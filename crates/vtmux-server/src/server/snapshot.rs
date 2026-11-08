@@ -1251,22 +1251,6 @@ impl Server {
         if !meta.requires.contains(&need) && terms.any(crate::snapshot_term::has_ghostty_pages) {
             meta.requires.push(need);
         }
-        // A primary screen left at its size under the alternate one: a
-        // reader without the field would take its rows at the terminal's.
-        let sized = snap::PRIMARY_SIZE_FEATURE.to_string();
-        if !meta.requires.contains(&sized)
-            && panes
-                .iter()
-                .filter_map(|p| p.term.as_ref())
-                .chain(
-                    clients
-                        .iter()
-                        .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
-                )
-                .any(|t| t.primary_size.is_some())
-        {
-            meta.requires.push(sized);
-        }
         let bar = snap::SCROLLBAR_FEATURE.to_string();
         if !meta.requires.contains(&bar)
             && panes.iter().any(|p| {

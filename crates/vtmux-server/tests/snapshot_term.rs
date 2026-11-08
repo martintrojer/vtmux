@@ -249,6 +249,27 @@ fn long_history_in_both_forms() {
     }
     round_trip(&mut a, Form::SamePin, PROBE, "long, same pin");
     round_trip(&mut a, Form::Rows, PROBE, "long, rows");
+    // Under an alternate screen of another size: the compressed history
+    // goes into the copy at the terminal's size as it is.
+    let mut a = compressed(pane(90, 30, 5000, &text));
+    assert!(a.compressed_pages() > 0);
+    a.feed(b"\x1b[?1049hvim");
+    a.resize(70, 20);
+    let rows = term_to_snapshot(&a, Form::Rows);
+    let sized = rows.sized_primary.as_ref().expect("left at 90x30");
+    assert_eq!(rows.primary.rows.len(), 20);
+    assert!(rows.primary.history.len() > 10);
+    assert_eq!(sized.screen.as_ref().map(|s| s.rows.len()), Some(30));
+    round_trip(
+        &mut a,
+        Form::SamePin,
+        b"\x1b[?1049l",
+        "long alternate, same pin",
+    );
+    let mut a = compressed(pane(90, 30, 5000, &text));
+    a.feed(b"\x1b[?1049hvim");
+    a.resize(70, 20);
+    round_trip(&mut a, Form::Rows, b"\x1b[?1049l", "long alternate, rows");
 }
 
 /// Each page of the primary screen: rows, width and capacity, or a blob.
@@ -434,39 +455,155 @@ fn an_older_writers_times_start_where_they_end() {
 /// The primary screen the alternate one left at its size, and the cursor
 /// `?1049h` saved, cross a snapshot: the end of the alternate screen
 /// resizes the primary as tmux 3.8 does (oracle `alt_exit_hscrolled`,
-/// shrink; `alt_screen_exit`, `s47`).
+/// shrink; `alt_screen_exit`, `s47`). A row-form snapshot, which a reader
+/// from before the field may read, also has the screen at the terminal's
+/// size where that reader reads it; one in Ghostty's form goes only to a
+/// binary of this patch stack, which has the field.
 #[test]
 fn the_primary_size_crosses_a_snapshot() {
-    for (enter, leave, back, end) in [
-        // ?1049l: the saved cursor, on the last row; the shorter screen
-        // pushed 30 rows, which a taller one pulls back.
+    for form in [Form::Rows, Form::SamePin] {
+        for (enter, leave, back, end) in [
+            // ?1049l: the saved cursor, on the last row; the shorter screen
+            // pushed 30 rows, which a taller one pulls back.
+            (
+                &b"\x1b[?1049h\x1b[H\x1b[2Jvim"[..],
+                &b"\x1b[?1049l"[..],
+                (41, (2, 19)),
+                (1, (2, 59)),
+            ),
+            // ?47l: the alternate cursor, on the top row; the rows under it
+            // go, none into history.
+            (
+                b"\x1b[?47h\x1b[H\x1b[2Jvim",
+                b"\x1b[?47l",
+                (11, (3, 0)),
+                (0, (3, 11)),
+            ),
+        ] {
+            let mut a = sixty_lines();
+            a.resize(80, 50);
+            a.feed(enter);
+            a.resize(80, 20);
+            let t = through_stream(term_to_snapshot(&a, form), form);
+            let sized = t.sized_primary.as_ref().expect("the primary's size");
+            assert_eq!((sized.cols, sized.rows), (80, 50));
+            let (at_size, older) = match form {
+                Form::Rows => (sized.screen.as_ref().expect("the screen"), 20),
+                Form::SamePin => {
+                    assert_eq!(sized.screen, None);
+                    (&t.primary, 50)
+                }
+            };
+            assert_eq!(at_size.rows.len(), 50, "{form:?}");
+            assert_eq!(t.primary.rows.len(), older, "{form:?}");
+            let mut b = term_from_snapshot(&t, PATCH_STACK).expect("import");
+            assert_eq!(b.alternate_saved(), a.alternate_saved());
+            b.feed(leave);
+            assert_eq!((b.history_size(), b.cursor()), back, "{form:?}");
+            b.resize(80, 60);
+            assert_eq!((b.history_size(), b.cursor()), end, "{form:?}");
+        }
+    }
+}
+
+/// Both cursor slots and a primary screen left at another size, DECSC's
+/// slot copied as the alternate screen came up, come back exactly in
+/// either form, whatever the writer put where an older reader reads.
+#[test]
+fn alternate_screen_slots_round_trip() {
+    for form in [Form::Rows, Form::SamePin] {
+        for enter in [&b"\x1b[?1049h"[..], b"\x1b[?47h"] {
+            for resize in [None, Some((60, 30)), Some((90, 12))] {
+                let mut a = sixty_lines();
+                a.feed(b"\x1b[3;3H\x1b7\x1b[5;7H\x1b]133;A\x07$ ");
+                a.feed(enter);
+                a.feed(b"\x1b[4;4Halt\x1b[6;6H\x1b7");
+                if let Some((c, r)) = resize {
+                    a.resize(c, r);
+                }
+                let ctx = format!("{form:?} {enter:?} {resize:?}");
+                round_trip(&mut a, form, b"\x1b[?1049l\x1b8\x1b[?47l\x1b8x", &ctx);
+            }
+        }
+    }
+}
+
+/// What a reader from before `sized_primary` and `alternate_saved` (the
+/// build before, after a downgrade or reading a checkpoint) reads of a
+/// pane with `?1049` or `?47` up: the primary screen at the terminal's
+/// size, reflowed as its emulator kept it, and `?1049h`'s save in the
+/// primary screen's DECSC slot, where its `?1049l` restores from. Nothing
+/// is required, so it reads the stream at all (live upgrade spec,
+/// *Required and ignorable fields*). The older reader is played by
+/// dropping the fields, which this build then reads as an older writer's.
+#[test]
+fn an_older_reader_takes_the_screens_it_knows() {
+    for (enter, leave) in [
         (
-            &b"\x1b[?1049h\x1b[H\x1b[2Jvim"[..],
+            &b"\x1b[5;7H\x1b[?1049h\x1b[H\x1b[2Jvim"[..],
             &b"\x1b[?1049l"[..],
-            (41, (2, 19)),
-            (1, (2, 59)),
         ),
-        // ?47l: the alternate cursor, on the top row; the rows under it
-        // go, none into history.
-        (
-            b"\x1b[?47h\x1b[H\x1b[2Jvim",
-            b"\x1b[?47l",
-            (11, (3, 0)),
-            (0, (3, 11)),
-        ),
+        (b"\x1b[5;7H\x1b[?47h\x1b[H\x1b[2Jvim", b"\x1b[?47l"),
+    ] {
+        for resize in [None, Some((60, 30)), Some((100, 12))] {
+            let ctx = format!("{enter:?} {resize:?}");
+            let mut a = sixty_lines();
+            a.feed(enter);
+            if let Some((c, r)) = resize {
+                a.resize(c, r);
+            }
+            let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+            t.sized_primary = None;
+            t.alternate_saved = None;
+            t.alternate_saved_layout = None;
+            let mut b = term_from_snapshot(&t, PATCH_STACK)
+                .unwrap_or_else(|e| panic!("{ctx}: an older reader's import: {e}"));
+            assert_eq!(b.alternate_saved(), a.alternate_saved(), "{ctx}");
+            assert_eq!(
+                vtmux_vt::capture(&b, vtmux_vt::CaptureOpts::default()),
+                vtmux_vt::capture(&a, vtmux_vt::CaptureOpts::default()),
+                "{ctx}: the alternate screen"
+            );
+            a.feed(leave);
+            b.feed(leave);
+            if resize.is_none() {
+                assert_alike(&a, &b, &ctx, false);
+            } else if enter.starts_with(b"\x1b[5;7H\x1b[?1049") {
+                // Its primary screen is at the pane's size already.
+                assert_eq!(b.cursor(), (6, 4), "{ctx}: ?1049h's cursor");
+            }
+        }
+    }
+}
+
+/// A writer from before `alternate_saved` kept `?1049h`'s save in the
+/// primary screen's DECSC slot while the alternate screen was up (upstream
+/// Ghostty's `saveCursor`), and nowhere else: an upgrade from it keeps the
+/// save, so `?1049l` puts the cursor back after the text printed before
+/// `?1049h`. Under `?47` the slot is DECSC's. Played by dropping the
+/// fields from a row-form stream, which holds the save there too.
+#[test]
+fn an_older_writers_1049_save_is_kept() {
+    for (enter, saved) in [
+        (&b"abc\x1b[?1049h\x1b[H\x1b[2Jvim"[..], Some((5, 19))),
+        (b"abc\x1b7\x1b[?47h\x1b[H\x1b[2Jvim", None),
     ] {
         let mut a = sixty_lines();
-        a.resize(80, 50);
         a.feed(enter);
-        a.resize(80, 20);
-        let t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
-        assert_eq!(t.primary_size, Some((80, 50)));
-        assert_eq!(t.primary.rows.len(), 50);
-        let mut b = term_from_snapshot(&t, PATCH_STACK).expect("import");
-        assert_eq!(b.alternate_saved(), a.alternate_saved());
+        let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+        t.alternate_saved = None;
+        t.alternate_saved_layout = None;
+        let mut b = term_from_snapshot(&t, PATCH_STACK).expect("an older writer's snapshot");
+        assert_eq!(a.alternate_saved(), saved);
+        assert_eq!(b.alternate_saved(), saved);
+        let leave = if saved.is_some() {
+            &b"\x1b[?1049l"[..]
+        } else {
+            b"\x1b[?47l\x1b8"
+        };
+        a.feed(leave);
         b.feed(leave);
-        assert_eq!((b.history_size(), b.cursor()), back);
-        b.resize(80, 60);
-        assert_eq!((b.history_size(), b.cursor()), end);
+        assert_eq!(b.cursor(), a.cursor());
+        assert_eq!(b.cursor(), (5, 19));
     }
 }

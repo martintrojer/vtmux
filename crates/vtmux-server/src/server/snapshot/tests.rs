@@ -1388,12 +1388,15 @@ fn timers_and_messages_survive_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A primary screen the alternate one left at its size (Ghostty patch
-/// 0028) goes under its feature name, as a reader without it would take
-/// its rows at the pane's size, and comes back to end the alternate screen
-/// as tmux does; none left so requires nothing.
+/// A pane resized under vim is an ordinary session (a window resize, a
+/// split, a zoom, a client attaching at another size): its primary screen,
+/// which the alternate one left at its size (Ghostty patch 0028), requires
+/// no feature, so the build before reads the snapshot (live upgrade spec,
+/// *Required and ignorable fields*; a checkpoint's restore refuses one
+/// requiring what it lacks too). It comes back to end the alternate screen
+/// as tmux does.
 #[test]
-fn a_primary_screen_left_at_its_size_requires_its_feature() {
+fn a_primary_screen_left_at_its_size_requires_nothing() {
     let dir = temp_dir("psize");
     let mut a = server(&dir);
     ok(
@@ -1415,15 +1418,23 @@ fn a_primary_screen_left_at_its_size_requires_its_feature() {
     let p = vtmux_core::ids::PaneId(0);
     let term = &mut a.model.panes.get_mut(&p).unwrap().term;
     term.feed(b"one\r\ntwo\x1b[?1049h\x1b[Hvim");
-    let plain = a.to_snapshot(snap::Meta::default());
-    assert!(plain.meta.requires.is_empty(), "{:?}", plain.meta.requires);
     ok(&mut a, &dir, &["resize-window", "-t", "s", "-y", "10"]);
     assert_eq!(a.model.panes[&p].term.rows(), 10);
-    let sized = a.to_snapshot(snap::Meta::default());
-    assert_eq!(
-        sized.meta.requires,
-        vec![snap::PRIMARY_SIZE_FEATURE.to_string()]
-    );
+    for (purpose, form) in [
+        (snap::Purpose::Upgrade, crate::snapshot_term::Form::SamePin),
+        (snap::Purpose::Upgrade, crate::snapshot_term::Form::Rows),
+        (
+            snap::Purpose::CheckpointFull,
+            crate::snapshot_term::Form::Rows,
+        ),
+    ] {
+        let meta = snap::Meta {
+            purpose,
+            ..snap::Meta::default()
+        };
+        let sized = a.to_snapshot_with(meta, Some(form));
+        assert_eq!(sized.meta.requires, Vec::<String>::new(), "{purpose:?}");
+    }
 
     let mut b = rebuild(&a, &dir, "b");
     let term = &mut b.model.panes.get_mut(&p).unwrap().term;

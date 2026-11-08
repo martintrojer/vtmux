@@ -5211,6 +5211,31 @@ mod tests {
         assert_eq!(t.cursor(), (3, 2));
     }
 
+    /// What a reader from before Ghostty patch 0028 takes of a primary
+    /// screen the alternate one left at its size: a copy at the terminal's
+    /// size, reflowed, the alternate screen as it is.
+    #[test]
+    fn a_copy_has_the_primary_at_the_terminals_size() {
+        let mut t = PaneTerm::new(80, 20, 2000);
+        for i in 10..70 {
+            t.feed(format!("{i}{}\r\n", "x".repeat(73)).as_bytes());
+        }
+        t.feed(b"\x1b]133;A\x07$ \x1b[?1049h\x1b[Hvim");
+        assert!(t.with_primary_resized().is_none(), "at the terminal's size");
+        t.resize(40, 10);
+        let copy = t.with_primary_resized().expect("left at 80x20");
+        let (a, b) = (t.export_state(), copy.export_state());
+        assert_eq!(a.primary_size, Some((80, 20)));
+        assert_eq!(b.primary_size, None);
+        assert_eq!((b.cols, b.rows), (40, 10));
+        assert!(b.alternate_active);
+        assert_eq!(b.alternate, a.alternate, "the alternate screen");
+        assert_eq!(b.pane.marks.len(), a.pane.marks.len(), "the mark follows");
+        let rows =
+            |s: &TermState| -> usize { s.primary.pages.iter().filter_map(PageState::rows).sum() };
+        assert!(rows(&b) > rows(&a), "the 76-cell rows are split in two");
+    }
+
     /// `?1049h` saves the cursor in a slot of its own, kept after the
     /// alternate screen and restored by `?1049l` even off it; `?1049h` on
     /// an alternate screen already up saves nothing; DECSC's slot is one

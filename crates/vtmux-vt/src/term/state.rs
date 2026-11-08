@@ -1094,6 +1094,40 @@ impl PaneTerm {
         }
     }
 
+    /// A copy of the pane whose primary screen, which the alternate one
+    /// left at its size (Ghostty patch 0028), has the terminal's size:
+    /// resized and reflowed as Ghostty did before that patch, with its
+    /// own cursor, the rows' marks and the alternate screen's entry row
+    /// following their rows. That is the state a reader from before the
+    /// patch takes (it reads the primary's rows at the terminal's size);
+    /// `None` when the primary screen has the terminal's size. The copy
+    /// is for export only.
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate.
+    #[must_use]
+    pub fn with_primary_resized(&self) -> Option<PaneTerm> {
+        let head = self.export_state_head();
+        head.primary_size?;
+        // A page at a time, compressed ones as they are (this binary's).
+        let mut import = StateImport::new(&head, ImportCheck::Lazy).expect("a pane's own state");
+        self.export_pages(CompressedPages::Blob, |screen, page| {
+            import.page(screen, &page)
+        })
+        .expect("a pane's own pages");
+        let mut copy = import.finish().expect("a pane's own state");
+        // Upstream's ?47l shows the primary screen, which resizes it to
+        // the terminal's first; then back to the alternate one, as it
+        // was. CAN first ends a sequence the program left half-written.
+        let term = &mut copy.term;
+        term.vtmux_set_tmux_alternate(false).expect("terminal mode");
+        term.vt_write(b"\x18\x1b[?47l");
+        term.vtmux_set_active_screen(gv::ALTERNATE)
+            .expect("the alternate screen");
+        term.vtmux_set_tmux_alternate(true).expect("terminal mode");
+        Some(copy)
+    }
+
     /// Every page of the pane's screens, the primary's oldest first, then
     /// the alternate's: each is built, handed to `each`, and dropped, so
     /// only one page is held at a time (a 100k-line history is never in

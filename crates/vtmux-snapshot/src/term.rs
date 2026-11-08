@@ -93,6 +93,46 @@ record! {
 }
 
 record! {
+    /// The primary screen while the alternate screen leaves it at the size
+    /// it had (tmux resizes it when it comes back), when that is not the
+    /// terminal's ([`TermState::sized_primary`]).
+    pub struct SizedPrimary {
+        1 => one cols: u32,
+        2 => one rows: u32,
+        /// The screen at that size: its visible rows are that many. Absent
+        /// when [`TermState::primary`] is this screen, which only a reader
+        /// with this field takes: an upgrade onto a binary of the writer's
+        /// Ghostty patch stack (live upgrade spec, decision 23), which has
+        /// it. Otherwise [`TermState::primary`] is the screen resized to the
+        /// terminal's size and reflowed, as a reader from before this field
+        /// keeps it (its emulator resized it at every resize), and
+        /// [`TermState::marks`] and [`AltEntry::entry_row`] count that
+        /// screen's rows.
+        3 => opt screen: Option<Screen>,
+        /// [`TermState::marks`] and [`AltEntry::entry_row`] in the rows of
+        /// [`SizedPrimary::screen`], when it is there.
+        4 => many marks: Vec<FrozenMark>,
+        5 => opt entry_row: Option<u64>,
+    }
+}
+
+record! {
+    /// Where `?1049h`'s save is for a reader from before
+    /// [`TermState::alternate_saved`], which restores `?1049l` from the
+    /// primary screen's DECSC slot: every writer with that field writes
+    /// this record ([`TermState::alternate_saved_layout`]). Without it (an
+    /// older writer), the primary screen's DECSC slot held `?1049h`'s save
+    /// while the alternate screen was up with mode 1049.
+    pub struct AltSaveLayout {
+        /// [`TermState::primary`]'s [`Screen::saved_cursor`] is `?1049h`'s
+        /// save, put there for an older reader; the slot's own value is
+        /// [`AltSaveLayout::primary_saved`].
+        1 => one moved: bool,
+        2 => opt primary_saved: Option<SavedCursor>,
+    }
+}
+
+record! {
     /// One screen: its visible rows, its history and its cursor state.
     /// The alternate screen has no history.
     pub struct Screen {
@@ -258,7 +298,7 @@ record! {
         // 10: the cursor's row in `saved` that the primary screen was
         // resized with when the alternate one ended, while the emulator
         // resized the primary under it. Since the emulator leaves it at
-        // its size (`TermState::primary_size`) it is not written or read.
+        // its size (`TermState::sized_primary`) it is not written or read.
     }
 }
 
@@ -429,14 +469,14 @@ record! {
         /// tmux's `INPUT_LAST`: the last thing parsed was a printed
         /// character, which a REP repeats (input.c `INPUT_CSI_REP`).
         36 => one input_last: bool,
-        /// The primary screen's width and height while the alternate
-        /// screen leaves it at the size it had (tmux resizes it when it
-        /// comes back), when they are not the terminal's: its visible
-        /// rows are then that many. A writer lists
-        /// [`crate::PRIMARY_SIZE_FEATURE`] with it.
-        37 => opt primary_size: Option<(u32, u32)>,
+        /// The primary screen while the alternate screen leaves it at the
+        /// size it had, when that is not the terminal's. A reader without
+        /// it takes [`TermState::primary`], at the terminal's size.
+        37 => opt sized_primary: Option<SizedPrimary>,
         /// What `?1049h` saved, if anything.
         38 => opt alternate_saved: Option<AltSaved>,
+        /// Always written beside [`TermState::alternate_saved`].
+        39 => opt alternate_saved_layout: Option<AltSaveLayout>,
     }
 }
 
@@ -638,14 +678,29 @@ pub(crate) mod tests {
     #[test]
     fn alternate_screen_fields() {
         let mut t = sample_term();
-        t.primary_size = Some((30, 4));
+        t.sized_primary = Some(SizedPrimary {
+            cols: 30,
+            rows: 4,
+            screen: Some(t.primary.clone()),
+            marks: t.marks.clone(),
+            entry_row: Some(2),
+        });
         t.alternate_saved = Some(AltSaved {
             x: 20,
             y: 3,
             style: t.primary.cursor.style,
         });
+        t.alternate_saved_layout = Some(AltSaveLayout {
+            moved: true,
+            primary_saved: t.primary.saved_cursor.clone(),
+        });
         round_trip(&t);
         round_trip(t.alternate_saved.as_ref().unwrap());
+        round_trip(t.sized_primary.as_ref().unwrap());
+        round_trip(t.alternate_saved_layout.as_ref().unwrap());
+        // A writer always lists the layout, even with nothing moved.
+        t.alternate_saved_layout = Some(AltSaveLayout::default());
+        round_trip(&t);
     }
 
     /// Every field added after the golden file was written, set.

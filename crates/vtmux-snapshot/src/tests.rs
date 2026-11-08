@@ -209,6 +209,28 @@ fn pages_are_found_everywhere_they_live() {
     let mut n = 0;
     sample().pages_mut(&mut |_| n += 1);
     assert_eq!(n, 7);
+    // The primary screen at the size the alternate one left it, beside
+    // its copy at the terminal's: in a manifest and back from its chunks.
+    let mut s = sample();
+    let t = s.panes[0].term.as_mut().unwrap();
+    let mut screen = t.primary.clone();
+    screen.history = vec![HistoryPage::from_rows(&[sample_row()], false)];
+    t.sized_primary = Some(term::SizedPrimary {
+        cols: 3,
+        rows: 2,
+        screen: Some(screen),
+        ..term::SizedPrimary::default()
+    });
+    assert_eq!(s.pages().len(), 8);
+    let mut n = 0;
+    s.pages_mut(&mut |_| n += 1);
+    assert_eq!(n, 8);
+    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
+        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
+    assert_eq!(
+        decode_with(&encode_manifest(&s), |h| chunks.get(h).cloned()).unwrap(),
+        s
+    );
 }
 
 #[test]

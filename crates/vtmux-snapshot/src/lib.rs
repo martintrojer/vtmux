@@ -47,6 +47,12 @@
 //!   in [`Meta::requires`] would make nearly every server refuse a
 //!   downgrade to the build before (decision 6 is about the format
 //!   version, not about a feature a fix adds).
+//! - So does state an ordinary session produces when the writer also puts
+//!   what an older reader takes for it in the fields that reader reads:
+//!   [`TermState::sized_primary`] beside the primary screen at the
+//!   terminal's size, [`TermState::alternate_saved`] beside a copy in the
+//!   primary screen's DECSC slot ([`term::AltSaveLayout`]). The older
+//!   reader restores what its own build would have held.
 //! - A field under a new tag that carries state (losing it would change a
 //!   format, a screen or a `show-*`/`list-*` output after the restore)
 //!   needs either a new [`FORMAT_VERSION`] or a feature name: the writer
@@ -102,17 +108,10 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 /// It keeps the names no writer lists any more, for the streams of the
 /// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
-    PRIMARY_SIZE_FEATURE,
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
     TERMINAL_TITLE_FEATURE,
 ];
-
-/// The [`Meta::requires`] name of a primary screen the alternate screen
-/// left at another size ([`TermState::primary_size`]), listed when some
-/// pane's is: a reader without it would take the primary's rows at the
-/// terminal's size.
-pub const PRIMARY_SIZE_FEATURE: &str = "alternate-primary-size";
 
 /// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
 /// ([`Pane::scrollbar_visible`] and the fields after it), listed when
@@ -470,7 +469,8 @@ impl Snapshot {
     #[must_use]
     pub fn pages(&self) -> Vec<&HistoryPage> {
         fn term<'a>(t: &'a TermState, out: &mut Vec<&'a HistoryPage>) {
-            for screen in std::iter::once(&t.primary).chain(&t.alternate) {
+            let sized = t.sized_primary.as_ref().and_then(|p| p.screen.as_ref());
+            for screen in std::iter::once(&t.primary).chain(sized).chain(&t.alternate) {
                 out.extend(&screen.history);
             }
             if let Some(a) = &t.alt_entry {
@@ -499,7 +499,11 @@ impl Snapshot {
     /// [`Snapshot::pages`], mutably.
     pub fn pages_mut(&mut self, f: &mut impl FnMut(&mut HistoryPage)) {
         fn term(t: &mut TermState, f: &mut impl FnMut(&mut HistoryPage)) {
-            for screen in std::iter::once(&mut t.primary).chain(&mut t.alternate) {
+            let sized = t.sized_primary.as_mut().and_then(|p| p.screen.as_mut());
+            for screen in std::iter::once(&mut t.primary)
+                .chain(sized)
+                .chain(&mut t.alternate)
+            {
                 screen.history.iter_mut().for_each(&mut *f);
             }
             if let Some(a) = &mut t.alt_entry {

@@ -1173,6 +1173,52 @@ fn screen_out(s: &ScreenState, visible: ScreenOut) -> snap::term::Screen {
     visible.finish(screen)
 }
 
+fn saved_cursor_in(v: &snap::term::SavedCursor) -> Result<SavedCursor, TermError> {
+    Ok(SavedCursor {
+        x: narrow(v.x, "saved cursor")?,
+        y: narrow(v.y, "saved cursor")?,
+        pen: style_in(&v.style),
+        protected: v.protected,
+        pending_wrap: v.pending_wrap,
+        origin: v.origin,
+        charset: charsets_in(&v.charsets)?,
+    })
+}
+
+/// What `?1049h` saved. A writer from before
+/// [`snap::TermState::alternate_saved`] (no
+/// [`snap::TermState::alternate_saved_layout`]) kept it in the primary
+/// screen's DECSC slot while the alternate screen was up with mode 1049,
+/// where its `?1049l` restored it from (upstream Ghostty's `saveCursor`).
+fn alternate_saved_in(
+    t: &snap::TermState,
+    primary: &snap::term::Screen,
+) -> Result<Option<vt::AltSaved>, TermError> {
+    let saved = |x: u32, y: u32, style: &snap::Style| -> Result<vt::AltSaved, TermError> {
+        Ok(vt::AltSaved {
+            x: narrow(x, "alternate saved cursor")?,
+            y: narrow(y, "alternate saved cursor")?,
+            pen: style_in(style),
+        })
+    };
+    if t.alternate_saved_layout.is_some() {
+        return t
+            .alternate_saved
+            .as_ref()
+            .map(|a| saved(a.x, a.y, &a.style))
+            .transpose();
+    }
+    let in_1049 = t.active == snap::term::ActiveScreen::Alternate
+        && t.modes.iter().any(|m| m.number == 1049 && !m.ansi && m.on);
+    match &primary.saved_cursor {
+        // tmux's `cx` past the last column while a wrap is pending.
+        Some(c) if in_1049 => {
+            saved(c.x.saturating_add(c.pending_wrap.into()), c.y, &c.style).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
 fn screen_in(s: &snap::term::Screen) -> Result<ScreenState, TermError> {
     let c = &s.cursor;
     let mut kitty = [0u8; 8];
@@ -1192,21 +1238,7 @@ fn screen_in(s: &snap::term::Screen) -> Result<ScreenState, TermError> {
             semantic_content: narrow(c.semantic, "content kind")?,
             semantic_clear_eol: c.semantic_clear_eol,
         },
-        saved_cursor: s
-            .saved_cursor
-            .as_ref()
-            .map(|v| -> Result<SavedCursor, TermError> {
-                Ok(SavedCursor {
-                    x: narrow(v.x, "saved cursor")?,
-                    y: narrow(v.y, "saved cursor")?,
-                    pen: style_in(&v.style),
-                    protected: v.protected,
-                    pending_wrap: v.pending_wrap,
-                    origin: v.origin,
-                    charset: charsets_in(&v.charsets)?,
-                })
-            })
-            .transpose()?,
+        saved_cursor: s.saved_cursor.as_ref().map(saved_cursor_in).transpose()?,
         charset: charsets_in(&s.charsets)?,
         protected_mode: narrow(s.protected_mode, "protected mode")?,
         kitty_flags: kitty,
@@ -1240,6 +1272,86 @@ fn times_in(runs: &[snap::term::TimeRun], limit: usize) -> Result<Vec<i64>, Term
         out.extend(std::iter::repeat_n(r.time, n));
     }
     Ok(out)
+}
+
+/// `term`'s primary screen alone, with its OSC 133 marks and the
+/// alternate screen's entry row in its rows.
+fn primary_of(
+    term: &PaneTerm,
+    compressed: CompressedPages,
+) -> (snap::term::Screen, Vec<snap::term::FrozenMark>, Option<u64>) {
+    let v = term.export_state_head();
+    let mut out = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
+    let done: Result<(), std::convert::Infallible> =
+        term.export_pages(compressed, |screen, page| {
+            if screen == ScreenKind::Primary {
+                out.page(page);
+            }
+            Ok(())
+        });
+    let Ok(()) = done;
+    let p = &v.pane;
+    (
+        screen_out(&v.primary, out),
+        p.marks
+            .iter()
+            .map(|(y, m)| mark_out(u64::from(*y), m))
+            .collect(),
+        p.alt_entry.map(|(y, _)| u64::from(y)),
+    )
+}
+
+/// What a reader from before [`snap::TermState::sized_primary`] and
+/// [`snap::TermState::alternate_saved`] (a downgrade, or an older binary
+/// restoring a checkpoint) needs where it reads: the primary screen at the
+/// terminal's size, as its emulator kept it, and `?1049h`'s save in the
+/// primary screen's DECSC slot, where its `?1049l` restores from. Only for
+/// [`Form::Rows`]: [`Form::SamePin`] goes to a binary of this patch stack,
+/// which has both fields (an older one has another stack).
+fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap::TermState) {
+    if let Some(sized) = t.sized_primary.as_mut() {
+        let copy = term
+            .with_primary_resized()
+            .expect("a primary screen at another size");
+        let (screen, marks, entry_row) = primary_of(&copy, compressed);
+        sized.screen = Some(std::mem::replace(&mut t.primary, screen));
+        sized.marks = std::mem::replace(&mut t.marks, marks);
+        if let Some(alt) = t.alt_entry.as_mut() {
+            sized.entry_row = std::mem::replace(&mut alt.entry_row, entry_row);
+        }
+    }
+    let layout = t
+        .alternate_saved_layout
+        .as_mut()
+        .expect("written with the slot");
+    if t.active != snap::term::ActiveScreen::Alternate {
+        return;
+    }
+    let Some(a) = &t.alternate_saved else {
+        return;
+    };
+    // `t.primary` is at the terminal's size now.
+    let cols = t.cols.max(1);
+    let origin = t.modes.iter().any(|m| m.number == 6 && !m.ansi && m.on);
+    let save = snap::term::SavedCursor {
+        x: a.x.min(cols - 1),
+        y: a.y,
+        pending_wrap: a.x >= cols,
+        style: a.style,
+        protected: false,
+        origin,
+        // tmux's ?1049l keeps the charsets, which both screens share.
+        charsets: t
+            .alternate
+            .as_ref()
+            .map_or_else(|| t.primary.charsets.clone(), |alt| alt.charsets.clone()),
+    };
+    let own = t.primary.saved_cursor.replace(save);
+    // Unless the screen a reader with the field takes is another one.
+    if t.sized_primary.is_none() {
+        layout.moved = true;
+        layout.primary_saved = own;
+    }
 }
 
 /// Export `term` as a snapshot record, one page at a time (see the module
@@ -1302,7 +1414,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
     });
     let (g0, g1, shifted, (s0, s1, ss)) = p.charset;
     let (shape, blinking, blinking_set, option) = p.cursor_style;
-    snap::TermState {
+    let mut t = snap::TermState {
         cols: v.cols.into(),
         rows: v.rows.into(),
         primary: screen_out(&v.primary, primary),
@@ -1400,12 +1512,17 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             vt::ExtendedKeys::Always => 2,
         },
         input_last: p.last_print,
-        primary_size: v.primary_size.map(|(c, r)| (u32::from(c), u32::from(r))),
+        sized_primary: v.primary_size.map(|(c, r)| snap::term::SizedPrimary {
+            cols: c.into(),
+            rows: r.into(),
+            ..snap::term::SizedPrimary::default()
+        }),
         alternate_saved: g.alternate_saved.map(|a| snap::term::AltSaved {
             x: a.x.into(),
             y: a.y.into(),
             style: style_out(&a.pen),
         }),
+        alternate_saved_layout: Some(snap::term::AltSaveLayout::default()),
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1432,7 +1549,11 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             bg: g.bg.map(rgb_out),
             cursor_colour: g.cursor_color.map(rgb_out),
         },
+    };
+    if form == Form::Rows {
+        for_older_readers(term, compressed, &mut t);
     }
+    t
 }
 
 fn palette_in(entries: &[snap::term::PaletteEntry]) -> Result<Vec<(u8, vt::Rgb)>, TermError> {
@@ -1507,17 +1628,30 @@ pub fn term_from_snapshot_with(
     let cols = narrow::<u16>(t.cols, "terminal width")?;
     let rows = narrow::<u16>(t.rows, "terminal height")?;
     let primary_size = t
-        .primary_size
-        .map(|(c, r)| {
+        .sized_primary
+        .as_ref()
+        .map(|p| {
             Ok::<_, TermError>((
-                narrow::<u16>(c, "primary width")?,
-                narrow::<u16>(r, "primary height")?,
+                narrow::<u16>(p.cols, "primary width")?,
+                narrow::<u16>(p.rows, "primary height")?,
             ))
         })
         .transpose()?;
     let (primary_cols, primary_rows) = primary_size.unwrap_or((cols, rows));
+    let alt = t.alt_entry.clone().unwrap_or_default();
+    // The primary screen at its size, when the writer also put it at the
+    // terminal's for an older reader (`for_older_readers`).
+    let (primary_screen, marks, entry_row) = match &t.sized_primary {
+        Some(snap::term::SizedPrimary {
+            screen: Some(screen),
+            marks,
+            entry_row,
+            ..
+        }) => (screen, marks, *entry_row),
+        _ => (&t.primary, &t.marks, alt.entry_row),
+    };
     // Every screen shows exactly its visible rows; history is before them.
-    if t.primary.rows.len() != usize::from(primary_rows)
+    if primary_screen.rows.len() != usize::from(primary_rows)
         || t.alternate
             .as_ref()
             .is_some_and(|alt| alt.rows.len() != usize::from(rows))
@@ -1526,7 +1660,6 @@ pub fn term_from_snapshot_with(
     }
     let h = &t.history;
     let usize_of = |v: u64, what| narrow::<usize>(v, what);
-    let alt = t.alt_entry.clone().unwrap_or_default();
     let frozen = if alt.has_history {
         Some(frozen_rows(&alt.history)?)
     } else {
@@ -1587,17 +1720,7 @@ pub fn term_from_snapshot_with(
             .line_limit
             .map(|n| usize_of(n, "line limit"))
             .transpose()?,
-        alternate_saved: t
-            .alternate_saved
-            .as_ref()
-            .map(|a| {
-                Ok::<_, TermError>(vt::AltSaved {
-                    x: narrow(a.x, "alternate saved cursor")?,
-                    y: narrow(a.y, "alternate saved cursor")?,
-                    pen: style_in(&a.style),
-                })
-            })
-            .transpose()?,
+        alternate_saved: alternate_saved_in(t, primary_screen)?,
     };
     let tc = &t.tmux_charset;
     let cs = &t.cursor_style;
@@ -1619,8 +1742,7 @@ pub fn term_from_snapshot_with(
         alt_collected: usize_of(alt.collected, "collected rows")?,
         clear_primary_history: alt.clear_primary_history,
         redraw: t.redraw,
-        marks: t
-            .marks
+        marks: marks
             .iter()
             .map(|m| Ok((narrow(m.row, "mark row")?, osc133_in(&m.mark)?)))
             .collect::<Result<_, TermError>>()?,
@@ -1631,8 +1753,7 @@ pub fn term_from_snapshot_with(
             .map(|m| Ok((usize_of(m.row, "mark row")?, osc133_in(&m.mark)?)))
             .collect::<Result<_, TermError>>()?,
         saved,
-        alt_entry: alt
-            .entry_row
+        alt_entry: entry_row
             .map(|y| {
                 Ok::<_, TermError>((
                     narrow(y, "alternate entry row")?,
@@ -1689,18 +1810,28 @@ pub fn term_from_snapshot_with(
         scroll_on_clear: t.scroll_on_clear,
         sync: t.sync.as_ref().map(sync_in).transpose()?,
     };
+    let mut primary = screen_in(primary_screen)?;
+    if let Some(layout) = &t.alternate_saved_layout
+        && layout.moved
+    {
+        primary.saved_cursor = layout
+            .primary_saved
+            .as_ref()
+            .map(saved_cursor_in)
+            .transpose()?;
+    }
     let state = TermState {
         cols,
         rows,
         primary_size,
-        primary: screen_in(&t.primary)?,
+        primary,
         alternate: t.alternate.as_ref().map(screen_in).transpose()?,
         alternate_active: t.active == snap::term::ActiveScreen::Alternate,
         ghostty,
         pane,
     };
     let mut import = StateImport::new(&state, check)?;
-    pages_of(&t.primary, primary_cols, ghostty_patches, &mut |page| {
+    pages_of(primary_screen, primary_cols, ghostty_patches, &mut |page| {
         Ok(import.page(ScreenKind::Primary, page)?)
     })?;
     if let Some(alt) = &t.alternate {
