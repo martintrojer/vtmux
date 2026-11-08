@@ -1,0 +1,91 @@
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 17a3bc130..c1b3b99d2 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -2261,6 +2261,31 @@ pub inline fn resize(
+         self.cursor.hyperlink = null;
+     }
+ 
++    // vtmux: a cursor at or past the end of the cells its line used goes
++    // to the end of the reflowed line, as tmux's does (grid_wrap_position
++    // gives it UINT_MAX, grid_unwrap_position the cellused of the line's
++    // last row), so a line that now ends at the last column leaves the
++    // cursor past it, as a pending wrap. Upstream moved the cursor as a
++    // cell after the line and started a new row with it. Put it on the
++    // last used cell with a pending wrap: the reflow moves it with that
++    // cell, and the pending wrap is dropped below with the cursor moved
++    // one on unless the cell ends a row.
++    const tmux_line_end: ?size.CellCountInt = tmux_line_end: {
++        if (!opts.reflow or opts.cols == self.pages.cols) break :tmux_line_end null;
++        if (self.cursor.pending_wrap or self.cursor.page_row.wrap) break :tmux_line_end null;
++        const page = self.cursor.page_pin.node.page();
++        const used = self.cursor.page_row.tmuxCellsUsed(page.getCells(self.cursor.page_row));
++        if (used == 0 or self.cursor.x < used) break :tmux_line_end null;
++        const x = self.cursor.x;
++        self.cursorHorizontalAbsolute(used - 1);
++        self.cursor.pending_wrap = true;
++        break :tmux_line_end x;
++    };
++    errdefer if (tmux_line_end) |x| {
++        self.cursor.pending_wrap = false;
++        self.cursorHorizontalAbsolute(x);
++    };
++
+     // Perform the resize operation.
+     try tw.check(.pages);
+     try self.pages.resize(.{
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 1fe6f925d..3833d8d67 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -15430,6 +15430,50 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+     }
+ }
+ 
++test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // 18 characters on 20 columns, the cursor after them, narrowed to 9:
++    // tmux's cursor ends the second row, past its last column (9,1).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijklmnopqr");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        try testing.expectEqual(@as(size.CellCountInt, 8), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++        try testing.expect(t.screens.active.cursor.pending_wrap);
++
++        // The next character starts the third row.
++        try t.print('Z');
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.y);
++    }
++
++    // A line that does not end its last row: the cursor right after it.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijklmnop");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        try testing.expectEqual(@as(size.CellCountInt, 7), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++        try testing.expect(!t.screens.active.cursor.pending_wrap);
++    }
++
++    // A cursor moved past the line's end goes to its end.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abc");
++        t.setCursorPos(1, 10);
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.y);
++    }
++}
++
+ test "Terminal: reflow measures a line by the cells it used (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

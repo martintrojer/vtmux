@@ -1,0 +1,6 @@
+kind=format
+bytes=\344\270\200abcdefghijklmnop
+resize=9x5
+format=#{cursor_x}
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'\344\270\200abcdefghijklmnop'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 9 -y 5 ; display-message -p -t 0 '#{cursor_x}'
+expected=1\n

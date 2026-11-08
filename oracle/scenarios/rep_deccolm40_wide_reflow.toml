@@ -1,0 +1,67 @@
+name = "rep_deccolm40_wide_reflow"
+size = [9, 8]
+# Emulator corners after rep_deccolm_tab_reflow. REP repeats the last
+# character printed, a combining one too (input.c input_top_bit_set keeps
+# every character as ictx->last; INPUT_CSI_REP writes it again, and it joins
+# the cell before). DECCOLM homes and clears into history whatever DEC
+# mode 40 says (tmux ignores mode 40; input_csi_dispatch_sm_private). A
+# reflow measures a wide character as its cell of width 2 and one padding
+# cell of width 1 (grid_reflow, grid_reflow_split, grid_reflow_join with
+# grid_get_cell1): a padding cell that does not fit starts the next row on
+# its own, drawn blank (tty_draw_line) and skipped by capture-pane
+# (grid_string_cells). A cursor at the end of its line stays at the end of
+# the reflowed line, past the last column when that ends a row
+# (grid_wrap_position, grid_unwrap_position). A tab wider than the row stays
+# a TAB cell on a row of its own (grid_reflow_split). The scenes draw on 20
+# or 40 columns; the 9x8 client (status off) narrows them.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "9", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # rep: e, a combining acute, REP 2: one cell with three accents, then |
+  { run = ["new", "-d", "-s", "rep", "-n", "w", "-x", "9", "-y", "8", "sh", "-c", "printf 'e\\314\\201\\033[2b|'; tmux wait-for -S rep; exec cat"] },
+  { wait_for = "rep" },
+  { attach = { session = "rep", id = "rep" } },
+  { run = ["display", "-p", "-t", "rep:", "#{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "rep:"] },
+  { screen = { id = "rep" } },
+  # deccolm40: mode 40 set first changes nothing: two lines into history, X at the top left, the width kept
+  { run = ["new", "-d", "-s", "deccolm40", "-n", "w", "-x", "9", "-y", "8", "sh", "-c", "printf 'abc\\r\\ndef\\033[?40h\\033[?3hX'; tmux wait-for -S deccolm40; exec cat"] },
+  { wait_for = "deccolm40" },
+  { attach = { session = "deccolm40", id = "deccolm40" } },
+  { run = ["display", "-p", "-t", "deccolm40:", "#{history_size} #{cursor_x},#{cursor_y} #{pane_width}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "deccolm40:"] },
+  { screen = { id = "deccolm40" } },
+  # widepad: a wide character measured with its padding; its padding split off by the narrowing at a line end, and before more
+  { run = ["new", "-d", "-s", "widepad", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf '\\344\\270\\200abcdefghijklmnop\\r\\nabcdefg\\344\\270\\200\\r\\nabcdefg\\344\\270\\200hij'; tmux wait-for -S widepad; exec cat"] },
+  { wait_for = "widepad" },
+  { attach = { session = "widepad", id = "widepad" } },
+  { run = ["display", "-p", "-t", "widepad:", "#{history_size} #{cursor_x},#{cursor_y} #{pane_width}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "widepad:"] },
+  { screen = { id = "widepad" } },
+  { run = ["resize-window", "-t", "widepad", "-x", "20"] },
+  { run = ["display", "-p", "-t", "widepad:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "widepad:"] },
+  # zwj: a family emoji counts its padding too
+  { run = ["new", "-d", "-s", "zwj", "-n", "w", "-x", "40", "-y", "8", "sh", "-c", "printf '\\r\\n\\r\\n\\r\\n\\r\\n\\r\\n\\r\\nfam \\360\\237\\221\\250\\342\\200\\215\\360\\237\\221\\251\\342\\200\\215\\360\\237\\221\\247 and more'; tmux wait-for -S zwj; exec cat"] },
+  { wait_for = "zwj" },
+  { attach = { session = "zwj", id = "zwj" } },
+  { run = ["display", "-p", "-t", "zwj:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "zwj:"] },
+  { screen = { id = "zwj" } },
+  # lineend: 18 characters on 20 columns end the second row on 9: the cursor waits past it, the next character starts the third
+  { run = ["new", "-d", "-s", "lineend", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf 'abcdefghijklmnopqr'; tmux wait-for -S lineend; exec cat"] },
+  { wait_for = "lineend" },
+  { attach = { session = "lineend", id = "lineend" } },
+  { run = ["display", "-p", "-t", "lineend:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { screen = { id = "lineend" } },
+  { run = ["send-keys", "-t", "lineend:", "-l", "Z"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "lineend:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { screen = { id = "lineend" } },
+  # tabwide: a tab of 8 narrowed to 7 columns: the TAB cell keeps a row of its own
+  { run = ["new", "-d", "-s", "tabwide", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf 'ab\\r\\n\\tcd'; tmux wait-for -S tabwide; exec cat"] },
+  { wait_for = "tabwide" },
+  { run = ["resize-window", "-t", "tabwide", "-x", "7"] },
+  { run = ["display", "-p", "-t", "tabwide:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "tabwide:"] },
+]

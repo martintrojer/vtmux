@@ -640,6 +640,65 @@ Recorded per commit in git history; the list is kept current:
   or without (vtmux)` (fails without the change). Not an upstream
   candidate.
 
+- `patches/0023-reflow-cursor-at-line-end.patch` (`Screen.zig` `resize`): a
+  cursor at or past the end of the cells its line used goes to the end of the
+  reflowed line, as tmux's does (`grid_wrap_position` gives it `UINT_MAX`,
+  `grid_unwrap_position` the `cellused` of the line's last row): when that
+  row is full the cursor is past its last column, a pending wrap, where
+  upstream started a row of its own with it (18 characters on 20 columns
+  narrowed to 9: tmux and now vtmux `9,0` with `history_size` 1, vtmux
+  before `0,2` with 0). Before the reflow the cursor goes on the line's last
+  used cell with a wrap pending; the reflow moves it with that cell and
+  `resize` already drops the pending wrap, moving the cursor one on, unless
+  the cell ends a row. Main screen only (it reflows). vtmux's `PaneTerm::resize`
+  no longer skips its blank-row fix-up for such a cursor and moves it only by
+  VPA, which keeps a pending wrap (patch 0014). Test: `Terminal: reflow leaves
+  a cursor at the line's end past it (vtmux)` (fails without the change).
+  Not an upstream candidate.
+
+- `patches/0024-reflow-wide-character-as-tmux.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, `tmuxWidePadding`, `tmuxReflowWidth`,
+  `bulkRunLength`, `bulkCopyable`, `cursorNewPage`, new field
+  `src_in_tab`): a reflow measures a wide character as tmux's does: its cell
+  of width 2 and one padding cell, which reads back as width 1
+  (`grid_get_cell1`), 3 columns in all (`grid_reflow`, `grid_reflow_split`,
+  `grid_reflow_join`), so `一abcdefghijklmnop` on 20 columns narrowed to 9
+  is `一abcdef` / `ghijklmno` / `p`. The wide cell adds 1 to `tab_extra`
+  (patch 0015). tmux can split the two: a padding cell that does not fit
+  goes to the next row, which then starts with it (drawn blank,
+  `tty_draw_line`; skipped by `capture-pane`, `grid_string_cells`), even
+  when the line ends there. Ghostty keeps the spacer tail with its wide
+  cell, so `tmuxWidePadding` starts that row with a tab continuation cell
+  that no tab precedes (the reflow tracks `src_in_tab` to tell them apart):
+  vtmux-vt reads it as padding already (skipped by a capture, blank on
+  screen). A reflow drops such a cell and makes it again where the padding
+  falls; pins on it go to the cell before it, pins on a spacer tail whose
+  padding moves go with the padding (a cursor after `abcdefg一` narrowed to
+  9 goes to 1,1 as in tmux). Wide pairs leave the bulk copy (it copied
+  pairs as two columns), and so do tab cells erased with a background
+  (`bulkCopyable` let a tab over erased cells through, so patch 0015
+  measured it as one column: `一`, EL in green, two tabs, 40 -> 57 columns).
+  The cells past the used ones of a line that fits (the background it was
+  erased with) are copied up to the width without being measured, as
+  `grid_reflow_move` keeps them. Seven upstream wide-character reflow tests
+  ("less cols to wrap a wide char", the five "wide char bulk run" tests,
+  "to wrap a multi-codepoint grapheme with a spacer head") now expect
+  tmux's rows. New test `Terminal: reflow measures a wide character as tmux
+  does (vtmux)` (fails without the change). Cost: 20k lines of CJK at
+  120x40, five resizes (release, in a server): 0.05 s before, 0.11 s after
+  (tmux 0.23 s). Not an upstream candidate (tmux's model).
+
+  With 0021-0024 the full `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` (Debug, 40 min on a loaded host, run on a draft of
+  0024 without its last three changes: the background tab, the cells past
+  the used ones, the pins) gives 7017 of 7099 pass, 76 skip, and two
+  failures in each test binary: the known `tabClear single`, and the kitty
+  temporary-file test of patch 0001's note (the checkout was under `/tmp`);
+  "golden snapshot with a virtual placement" failed on that run, before the
+  fixture above was regenerated, and passes with it (`-Dtest-filter="golden
+  snapshot"`, 89/89). On the final patches, `-Doptimize=ReleaseSafe` with
+  `-Dtest-filter=PageList` 699/699, `reflow` 303/303, `vtmux` 130/130.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

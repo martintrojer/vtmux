@@ -1469,15 +1469,11 @@ impl PaneTerm {
             self.eat_below_cursor(rows.max(1));
             self.grow_pulling_history(rows.max(1));
         }
-        // A cursor waiting to wrap, or one the reflow puts at the end of a
-        // row (its column a nonzero multiple of the new width): Ghostty
-        // gives it a row of its own, which tmux does not
-        // (grid_unwrap_position leaves `cx` past the end of the row). Left
-        // to Ghostty: the blank-row fix-up would count that row.
-        let (cx, new_cols) = (self.cursor().0, cols.max(1));
-        let fits =
-            !self.term.is_cursor_pending_wrap().unwrap_or(false) && (cx == 0 || cx % new_cols != 0);
-        if cols.max(1) != self.cols() && on_primary && fits {
+        // A cursor at the end of its line stays at the end of the
+        // reflowed line, past the last column when that ends a row
+        // (grid_unwrap_position; Ghostty patch 0023 leaves a pending wrap
+        // there instead of a row of its own).
+        if cols.max(1) != self.cols() && on_primary {
             // The height first, as screen_resize_y does before the reflow.
             if rows.max(1) != self.rows() {
                 self.term
@@ -1711,12 +1707,15 @@ impl PaneTerm {
         let content = history + usize::from(rows - have);
         let short = u16::try_from(usize::from(rows).saturating_sub(content)).unwrap_or(rows);
         let want = blank.max(short).min(rows);
-        let (cx, cy) = self.cursor();
+        let cy = self.cursor().1;
         let resize = |t: &mut Self, r: u16| {
             t.term
                 .resize(t.cols(), r, CELL_WIDTH_PX, CELL_HEIGHT_PX)
                 .expect("libghostty resize");
         };
+        // The cursor changes rows only by VPA, which keeps its column and
+        // a pending wrap (patch 0014): a cursor past the end of a row
+        // stays there.
         if want > have {
             // Blank rows at the bottom (Ghostty grows the screen with blank
             // rows while the cursor is off its last row, else it pulls
@@ -1724,19 +1723,27 @@ impl PaneTerm {
             // pinned, so Ghostty trims none of them: the top rows go into
             // history and the cursor goes up with its line.
             let n = want - have;
-            self.write_screen_moves("\x1b[H");
+            let on_last = cy == rows - 1;
+            if on_last {
+                self.write_screen_moves("\x1b[1d");
+            }
             resize(self, rows + n);
             let bottom = PointCoordinate {
                 x: 0,
                 y: u32::from(rows + n - 1),
             };
             let pin = self.term.track_grid_ref(Point::Active(bottom)).ok();
+            if on_last {
+                self.write_screen_moves(&format!("\x1b[{}d", rows + n));
+            }
             resize(self, rows);
             drop(pin);
             // screen_resize_cursor: a cursor line now in history leaves the
             // cursor at the top left.
-            if cy >= n {
-                self.write_screen_moves(&format!("\x1b[{};{}H", cy - n + 1, cx + 1));
+            if cy < n {
+                self.write_screen_moves("\x1b[H");
+            } else if on_last {
+                self.write_screen_moves(&format!("\x1b[{}d", cy - n + 1));
             }
         } else if want < have {
             // Ghostty trims the blank rows when the screen gets shorter,
@@ -1747,9 +1754,9 @@ impl PaneTerm {
                 return;
             }
             resize(self, rows - n);
-            self.write_screen_moves(&format!("\x1b[{};1H", rows - n));
+            self.write_screen_moves(&format!("\x1b[{}d", rows - n));
             resize(self, rows);
-            self.write_screen_moves(&format!("\x1b[{};{}H", cy + n + 1, cx + 1));
+            self.write_screen_moves(&format!("\x1b[{}d", cy + n + 1));
         }
     }
 

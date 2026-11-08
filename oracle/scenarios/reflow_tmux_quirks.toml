@@ -1,0 +1,33 @@
+name = "reflow_tmux_quirks"
+# Two reflow corners where vtmux does not copy tmux 3.8 (compat/DIVERGENCES.md).
+# D-040: grid_reflow_split moves to the next line before a cell that does not
+# fit even when the line has nothing on it yet, so a tab wider than the pane
+# at a split point leaves an empty row before it (two for a row holding only
+# the tab). D-041: grid_reflow_join tests the wrap flag of the line it stops
+# at, so a line whose last row does not fit from its first cell after a whole
+# row was joined loses its soft wrap there: capture-pane -J gives two lines.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "20", "-y", "6", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # tabwide: a tab of 8 at the start of a row narrowed to 7 then 5 columns
+  { run = ["new", "-d", "-s", "tabwide", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf 'ab\\r\\n\\tcd\\tx'; tmux wait-for -S tabwide; exec cat"] },
+  { wait_for = "tabwide" },
+  { run = ["resize-window", "-t", "tabwide", "-x", "7"] },
+  { run = ["display", "-p", "-t", "tabwide:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "tabwide", "-x", "5"] },
+  { divergence = { id = "D-040", expect = { kind = "cli", stdout = "5 1,1\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "tabwide:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { divergence = { id = "D-040", expect = { kind = "cli", stdout = "ab\n\t\n\ncd\n\t\n\nx\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "tabwide:"] },
+  # lostwrap: 39 characters and three wide ones on 40 columns, narrowed to 9, widened to 23
+  { run = ["new", "-d", "-s", "lostwrap", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'abclklongwordlongword longwordlongword \\345\\255\\227\\346\\274\\242\\360\\237\\230\\200'; tmux wait-for -S lostwrap; exec cat"] },
+  { wait_for = "lostwrap" },
+  { run = ["resize-window", "-t", "lostwrap", "-x", "9"] },
+  { run = ["display", "-p", "-t", "lostwrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "lostwrap:"] },
+  { run = ["resize-window", "-t", "lostwrap", "-x", "23"] },
+  { divergence = { id = "D-041", expect = { kind = "cli", stdout = "1 2,1\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "lostwrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { divergence = { id = "D-041", expect = { kind = "cli", stdout = "abclklongwordlongword longwordlongword 字漢😀\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "lostwrap:"] },
+]

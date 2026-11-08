@@ -1,0 +1,7 @@
+kind=format
+cols=40
+bytes=\344\270\200\346\274\242\345\255\227\033[42m\033[K\033[mxy\n
+format=#{history_size}
+resize=11x5
+command=new-session -d -x 40 -y 5 'sh -c 'printf '"'"'\344\270\200\346\274\242\345\255\227\033[42m\033[K\033[mxy\n'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 11 -y 5 ; display-message -p -t 0 '#{history_size}'
+expected=0\n

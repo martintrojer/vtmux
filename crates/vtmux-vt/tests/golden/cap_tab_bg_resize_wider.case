@@ -1,0 +1,7 @@
+kind=capture
+cols=40
+bytes=\344\270\200\033[42m\033[K\033[m\t\txylongwordlongwordabcdefghijklmnopqrstuvwxyz
+flags=-p -S -
+resize=57x5
+command=new-session -d -x 40 -y 5 'sh -c 'printf '"'"'\344\270\200\033[42m\033[K\033[m\t\txylongwordlongwordabcdefghijklmnopqrstuvwxyz'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 57 -y 5 ; capturep -p -S -
+expected=一\t\txylongwordlongwordabcdefghij\nklmnopqrstuvwxyz\n\n\n\n

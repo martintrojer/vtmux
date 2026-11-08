@@ -953,7 +953,7 @@ fn read_screen_cells(
             tab,
         });
     }
-    whole_tabs(&mut cells, width);
+    whole_tabs(&mut cells, width, wrapped);
     (cells, wrapped)
 }
 
@@ -1037,10 +1037,12 @@ impl CellBits {
 /// (a resize without reflow cut it) is plain blanks here. A reflow never
 /// cuts one: it moves a tab whole or splits it after its first cell as tmux
 /// does (patch 0015), and the columns moved to the next row are padding
-/// there, as tmux's are. A tab tmux itself could hold (`window_copy` over a
-/// partly erased tab) stays. `width` is the row's, which `cells` may stop
-/// short of.
-fn whole_tabs(cells: &mut [RowCell], width: usize) {
+/// there, as tmux's are. A tab wider than the row starts a wrapped row of
+/// its own there and stays a TAB cell, as in tmux (`grid_reflow_split`
+/// keeps a first cell that does not fit). A tab tmux itself could hold
+/// (`window_copy` over a partly erased tab) stays. `width` is the row's,
+/// which `cells` may stop short of.
+fn whole_tabs(cells: &mut [RowCell], width: usize, wrapped: bool) {
     let blank = |c: &mut RowCell| {
         c.tab = 0;
         c.text.clear();
@@ -1050,6 +1052,7 @@ fn whole_tabs(cells: &mut [RowCell], width: usize) {
         .iter()
         .rposition(|c| c.tab != 0 && c.tab != TAB_CONTINUATION)
         && x + usize::from(cells[x].tab) > width
+        && !(x == 0 && wrapped)
     {
         let n = cells.len() - x;
         cells[x..x + n].iter_mut().for_each(blank);

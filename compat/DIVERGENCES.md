@@ -324,3 +324,20 @@ product reasons" category.
 - vtmux behaviour: frames are cells, so the isolate goes on the cell left of the span; a blank one is written as a space carrying it. vtmux in tmux and vtmux in vtmux show what tmux in tmux does (the regress scene, both ways); a libghostty-vt observer shows the U+2069 on those rows, where tmux's own isolate is dropped.
 - Evidence: regress `screen-redraw-bidi.sh` with the outer server reference tmux 3.8 and the inner vtmux passes, as does vtmux in vtmux; the oracle trace of tmux 3.8 shows no U+2069 left of the border on rows with no text there (`bidi_border_isolates` step 17).
 - Category: Ghostty grid (libghostty-vt's rule for a zero-width character after an empty cell; no arbiter run: tmux's grid and Ghostty's disagree, and vtmux's bytes give tmux's result on tmux's).
+
+### D-040: a tab wider than the pane gets no empty rows before it on a reflow
+
+- Test / assertion: oracle `reflow_tmux_quirks` scene `tabwide` (annotated, the `display` and `capture-pane` after the second narrowing).
+- tmux behaviour: `grid_reflow_split` (grid.c) moves to the next line before every cell for which `width + gc.data.width > sx`, also when nothing is on the line yet (`width` 0): a TAB cell wider than the pane at the point where a line splits leaves an empty line before it, and a line holding only such a tab (`at` stays 0) leaves two, the original line emptied and the one skipped. Each further narrowing below the tab's width adds more.
+- vtmux behaviour: the tab starts the next row with nothing before it (patch 0015 measures it as tmux does, `whole_tabs` keeps it a TAB cell).
+- Evidence: reference tmux 3.8, `printf 'ab\r\n\tcd\tx'` on 20x6, `resize-window -x 7` then `-x 5`: tmux `#{history_size}` 7, `capture-pane -p` `ab` / blank / blank / TAB / blank / `cd` / TAB / blank / `x`; vtmux 5 and `ab` / TAB / blank / `cd` / TAB / blank / `x`. Found by a random-content reflow probe (`lows_batch_k`, 100 seeds of wide characters, tabs, links and erases, five resizes each): with tabs replaced by spaces every seed matches tmux but the D-041 ones.
+- Category: Deferred (blank rows tmux makes out of nothing; only tabs wider than the pane, 8 columns or fewer).
+
+### D-041: a reflow that joins a whole row keeps the line's soft wrap where the next row does not fit
+
+- Test / assertion: oracle `reflow_tmux_quirks` scene `lostwrap` (annotated, the `display` and `capture-pane -J` after widening).
+- tmux behaviour: `grid_reflow_join` (grid.c) sets `wrapped` from the next line before it tests whether that line's first cell fits; when it does not, and the line before it was joined whole, `left` is 0 and the target line loses `GRID_LINE_WRAPPED` although the rest of the line follows: the logical line becomes two (`capture-pane -J`, copy mode and later reflows see two lines), and the cursor at the line's end goes to the end of the first.
+- vtmux behaviour: the line stays one wrapped line; the next row is its continuation.
+- Evidence: reference tmux 3.8, `printf 'abclklongwordlongword longwordlongword 字漢😀'` on 40x6, `resize-window -x 9` then `-x 23`: tmux `capture-pane -pJ` `abclklongwordlongword longwordlongword 字漢` / `😀`, `#{history_size} #{cursor_x},#{cursor_y}` `1 20,0`; vtmux one line ending `字漢😀`, `1 2,1`.
+- Category: Do not copy tmux bug (the soft wrap of a line is lost on a resize).
+

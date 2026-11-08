@@ -1,0 +1,591 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 946a55e45..762ec5634 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1683,10 +1683,18 @@ const ReflowCursor = struct {
+     /// cell's width and one more for each padding cell (grid_reflow,
+     /// grid_reflow_split, grid_reflow_join: `gc.data.width`; a padding
+     /// cell reads back as width 1, grid_get_cell1). So a tab of width w
+-    /// costs 2w - 1 columns: `x` moves w, this w - 1. A new row starts at
+-    /// 0 (init, cursorScroll).
++    /// costs 2w - 1 columns: `x` moves w, this w - 1. A wide character is
++    /// its cell of width 2 and one padding cell: it costs 3 columns, `x`
++    /// moves 2, this 1. A new row starts at 0 (init, cursorScroll).
+     tab_extra: size.CellCountInt,
+ 
++    /// vtmux: whether the last source cell reflowed in this line was part
++    /// of a tab (`Cell.tab` set). A tab continuation cell that is not is
++    /// the padding of the wide character before it, which tmux's reflow
++    /// moved to the next row on its own (see `tmuxWidePadding`): it is
++    /// dropped and made again where it falls now.
++    src_in_tab: bool,
++
+     /// This is the final row count of the reflowed pages.
+     total_rows: usize,
+ 
+@@ -1735,6 +1743,7 @@ const ReflowCursor = struct {
+             .new_rows = 0,
+             .prev_wrap = false,
+             .tab_extra = 0,
++            .src_in_tab = false,
+ 
+             // Initially whatever size our input node is.
+             .total_rows = node.rows(),
+@@ -1759,6 +1768,7 @@ const ReflowCursor = struct {
+         // vtmux: read before anything below can reinitialize the cursor.
+         const prev_wrap = self.prev_wrap;
+         defer self.prev_wrap = src_row.wrap;
++        if (!prev_wrap) self.src_in_tab = false;
+ 
+         // vtmux: where the destination cursor is: 0 starts a line (deferred
+         // line breaks and pending wrap reset the column), anything else
+@@ -1804,7 +1814,7 @@ const ReflowCursor = struct {
+                 used
+             else
+                 @max(used, @min(cols_len, new_cols)));
+-            if (cols_len > used and tmuxReflowWidth(cells[0..used]) > new_cols)
++            if (cols_len > used and self.tmuxReflowWidth(cells[0..used]) > new_cols)
+                 cols_len = @intCast(used);
+ 
+             // If the row has a semantic prompt then the blank row is meaningful
+@@ -1917,18 +1927,42 @@ const ReflowCursor = struct {
+                 self.page_row.wrap_continuation = true;
+             }
+ 
++            // vtmux: a wide character's padding that an earlier reflow
++            // moved to a row of its own (tmuxWidePadding) is made again
++            // where the padding falls now, so it is not copied. A pin on
++            // it goes to the cell written last: the spacer tail it pads,
++            // or the padding made again for it.
++            if (cells[x].tab == pagepkg.Cell.tab_continuation and !self.src_in_tab) {
++                if (row_has_pins) for (list.tracked_pins.keys()) |p| {
++                    if (p.node != row.node or p.y != src_y or p.x != x) continue;
++                    p.node = self.node;
++                    p.x = if (self.pending_wrap or self.x == 0) self.x else self.x - 1;
++                    p.y = self.y;
++                };
++                x += 1;
++                continue;
++            }
++            self.src_in_tab = cells[x].tab != 0;
++
+             // vtmux: a cell that does not fit the row by tmux's measure
+             // (tab_extra) starts the next row, as grid_reflow_split and
+             // grid_reflow_join break a line where `width + gc.data.width >
+             // sx`: a tab that does not fit moves whole, the columns after
+             // the first move one by one. A row is never left empty (tmux
+             // adds an empty line for a tab wider than the pane). A wide
+-            // character after a tab needs both its columns here; without
+-            // a tab, its own spacer-head wrap below handles it (tmux also
+-            // counts its padding cell, which this does not follow).
++            // character after a tab or another wide character needs its
++            // width here; otherwise its own spacer-head wrap below handles
++            // it. Its spacer tail stays with it whatever tmux's measure
++            // says (see tmuxWidePadding).
++            //
++            // The cells after the ones a line that fits used (the
++            // background it was erased with) are not measured: tmux
++            // moves such a line whole (grid_reflow_move) and they show
++            // up to the width.
++            const past_used = !src_row.wrap and x >= used;
+             const tab_cost = tmuxReflowCost(cells[x]);
+             const need = tab_cost + @intFromBool(self.tab_extra > 0 and cells[x].wide == .wide);
+-            if (self.x > 0 and
++            if (self.x > 0 and cells[x].wide != .spacer_tail and !past_used and
+                 @as(usize, self.x) + self.tab_extra + need > self.page.size.cols)
+             {
+                 self.pending_wrap = true;
+@@ -1946,7 +1980,8 @@ const ReflowCursor = struct {
+             if (!row_has_pins) {
+                 const max_run = @min(
+                     cols_len - x,
+-                    @as(usize, self.page.size.cols) - self.x - self.tab_extra,
++                    @as(usize, self.page.size.cols) - self.x -
++                        if (past_used) 0 else self.tab_extra,
+                 );
+                 const window = cells[x..][0..max_run];
+                 const run = bulkRunLength(window);
+@@ -1982,9 +2017,12 @@ const ReflowCursor = struct {
+                 src_page,
+             );
+ 
+-            // vtmux: a tab's first cell costs its width (tab_extra).
++            // vtmux: a tab's first cell costs its width, a wide
++            // character's one more for its padding (tab_extra).
+             if (write_result) |result| {
+                 if (result == .success and tab_cost > 1) self.tab_extra += @intCast(tab_cost - 1);
++                if (result == .success and cells[x].wide == .wide and self.page.size.cols > 1)
++                    self.tab_extra += 1;
+             } else |_| {}
+ 
+             // vtmux: the cells this row used are used in the new one.
+@@ -2000,6 +2038,17 @@ const ReflowCursor = struct {
+                 }
+             } else |_| {}
+ 
++            // vtmux: a wide character whose padding does not fit the row
++            // by tmux's measure leaves its padding to the next row.
++            if (write_result) |result| {
++                if (result == .success and cells[x].wide == .spacer_tail and
++                    @as(usize, self.x) + @intFromBool(self.pending_wrap) + self.tab_extra >
++                        self.page.size.cols)
++                {
++                    try self.tmuxWidePadding(list, cap, src_row, write_x);
++                }
++            } else |_| {}
++
+             if (write_result) |result| switch (result) {
+                 // Wrote the cell, move to the next.
+                 .success => x += 1,
+@@ -2065,19 +2114,71 @@ const ReflowCursor = struct {
+     }
+ 
+     /// vtmux: the columns tmux's reflow counts for a cell (tab_extra): a
+-    /// tab's first cell its width, any other cell one.
++    /// tab's first cell its width, any other cell one (a wide cell's
++    /// extra column is counted where it is written).
+     inline fn tmuxReflowCost(cell: pagepkg.Cell) usize {
+         return if (cell.tab >= 1 and cell.tab <= pagepkg.Cell.tab_max) cell.tab else 1;
+     }
+ 
+     /// vtmux: the width tmux's reflow measures a line by (grid_reflow):
+-    /// its cells, plus tab_extra's w - 1 for each tab.
+-    fn tmuxReflowWidth(cells: []const pagepkg.Cell) usize {
++    /// its cells, plus tab_extra's w - 1 for each tab and 1 for each wide
++    /// character, less the wide characters' padding cells that are not
++    /// copied (tmuxWidePadding).
++    fn tmuxReflowWidth(self: *const ReflowCursor, cells: []const pagepkg.Cell) usize {
+         var width: usize = cells.len;
+-        for (cells) |c| width += tmuxReflowCost(c) - 1;
++        var in_tab = self.src_in_tab;
++        for (cells) |c| {
++            if (c.tab == pagepkg.Cell.tab_continuation and !in_tab) {
++                width -= 1;
++                continue;
++            }
++            in_tab = c.tab != 0;
++            width += tmuxReflowCost(c) - 1;
++            if (c.wide == .wide) width += 1;
++        }
+         return width;
+     }
+ 
++    /// vtmux: tmux keeps a wide character as its cell and one padding
++    /// cell, and its reflow can split the two: the padding goes to the
++    /// next row when it does not fit (grid_reflow_split and
++    /// grid_reflow_join test `width + gc.data.width > sx` for it too), and
++    /// that row starts with it (drawn blank, tty_draw_line; skipped by a
++    /// capture, grid_string_cells), even when the line ends there. Ghostty
++    /// keeps the spacer tail with the wide cell, so the row the padding
++    /// starts holds a tab continuation cell for it: one column, no tab
++    /// before it. A reflow drops it (reflowRow) and makes it again where
++    /// the padding falls.
++    ///
++    /// A pin on the spacer tail (at `tail_x` of the row just filled) is on
++    /// tmux's padding cell, so it moves with it: a cursor at the end of
++    /// the line (Screen.resize leaves it on the tail with a wrap pending)
++    /// ends up after it, as grid_unwrap_position puts it at the end of
++    /// the padding's row.
++    fn tmuxWidePadding(
++        self: *ReflowCursor,
++        list: *PageList,
++        cap: Capacity,
++        src_row: *const Row,
++        tail_x: size.CellCountInt,
++    ) Allocator.Error!void {
++        const tail_node = self.node;
++        const tail_y = self.y;
++        self.page_row.wrap = true;
++        try self.cursorScrollOrNewPage(list, cap);
++        self.copyRowMetadata(src_row);
++        self.page_row.wrap_continuation = true;
++        self.page_cell.* = .{ .tab = pagepkg.Cell.tab_continuation };
++        self.page_row.tmuxRaiseUsed(1);
++        for (list.tracked_pins.keys()) |p| {
++            if (p.node != tail_node or p.y != tail_y or p.x != tail_x) continue;
++            p.node = self.node;
++            p.x = self.x;
++            p.y = self.y;
++        }
++        self.cursorForward();
++    }
++
+     /// Compute and memoize the new-page capacity for the given source
+     /// page. See the call site in reflowRow for details.
+     fn computeAndMemoizeCap(
+@@ -2133,9 +2234,11 @@ const ReflowCursor = struct {
+             // (see writeCell) so they are pure copies. The style
+             // check is defensive so that a bg cell can never join or
+             // extend a styled run.
++            // vtmux: a tab over cells erased with a background is
++            // measured one by one too (tab_extra).
+             .bg_color_palette,
+             .bg_color_rgb,
+-            => cell.style_id == stylepkg.default_id,
++            => cell.style_id == stylepkg.default_id and cell.tab == 0,
+         };
+     }
+ 
+@@ -2180,20 +2283,16 @@ const ReflowCursor = struct {
+         if (cells.len == 0) return 0;
+         const first = cells[0];
+ 
+-        // A run may start on a bulk-copyable narrow cell or on a wide pair.
+-        const pair_start = first.content_tag == .codepoint and
+-            first.wide == .wide and
+-            !first.hyperlink;
+-        if (!pair_start and !bulkCopyable(first)) return 0;
++        // A run starts on a bulk-copyable narrow cell.
++        // vtmux: not on a wide pair, nor take one in: tmux's reflow counts
++        // a wide character's padding cell (tab_extra), which reflowRow
++        // does cell by cell.
++        if (!bulkCopyable(first)) return 0;
+ 
+         // Patterns for each cell shape admitted to the run.
+         var proto = first;
+         proto.wide = .narrow;
+         const narrow_pattern = BulkRunMask.pattern(proto);
+-        proto.wide = .wide;
+-        const wide_pattern = BulkRunMask.pattern(proto);
+-        proto.wide = .spacer_tail;
+-        const tail_pattern = BulkRunMask.pattern(proto);
+ 
+         // Only text cells can contain a placeholder; for bg color
+         // tags the content bits are a color, so we skip the check for
+@@ -2240,17 +2339,7 @@ const ReflowCursor = struct {
+                     continue;
+                 }
+ 
+-                // Wide pairs are consumed atomically so the run
+-                // (or window) end can never split a pair.
+-                if (len + 1 < cells.len and
+-                    BulkRunMask.eqlScalar(cell, wide_pattern) and
+-                    BulkRunMask.eqlScalar(cells[len + 1], tail_pattern))
+-                {
+-                    len += 2;
+-                    // Re-enter the vectorized loop: narrow groups
+-                    // commonly follow a stretch of pairs.
+-                    continue :outer;
+-                }
++                // vtmux: a wide pair ends the run (see pair_start).
+ 
+                 break :outer;
+             }
+@@ -2953,6 +3042,8 @@ const ReflowCursor = struct {
+         // Remember our new row count so we can restore it
+         // after reinitializing our cursor on the new page.
+         const new_rows = self.new_rows;
++        // vtmux: and where the source line is (src_in_tab).
++        const src_in_tab = self.src_in_tab;
+ 
+         const node = try list.createPage(.{ .cap = cap });
+         errdefer comptime unreachable;
+@@ -2961,6 +3052,7 @@ const ReflowCursor = struct {
+ 
+         self.* = .init(node);
+         self.new_rows = new_rows;
++        self.src_in_tab = src_in_tab;
+     }
+ 
+     /// Performs `cursorScroll` or `cursorNewPage` as necessary
+@@ -19079,7 +19171,9 @@ test "PageList resize reflow less cols to wrap a wide char" {
+     // Resize
+     try s.resize(.{ .cols = 2, .reflow = true });
+     try testing.expectEqual(@as(usize, 2), s.cols);
+-    try testing.expectEqual(@as(usize, 2), s.totalRows());
++    // vtmux: tmux's reflow counts the wide character's padding cell too
++    // (tab_extra): 2 + 1 columns, so the padding starts a third row.
++    try testing.expectEqual(@as(usize, 3), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+@@ -19105,6 +19199,13 @@ test "PageList resize reflow less cols to wrap a wide char" {
+             const rac = page.getRowAndCell(1, 1);
+             try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
+             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
++            try testing.expect(rac.row.wrap);
++        }
++        {
++            const rac = page.getRowAndCell(0, 2);
++            try testing.expectEqual(pagepkg.Cell.tab_continuation, rac.cell.tab);
++            try testing.expect(rac.row.wrap_continuation);
++            try testing.expect(!rac.row.wrap);
+         }
+     }
+ }
+@@ -19141,19 +19242,19 @@ test "PageList resize reflow less cols wide char bulk run" {
+         }
+     }
+ 
+-    // Resize to exactly two pairs per row: runs end on the row
+-    // boundary with no spacer heads needed.
++    // Resize to two pairs' columns per row. vtmux: tmux's reflow counts
++    // each pair as 3 columns (tab_extra), so a row holds one.
+     try s.resize(.{ .cols = 4, .reflow = true });
+     try testing.expectEqual(@as(usize, 4), s.cols);
+-    try testing.expectEqual(@as(usize, 2), s.totalRows());
++    try testing.expectEqual(@as(usize, 4), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+         const page = s.pages.first.?.page();
+ 
+         for (0..4) |i| {
+-            const y = i / 2;
+-            const x = (i % 2) * 2;
++            const y = i;
++            const x = 0;
+             {
+                 const rac = page.getRowAndCell(x, y);
+                 try testing.expectEqual(
+@@ -19175,7 +19276,7 @@ test "PageList resize reflow less cols wide char bulk run" {
+             try testing.expect(!rac.row.wrap_continuation);
+         }
+         {
+-            const rac = page.getRowAndCell(0, 1);
++            const rac = page.getRowAndCell(0, 3);
+             try testing.expect(!rac.row.wrap);
+             try testing.expect(rac.row.wrap_continuation);
+         }
+@@ -19212,20 +19313,22 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+         }
+     }
+ 
+-    // Resize to an odd number of columns: the bulk run must stop a
+-    // pair short of the row boundary and the slow path inserts a
+-    // spacer head in the final column.
++    // Resize to an odd number of columns. vtmux: tmux's reflow counts
++    // each pair as 3 columns (tab_extra): two pairs fill 5 columns but
++    // the second's padding does not fit, so it starts the next row
++    // (tmuxWidePadding), and the third pair follows it.
+     try s.resize(.{ .cols = 5, .reflow = true });
+     try testing.expectEqual(@as(usize, 5), s.cols);
+-    try testing.expectEqual(@as(usize, 2), s.totalRows());
++    try testing.expectEqual(@as(usize, 3), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+         const page = s.pages.first.?.page();
+ 
++        const at = [_][2]usize{ .{ 0, 0 }, .{ 2, 0 }, .{ 1, 1 }, .{ 0, 2 } };
+         for (0..4) |i| {
+-            const y = i / 2;
+-            const x = (i % 2) * 2;
++            const y = at[i][1];
++            const x = at[i][0];
+             {
+                 const rac = page.getRowAndCell(x, y);
+                 try testing.expectEqual(
+@@ -19244,13 +19347,14 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+         {
+             const rac = page.getRowAndCell(4, 0);
+             try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
+-            try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
++            try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
+             try testing.expect(rac.row.wrap);
+         }
+         {
+-            const rac = page.getRowAndCell(4, 1);
+-            try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
++            const rac = page.getRowAndCell(0, 1);
++            try testing.expectEqual(pagepkg.Cell.tab_continuation, rac.cell.tab);
+             try testing.expect(rac.row.wrap_continuation);
++            try testing.expect(rac.row.wrap);
+         }
+     }
+ }
+@@ -19289,8 +19393,9 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+         }
+     }
+ 
+-    // Shrink: the run ends exactly on the row boundary after the
+-    // second narrow cell.
++    // Shrink. vtmux: tmux's reflow counts each pair as 3 columns
++    // (tab_extra): the second pair's padding does not fit 6 and starts
++    // the next row (tmuxWidePadding), y and the rest follow it.
+     try s.resize(.{ .cols = 6, .reflow = true });
+     try testing.expectEqual(@as(usize, 6), s.cols);
+     try testing.expectEqual(@as(usize, 2), s.totalRows());
+@@ -19298,12 +19403,13 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+         const page = s.pages.first.?.page();
+-        for (shape[0..6], 0..) |c, x| {
++        for (shape[0..5], 0..) |c, x| {
+             const rac = page.getRowAndCell(x, 0);
+             try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
+             try testing.expectEqual(c.wide, rac.cell.wide);
+         }
+-        for (shape[6..], 0..) |c, x| {
++        try testing.expectEqual(pagepkg.Cell.tab_continuation, page.getRowAndCell(0, 1).cell.tab);
++        for (shape[5..], 1..) |c, x| {
+             const rac = page.getRowAndCell(x, 1);
+             try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
+             try testing.expectEqual(c.wide, rac.cell.wide);
+@@ -19312,21 +19418,28 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+         try testing.expect(page.getRowAndCell(0, 1).row.wrap_continuation);
+     }
+ 
+-    // Grow back: the wrapped rows must rejoin into the original
+-    // single-row layout.
++    // Grow back: the padding cell goes and the rows rejoin, but by
++    // tmux's measure the line is 12 columns, so it splits before the
++    // third pair.
+     try s.resize(.{ .cols = 9, .reflow = true });
+     try testing.expectEqual(@as(usize, 9), s.cols);
+-    try testing.expectEqual(@as(usize, 1), s.totalRows());
++    try testing.expectEqual(@as(usize, 2), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+         const page = s.pages.first.?.page();
+-        for (shape, 0..) |c, x| {
++        for (shape[0..6], 0..) |c, x| {
+             const rac = page.getRowAndCell(x, 0);
+             try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
+             try testing.expectEqual(c.wide, rac.cell.wide);
+         }
+-        try testing.expect(!page.getRowAndCell(0, 0).row.wrap);
++        for (shape[6..], 0..) |c, x| {
++            const rac = page.getRowAndCell(x, 1);
++            try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
++            try testing.expectEqual(c.wide, rac.cell.wide);
++        }
++        try testing.expect(page.getRowAndCell(0, 0).row.wrap);
++        try testing.expect(!page.getRowAndCell(0, 1).row.wrap);
+     }
+ }
+ 
+@@ -19374,16 +19487,17 @@ test "PageList resize reflow less cols wide char bulk run styled" {
+     }
+ 
+     // Resize
++    // vtmux: one pair a row (tmux's reflow counts a pair as 3 columns).
+     try s.resize(.{ .cols = 4, .reflow = true });
+     try testing.expectEqual(@as(usize, 4), s.cols);
+-    try testing.expectEqual(@as(usize, 2), s.totalRows());
++    try testing.expectEqual(@as(usize, 4), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+         const page = s.pages.first.?.page();
+ 
+-        for (0..2) |y| {
+-            for (0..4) |x| {
++        for (0..4) |y| {
++            for (0..2) |x| {
+                 const rac = page.getRowAndCell(x, y);
+                 const style_id = rac.cell.style_id;
+                 try testing.expect(style_id != 0);
+@@ -19444,9 +19558,10 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+     }
+ 
+     // Resize
++    // vtmux: the pair is 3 columns to tmux's reflow, so x wraps.
+     try s.resize(.{ .cols = 3, .reflow = true });
+     try testing.expectEqual(@as(usize, 3), s.cols);
+-    try testing.expectEqual(@as(usize, 1), s.totalRows());
++    try testing.expectEqual(@as(usize, 2), s.totalRows());
+ 
+     {
+         try testing.expect(s.pages.first == s.pages.last);
+@@ -19466,7 +19581,7 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+             try testing.expectEqual(stylepkg.default_id, rac.cell.style_id);
+         }
+         {
+-            const rac = page.getRowAndCell(2, 0);
++            const rac = page.getRowAndCell(0, 1);
+             try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint.data);
+             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
+         }
+@@ -19565,9 +19680,11 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
+             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
+         }
+         {
++            // vtmux: the first pair is 3 columns to tmux's reflow, so the
++            // row is full without a spacer head (tab_extra).
+             const rac = page.getRowAndCell(2, 0);
+             try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
+-            try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
++            try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
+         }
+ 
+         {
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 3833d8d67..c5a29c7a9 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -15430,6 +15430,73 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+     }
+ }
+ 
++test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // tmux counts a wide character's padding cell too: 一 and abcdef
++    // are 9 columns to it, so g starts the second row on 9 columns.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("一abcdefghijklmnop");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("一abcdef\nghijklmno\np", str);
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.y);
++    }
++
++    // A wide character that fits where its padding does not: the
++    // padding starts the next row, a blank cell before h, and goes again
++    // when the line is widened back.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefg一hij");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        const pad = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 1 } }).?;
++        try testing.expectEqual(Cell.tab_continuation, pad.cell.tab);
++        try testing.expect(pad.row.wrap_continuation);
++        try testing.expectEqual(@as(size.CellCountInt, 4), pad.row.tmux_used);
++        const h = t.screens.active.pages.getCell(.{ .screen = .{ .x = 1, .y = 1 } }).?;
++        try testing.expectEqual(@as(u21, 'h'), h.cell.codepoint());
++        try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++
++        try t.resize(alloc, .{ .cols = 20, .rows = 5 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcdefg一hij", str);
++        try testing.expectEqual(@as(size.CellCountInt, 12), t.screens.active.cursor.x);
++    }
++
++    // The padding of a wide character that ends the line gets a row of
++    // its own, as in tmux.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefg一\nX");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        const pad = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 1 } }).?;
++        try testing.expectEqual(Cell.tab_continuation, pad.cell.tab);
++        const x = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 2 } }).?;
++        try testing.expectEqual(@as(u21, 'X'), x.cell.codepoint());
++    }
++
++    // A cursor after such a line goes after the padding (1,1), as tmux's
++    // goes to the end of the padding's row.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefg一");
++        try t.resize(alloc, .{ .cols = 9, .rows = 5 });
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++        try testing.expect(!t.screens.active.cursor.pending_wrap);
++    }
++}
++
+ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

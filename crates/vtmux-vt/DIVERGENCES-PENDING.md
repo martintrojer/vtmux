@@ -12,30 +12,26 @@ and the probes from `review_vt_wrap`.
 - Golden: `cap_region_scroll_history`, `fmt_region_scroll_history_size`
   (ignored); regress `input-raw-scroll.sh`. See `compat/DIVERGENCES.md` D-032.
 
-## P2. Reflow of a cursor at the end of a row
+## P2. Reflow of a cursor at the end of a row: closed (`lows_batch_k`)
 
-- Golden: `fmt_reflow_pending_wrap_wide_cursor_x`,
-  `fmt_reflow_pending_wrap_wide_cursor_y`,
-  `fmt_reflow_pending_wrap_wide_history_size`
 - Closed (`gap_render_styles`): narrowing now pushes the split rows into
   history and widening joins them back, the blank rows below the cursor kept,
   as `grid_reflow` does (`PaneTerm::resize`; goldens `cap_reflow_narrow`,
   `fmt_reflow_narrow_*`, regress `cursor-test4.sh`, oracle
   `reflow_footer_under_cursor`).
-- Left: a cursor that ends a row after the reflow (waiting to wrap, or its
-  column a multiple of the new width): tmux leaves `cx` past the end of that
-  row (`grid_unwrap_position`), Ghostty starts the next row with it, so that
-  step's `#{history_size}` is one more and the cursor is at column 0 of the
-  row below (30 lines, prompt of 24 columns, `resize-window -x 12`: tmux
-  `102 12,19`, vtmux `103 0,19`; a later resize agrees again).
-- Pending-wrap cursor: 20x5, `0123456789abcdefghij0123`, `short`, then ten
-  wide `漢字` cells filling the row (wrap pending), resized to 7x5: tmux puts
-  the cursor at 4,3 with `#{history_size}` 6. Ghostty 3bd54e025 gives 2,4
-  with `history_size` 4 (ghostty a887df42c gave 7,4, past the last column).
-  The ASCII case (20 chars at 20x5, resize 7x5) now matches tmux's
-  `cursor_x` 6 (`fmt_reflow_pending_wrap_cursor_x`; a887df42c gave 7).
-- Visible: `#{history_size}`, `#{cursor_x}`, `#{cursor_y}`, CPR and
-  `capture-pane` after a resize that leaves the cursor at the end of a row.
+- Closed (`lows_batch_k`): a cursor at the end of its line stays at the end
+  of the reflowed line, past the last column when that ends a row
+  (`grid_wrap_position`, `grid_unwrap_position`; patch
+  `0023-reflow-cursor-at-line-end.patch`, and `PaneTerm::resize` moves it
+  only by VPA). The pending-wrap wide case (20x5,
+  `0123456789abcdefghij0123`, `short`, ten wide `漢字` cells, resized to
+  7x5: tmux 4,3 with `#{history_size}` 6) also needed tmux's measure of a
+  wide character, its padding cell counted (patch
+  `0024-reflow-wide-character-as-tmux.patch`). Goldens
+  `fmt_reflow_pending_wrap_wide_*` (no longer ignored),
+  `fmt_reflow_line_end_*`, `fmt_reflow_wide_*`, `cap_reflow_wide_*`; oracle
+  `rep_deccolm40_wide_reflow`. The 30-line, 24-column-prompt case below
+  (`resize-window -x 12`) matches tmux too.
 
 - Tab cells: closed (`low_rep_after_control_and_deccolm`). Patch
   `0015-reflow-tab-as-tmux.patch` measures a tab by tmux's reflow width
