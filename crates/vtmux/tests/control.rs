@@ -1283,3 +1283,39 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
         )
     });
 }
+
+/// `client-<pid>` names -> `client-N`: the pids differ between runs.
+fn normalise_client_names(lines: Vec<String>) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|l| {
+            l.split(' ')
+                .map(|word| match word.strip_prefix("client-") {
+                    Some(n) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => "client-N",
+                    _ => word,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
+/// server.c `server_send_exit`: `kill-server` marks every client exiting
+/// before any goes, so no control client hears another's
+/// `%client-detached` (control-notify.c `CONTROL_SHOULD_NOTIFY_CLIENT`).
+#[test]
+fn kill_server_tells_no_control_client_another_left() {
+    compare("kill_server_tells_no_control_client_another_left", |w| {
+        w.run(&["new", "-d", "-s", "c", "-n", "w", "cat", "-"]);
+        let a = w.control(&["attach", "-t", "c"]);
+        a.wait("%session-changed", |t| t.contains("%session-changed"));
+        let b = w.control(&["attach", "-t", "c"]);
+        b.wait("%session-changed", |t| t.contains("%session-changed"));
+        a.wait("b attached", |t| t.contains("%client-session-changed"));
+        w.run(&["kill-server"]);
+        let (ta, _, ca) = a.close();
+        let (tb, _, cb) = b.close();
+        let lines = |t: &str| normalise_client_names(normalise_guards(&w.normalise(t)));
+        (lines(&ta), ca, lines(&tb), cb)
+    });
+}

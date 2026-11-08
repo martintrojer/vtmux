@@ -742,16 +742,22 @@ impl Server {
     /// End of a loop turn (`server_client_check_exit`): send `Exit` to
     /// control clients that are leaving; on shutdown, to all of them.
     pub(crate) fn control_tick(&mut self) {
+        // server_send_exit (server.c): every client is marked exiting
+        // before any goes, so one leaving (client-detached) is heard by
+        // none of the others.
+        if self.shutdown {
+            for id in self.control_ids() {
+                if let Some(cs) = self.control_mut(id) {
+                    cs.exit.get_or_insert(Exit::Shutdown);
+                }
+            }
+        }
         for id in self.control_ids() {
-            let shutdown = self.shutdown;
             let Some(cs) = self.control_mut(id) else {
                 continue;
             };
             if cs.finished {
                 continue;
-            }
-            if shutdown {
-                cs.exit.get_or_insert(Exit::Shutdown);
             }
             let Some(exit) = cs.exit.clone() else {
                 continue;
