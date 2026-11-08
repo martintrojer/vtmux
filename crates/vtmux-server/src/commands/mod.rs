@@ -604,7 +604,7 @@ fn dispatch(
         "send-prefix" => keys::send_prefix(server, item, args, found),
         "switch-client" => keys::switch_client(server, item, args),
         "refresh-client" => refresh_client::exec(server, item, args),
-        "source-file" => source_file::exec(server, item, args, found),
+        "source-file" => source_file::exec(server, item, args, found, call.verbose),
         "wait-for" => wait_for::exec(server, item, args),
         "run-shell" => run_shell::exec(server, item, args, found),
         "if-shell" => run_shell::if_shell(server, item, args, found),

@@ -1347,6 +1347,37 @@ fn startup_config_conditions() {
     });
 }
 
+/// A `source-file` read by `source-file -v` is verbose too, also inside a
+/// `{ }` block: its parse flags hold `CMD_PARSE_VERBOSE`
+/// (cmd-source-file.c `cmd_source_file_exec`, `cmd_get_parse_flags`). A
+/// command string `if-shell` parses later has its own flags, so not
+/// there; and not without `-v` on the outer file.
+#[test]
+fn source_file_verbose_reaches_nested_files() {
+    compare("source_file_verbose_reaches_nested_files", |w| {
+        let write = |name: &str, text: &str| {
+            let path = w.dir().join(name);
+            std::fs::write(&path, text).expect("write");
+            path.to_str().expect("utf-8").to_owned()
+        };
+        let inner = write("inner.conf", "display -p inner\n");
+        let outer = write(
+            "outer.conf",
+            &format!(
+                "display -p outer\n\
+                 source-file {inner}\n\
+                 if -F 1 {{ source-file {inner} }}\n\
+                 if -F 1 'source-file {inner}'\n"
+            ),
+        );
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["source", "-v", &outer]),
+            w.run(&["source", &outer]),
+        ]
+    });
+}
+
 /// `source-file` globs a relative path under the client's directory
 /// quoted for glob(3) (cmd-source-file.c `cmd_source_file_quote_for_glob`):
 /// a directory named with `[`, `*` and a space is taken literally, while

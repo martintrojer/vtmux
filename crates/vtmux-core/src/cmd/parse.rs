@@ -74,6 +74,10 @@ pub trait ConfigEnv {
 
 /// Options for [`parse_config_with`] (the `CMD_PARSE_*` flags that matter).
 #[derive(Clone, Copy, Debug, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent CMD_PARSE_* flags"
+)]
 pub struct ParseOpts {
     /// `CMD_PARSE_PARSEONLY` (`source-file -n`): assignments are checked but
     /// not applied.
@@ -86,6 +90,9 @@ pub struct ParseOpts {
     /// `_from_string`: `source-file`, `run -C`, control lines, key
     /// bindings) reads it through a signed `char`, where 0xff is `EOF`.
     pub from_file: bool,
+    /// `CMD_PARSE_VERBOSE` (`source-file -v`): every command built is
+    /// [`CommandCall::verbose`].
+    pub verbose: bool,
 }
 
 /// The environment for text that cannot contain `$` or `~` (the default
@@ -210,7 +217,11 @@ pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdErr
     if !current.is_empty() {
         commands.push(new(current));
     }
-    build_commands(&commands, true, &mut Build::new(false, 0, None))
+    build_commands(
+        &commands,
+        true,
+        &mut Build::new(ParseOpts::default(), 0, None),
+    )
 }
 
 /// Parse config text: one line, or several (a newline ends a statement
@@ -254,7 +265,7 @@ fn parse_lines(
 ) -> Result<Vec<CommandCall>, ParseError> {
     let raw = lex_commands(text, env, opts, first_line)
         .map_err(|(line, error)| ParseError { line, error })?;
-    let mut build = Build::new(opts.one_group, first_line, print);
+    let mut build = Build::new(opts, first_line, print);
     build_commands(&raw, true, &mut build).map_err(|error| ParseError {
         line: build.line,
         error,
@@ -265,9 +276,8 @@ fn parse_lines(
 /// string, every command in one group (`{ a \n b }` is `a ; b`).
 pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, CmdError> {
     let opts = ParseOpts {
-        parse_only: false,
         one_group: true,
-        from_file: false,
+        ..ParseOpts::default()
     };
     Ok(CommandList {
         calls: parse_config_with(text, env, opts)?,
@@ -278,6 +288,8 @@ pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, 
 struct Build<'p> {
     /// `CMD_PARSE_ONEGROUP`.
     one_group: bool,
+    /// `CMD_PARSE_VERBOSE`.
+    verbose: bool,
     /// `pi->line`: the line of the command being built. A block's commands
     /// move it, so a group printed or failing after a block reports the
     /// block's last command's line, as tmux does.
@@ -288,9 +300,10 @@ struct Build<'p> {
 }
 
 impl<'p> Build<'p> {
-    fn new(one_group: bool, line: u32, print: Option<PrintGroup<'p>>) -> Self {
+    fn new(opts: ParseOpts, line: u32, print: Option<PrintGroup<'p>>) -> Self {
         Self {
-            one_group,
+            one_group: opts.one_group,
+            verbose: opts.verbose,
             line,
             print,
             depth: 0,
@@ -358,7 +371,7 @@ fn build_command(
             let opts = ParseOpts {
                 parse_only: true,
                 one_group: b.one_group,
-                from_file: false,
+                ..ParseOpts::default()
             };
             let mut expanded = lex_commands(&text, &mut NoEnv, opts, b.line).map_err(|e| e.1)?;
             let Some(last) = expanded.last_mut() else {
@@ -392,6 +405,7 @@ fn build_command(
         entry,
         args,
         group: 0,
+        verbose: b.verbose,
     }])
 }
 
@@ -1381,11 +1395,13 @@ mod tests {
         parse_only: false,
         one_group: false,
         from_file: false,
+        verbose: false,
     };
     const PARSE_ONLY: ParseOpts = ParseOpts {
         parse_only: true,
         one_group: false,
         from_file: false,
+        verbose: false,
     };
 
     fn parse(text: &str) -> Result<Vec<CommandCall>, CmdError> {

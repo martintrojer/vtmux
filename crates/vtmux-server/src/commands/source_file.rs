@@ -25,12 +25,15 @@ const DEPTH_LIMIT: usize = 50;
 
 /// `cmd_source_file_exec` (cmd-source-file.c:174-273): each file's
 /// commands go into the queue right after this one, then a step that
-/// reports the causes (`cmd_source_file_complete_cb`).
+/// reports the causes (`cmd_source_file_complete_cb`). `verbose`: the
+/// command itself was read by a `source-file -v` (`CMD_PARSE_VERBOSE` in
+/// its parse flags), which makes it verbose as `-v` does.
 pub fn exec(
     server: &mut Server,
     item: &mut Item,
     args: &Args,
     found: Found,
+    verbose: bool,
 ) -> Result<(), CmdError> {
     // Without a client the depth is global, else the client's.
     let depth = server.source_depths.entry(item.client).or_default();
@@ -77,7 +80,7 @@ pub fn exec(
         quiet: false,
         parse_only: args.flag('n'),
         // cmd-source-file.c:211-215: not for a control client.
-        verbose: args.flag('v') && item.control.is_none(),
+        verbose: (args.flag('v') || verbose) && item.control.is_none(),
         parse_client: None,
     };
     // cmd-source-file.c:264-272: with nothing to read, a miss is the
@@ -373,6 +376,7 @@ fn parse_text(
         // reads with `cmd_parse_from_file` (cfg.c:96-123); `source-file`
         // goes through `load_cfg_from_buffer`. Byte 0xff tells them apart.
         from_file: opts.parse_client.is_some(),
+        verbose: opts.verbose,
     };
     // Each line is its own group (cmd-parse.y cmd_parse_build_commands):
     // an error stops the rest of that line only. `pi->c` is the item's

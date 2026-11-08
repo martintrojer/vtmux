@@ -57,6 +57,10 @@ pub struct CommandCall {
     /// each source line unless [`ParseOpts::one_group`] is set. Only
     /// equality inside one list means anything.
     pub group: u32,
+    /// Parsed with `CMD_PARSE_VERBOSE` (`cmd_get_parse_flags`): built from
+    /// a file `source-file -v` read, so a `source-file` among them is
+    /// verbose too (cmd-source-file.c `cmd_source_file_exec`).
+    pub verbose: bool,
 }
 
 /// A parsed command list (`struct cmd_list`): what a `{ }` block is, and

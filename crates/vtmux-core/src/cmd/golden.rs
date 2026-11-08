@@ -49,6 +49,7 @@ fn run(name: &str, text: &str) -> String {
         parse_only: !applying,
         one_group: false,
         from_file: false,
+        verbose: false,
     };
     let mut out = String::new();
     let mut printed = |group: Group<'_>| {
