@@ -45,7 +45,7 @@ pub fn exec(
         return Ok(());
     }
     if !server.model.windows[&w].is_floating_now(wp) {
-        server.model.unzoom(w);
+        server.model.server_unzoom(w);
     }
     let mut req = ResizeRequest {
         x: args

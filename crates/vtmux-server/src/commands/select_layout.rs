@@ -47,7 +47,7 @@ fn select(
     let (Some(w), Some(wp)) = (found.window, found.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    server.model.unzoom(w);
+    server.model.server_unzoom(w);
     let next = cycle == Some(true) || args.flag('n');
     let previous = cycle == Some(false) || args.flag('p');
 

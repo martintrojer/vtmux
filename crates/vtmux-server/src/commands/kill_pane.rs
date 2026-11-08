@@ -27,7 +27,7 @@ pub fn exec(
         return Ok(());
     }
     // cmd_kill_pane_all: every other pane matching the filter, unzoomed.
-    server.model.unzoom(w);
+    server.model.server_unzoom(w);
     let others: Vec<_> = server.model.windows[&w]
         .panes
         .panes

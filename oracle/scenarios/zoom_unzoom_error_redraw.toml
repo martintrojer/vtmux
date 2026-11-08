@@ -1,0 +1,39 @@
+name = "zoom_unzoom_error_redraw"
+size = [40, 10]
+# server_unzoom_window (server-fn.c:564-568) redraws the window's clients
+# whole, status line included, before the command goes on, so a command
+# that unzooms and then fails still drops the Z flag from the status line:
+# select-layout with a layout it cannot parse (cmd-select-layout.c:84),
+# join-pane of a pane onto itself (cmd-join-pane.c:473-480), resize-pane
+# with a bad width (cmd-resize-pane.c:95-104), break-pane to an index in
+# use (cmd-break-pane.c:128-150).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["selectp", "-t", "%0", "-T", "t"] },
+  { run = ["splitw", "-t", "a", "cat", "-"] },
+  { run = ["selectp", "-t", "%1", "-T", "t"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "v", "cat", "-"] },
+  { attach = { session = "a" } },
+  { run = ["resizep", "-Z", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["selectl", "-t", "a:0", "bad"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["resizep", "-Z", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["joinp", "-s", "%0", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["resizep", "-Z", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["resizep", "-t", "%0", "-x", "abc"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["resizep", "-Z", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["breakp", "-s", "%1", "-t", "a:1"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

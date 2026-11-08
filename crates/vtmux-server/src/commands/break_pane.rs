@@ -69,7 +69,7 @@ pub fn exec(
         }
         idx = Some(i);
     }
-    server.model.unzoom(w);
+    server.model.server_unzoom(w);
     let detached = args.flag('d');
 
     let (index, w) = if server.model.windows[&w].panes.panes.len() == 1 {

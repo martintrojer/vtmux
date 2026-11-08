@@ -40,8 +40,8 @@ pub fn exec(
     if is_modal(src_w, src_wp) || is_modal(dst_w, dst_wp) {
         return Err(EdgeError::Message("pane is modal".into()).into());
     }
-    server.model.unzoom(dst_w);
-    server.model.unzoom(src_w);
+    server.model.server_unzoom(dst_w);
+    server.model.server_unzoom(src_w);
     if src_wp == dst_wp {
         if server.model.windows[&src_w].is_floating(src_wp) {
             return tile(server, args, src_w, src_wp);

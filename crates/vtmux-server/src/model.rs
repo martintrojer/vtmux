@@ -1851,6 +1851,17 @@ impl Model {
         Some((first, removed))
     }
 
+    /// `server_unzoom_window` (server-fn.c:564-568): [`Self::unzoom`], and
+    /// the window's clients redrawn whole (their status lines too) when it
+    /// was zoomed, whatever the command does next, an error included.
+    pub fn server_unzoom(&mut self, w: WindowId) -> bool {
+        let unzoomed = self.unzoom(w);
+        if unzoomed {
+            self.redraw(Redraw::Window(w));
+        }
+        unzoomed
+    }
+
     /// `window_unzoom` (window.c:1022-1080): false when not zoomed. The
     /// panes floating over the zoom take their geometry back to the full
     /// layout; a floating zoom target returns to the front of the z-order
