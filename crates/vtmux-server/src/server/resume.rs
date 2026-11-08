@@ -608,13 +608,13 @@ impl Server {
                 Err(message) => Exec::Failed(message),
             };
         }
-        // The editor popups the snapshot does not carry: their 0600 temp
-        // files would outlive the exec (no destructor runs), so they go
-        // now, the last moment before it. Not at `to_snapshot`'s export:
-        // that runs for each dry run and for persistence checkpoints too,
-        // with the server serving on.
-        for popup in self.clients.values().filter_map(|c| c.popup.as_ref()) {
-            popup.discard_editor_file();
+        // The editors the snapshot does not carry (an editor pane resumes
+        // as a plain modal pane): their 0600 temp files would outlive the
+        // exec (no destructor runs), so they go now, the last moment before
+        // it. Not at `to_snapshot`'s export: that runs for each dry run and
+        // for persistence checkpoints too, with the server serving on.
+        for editor in self.model.panes.values().filter_map(|p| p.editor.as_ref()) {
+            let _ = std::fs::remove_file(&editor.path);
         }
         // 6. Attached clients told to re-execute and re-attach.
         self.upgrade_notify(binary);

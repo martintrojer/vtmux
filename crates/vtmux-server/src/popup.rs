@@ -116,16 +116,6 @@ impl std::fmt::Debug for Popup {
 }
 
 impl Popup {
-    /// An upgrade's `execve` runs no destructor, so the file of an editor
-    /// the snapshot does not carry ([`Self::export`]) is removed now, not
-    /// by [`Editor`]'s `Drop`; the edit is dropped with it (live-upgrade
-    /// spec, *Open questions*).
-    pub(crate) fn discard_editor_file(&self) {
-        if let Some(e) = &self.editor {
-            let _ = std::fs::remove_file(&e.path);
-        }
-    }
-
     /// The popup as a snapshot carries it (D27), but its terminal
     /// (`term` `None`), which `Server::to_snapshot` adds.
     #[must_use]
