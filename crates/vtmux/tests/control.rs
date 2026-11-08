@@ -1352,3 +1352,43 @@ fn empty_line_behind_a_waiting_command_exits() {
         (out, code, w.run(&["show", "-gv", "@rvskipped"]))
     });
 }
+
+/// control-notify.c `control_window_layout_changed_cb` formats
+/// `%layout-change` as the event fires, not when the command is done: a
+/// command that unzooms (window.c `window_unzoom` fires one) and then
+/// arranges the panes, or resizes and zooms again (resize.c
+/// `resize_window`), reports the unzoomed layout, without `Z`, first;
+/// `rotate-window` on a zoomed window reports only that one, and
+/// `kill-pane` the layout before the pane went.
+#[test]
+fn layout_change_reports_the_layout_when_it_fired() {
+    compare("layout_change_reports_the_layout_when_it_fired", |w| {
+        w.run(&[
+            "new", "-d", "-s", "c", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+        ]);
+        w.run(&["split-window", "-t", "c", "cat", "-"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let out = script(
+            w,
+            &mut c,
+            &[
+                "resize-pane -Z",
+                "select-layout even-horizontal",
+                "resize-pane -Z",
+                "rotate-window",
+                "resize-pane -Z",
+                "resize-window -x 60 -y 20",
+                "split-window cat -",
+                "resize-pane -Z",
+                "kill-pane -t :0.0",
+            ],
+        );
+        let (_, _, code) = c.close();
+        let layouts: Vec<String> = out
+            .into_iter()
+            .filter(|l| l.starts_with("%layout-change"))
+            .collect();
+        (layouts, code)
+    });
+}

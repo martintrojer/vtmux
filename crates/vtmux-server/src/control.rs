@@ -1007,7 +1007,7 @@ impl Server {
                 let Some(w) = ev.get_window("window") else {
                     return;
                 };
-                self.control_layout_changed(w);
+                self.control_layout_changed(w, ev.layouts.as_deref());
             }
             // control-notify.c:107-123.
             "window-pane-changed" => {
@@ -1134,7 +1134,7 @@ impl Server {
 
     /// `%layout-change` (control-notify.c:62-104): to each client whose
     /// session has the window, unless the window has gone or has no layout.
-    fn control_layout_changed(&mut self, w: WindowId) {
+    fn control_layout_changed(&mut self, w: WindowId, layouts: Option<&crate::events::Layouts>) {
         const TEMPLATE: &str = "%layout-change #{window_id} #{window_layout} \
                                 #{window_visible_layout} #{window_raw_flags}";
         if !self.model.windows.contains_key(&w) || self.model.sessions_with(w).next().is_none() {
@@ -1153,6 +1153,25 @@ impl Server {
             // client's own format tree.
             ctx.jobs = Some(self.job_handle(Some(id)));
             ctx.old_layouts = self.old_layouts(Some(id));
+            // The layouts when the event fired, not now.
+            if let Some(l) = layouts {
+                let (layout, visible) = if ctx.old_layouts {
+                    (Some(l.layout_v1.clone()), Some(l.visible_v1.clone()))
+                } else {
+                    (l.layout.clone(), l.visible.clone())
+                };
+                ctx.extra
+                    .extend(layout.map(|v| ("window_layout".into(), v)));
+                ctx.extra
+                    .extend(visible.map(|v| ("window_visible_layout".into(), v)));
+                // `Z` is the last of the flags (window.c window_printable_flags).
+                let now = vtmux_core::format::expand_str("#{window_raw_flags}", &ctx);
+                let mut flags = now.strip_suffix('Z').unwrap_or(&now).to_owned();
+                if l.zoomed {
+                    flags.push('Z');
+                }
+                ctx.extra.push(("window_raw_flags".into(), flags));
+            }
             let line =
                 vtmux_core::rawstr::to_bytes(&vtmux_core::format::expand_str(TEMPLATE, &ctx))
                     .into_owned();

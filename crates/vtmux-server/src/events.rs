@@ -70,6 +70,23 @@ pub struct Event {
     /// `_hooks_monitor`: a monitor hook's event, fired by the monitor of
     /// the hook in this tree. Only that hook runs for it.
     pub monitor: Option<TreeId>,
+    /// A `window-layout-changed`'s window layouts when it fired.
+    pub layouts: Option<Rc<Layouts>>,
+}
+
+/// A window's layouts as `#{window_layout}` and `#{window_visible_layout}`
+/// dump them, in both forms. tmux's control sink formats `%layout-change`
+/// as the event fires (control-notify.c `control_window_layout_changed_cb`),
+/// so a command that unzooms (window.c `window_unzoom` fires one) and then
+/// rearranges or zooms again reports the unzoomed layout first.
+#[derive(Clone, Debug)]
+pub struct Layouts {
+    pub layout: Option<String>,
+    pub visible: Option<String>,
+    pub layout_v1: String,
+    pub visible_v1: String,
+    /// The `Z` of `#{window_raw_flags}`.
+    pub zoomed: bool,
 }
 
 impl Event {
@@ -295,9 +312,30 @@ impl Model {
         self.push_event(ev);
     }
 
-    /// `window-layout-changed`.
+    /// `window-layout-changed`, with the layouts as they are now.
     pub fn layout_changed(&mut self, w: WindowId) {
-        self.fire_window("window-layout-changed", w);
+        let Some(window) = self.windows.get(&w) else {
+            self.fire_window("window-layout-changed", w);
+            return;
+        };
+        let mut panes = window.panes.clone();
+        panes.base_index = self.pane_base_index(w);
+        let layouts = Layouts {
+            layout: match &window.zoom {
+                Some(z) => z.saved.dump_v2_saved(&panes, z.pane),
+                None => window.layout.dump_v2(&panes),
+            },
+            visible: window.layout.dump_v2(&panes),
+            layout_v1: window.full_layout().dump_v1(),
+            visible_v1: window.layout.dump_v1(),
+            zoomed: window.zoomed(),
+        };
+        let mut ev = Event::new("window-layout-changed")
+            .target(Found::from_window(self, w))
+            .window(self, "window", w)
+            .linked_now(self, w);
+        ev.layouts = Some(Rc::new(layouts));
+        self.push_event(ev);
     }
 }
 
