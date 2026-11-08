@@ -164,6 +164,22 @@ fn text_paths_off() -> bool {
     false
 }
 
+/// Whether the ASCII pattern `pat` matches the line text `text` (a byte a
+/// cell) at column `ax`, entirely inside it: [`Grid::matches_at`] on a line
+/// of narrow ASCII cells that does not wrap, ignoring case as
+/// `window_copy_search_compare` does when `cis`.
+fn text_matches(text: &[u8], pat: &[u8], cis: bool, ax: usize) -> bool {
+    text.get(ax..ax + pat.len()).is_some_and(|t| {
+        t.iter().zip(pat).all(|(&c, &p)| {
+            if cis {
+                c.to_ascii_lowercase() == p
+            } else {
+                c == p
+            }
+        })
+    })
+}
+
 /// tmux's `"^$*+()?[].\\"`: a search with none of these is plain text.
 fn has_regex_chars(s: &str) -> bool {
     s.chars().any(|c| "^$*+()?[].\\".contains(c))
@@ -454,28 +470,48 @@ impl Grid {
         // down: the text starting at the cursor can match what the whole
         // does not, as for `\<`).
         let skip_text = !text_paths_off();
+        // A plain ASCII pattern is looked for in such a line's text, which
+        // finds what comparing its cells finds (`window_copy_search_compare`
+        // compares a narrow ASCII cell's one byte, a blank as a space) at a
+        // fraction of the cost: a line that does not wrap holds a match
+        // only inside it (`window_copy_search_lr` fails one that runs past
+        // the last column).
+        let plain = re.is_none().then(|| pat.ascii_bytes()).flatten();
         let mut text = String::new();
-        let mut skipped = |y: usize, whole: bool| {
-            let skip = skip_text
-                && self.ascii_text(y, &mut text) == Some(false)
+        // Whether line `y` is passed unread, and whether its text in `text`
+        // is the whole of it (narrow ASCII, not wrapped).
+        let read = |y: usize, whole: bool, text: &mut String| {
+            let ascii = skip_text && self.ascii_text(y, text) == Some(false);
+            let skip = ascii
                 && match re {
                     None => pat.never_in_ascii(),
-                    Some(re) => whole && matches!(re.span_with(&text, false), Ok(None)),
+                    Some(re) => whole && matches!(re.span_with(text, false), Ok(None)),
                 };
             #[cfg(test)]
             if skip {
                 tests::ASCII_SKIPPED.with(|n| n.set(n.get() + 1));
             }
-            skip
+            (skip, ascii)
+        };
+        let in_text = |text: &str, ax: usize| {
+            #[cfg(test)]
+            tests::ASCII_SEARCHED.with(|n| n.set(n.get() + 1));
+            plain
+                .as_deref()
+                .is_some_and(|p| text_matches(text.as_bytes(), p, pat.cis, ax))
         };
         if down {
             for i in fy..=endline {
-                if skipped(i, fx == 0) {
+                let (skip, ascii) = read(i, fx == 0, &mut text);
+                if skip {
                     fx = 0;
                     continue;
                 }
                 found = match re {
                     Some(re) => self.search_lr_regex(re, i, fx, sx).map(|(px, _)| (px, i)),
+                    None if ascii && plain.is_some() => {
+                        (fx..sx).find(|&ax| in_text(&text, ax)).map(|px| (px, i))
+                    }
                     None => self.search_lr(pat, i, fx, sx).map(|px| (px, i)),
                 };
                 if found.is_some() {
@@ -486,7 +522,8 @@ impl Grid {
         } else {
             let mut i = fy + 1;
             while endline < i {
-                if skipped(i - 1, true) {
+                let (skip, ascii) = read(i - 1, true, &mut text);
+                if skip {
                     fx = sx - 1;
                     i -= 1;
                     continue;
@@ -496,6 +533,10 @@ impl Grid {
                         .search_rl_regex(re, i - 1, 0, fx + 1)
                         .map(|m| self.search_back_overlap(re, m, i, endline))
                         .map(|(px, py)| (px, py - 1)),
+                    None if ascii && plain.is_some() => (0..=fx)
+                        .rev()
+                        .find(|&ax| in_text(&text, ax))
+                        .map(|px| (px, i - 1)),
                     None => self.search_rl(pat, i - 1, 0, fx + 1).map(|px| (px, i - 1)),
                 };
                 if found.is_some() {
@@ -1032,6 +1073,8 @@ mod tests {
         pub(super) static ASCII_COUNTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         /// Lines the jump passed from their text ([`Grid::search_from`]).
         pub(super) static ASCII_SKIPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Columns the jump looked for a plain pattern at in a line's text.
+        pub(super) static ASCII_SEARCHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     /// `repeat` blocks of one line of each kind on a 40x6 pane: plain and
@@ -1208,6 +1251,57 @@ mod tests {
             "all but the last, which is in view"
         );
         assert_eq!(g.kept_lines(), 0);
+    }
+
+    /// A plain ASCII pattern looks for itself in the text of the ASCII lines
+    /// that do not wrap and reads none of them as cells (task
+    /// `audit_perf_hotpaths`: a search over 100k such lines took 3.4x
+    /// tmux's time, reading every line's cells at every column), and finds
+    /// what the cells find, with and without case, at the line's edges.
+    #[test]
+    fn a_plain_ascii_pattern_reads_ascii_lines_as_text() {
+        let peeked = || crate::mode::grid::tests::ROWS_PEEKED.with(std::cell::Cell::get);
+        let mut t = PaneTerm::new(40, 4, 1000);
+        for i in 0..500 {
+            let line = match i {
+                123 => "edge at the end of this full row: Needle".to_owned(),
+                321 => "needle at the start".to_owned(),
+                _ => format!("line {i} plain \x1b[31mred\x1b[m text"),
+            };
+            t.feed(format!("{line}\r\n").as_bytes());
+        }
+        let g = Grid::clone_of(&t, 40, 4, false).0;
+        let last = g.last();
+        let before = peeked();
+        let pat = Pattern::new("nowhere");
+        assert_eq!(g.search_from(&pat, None, (0, last), 0, false, false), None);
+        assert_eq!(g.search_from(&pat, None, (0, 0), last, false, true), None);
+        assert!(
+            peeked() - before < 10,
+            "{} lines read as cells",
+            peeked() - before
+        );
+        for (pattern, down, want) in [
+            ("needle", false, Some((0, 321))),
+            ("needle", true, Some((34, 123))),
+            ("Needle", false, Some((34, 123))),
+            ("Needle", true, Some((34, 123))),
+            ("ne 7 pl", false, Some((2, 7))),
+            ("red text", true, Some((13, 0))),
+            // Blanks past the text are spaces.
+            ("start  ", false, Some((14, 321))),
+            ("plain  ", false, None),
+        ] {
+            let pat = Pattern::new(pattern);
+            let from = if down { (0, 0) } else { (39, last) };
+            let end = if down { last } else { 0 };
+            let got = g.search_from(&pat, None, from, end, false, down);
+            NO_ASCII_COUNT.with(|f| f.set(true));
+            let cells = g.search_from(&pat, None, from, end, false, down);
+            NO_ASCII_COUNT.with(|f| f.set(false));
+            assert_eq!(got, cells, "{pattern} down={down}");
+            assert_eq!(got, want, "{pattern} down={down}");
+        }
     }
 
     fn grid(text: &str, cols: u16) -> Grid {

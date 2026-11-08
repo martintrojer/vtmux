@@ -289,6 +289,8 @@ impl Grid {
         if let Some((_, row)) = peeked.iter().rev().find(|(py, _)| *py == y) {
             return RowRef::Read(Rc::clone(row));
         }
+        #[cfg(test)]
+        tests::ROWS_PEEKED.with(|r| r.set(r.get() + 1));
         let row = Rc::new(source.used_row(src));
         if peeked.len() == PEEKED {
             peeked.pop_front();
@@ -701,6 +703,9 @@ pub(super) mod tests {
     thread_local! {
         /// Rows [`Grid::extend_from`] read on this thread.
         pub(in crate::mode) static ROWS_READ: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+        /// Rows [`Grid::peek`] read as cells from the entry copy.
+        pub(in crate::mode) static ROWS_PEEKED: std::cell::Cell<usize> =
             const { std::cell::Cell::new(0) };
     }
 
