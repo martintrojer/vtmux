@@ -6136,13 +6136,16 @@ fn since(a: &Attached, mark: usize) -> String {
 /// Ink TUI clears and redraws inside `?2026`, and flashed blank.
 /// Modelled on the owner's synccheck.py.
 ///
-/// The timer is wall-clock, so a check that something is *still* held is only
-/// valid inside its second: on a starved host a `sleep` or a CLI call alone can
-/// outlast it. A check that fails after the timer could have run out is
-/// inconclusive, not a failure (`SyncWindow`): the phase starts over from a
-/// reset screen. A check that fails inside the window, or a phase that never
-/// gets a window, still fails. Waits for output have no wall-clock bound a
-/// loaded host could miss (`LOAD_LIMIT` only ends a hang).
+/// The hold ends by other means than the program too: the timer is
+/// wall-clock, so a starved host can outlast its second between two steps of
+/// the test, and a full redraw of the client ends it (`screen_write_stop_sync`;
+/// the reference redraws when its terminal queries go unanswered). A check
+/// that something is *still* held and fails, with the timer possibly run out or
+/// the pane no longer syncing, is inconclusive, not a failure (`SyncWindow`):
+/// the phase starts over from a reset screen. A leak with the pane still
+/// syncing inside the window fails at once, and so does a hold that ends early
+/// on every one of `ATTEMPTS` attempts. Waits for output have no wall-clock
+/// bound a loaded host could miss (`LOAD_LIMIT` only ends a hang).
 #[test]
 #[allow(clippy::too_many_lines)]
 fn synchronized_output_holds_the_pane_until_it_ends() {
@@ -6163,10 +6166,23 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
         fn open(&self) -> bool {
             self.0.get().elapsed() < SYNC_TIMER
         }
-        fn check(&self, ok: bool, what: impl FnOnce() -> String) -> Result<(), Retry> {
+        /// `Err(Retry)` when `ok` is false and the hold may have ended for a
+        /// reason other than the program: the timer could have run out, or
+        /// `still_syncing` says the pane is no longer in synchronized output
+        /// (a full redraw of the client ends it too, `screen_write_stop_sync`
+        /// from the redraw; the reference does one when its terminal queries
+        /// go unanswered, some seconds after the attach, which a starved
+        /// host reaches in the middle of the test). Panics when `ok` is
+        /// false while the pane is held inside the window: a real leak.
+        fn check(
+            &self,
+            ok: bool,
+            still_syncing: impl FnOnce() -> bool,
+            what: impl FnOnce() -> String,
+        ) -> Result<(), Retry> {
             if ok {
                 Ok(())
-            } else if self.open() {
+            } else if self.open() && still_syncing() {
                 panic!("{}", what())
             } else {
                 Err(Retry)
@@ -6206,6 +6222,7 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
         };
         let (mut left, mut right) = (tty("a:0.0"), tty("a:0.1"));
         let sync_flag = || display_t(&w, "a:0.0", "#{synchronized_output_flag}");
+        let syncing = || sync_flag() == "1";
         let a = w.attach_sized(&["attach", "-t", "a"], 60, 10);
         let row = |a: &Attached, y: usize| pane_text(a).lines().nth(y).unwrap_or("").to_owned();
         let rows_start =
@@ -6233,13 +6250,13 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             win.arm();
             left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HMIDSYNC").unwrap();
             thread::sleep(Duration::from_millis(300));
-            win.check(held(&a, mark, "MIDSYNC", "OLD"), || {
+            win.check(held(&a, mark, "MIDSYNC", "OLD"), syncing, || {
                 format!(
                     "{name}: bytes sent while the pane syncs: {:?}",
                     since(&a, mark)
                 )
             })?;
-            win.check(sync_flag() == "1", || format!("{name}: sync flag off"))?;
+            win.check(syncing(), syncing, || format!("{name}: sync flag off"))?;
 
             // Another pane is not held back. `?2026h` again re-arms the timer.
             win.arm();
@@ -6247,10 +6264,10 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             right.write_all(b"OTHER").unwrap();
             a.wait_labelled(&name, LOAD_LIMIT, |a| row(a, 0).contains("OTHER"));
             thread::sleep(Duration::from_millis(100));
-            win.check(rows_start(&a, "OLD"), || {
+            win.check(rows_start(&a, "OLD"), syncing, || {
                 format!("{name}: the pane's last rows stay: {:?}", pane_text(&a))
             })?;
-            win.check(sync_flag() == "1", || format!("{name}: sync flag off"))
+            win.check(syncing(), syncing, || format!("{name}: sync flag off"))
         };
         let mut attempts = 0;
         loop {
@@ -6261,7 +6278,7 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             attempts += 1;
             assert!(
                 attempts < ATTEMPTS,
-                "{name}: the sync timer always ran out first"
+                "{name}: the hold always ended before the checks ran"
             );
         }
 
@@ -6288,7 +6305,7 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             win.arm();
             left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HSTUCK").unwrap();
             thread::sleep(Duration::from_millis(500));
-            let quiet = win.check(held(&a, mark, "STUCK", "NEW"), || {
+            let quiet = win.check(held(&a, mark, "STUCK", "NEW"), syncing, || {
                 format!(
                     "{name}: bytes sent while the pane syncs: {:?}",
                     since(&a, mark)
@@ -6296,11 +6313,11 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             });
             a.wait_labelled(&name, LOAD_LIMIT, |a| row(a, 0).starts_with("STUCK"));
             let took = start.elapsed();
-            assert!(
-                took >= Duration::from_millis(800),
-                "{name}: drawn after {took:?}"
-            );
-            if quiet.is_ok() && took < Duration::from_secs(3) {
+            // Early is a redraw of the whole client (it ends the hold) or a
+            // timer that is too short: only an early drawing on every
+            // attempt fails.
+            if quiet.is_ok() && took >= Duration::from_millis(800) && took < Duration::from_secs(3)
+            {
                 break;
             }
             attempts += 1;
