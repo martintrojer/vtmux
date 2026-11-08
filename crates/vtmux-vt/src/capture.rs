@@ -1662,6 +1662,28 @@ mod tests {
         );
     }
 
+    /// tmux gives the line-drawing charset only to an ASCII character
+    /// (input.c `input_print`): a character from UTF-8 printed under it is
+    /// a plain one (`input_top_bit_set`). Expected: tmux 3.8's
+    /// capture-pane -e.
+    #[test]
+    fn utf8_under_line_drawing_is_plain() {
+        let mut t = PaneTerm::new(20, 2, 0);
+        t.feed("\x1b(0q\u{3042}\u{2500}x\x1b(B".as_bytes());
+        let opts = CaptureOpts {
+            escapes: true,
+            ..Default::default()
+        };
+        let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert!(
+            text.starts_with("\x0eq\x0f\u{3042}\u{2500}\x0ex\n"),
+            "{text:?}"
+        );
+        let s = crate::snapshot(&t);
+        let acs: Vec<bool> = [0, 1, 3, 4].map(|x| s.cell(x, 0).unwrap().acs).to_vec();
+        assert_eq!(acs, [true, false, false, true]);
+    }
+
     /// tmux keeps a link's URI and id through `utf8_stravis` with
     /// `VIS_OCTAL|VIS_CSTYLE` (hyperlinks.c `hyperlinks_put`), so
     /// capture-pane shows a backslash doubled and DEL in octal.

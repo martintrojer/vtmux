@@ -1,0 +1,72 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "acs_utf8_plain",
+  "inputs": {
+    "name": "acs_utf8_plain",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '\\033(0q\\343\\201\\202\\342\\224\\200x\\033(B\\015\\012\\016\\033)0\\344\\270\\200q\\303\\251\\017'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u000eq\u000fあ─\u000ex\n\u000f一\u000eq\u000fé\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

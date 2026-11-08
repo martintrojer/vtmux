@@ -632,6 +632,7 @@ impl PaneTerm {
             }
             let mut j = i;
             let mut event = None;
+            let mut plain_char = None;
             while j < bytes.len() && j - i < step {
                 if self.scan.state == ScanState::Ground && !self.scan.utf8.started() {
                     // Printable ASCII changes nothing the scanner keeps.
@@ -654,6 +655,10 @@ impl PaneTerm {
                     {
                         self.pending.clear();
                         self.scan.last_print = true;
+                        if self.scan.charset.acs() {
+                            plain_char = Some(n);
+                            break;
+                        }
                         j += n;
                         continue;
                     }
@@ -671,6 +676,11 @@ impl PaneTerm {
             }
             self.feed_piece(&bytes[i..j]);
             i = j;
+            if let Some(n) = plain_char {
+                self.feed_plain_char(&bytes[i..i + n]);
+                i += n;
+                continue;
+            }
             if event == Some(ScanEvent::DcsStart) {
                 // `ESC P` is tmux's alone: Ghostty has the ESC (it ended
                 // whatever string was open, as in tmux) and CAN takes it
@@ -692,7 +702,7 @@ impl PaneTerm {
             }
             if event == Some(ScanEvent::Utf8) {
                 if let Some(out) = self.scan.utf8_out.take() {
-                    self.feed_piece(&out);
+                    self.feed_plain_char(&out);
                 }
                 i += 1;
                 continue;
@@ -1186,6 +1196,20 @@ impl PaneTerm {
         if !self.scan.charset.acs() {
             self.term.vt_write(b"\x1b[0\"q");
         }
+    }
+
+    /// A character from UTF-8: tmux gives the line-drawing charset only to
+    /// an ASCII one (input.c `input_print`; `input_top_bit_set` prints
+    /// with the attribute clear), so under it Ghostty prints this one
+    /// without the protection bit that marks it ([`Self::sync_charset`]).
+    fn feed_plain_char(&mut self, ch: &[u8]) {
+        if !self.scan.charset.acs() {
+            self.feed_piece(ch);
+            return;
+        }
+        self.term.vt_write(b"\x1b[0\"q");
+        self.feed_piece(ch);
+        self.term.vt_write(b"\x1b[1\"q");
     }
 
     fn feed_piece(&mut self, piece: &[u8]) {

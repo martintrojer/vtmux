@@ -1,0 +1,10 @@
+name = "acs_utf8_plain"
+# tmux gives the line-drawing charset only to an ASCII character (input.c
+# input_print); a character from UTF-8 printed under it is a plain one
+# (input_top_bit_set), whether G0 or a shifted G1 is the line-drawing set.
+# Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "4", "sh", "-c", "printf '\\033(0q\\343\\201\\202\\342\\224\\200x\\033(B\\015\\012\\016\\033)0\\344\\270\\200q\\303\\251\\017'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]
