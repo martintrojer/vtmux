@@ -898,6 +898,7 @@ impl Server {
     /// record's, so it is not asked again) and redrawn in full. A token
     /// no record holds (given up on, or its session went) is told to
     /// attach again.
+    #[allow(clippy::too_many_lines)] // one step per record field; two units each added one
     pub(crate) fn reattach(&mut self, new: ClientId, hello: &Hello, token: &str) {
         let old = self
             .clients
