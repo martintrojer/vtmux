@@ -208,8 +208,13 @@ impl Event {
 /// The standard events (events.c `events_fire_*`), made against the model
 /// as it is now and queued.
 impl Model {
-    /// Queue an event for the sinks.
-    pub fn push_event(&mut self, ev: Event) {
+    /// Queue an event for the sinks. A target that is not valid now is
+    /// dropped: hooks.c:116-119 checks it when the event fires and starts
+    /// such a hook from nothing (`cmd_find_from_nothing`).
+    pub fn push_event(&mut self, mut ev: Event) {
+        if ev.target.is_some_and(|t| !t.still_valid(self)) {
+            ev.target = None;
+        }
         self.events.push(Queued::Event(ev));
     }
 
@@ -581,6 +586,13 @@ impl Server {
         let m = &self.model;
         if let Some(t) = t {
             if t.still_valid(m) {
+                return Some(t);
+            }
+            // Valid when it fired ([`Model::push_event`]) and gone since
+            // (a pane killed by the command that fired it): tmux keeps
+            // the state, and its commands find their current target from
+            // the client or from nothing when they run (cmd-find.c:995-1006).
+            if t.valid() {
                 return Some(t);
             }
             if let Some(p) = t.pane.filter(|p| m.panes.contains_key(p)) {

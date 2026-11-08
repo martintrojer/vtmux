@@ -1488,11 +1488,15 @@ impl Model {
         // window_lost_pane, which fires window-pane-changed for a new
         // active pane (window.c:1215-1219).
         window.layout.close_pane(id);
+        self.fix_panes(wid);
+        // layout_close_pane fires window-layout-changed while the pane is
+        // still the window's (layout.c:1548): from the closing pane, if it
+        // is the active one.
+        self.layout_changed(wid);
+        let window = self.windows.get_mut(&wid).expect("checked above");
         let was_active = window.panes.active == Some(id);
         window.panes.remove(id);
         let next = window.panes.active;
-        self.fix_panes(wid);
-        self.layout_changed(wid);
         if was_active && let Some(n) = next {
             self.fire_pane_changed(wid, n, Some(id));
             // window.c:1219.

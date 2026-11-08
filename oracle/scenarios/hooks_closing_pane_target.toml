@@ -1,0 +1,22 @@
+name = "hooks_closing_pane_target"
+# kill-pane of a window's active pane: layout_close_pane fires
+# window-layout-changed while the pane is still the window's active one
+# (server-fn.c:229-233, layout.c:1548), so the hook's state names a pane
+# that is gone by the time its commands run. They then start from the
+# client or from nothing (cmd-find.c:995-1006): the best session's current
+# window, not the window that changed. The hook formats still name it.
+# Killing a pane that is not active leaves the state valid.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["neww", "-d", "-n", "w1", "cat", "-"] },
+  { run = ["splitw", "-t", "a:1", "cat", "-"] },
+  { run = ["splitw", "-t", "a:1", "cat", "-"] },
+  { run = ["set-hook", "-g", "window-layout-changed", "set -gaF @log '|#{hook_window}:#{window_id}:#{pane_id}'"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["kill-pane", "-t", "a:1.2"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["kill-pane", "-t", "a:1.0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]
