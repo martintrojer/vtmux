@@ -1,0 +1,20 @@
+name = "status_pane_path"
+size = [50, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "[#{pane_path}]"] },
+  { run = ["set", "-g", "status-left", ""] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_path}]"] },
+  { run = ["splitw", "-t", "a", "sh", "-c", "printf '\\033]7;file:///tmp/x y\\007'; tmux wait-for -S p; exec cat"] },
+  { wait_for = "p" },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%1", "[#{pane_path}]"] },
+  { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
