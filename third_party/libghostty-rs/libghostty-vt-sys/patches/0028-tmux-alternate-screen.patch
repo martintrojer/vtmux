@@ -65,7 +65,7 @@ index 46537320a..3762ab864 100644
              @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
              @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 06701afb9..90ac4fea8 100644
+index 06701afb9..153cc7414 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -102,6 +102,15 @@ glyph_glossary: glyph.Glossary = .empty,
@@ -84,7 +84,33 @@ index 06701afb9..90ac4fea8 100644
  /// These are just a packed set of flags we may set on the terminal.
  flags: packed struct {
      // This supports a Kitty extension where programs using semantic
-@@ -4736,7 +4745,11 @@ pub fn resize(
+@@ -4718,6 +4727,25 @@ pub fn resize(
+     // If our cols/rows didn't change, skip grid work but still apply pixels.
+     if (self.cols == opts.cols and self.rows == opts.rows) return;
+ 
++    // vtmux: DECSC's slot is tmux's input context's (input.c
++    // input_save_state), which no resize moves: DECRC clamps it to the
++    // screen (input_restore_state, screen_write_cursormove). Upstream
++    // moved a saved cursor with its row as a tracked pin, to the top-left
++    // when the row left the screen, and the pin kept the blank rows under
++    // it from being trimmed, so rows above the cursor went instead.
++    const kept_saved: [2]?Screen.SavedCursor = if (self.tmux_alternate) .{
++        self.screens.get(.primary).?.saved_cursor,
++        if (self.screens.get(.alternate)) |alt| alt.saved_cursor else null,
++    } else .{ null, null };
++    if (self.tmux_alternate) {
++        self.screens.get(.primary).?.saved_cursor = null;
++        if (self.screens.get(.alternate)) |alt| alt.saved_cursor = null;
++    }
++    defer if (self.tmux_alternate) {
++        self.screens.get(.primary).?.saved_cursor = kept_saved[0];
++        if (self.screens.get(.alternate)) |alt| alt.saved_cursor = kept_saved[1];
++    };
++
+     // Build replacement tabstops without touching the current table. Keep
+     // ownership here until every fallible resize operation has succeeded.
+     var new_tabstops: ?Tabstops = null;
+@@ -4736,7 +4764,11 @@ pub fn resize(
      // and alt fails than the reverse.
      try tw.check(.primary_screen);
      const primary = self.screens.get(.primary).?;
@@ -97,7 +123,7 @@ index 06701afb9..90ac4fea8 100644
          .cols = opts.cols,
          .rows = opts.rows,
          // vtmux: tmux reflows the main screen whatever DECAWM says
-@@ -4808,6 +4821,14 @@ pub fn resize(
+@@ -4808,6 +4840,14 @@ pub fn resize(
                  "alternate screen replacement failed, falling back to primary err={}",
                  .{init_err},
              );
@@ -112,7 +138,7 @@ index 06701afb9..90ac4fea8 100644
              break :alt;
          };
  
-@@ -5451,6 +5472,21 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
+@@ -5451,6 +5491,21 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
      if (self.screens.active_key == key) return null;
      const old = self.screens.active;
  
@@ -134,7 +160,7 @@ index 06701afb9..90ac4fea8 100644
      // We always end hyperlink state when switching screens.
      // We need to do this on the original screen.
      old.endHyperlink();
-@@ -5535,6 +5571,8 @@ pub fn switchScreenMode(
+@@ -5535,6 +5590,8 @@ pub fn switchScreenMode(
      // We shouldn't touch anything in here without adding a unit
      // test AND verifying the behavior with xterm.
  
@@ -143,7 +169,7 @@ index 06701afb9..90ac4fea8 100644
      switch (mode) {
          .@"47" => {},
  
-@@ -5599,6 +5637,133 @@ pub fn switchScreenMode(
+@@ -5599,6 +5656,133 @@ pub fn switchScreenMode(
      }
  }
  
@@ -277,7 +303,7 @@ index 06701afb9..90ac4fea8 100644
  /// Modal screen changes. These map to the literal terminal
  /// modes to enable or disable alternate screen modes. They each
  /// have subtle behaviors so we define them as an enum here.
-@@ -5639,6 +5804,18 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
+@@ -5639,6 +5823,18 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
  /// this will reuse the existing memory. In the latter case, memory may
  /// be wasted (since its unused) but it isn't leaked.
  pub fn fullReset(self: *Terminal) void {
@@ -296,7 +322,7 @@ index 06701afb9..90ac4fea8 100644
      // Ensure we're back on primary screen
      self.screens.switchTo(.primary);
  
-@@ -19284,3 +19461,89 @@ test "Terminal: eraseDisplay complete at input prompt copied from alt screen scr
+@@ -19284,3 +19480,112 @@ test "Terminal: eraseDisplay complete at input prompt copied from alt screen scr
  
      try testing.expect(t.screens.active.pages.total_rows > t.screens.active.pages.rows);
  }
@@ -385,6 +411,29 @@ index 06701afb9..90ac4fea8 100644
 +    try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
 +    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.y);
 +    try testing.expectEqual(@as(size.CellCountInt, 4), t.tmux_alt_saved.?.x);
++}
++
++test "Terminal: tmux saved cursor is not moved by a resize (vtmux)" {
++    const alloc = testing.allocator;
++    var t = try init(testing.io, alloc, .{ .rows = 10, .cols = 10 });
++    defer t.deinit(alloc);
++    t.tmux_alternate = true;
++
++    // DECSC on the last row, then the alternate screen's cursor near the
++    // top: a shorter screen keeps the alternate cursor (the blank rows
++    // under it go), and DECRC goes back to the saved row, clamped.
++    t.setCursorPos(10, 4);
++    t.saveCursor();
++    try t.switchScreenMode(.@"47", true);
++    t.setCursorPos(2, 3);
++    try t.resize(alloc, .{ .cols = 10, .rows = 5 });
++    try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++    try testing.expectEqual(@as(size.CellCountInt, 9), t.screens.active.saved_cursor.?.y);
++    try t.resize(alloc, .{ .cols = 12, .rows = 10 });
++    t.restoreCursor();
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 9), t.screens.active.cursor.y);
 +}
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
 index 7220c3ebc..d89ea39cf 100644

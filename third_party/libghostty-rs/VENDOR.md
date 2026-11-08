@@ -802,7 +802,12 @@ Recorded per commit in git history; the list is kept current:
   `saved_cell`), restored by `?1049l` even off the alternate screen and
   from an earlier one, never with the charsets or origin mode; `?1049h` on
   an alternate screen already up saves nothing. DECSC's slot is tmux's
-  input context's, so both screens share it (copied at each switch).
+  input context's, so both screens share it (copied at each switch), and
+  `resize` leaves it as it is (input.c `input_save_state`; DECRC clamps
+  it, `input_restore_state`): upstream moved it with its row as a tracked
+  pin, to the top-left once the row left the screen, and the pin kept the
+  blank rows under it from being trimmed, so a shorter alternate screen
+  lost the rows its cursor was on.
   Upstream used DECSC's per-screen slot for 1049 and resized and reflowed
   the primary at every resize, with its own cursor. When the alternate
   screen ends at another size, the terminal takes the primary's size with
@@ -822,12 +827,14 @@ Recorded per commit in git history; the list is kept current:
   `Importer::primary_size` (`vtmux.rs`; `VtmuxAltSaved` and the
   functions in `bindings.rs` by hand). Tests: `Terminal: tmux alternate
   screen leaves the primary at its size (vtmux)`, `Terminal: tmux
-  alternate screen cursor slots (vtmux)`. With it, `-Doptimize=ReleaseSafe`
-  `-Dtest-filter=vtmux` 67/67 (71 in the C test binary), `resize`,
+  alternate screen cursor slots (vtmux)`, `Terminal: tmux saved cursor is
+  not moved by a resize (vtmux)`. With it, `-Doptimize=ReleaseSafe`
+  `-Dtest-filter=vtmux` 68/68 (72 in the C test binary), `resize`,
   `PageList`, `reflow` and `Screen` pass; Debug `-Dtest-filter="Terminal: "`
-  1047/1049 with the known `tabClear single` failure in each test binary.
+  1049/1051 with the known `tabClear single` failure in each test binary.
   Oracle `alt_screen_exit`, `alt_screen_cleared_narrowed`,
-  `alt_screen_cursor_slots`, `alt_screen_history_clears`. Not an upstream
+  `alt_screen_cursor_slots`, `alt_screen_history_clears`,
+  `alt_screen_saved_cursor_resize`. Not an upstream
   candidate (tmux's model).
 
 - `patches/0029-tmux-grid-corners.patch` (`PageList.zig`

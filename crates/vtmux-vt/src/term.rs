@@ -5177,6 +5177,40 @@ mod tests {
         }
     }
 
+    /// DECSC's slot is tmux's input context's (input.c `input_save_state`):
+    /// no resize moves it, and DECRC clamps it to the screen
+    /// (`input_restore_state`). Ghostty moved it with its row, to the
+    /// top-left once the row left the screen, and kept the blank rows
+    /// under it, so a shorter alternate screen lost the rows its cursor was
+    /// on. Numbers from tmux 3.8 (oracle `alt_screen_saved_cursor_resize`).
+    #[test]
+    fn a_resize_leaves_the_saved_cursor_as_tmux() {
+        let lines = |t: &mut PaneTerm| {
+            for i in 10..40 {
+                t.feed(format!("{i}xxxxxxxxxx\r\n").as_bytes());
+            }
+        };
+        for (end, back) in [((80, 30), (1, (10, 29))), ((60, 40), (0, (10, 29)))] {
+            let mut t = PaneTerm::new(80, 30, 2000);
+            lines(&mut t);
+            t.feed(b"\x1b[30;11H\x1b7\x1b[?47h\x1b[2;4Habc");
+            t.resize(100, 20);
+            assert_eq!(t.cursor(), (6, 1), "{end:?}: the alternate cursor");
+            t.resize(end.0, end.1);
+            t.feed(b"\x1b[?47l\x1b8");
+            assert_eq!((t.history_size(), t.cursor()), back, "{end:?}");
+        }
+        let mut t = PaneTerm::new(80, 30, 2000);
+        lines(&mut t);
+        t.feed(b"\x1b[3;6H\x1b7\x1b[30;1H");
+        t.resize(80, 20);
+        t.feed(b"\x1b8");
+        assert_eq!((t.history_size(), t.cursor()), (11, (5, 2)));
+        t.resize(4, 20);
+        t.feed(b"\x1b8");
+        assert_eq!(t.cursor(), (3, 2));
+    }
+
     /// `?1049h` saves the cursor in a slot of its own, kept after the
     /// alternate screen and restored by `?1049l` even off it; `?1049h` on
     /// an alternate screen already up saves nothing; DECSC's slot is one

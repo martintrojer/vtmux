@@ -4829,10 +4829,14 @@ impl Server {
         pane.term.set_scroll_on_clear(false);
         // input_free: the old program's requests go.
         pane.requests.clear();
-        // screen_alternate_off(s, NULL, 0): no cursor restored; then
-        // saved_cx and saved_cy go (screen.c:122-125).
+        // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM
+        // home it too, so they come before), then screen_alternate_off(s,
+        // NULL, 0): no cursor restored, but its resize back to the pane's
+        // size moves the homed one (a taller pane pulls history back above
+        // it), and nothing homes it again; then saved_cx and saved_cy go
+        // (screen.c:122-125).
         pane.term.feed(
-            b"\x1b[?47l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
+            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[20l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
         let _ = pane.term.take_replies();
         pane.term.forget_alternate_saved();

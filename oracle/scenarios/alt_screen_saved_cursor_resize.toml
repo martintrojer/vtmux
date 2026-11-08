@@ -1,0 +1,61 @@
+name = "alt_screen_saved_cursor_resize"
+size = [80, 24]
+# DECSC's slot is tmux's input context's (input.c input_save_state): a resize
+# never moves it, and DECRC puts the cursor back there clamped to the screen
+# (input_restore_state, screen_write_cursormove). Ghostty moved a saved cursor
+# with the rows it was on at every resize of its screen, and to the top-left
+# when they left the screen: d47back's DECRC went to the alternate screen's
+# last row at 20 rows (10,19 for tmux's 10,29), d47tall's one row off, dplain's
+# to 0,0. respawn-pane (spawn.c, screen_reinit) zeroes the cursor before
+# screen_alternate_off(s, NULL, 0), whose resize back to the pane's size moves
+# it, and nothing homes it after.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "80", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["new", "-d", "-s", "d47back", "-n", "w", "-x", "80", "-y", "30", "sh", "-c", "i=10; while [ $i -lt 40 ]; do printf '%sxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[30;11H\\0337\\033[?47h\\033[2;4Habc'; tmux wait-for -S d47back-p0; tmux wait-for d47back-go1; printf '\\033[?47l\\0338'; tmux wait-for -S d47back-p1; exec cat -"] },
+  { wait_for = "d47back-p0" },
+  { run = ["display", "-p", "-t", "d47back:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["resize-window", "-t", "d47back", "-x", "100", "-y", "20"] },
+  { run = ["resize-window", "-t", "d47back", "-x", "80", "-y", "30"] },
+  { run = ["display", "-p", "-t", "d47back:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["wait-for", "-S", "d47back-go1"] },
+  { wait_for = "d47back-p1" },
+  { run = ["display", "-p", "-t", "d47back:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "d47back:"] },
+  { run = ["new", "-d", "-s", "d47tall", "-n", "w", "-x", "80", "-y", "30", "sh", "-c", "i=10; while [ $i -lt 40 ]; do printf '%sxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[30;11H\\0337\\033[?47h\\033[2;4Habc'; tmux wait-for -S d47tall-p0; tmux wait-for d47tall-go1; printf '\\033[?47l\\0338'; tmux wait-for -S d47tall-p1; exec cat -"] },
+  { wait_for = "d47tall-p0" },
+  { run = ["display", "-p", "-t", "d47tall:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["resize-window", "-t", "d47tall", "-x", "100", "-y", "20"] },
+  { run = ["resize-window", "-t", "d47tall", "-x", "60", "-y", "40"] },
+  { run = ["display", "-p", "-t", "d47tall:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["wait-for", "-S", "d47tall-go1"] },
+  { wait_for = "d47tall-p1" },
+  { run = ["display", "-p", "-t", "d47tall:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "d47tall:"] },
+  { run = ["new", "-d", "-s", "dplain", "-n", "w", "-x", "80", "-y", "30", "sh", "-c", "i=10; while [ $i -lt 40 ]; do printf '%sxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[3;6H\\0337\\033[30;1H'; tmux wait-for -S dplain-p0; tmux wait-for dplain-go1; printf '\\0338'; tmux wait-for -S dplain-p1; tmux wait-for dplain-go2; printf '\\0338'; tmux wait-for -S dplain-p2; exec cat -"] },
+  { wait_for = "dplain-p0" },
+  { run = ["resize-window", "-t", "dplain", "-x", "80", "-y", "20"] },
+  { run = ["wait-for", "-S", "dplain-go1"] },
+  { wait_for = "dplain-p1" },
+  { run = ["display", "-p", "-t", "dplain:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["resize-window", "-t", "dplain", "-x", "4", "-y", "20"] },
+  { run = ["wait-for", "-S", "dplain-go2"] },
+  { wait_for = "dplain-p2" },
+  { run = ["display", "-p", "-t", "dplain:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["new", "-d", "-s", "resp", "-n", "w", "-x", "80", "-y", "30", "sh", "-c", "i=1; while [ $i -le 45 ]; do printf '%s\\015\\012' $i; i=$((i+1)); done; printf '\\033[?1049hALT\\015\\012'; tmux wait-for -S resp-p0; exec cat -"] },
+  { wait_for = "resp-p0" },
+  { run = ["resize-window", "-t", "resp", "-x", "100", "-y", "20"] },
+  { run = ["resize-window", "-t", "resp", "-x", "60", "-y", "40"] },
+  { run = ["respawn-pane", "-k", "-t", "resp:", "sh", "-c", "tmux wait-for -S resp-p1; exec cat -"] },
+  { wait_for = "resp-p1" },
+  { run = ["display", "-p", "-t", "resp:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "resp:"] },
+  { run = ["new", "-d", "-s", "respsame", "-n", "w", "-x", "80", "-y", "30", "sh", "-c", "i=1; while [ $i -le 45 ]; do printf '%s\\015\\012' $i; i=$((i+1)); done; printf '\\033[?1049hALT\\015\\012'; tmux wait-for -S respsame-p0; exec cat -"] },
+  { wait_for = "respsame-p0" },
+  { run = ["resize-window", "-t", "respsame", "-x", "100", "-y", "20"] },
+  { run = ["resize-window", "-t", "respsame", "-x", "80", "-y", "30"] },
+  { run = ["respawn-pane", "-k", "-t", "respsame:", "sh", "-c", "tmux wait-for -S respsame-p1; exec cat -"] },
+  { wait_for = "respsame-p1" },
+  { run = ["display", "-p", "-t", "respsame:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on} #{pane_width}x#{pane_height}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "respsame:"] },
+]
