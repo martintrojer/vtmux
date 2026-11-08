@@ -7440,3 +7440,80 @@ fn set_hook_monitor_fires_on_change() {
         runs
     });
 }
+
+/// `display-message -a` lists every format with a value: `format_table`'s
+/// entries in its order, then the tree's (the command, copy mode's) by
+/// name (format.c `format_each`). The values that change from run to run
+/// are masked; the variables vtmux has yet to model are left out of both
+/// (compat/DIVERGENCES.md D-014, D-044).
+#[test]
+fn display_message_all() {
+    const VOLATILE: &[&str] = &[
+        "pid",
+        "pane_pid",
+        "pane_tty",
+        "start_time",
+        "session_created",
+        "session_activity",
+        "window_activity",
+        "buffer_created",
+        "top_line_time",
+    ];
+    const UNMODELLED: &[&str] = &[
+        "window_cell_width",
+        "window_cell_height",
+        "history_added",
+        "history_collected",
+        "history_generation",
+        "pane_output_generation",
+        "pane_command_running",
+        "pane_pb_progress",
+        "pane_pb_state",
+    ];
+    let all = |w: &World, args: &[&str]| {
+        let mut r = w.run(args);
+        r.stdout = r
+            .stdout
+            .lines()
+            .filter_map(|l| {
+                let (k, _) = l.split_once('=')?;
+                if UNMODELLED.contains(&k) {
+                    return None;
+                }
+                Some(if VOLATILE.contains(&k) {
+                    format!("{k}=X\n")
+                } else {
+                    format!("{l}\n")
+                })
+            })
+            .collect();
+        r
+    };
+    compare("display_message_all", |w| {
+        let mut out = steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+                ],
+                &["neww", "-d", "-n", "v", "cat", "-"],
+                &["splitw", "-d", "-t", ":v", "cat", "-"],
+                &["set-buffer", "-b", "b", "text"],
+                &["select-pane", "-t", ":w", "-T", "t"],
+            ],
+        );
+        w.wait_all_running("cat");
+        out.push(w.run(&["select-pane", "-t", ":v.0", "-T", "t0"]));
+        out.push(w.run(&["select-pane", "-t", ":v.1", "-T", "t1"]));
+        out.push(all(w, &["display", "-a"]));
+        out.push(all(w, &["display", "-a", "-t", ":v.1"]));
+        out.push(w.run(&["copy-mode", "-t", ":v.0"]));
+        out.push(w.run(&["send", "-t", ":v.0", "-X", "begin-selection"]));
+        out.push(all(w, &["display", "-a", "-t", ":v.0"]));
+        out.push(w.run(&["kill-server"]));
+        out.push(w.run(&["start-server", ";", "set", "-g", "exit-empty", "off"]));
+        out.push(all(w, &["display", "-a"]));
+        out.push(w.run(&["kill-server"]));
+        out
+    });
+}

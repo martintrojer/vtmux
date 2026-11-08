@@ -390,11 +390,18 @@ impl<'a> Ctx<'a> {
             // format_cb_session_many_attached.
             "session_many_attached" => flag(self.attached_to(s.id).count() > 1),
             // format_cb_session_attached_list: their names, in client order.
-            "session_attached_list" => self
-                .attached_to(s.id)
-                .map(|c| c.name.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
+            // format_cb_session_attached_list: none without a client.
+            "session_attached_list" => {
+                let names = self
+                    .attached_to(s.id)
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if names.is_empty() {
+                    return None;
+                }
+                names
+            }
             // format_cb_session_alert: each flag once, in the order the
             // windows (by index) first show it.
             "session_alert" => {
@@ -1002,6 +1009,62 @@ impl Ctx<'_> {
         if let Some((_, v)) = self.extra.iter().find(|(k, _)| *k == name) {
             return Some(v.clone());
         }
+        self.builtin(name)
+    }
+
+    /// `format_each` (format.c:4341-4380), what `display-message -a` lists:
+    /// each `format_table` entry with a value, in the table's order, then
+    /// the tree's own entries (the command's formats, a hook's, copy
+    /// mode's) in name order.
+    #[must_use]
+    pub fn each(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = FORMAT_TABLE
+            .iter()
+            .filter_map(|&name| {
+                let mut value = self.builtin(name)?;
+                // A time entry's callback gives the session's zero time,
+                // which format_each prints (format.c:4358-4361) and
+                // expansion leaves empty.
+                if name == "session_last_attached" && value.is_empty() {
+                    "0".clone_into(&mut value);
+                }
+                Some((name.to_owned(), value))
+            })
+            .collect();
+        let mut tree: std::collections::BTreeMap<String, String> = self
+            .extra
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        if let Some(p) = self.pane() {
+            for &name in COPY_FORMATS {
+                // format_add_cb entries are empty when their callback
+                // gives nothing.
+                let cb = matches!(
+                    name,
+                    "search_match"
+                        | "copy_cursor_word"
+                        | "copy_cursor_line"
+                        | "copy_cursor_hyperlink"
+                );
+                match self.copy_value(p, name) {
+                    Some(v) => {
+                        tree.insert(name.to_owned(), v);
+                    }
+                    None if cb && p.modes.first().and_then(|m| m.as_copy()).is_some() => {
+                        tree.insert(name.to_owned(), String::new());
+                    }
+                    None => {}
+                }
+            }
+        }
+        out.extend(tree);
+        out
+    }
+
+    /// The built-in variables (`format_table` and copy mode's), without
+    /// options or the tree's entries.
+    fn builtin(&self, name: &str) -> Option<String> {
         let server = match name {
             "socket_path" => Some(self.info.socket_path.clone()),
             "pid" => Some(self.info.pid.to_string()),
@@ -1397,3 +1460,250 @@ fn cursor_colour_option(text: &str) -> String {
         .unwrap_or(vtmux_core::colour::Colour::Default)
         .to_string()
 }
+
+/// The names in tmux's `format_table` (format.c:3592-4170), in its
+/// (sorted) order: what `format_each` walks first.
+const FORMAT_TABLE: &[&str] = &[
+    "active_window_index",
+    "alternate_on",
+    "alternate_saved_x",
+    "alternate_saved_y",
+    "bracket_paste_flag",
+    "buffer_created",
+    "buffer_full",
+    "buffer_mode_format",
+    "buffer_name",
+    "buffer_sample",
+    "buffer_size",
+    "client_activity",
+    "client_cell_height",
+    "client_cell_width",
+    "client_colours",
+    "client_control_mode",
+    "client_created",
+    "client_discarded",
+    "client_flags",
+    "client_height",
+    "client_key_table",
+    "client_last_session",
+    "client_mode_format",
+    "client_name",
+    "client_pid",
+    "client_prefix",
+    "client_readonly",
+    "client_session",
+    "client_termfeatures",
+    "client_termname",
+    "client_termtype",
+    "client_theme",
+    "client_tty",
+    "client_uid",
+    "client_user",
+    "client_utf8",
+    "client_width",
+    "client_written",
+    "config_files",
+    "cursor_blinking",
+    "cursor_character",
+    "cursor_colour",
+    "cursor_flag",
+    "cursor_shape",
+    "cursor_very_visible",
+    "cursor_x",
+    "cursor_y",
+    "history_added",
+    "history_all_bytes",
+    "history_bytes",
+    "history_collected",
+    "history_generation",
+    "history_limit",
+    "history_size",
+    "host",
+    "host_short",
+    "insert_flag",
+    "keypad_cursor_flag",
+    "keypad_flag",
+    "last_window_index",
+    "mouse_all_flag",
+    "mouse_any_flag",
+    "mouse_button_flag",
+    "mouse_hyperlink",
+    "mouse_line",
+    "mouse_pane",
+    "mouse_sgr_flag",
+    "mouse_standard_flag",
+    "mouse_status_line",
+    "mouse_status_range",
+    "mouse_utf8_flag",
+    "mouse_word",
+    "mouse_x",
+    "mouse_y",
+    "next_session_id",
+    "origin_flag",
+    "pane_active",
+    "pane_at_bottom",
+    "pane_at_left",
+    "pane_at_right",
+    "pane_at_top",
+    "pane_bg",
+    "pane_bottom",
+    "pane_command_duration",
+    "pane_command_end_time",
+    "pane_command_running",
+    "pane_command_start_time",
+    "pane_command_status",
+    "pane_current_command",
+    "pane_current_path",
+    "pane_dead",
+    "pane_dead_signal",
+    "pane_dead_status",
+    "pane_dead_time",
+    "pane_fg",
+    "pane_flags",
+    "pane_floating_flag",
+    "pane_format",
+    "pane_height",
+    "pane_id",
+    "pane_in_mode",
+    "pane_index",
+    "pane_input_off",
+    "pane_key_mode",
+    "pane_last",
+    "pane_last_output_time",
+    "pane_last_prompt_time",
+    "pane_left",
+    "pane_marked",
+    "pane_marked_set",
+    "pane_modal_flag",
+    "pane_mode",
+    "pane_output_generation",
+    "pane_path",
+    "pane_pb_progress",
+    "pane_pb_state",
+    "pane_pid",
+    "pane_pipe",
+    "pane_pipe_pid",
+    "pane_private_modes",
+    "pane_right",
+    "pane_search_string",
+    "pane_start_command",
+    "pane_start_command_list",
+    "pane_start_path",
+    "pane_synchronized",
+    "pane_tabs",
+    "pane_title",
+    "pane_top",
+    "pane_tty",
+    "pane_unseen_changes",
+    "pane_unzoomed_height",
+    "pane_unzoomed_width",
+    "pane_width",
+    "pane_x",
+    "pane_y",
+    "pane_z",
+    "pane_zoomed_flag",
+    "pid",
+    "scroll_region_lower",
+    "scroll_region_upper",
+    "server_sessions",
+    "session_active",
+    "session_activity",
+    "session_activity_flag",
+    "session_alert",
+    "session_alerts",
+    "session_attached",
+    "session_attached_list",
+    "session_bell_flag",
+    "session_created",
+    "session_format",
+    "session_group",
+    "session_group_attached",
+    "session_group_attached_list",
+    "session_group_list",
+    "session_group_many_attached",
+    "session_group_size",
+    "session_grouped",
+    "session_id",
+    "session_last_attached",
+    "session_many_attached",
+    "session_marked",
+    "session_name",
+    "session_path",
+    "session_silence_flag",
+    "session_stack",
+    "session_windows",
+    "sixel_support",
+    "socket_path",
+    "start_time",
+    "synchronized_output_flag",
+    "tree_mode_format",
+    "uid",
+    "user",
+    "version",
+    "window_active",
+    "window_active_clients",
+    "window_active_clients_list",
+    "window_active_sessions",
+    "window_active_sessions_list",
+    "window_activity",
+    "window_activity_flag",
+    "window_bell_flag",
+    "window_bigger",
+    "window_cell_height",
+    "window_cell_width",
+    "window_end_flag",
+    "window_flags",
+    "window_format",
+    "window_height",
+    "window_id",
+    "window_index",
+    "window_last_flag",
+    "window_layout",
+    "window_linked",
+    "window_linked_sessions",
+    "window_linked_sessions_list",
+    "window_manual_height",
+    "window_manual_width",
+    "window_marked_flag",
+    "window_modal_pane",
+    "window_name",
+    "window_offset_x",
+    "window_offset_y",
+    "window_panes",
+    "window_raw_flags",
+    "window_silence_flag",
+    "window_stack_index",
+    "window_start_flag",
+    "window_visible_layout",
+    "window_width",
+    "window_zoomed_flag",
+    "wrap_flag",
+];
+
+/// The entries `window_copy_formats` adds to a tree (window-copy.c:1105-1178).
+const COPY_FORMATS: &[&str] = &[
+    "top_line_time",
+    "scroll_position",
+    "copy_position",
+    "copy_position_limit",
+    "copy_line_numbers",
+    "refresh_active",
+    "rectangle_toggle",
+    "copy_cursor_x",
+    "copy_cursor_y",
+    "selection_start_x",
+    "selection_start_y",
+    "selection_end_x",
+    "selection_end_y",
+    "selection_active",
+    "selection_present",
+    "selection_mode",
+    "search_present",
+    "search_timed_out",
+    "search_count",
+    "search_count_partial",
+    "search_match",
+    "copy_cursor_word",
+    "copy_cursor_line",
+    "copy_cursor_hyperlink",
+];

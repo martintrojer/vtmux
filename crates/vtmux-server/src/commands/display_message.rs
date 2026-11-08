@@ -60,7 +60,11 @@ pub fn exec(
     let ctx = server.format_ctx(found, client);
     // cmd-display-message.c:131: -j ignores -a.
     if args.flag('a') && !args.flag('j') {
-        return Err(EdgeError::NotImplemented("display-message -a".into()).into());
+        // cmd-display-message.c:135-139, cmd_display_message_each.
+        for (key, value) in ctx.each() {
+            item.print(&format!("{key}={value}"));
+        }
+        return Ok(());
     }
     let mut msg = if args.flag('l') {
         template.to_owned()
