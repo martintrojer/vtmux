@@ -11,9 +11,11 @@ use crate::target::Found;
 const TEMPLATE: &str =
     "#{command_list_name}#{?command_list_alias, (#{command_list_alias}),} #{command_list_usage}";
 
-/// `cmd_list_single_command`: an empty expansion prints no line.
+/// `cmd_list_single_command`: an empty expansion prints no line. The
+/// tree describes no client (`format_defaults(ft, NULL, ...)`,
+/// cmd-list-commands.c:86-87), though the command's client owns its jobs.
 fn single(server: &Server, item: &mut Item, entry: &CmdEntry, template: &str) {
-    let mut ctx = server.format_ctx(Found::default(), item.client);
+    let mut ctx = server.format_ctx(Found::default(), None);
     for (k, v) in [
         ("command_list_name", entry.name),
         ("command_list_alias", entry.alias.unwrap_or("")),

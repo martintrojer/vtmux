@@ -5643,8 +5643,8 @@ fn log_lines(run: &Run) -> Run {
 
 /// `list-commands` (cmd-list-commands.c:40-100) against the reference: the
 /// whole table, one command by name and by alias, `-F` with the three
-/// variables, an empty expansion (no line), a lookup error and an ambiguous
-/// prefix.
+/// variables, an empty expansion (no line), a lookup error, an ambiguous
+/// prefix and a tree that describes no client.
 /// Reference: `tmux list-commands [-F fmt] [cmd]` with an isolated server.
 #[test]
 fn list_commands_table_formats_and_errors() {
@@ -5673,6 +5673,14 @@ fn list_commands_table_formats_and_errors() {
             w.run(&["list-commands", "nosuchcommand"]),
             w.run(&["list-commands", "list"]),
             w.run(&["list-commands", "a", "b"]),
+            // No client in the tree (format_defaults(ft, NULL, ...)), the
+            // command's own included.
+            w.run(&[
+                "list-commands",
+                "-F",
+                "[#{client_name}][#{session_name}]",
+                "ls",
+            ]),
         ]
     });
 }
