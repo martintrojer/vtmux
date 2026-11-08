@@ -280,6 +280,62 @@ fn a_manifest_names_pages_and_reads_them_from_chunks() {
     assert!(matches!(corrupt, Err(Error::MissingChunk(_))));
 }
 
+/// A manifest read with some chunks missing: [`decode_partial`] keeps
+/// it, [`Snapshot::unreadable`] names each part holding a page that does
+/// not check (a pane's terminal state, a copy mode, a popup's terminal
+/// state), and [`Snapshot::without`] leaves out only those, so what is
+/// left checks and is the rest as it was.
+#[test]
+fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
+    let mut s = sample();
+    // A page of its own (pages are named by their content).
+    let PaneMode::Copy(copy) = &mut s.panes[0].modes[0] else {
+        panic!("the sample's first mode is copy mode");
+    };
+    copy.history = vec![HistoryPage::from_rows(
+        &std::iter::repeat_n(sample_row(), 5).collect::<Vec<_>>(),
+        false,
+    )];
+    let copy_page = copy.history[0].hash;
+    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
+        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
+    let manifest = encode_manifest(&s);
+    let mut partial = decode_partial(&manifest, &Features::default(), |h| {
+        chunks.get(h).filter(|_| *h != copy_page).cloned()
+    })
+    .unwrap();
+    let bad = partial.unreadable();
+    assert_eq!(
+        bad,
+        [(Part::PaneMode(1, 0), Error::MissingChunk(copy_page))]
+    );
+    assert_eq!(bad[0].0.to_string(), "%1's copy mode");
+    partial.without(&[bad[0].0]);
+    assert_eq!(partial.check(), Ok(()));
+    let mut want = s.clone();
+    want.panes[0].modes.remove(0);
+    assert_eq!(partial, want);
+
+    // Every chunk missing: every part with history is named, in order.
+    let mut none = decode_partial(&manifest, &Features::default(), |_| None).unwrap();
+    let parts: Vec<Part> = none.unreadable().into_iter().map(|(p, _)| p).collect();
+    let popup = s.clients.iter().find(|c| c.popup.is_some()).unwrap().id;
+    assert_eq!(
+        parts,
+        [
+            Part::PaneTerm(1),
+            Part::PaneMode(1, 0),
+            Part::PopupTerm(popup)
+        ]
+    );
+    none.without(&parts);
+    assert_eq!(none.check(), Ok(()));
+    assert_eq!(none.pages(), Vec::<&HistoryPage>::new());
+    assert_eq!(none.panes[0].modes.len(), s.panes[0].modes.len() - 1);
+    // A strict decode refuses both.
+    assert!(decode_with(&manifest, |_| None).is_err());
+}
+
 #[test]
 fn page_refs_names_a_manifests_pages_without_their_chunks() {
     let s = sample();

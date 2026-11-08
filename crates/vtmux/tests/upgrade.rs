@@ -907,6 +907,117 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
     );
 }
 
+/// A copy mode over more history than a snapshot page holds, exported in
+/// one page as every vtmux before 8c94c6e did (the test hook, standing in
+/// for such an old image): open when the upgrade starts, the dry run
+/// refuses it and says to leave copy mode; entered while the dry run runs,
+/// it is in the snapshot the exec carries, which the new image's check
+/// refuses. The new image then serves the server without that copy mode,
+/// every pane's screen and history kept, rather than switch back to the
+/// image that wrote it, which can do no better (one before a548110 serves
+/// no session at all).
+#[test]
+fn a_copy_mode_page_past_the_limit_costs_only_that_copy_mode() {
+    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")]);
+}
+
+/// [`a_copy_mode_page_past_the_limit_costs_only_that_copy_mode`] from a
+/// real server of a build before 8c94c6e (the reviewer's race: such a
+/// server, upgraded onto 8fa8ce1, switched back to itself and served no
+/// session). `VTMUX_ONE_PAGE_COPY_BINARY` names it, of this build's
+/// protocol version (23ddb70's is).
+#[test]
+#[ignore = "needs VTMUX_ONE_PAGE_COPY_BINARY, a build before 8c94c6e"]
+fn a_server_from_before_8c94c6e_keeps_its_sessions_through_the_copy_mode_race() {
+    let old = PathBuf::from(
+        std::env::var_os("VTMUX_ONE_PAGE_COPY_BINARY").expect("VTMUX_ONE_PAGE_COPY_BINARY is set"),
+    );
+    copy_mode_past_the_limit(&old, &[]);
+}
+
+/// The copy mode tests above, on a server started from `server` with
+/// `server_env`, upgraded onto this build.
+fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)]) {
+    let world = World::new();
+    world.populate_from(server, server_env);
+    world.run(&["set", "-g", "history-limit", "100000"]);
+    world.run(&[
+        "neww",
+        "-d",
+        "-t",
+        "a",
+        "-n",
+        "big",
+        "sh",
+        "-c",
+        "seq 70000; exec cat -",
+    ]);
+    world.run(&["select-pane", "-t", "a:big", "-T", "t5"]);
+    let big = |format: &str| world.run(&["display", "-p", "-t", "a:big", format]);
+    wait("the long history", || {
+        big("#{history_size} #{pane_current_command}").trim() == "69977 cat"
+    });
+    let pane = big("#{pane_id}").trim().to_owned();
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+
+    // Open when the upgrade starts: refused, nothing lost.
+    world.run(&["copy-mode", "-t", "a:big"]);
+    let message = failed(world.upgrade(&bin()));
+    assert!(
+        message.ends_with(&format!(
+            "in {pane}'s copy mode: leave copy mode in {pane} and run vtmux-upgrade again"
+        )),
+        "{message}"
+    );
+    assert_eq!(world.observe_like(&before), before);
+    world.run(&["send-keys", "-t", "a:big", "-X", "cancel"]);
+    wait("copy mode left", || big("#{pane_in_mode}").trim() == "0");
+
+    // Entered while the dry run runs: the dry run passes (it was shown
+    // no copy mode), then the wrapper enters it, before the snapshot the
+    // exec carries.
+    let socket = world.run(&["display", "-p", "#{socket_path}"]);
+    let wrapper = world.home.path().join("enters-copy-mode");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --vtmux-check-snapshot ]; then\n\
+             '{BIN}' \"$@\" || exit $?\n\
+             '{BIN}' -S '{}' copy-mode -t a:big </dev/null >/dev/null 2>&1\n\
+             exit 0\nfi\nexec '{BIN}' \"$@\"\n",
+            socket.trim_end()
+        ),
+    )
+    .unwrap();
+    set_executable(&wrapper);
+    let message = failed(world.upgrade(&wrapper));
+    assert!(
+        message.starts_with("live upgrade failed: ")
+            && message.contains(&format!("in {pane}'s copy mode"))
+            && message.ends_with(&format!("; restored without {pane}'s copy mode")),
+        "{message}"
+    );
+
+    assert_eq!(world.pid(), pid);
+    let args = world.server_args();
+    assert!(
+        args.contains("--vtmux-resume") && !args.contains("--vtmux-switched-back"),
+        "{args}"
+    );
+    assert_eq!(world.pane_pids(), panes);
+    // Every pane's history and screen, the long one's too.
+    assert_eq!(world.observe_like(&before), before);
+    assert_eq!(big("#{pane_in_mode}").trim(), "0");
+    world.echo("a:big", "kept");
+    let log = world.run(&["show-messages"]);
+    assert!(
+        log.contains(&format!("; restored without {pane}'s copy mode")),
+        "{log}"
+    );
+}
+
 /// The dry run on its own: `--vtmux-check-snapshot` on a descriptor that
 /// is no snapshot exits 1 with why, and on one that is not open too.
 #[test]

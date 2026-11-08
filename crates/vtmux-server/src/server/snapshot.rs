@@ -489,6 +489,13 @@ pub(crate) fn restore_term(
         term.set_colour_names(vtmux_core::colour::x11_rgb);
         return Ok(term);
     }
+    fresh_term(server, p)
+}
+
+/// The terminal [`restore_term`] gives a pane without terminal state.
+fn fresh_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
+    let cols = u16::try_from(p.geometry.sx).unwrap_or(u16::MAX).max(1);
+    let rows = u16::try_from(p.geometry.sy).unwrap_or(u16::MAX).max(1);
     let mut term = PaneTerm::try_new(
         cols,
         rows,
@@ -519,6 +526,12 @@ fn restore_popup_term(
     if let Some(t) = &p.term {
         return term_from_snapshot(t, ghostty_patches).map_err(|e| invalid(format!("popup: {e}")));
     }
+    fresh_popup_term(server, popup)
+}
+
+/// The terminal [`restore_popup_term`] gives a popup without terminal
+/// state.
+fn fresh_popup_term(server: &Server, popup: &crate::popup::Popup) -> io::Result<PaneTerm> {
     let (jx, jy) = popup.inner();
     let mut term = PaneTerm::try_new(jx.max(1), jy.max(1), 0)
         .ok_or_else(|| invalid(format!("no popup terminal of {jx}x{jy}")))?;
@@ -1425,12 +1438,41 @@ impl Server {
     /// The snapshot is inconsistent (`InvalidData`: it fails
     /// [`snap::Snapshot::check`] or `validate`), or the poll or a
     /// descriptor can't be set up.
-    #[expect(clippy::too_many_lines, reason = "one record after another")]
     pub fn from_snapshot(
         listener: StdListener,
         config: ServerConfig,
         snapshot: &snap::Snapshot,
         fds: &mut Adopt<'_>,
+    ) -> io::Result<Self> {
+        Self::from_snapshot_in(listener, config, snapshot, fds, None)
+    }
+
+    /// [`Server::from_snapshot`] for the last resort (decision 7): a
+    /// pane's or popup's terminal state that does not import (a page in
+    /// Ghostty's form whose checksum fails, a grid not the pane's size)
+    /// leaves it a blank terminal of its size, and a copy mode that does
+    /// not import is left, instead of failing the whole rebuild. Each such
+    /// part is added to `salvaged`.
+    ///
+    /// # Errors
+    /// As [`Server::from_snapshot`], but for those parts.
+    pub(super) fn from_snapshot_salvaging(
+        listener: StdListener,
+        config: ServerConfig,
+        snapshot: &snap::Snapshot,
+        fds: &mut Adopt<'_>,
+        salvaged: &mut Vec<snap::Part>,
+    ) -> io::Result<Self> {
+        Self::from_snapshot_in(listener, config, snapshot, fds, Some(salvaged))
+    }
+
+    #[expect(clippy::too_many_lines, reason = "one record after another")]
+    fn from_snapshot_in(
+        listener: StdListener,
+        config: ServerConfig,
+        snapshot: &snap::Snapshot,
+        fds: &mut Adopt<'_>,
+        mut salvaged: Option<&mut Vec<snap::Part>>,
     ) -> io::Result<Self> {
         validate(snapshot)?;
         // Timers count on from when the snapshot was taken: the exec and
@@ -1703,7 +1745,13 @@ impl Server {
         }
 
         for x in &snapshot.panes {
-            let pane = server.pane_in(x, fds, &snapshot.meta.ghostty_patches, now)?;
+            let pane = server.pane_in(
+                x,
+                fds,
+                &snapshot.meta.ghostty_patches,
+                now,
+                salvaged.as_deref_mut(),
+            )?;
             server.model.panes.insert(pane.id, pane);
         }
 
@@ -1731,6 +1779,7 @@ impl Server {
                 &snapshot.meta.ghostty_patches,
                 now,
                 reattach_by,
+                salvaged.as_deref_mut(),
             )?;
             server.clients.insert(id, client);
         }
@@ -1766,6 +1815,7 @@ impl Server {
         fds: &mut Adopt<'_>,
         patches: &str,
         now: Instant,
+        mut salvaged: Option<&mut Vec<snap::Part>>,
     ) -> io::Result<Pane> {
         let id = PaneId(x.id);
         let io = match fds(&snap::Role::PanePty(x.id)) {
@@ -1783,10 +1833,32 @@ impl Server {
             _ => None,
         };
         let (sx, sy) = (x.geometry.sx as usize, x.geometry.sy as usize);
+        let term = match (restore_term(self, x, patches), salvaged.as_deref_mut()) {
+            (Ok(term), _) => term,
+            (Err(_), Some(salvaged)) if x.term.is_some() => {
+                salvaged.push(snap::Part::PaneTerm(x.id));
+                fresh_term(self, x)?
+            }
+            (Err(e), _) => return Err(e),
+        };
+        let mut modes = Vec::new();
+        for (n, m) in x.modes.iter().enumerate() {
+            match mode_in(m, sx, sy, now) {
+                Some(mode) => modes.push(mode),
+                // A copy mode whose grid does not import is left, as
+                // modes the snapshot closes are.
+                None => {
+                    if let (snap::PaneMode::Copy(_), Some(salvaged)) = (m, salvaged.as_deref_mut())
+                    {
+                        salvaged.push(snap::Part::PaneMode(x.id, n));
+                    }
+                }
+            }
+        }
         let mut pane = Pane {
             id,
             window: WindowId(x.window),
-            term: restore_term(self, x, patches)?,
+            term,
             io,
             pid: x.pid,
             tty: x.tty.clone(),
@@ -1810,11 +1882,7 @@ impl Server {
             active_point: x.active_point,
             resizes: x.resizes.clone(),
             resize_timer: x.resize_in_ms.map(|m| after(now, m)),
-            modes: x
-                .modes
-                .iter()
-                .filter_map(|m| mode_in(m, sx, sy, now))
-                .collect(),
+            modes,
             search: x.search.clone(),
             prompt: None,
             prompt_owner: None,
@@ -1843,13 +1911,17 @@ impl Server {
         };
         // History imported as rows is resident: due for the compressor at
         // once (decision 23).
-        if x.term.is_some() {
+        if x.term.is_some() && !salvaged.is_some_and(|s| s.contains(&snap::Part::PaneTerm(x.id))) {
             pane.compress.restored(&pane.term, now);
         }
         Ok(pane)
     }
 
     #[expect(clippy::too_many_lines, reason = "one field after another")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the record, its descriptors and the rebuild's context"
+    )]
     fn client_in(
         &mut self,
         x: &snap::Client,
@@ -1858,6 +1930,7 @@ impl Server {
         patches: &str,
         now: Instant,
         reattach_by: Instant,
+        salvaged: Option<&mut Vec<snap::Part>>,
     ) -> io::Result<Client> {
         use vtmux_core::protocol::{ClientFlags, ControlMode, Hello, TtyInfo};
         let std = std::os::unix::net::UnixStream::from(fd);
@@ -2038,7 +2111,14 @@ impl Server {
                 None => None,
             };
             let mut popup = crate::popup::Popup::import(p, io, PaneTerm::new(1, 1, 0));
-            popup.term = restore_popup_term(self, &popup, p, patches)?;
+            popup.term = match (restore_popup_term(self, &popup, p, patches), salvaged) {
+                (Ok(term), _) => term,
+                (Err(_), Some(salvaged)) if p.term.is_some() => {
+                    salvaged.push(snap::Part::PopupTerm(x.id));
+                    fresh_popup_term(self, &popup)?
+                }
+                (Err(e), _) => return Err(e),
+            };
             c.popup = Some(popup);
         }
         Ok(c)

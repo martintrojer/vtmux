@@ -418,25 +418,76 @@ pub fn decode_for(
     features: &Features,
     mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
 ) -> Result<Snapshot, Error> {
-    let (found, body) = body(bytes)?;
-    let cx = Ctx::for_input(found, body.len());
-    check_requires(body, &cx, features)?;
-    let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
     let mut missing = None;
-    s.pages_mut(&mut |p| {
-        if missing.is_some() || !p.data.is_empty() || p.is_ghostty() {
+    let s = decode_fetching(bytes, features, |p| {
+        if missing.is_some() {
             return;
         }
         p.data = chunk(&p.hash).unwrap_or_default();
         if p.raw().is_err() {
             missing = Some(p.hash);
         }
-    });
-    if let Some(h) = missing {
-        return Err(Error::MissingChunk(h));
+    })?;
+    match missing {
+        Some(h) => Err(Error::MissingChunk(h)),
+        None => Ok(s),
     }
+}
+
+/// [`decode_for`], except that a page whose chunk is missing or does not
+/// check is left in the snapshot as it is (its `data` empty or what the
+/// chunk held), for [`Snapshot::unreadable`] to find: what a restore that
+/// can do without some [`Part`]s reads.
+pub fn decode_partial(
+    bytes: &[u8],
+    features: &Features,
+    mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
+) -> Result<Snapshot, Error> {
+    decode_fetching(bytes, features, |p| {
+        p.data = chunk(&p.hash).unwrap_or_default();
+    })
+}
+
+/// The stream decoded, `fetch` called on each page that is neither
+/// inline nor in Ghostty's form, then migrated.
+fn decode_fetching(
+    bytes: &[u8],
+    features: &Features,
+    mut fetch: impl FnMut(&mut HistoryPage),
+) -> Result<Snapshot, Error> {
+    let (found, body) = body(bytes)?;
+    let cx = Ctx::for_input(found, body.len());
+    check_requires(body, &cx, features)?;
+    let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
+    s.pages_mut(&mut |p| {
+        if p.data.is_empty() && !p.is_ghostty() {
+            fetch(p);
+        }
+    });
     migrate::migrate(&mut s, found)?;
     Ok(s)
+}
+
+/// A part of a [`Snapshot`] a restore can do without and still serve
+/// every session, window and pane: what [`Snapshot::without`] drops.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Part {
+    /// Pane `id`'s terminal state (its screens and history).
+    PaneTerm(u32),
+    /// Pane `id`'s copy or view mode, the `n`th of its modes.
+    PaneMode(u32, usize),
+    /// The terminal state of client `id`'s popup.
+    PopupTerm(u32),
+}
+
+impl std::fmt::Display for Part {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PaneTerm(id) => write!(f, "%{id}'s terminal state"),
+            Self::PaneMode(id, _) => write!(f, "%{id}'s copy mode"),
+            Self::PopupTerm(id) => write!(f, "client {id}'s popup terminal state"),
+        }
+    }
 }
 
 /// Refuse a body that requires a feature beyond `features`. What the
@@ -533,15 +584,97 @@ impl Snapshot {
         }
     }
 
+    /// The parts holding a history page that does not decompress into
+    /// its rows within the page limits or does not match its name, in
+    /// the order [`Snapshot::pages`] goes, each with its first bad page's
+    /// error. A page in Ghostty's form is covered by the stream's hash;
+    /// only Ghostty can read further into it.
+    #[must_use]
+    pub fn unreadable(&self) -> Vec<(Part, Error)> {
+        fn first_bad<'a>(pages: impl IntoIterator<Item = &'a HistoryPage>) -> Option<Error> {
+            pages
+                .into_iter()
+                .filter(|p| !p.is_ghostty())
+                .find_map(|p| p.each_row_verified(|_| {}).err())
+        }
+        fn term(t: &TermState) -> Option<Error> {
+            let sized = t.sized_primary.as_ref().and_then(|p| p.screen.as_ref());
+            let screens = std::iter::once(&t.primary).chain(sized).chain(&t.alternate);
+            first_bad(
+                screens
+                    .flat_map(|s| &s.history)
+                    .chain(t.alt_entry.iter().flat_map(|a| &a.history)),
+            )
+        }
+        let mut out = Vec::new();
+        for p in &self.panes {
+            if let Some(e) = p.term.as_ref().and_then(term) {
+                out.push((Part::PaneTerm(p.id), e));
+            }
+            for (n, m) in p.modes.iter().enumerate() {
+                if let PaneMode::Copy(c) | PaneMode::View(c) = m
+                    && let Some(e) = first_bad(&c.history)
+                {
+                    out.push((Part::PaneMode(p.id, n), e));
+                }
+            }
+        }
+        for c in &self.clients {
+            if let Some(e) = c
+                .popup
+                .as_ref()
+                .and_then(|p| p.term.as_ref())
+                .and_then(term)
+            {
+                out.push((Part::PopupTerm(c.id), e));
+            }
+        }
+        out
+    }
+
+    /// Drop `parts` ([`Snapshot::unreadable`]'s): a pane's or popup's
+    /// terminal state goes (the pane comes back with a blank terminal of
+    /// its size, as from a `layout` checkpoint), a mode goes from its
+    /// pane's modes, the rest of the pane staying as it was.
+    pub fn without(&mut self, parts: &[Part]) {
+        let mut parts = parts.to_vec();
+        // Modes by index, the last first, so each index still holds.
+        parts.sort_unstable();
+        for part in parts.iter().rev() {
+            match *part {
+                Part::PaneTerm(id) => {
+                    if let Some(p) = self.panes.iter_mut().find(|p| p.id == id) {
+                        p.term = None;
+                    }
+                }
+                Part::PaneMode(id, n) => {
+                    if let Some(p) = self.panes.iter_mut().find(|p| p.id == id)
+                        && n < p.modes.len()
+                    {
+                        p.modes.remove(n);
+                    }
+                }
+                Part::PopupTerm(id) => {
+                    if let Some(popup) = self
+                        .clients
+                        .iter_mut()
+                        .find(|c| c.id == id)
+                        .and_then(|c| c.popup.as_mut())
+                    {
+                        popup.term = None;
+                    }
+                }
+            }
+        }
+    }
+
     /// Everything the dry run (`--vtmux-check-snapshot`) verifies beyond
     /// decoding: every page decompresses into its rows within the page
-    /// limits and matches its name, and the records refer to each other
-    /// consistently.
+    /// limits and matches its name ([`Snapshot::unreadable`]), and the
+    /// records refer to each other consistently.
     pub fn check(&self) -> Result<(), Error> {
-        // A page in Ghostty's form is covered by the stream's hash; only
-        // Ghostty can read further into it.
-        for p in self.pages().into_iter().filter(|p| !p.is_ghostty()) {
-            p.each_row_verified(|_| {})?;
+        if let Some((_, e)) = self.unreadable().into_iter().next() {
+            return Err(e);
         }
         let bad = |what: String| Err(Error::Inconsistent(what));
         let windows: std::collections::BTreeMap<u32, &Window> =

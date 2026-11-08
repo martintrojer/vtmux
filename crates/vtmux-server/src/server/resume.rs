@@ -45,7 +45,9 @@ use crate::sys::upgrade as sys;
 ///
 /// - `1`: the first restore fails in the image an upgrade execs (not in
 ///   the one it switches back to);
-/// - `always`: the first restore fails in both, so the last resort runs;
+/// - `always`: the first restore fails in both, and so does the last
+///   resort's rebuild that keeps terminal state ([`salvage`]), so the one
+///   without any runs;
 /// - `panic`: the first restore panics in the image an upgrade execs;
 /// - `check`: the rebuild fails in the dry run, and only there.
 const FAIL_HOOK: &str = "VTMUX_TEST_RESUME_FAIL";
@@ -62,10 +64,20 @@ fn features() -> snap::Features {
 
 /// A stream decoded and checked as [`Server::from_snapshot`] would check
 /// it.
+#[cfg(test)]
 fn decode(bytes: &[u8]) -> Result<snap::Snapshot, String> {
     let s = decode_unchecked(bytes)?;
-    super::snapshot::validate(&s).map_err(|e| e.to_string())?;
+    check(&s)?;
     Ok(s)
+}
+
+/// `s` checked as [`Server::from_snapshot`] checks it, the error naming
+/// the part a page that does not check is in.
+fn check(s: &snap::Snapshot) -> Result<(), String> {
+    super::snapshot::validate(s).map_err(|e| match s.unreadable().first() {
+        Some((part, _)) => format!("{e}, in {part}"),
+        None => e.to_string(),
+    })
 }
 
 /// A stream decoded, its records not yet checked (their pages among
@@ -95,7 +107,15 @@ pub fn check_snapshot(fd: RawFd) -> Result<(), String> {
 /// [`resume`] runs, every descriptor the snapshot names replaced by a
 /// fresh socket of this process's own.
 fn check_bytes(bytes: &[u8]) -> Result<(), String> {
-    let s = decode(bytes)?;
+    let s = decode_unchecked(bytes)?;
+    check(&s).map_err(|e| match s.unreadable().first() {
+        // A copy mode a writer before 8c94c6e exported over more history
+        // than a page holds: gone once copy mode is left.
+        Some((snap::Part::PaneMode(id, _), _)) => {
+            format!("{e}: leave copy mode in %{id} and run vtmux-upgrade again")
+        }
+        _ => e,
+    })?;
     if matches!(
         s.meta.purpose,
         snap::Purpose::CheckpointLayout | snap::Purpose::CheckpointFull
@@ -123,7 +143,7 @@ fn check_bytes(bytes: &[u8]) -> Result<(), String> {
         if hook().as_deref() == Some("check") {
             return Err(io::Error::other("test hook: the rebuild fails"));
         }
-        restore(&s, &kept, true)
+        restore(&s, &kept, true, None)
     })
     .map(drop)
 }
@@ -176,11 +196,15 @@ fn default_socket(path: &Path) -> bool {
 
 /// The server `s` describes, on duplicates of the descriptors in `kept`
 /// (so a failure closes nothing a switch back needs). A `dry_run` builds
-/// it only to drop it ([`ServerConfig::dry_run`]) and reaps nothing.
+/// it only to drop it ([`ServerConfig::dry_run`]) and reaps nothing. With
+/// `salvaged`, a pane's or popup's terminal state or copy mode that does
+/// not import is left out and added there
+/// ([`Server::from_snapshot_salvaging`]).
 fn restore(
     s: &snap::Snapshot,
     kept: &[(snap::Role, OwnedFd)],
     dry_run: bool,
+    salvaged: Option<&mut Vec<snap::Part>>,
 ) -> io::Result<Server> {
     let dup = |role: &snap::Role| {
         kept.iter()
@@ -211,7 +235,12 @@ fn restore(
         // The snapshot carries it (`Server::start_binary`).
         binary: None,
     };
-    let mut server = Server::from_snapshot(listener, config, s, &mut |role| dup(role))?;
+    let mut server = match salvaged {
+        Some(salvaged) => {
+            Server::from_snapshot_salvaging(listener, config, s, &mut |role| dup(role), salvaged)?
+        }
+        None => Server::from_snapshot(listener, config, s, &mut |role| dup(role))?,
+    };
     if !dry_run {
         // Panes whose process exited while the image changed.
         server.reap_children();
@@ -221,19 +250,66 @@ fn restore(
     Ok(server)
 }
 
-/// What the last resort but one rebuilds from: `s` without any pane's or
-/// popup's terminal state and modes, if that much is sound (a page that
-/// does not check, which the dry run refuses, is in what goes).
-fn bare(s: &snap::Snapshot) -> Option<snap::Snapshot> {
-    let bare = without_terminals(s);
-    super::snapshot::validate(&bare).ok()?;
-    Some(bare)
+/// The first of the last resorts (decision 7): the server `s` describes
+/// without each pane's or popup's terminal state or copy mode that holds a
+/// page that does not check ([`snap::Snapshot::unreadable`]) or does not
+/// import, every other part as it was, so one bad page costs only the part
+/// it is in. `s` is left without the parts that did not check. Returns the
+/// server and the parts left out.
+fn salvage(
+    s: &mut snap::Snapshot,
+    kept: &[(snap::Role, OwnedFd)],
+) -> Result<(Server, Vec<snap::Part>), String> {
+    let mut parts: Vec<snap::Part> = s.unreadable().into_iter().map(|(p, _)| p).collect();
+    s.without(&parts);
+    let mut more = Vec::new();
+    let server = guarded(|| {
+        if hook().as_deref() == Some("always") {
+            return Err(io::Error::other("test hook"));
+        }
+        restore(s, kept, false, Some(&mut more))
+    })?;
+    parts.extend(more);
+    Ok((server, parts))
+}
+
+/// What `show-messages` and the requester hear of a [`salvage`] that left
+/// out `parts`.
+fn salvaged_text(parts: &[snap::Part]) -> String {
+    if parts.is_empty() {
+        return "rebuilt at a second attempt".to_owned();
+    }
+    let parts: Vec<String> = parts.iter().map(ToString::to_string).collect();
+    format!("restored without {}", parts.join(", "))
+}
+
+/// Serve `server`, rebuilt by a last resort, telling `requester` and the
+/// log that the upgrade failed: `why`, and `what` the last resort did.
+fn serve_salvaged(
+    mut server: Server,
+    requester: Option<&snap::Requester>,
+    handshake: Option<OwnedFd>,
+    why: &str,
+    what: &str,
+) -> i32 {
+    let message = format!("live upgrade failed: {why}; {what}");
+    server.add_message(message.clone());
+    answer(Some(&mut server), requester, handshake, Err(message));
+    sys::release_free_memory();
+    run(server)
+}
+
+/// What the last of the last resorts but one rebuilds from: `s` without
+/// any pane's or popup's terminal state and modes, if that much is sound.
+fn bare(mut s: snap::Snapshot) -> Option<snap::Snapshot> {
+    without_terminals(&mut s);
+    super::snapshot::validate(&s).ok()?;
+    Some(s)
 }
 
 /// `s` without what a restore can lose and still serve every pane: pane
 /// and popup terminal state, and modes (the last resort, decision 7).
-fn without_terminals(s: &snap::Snapshot) -> snap::Snapshot {
-    let mut s = s.clone();
+fn without_terminals(s: &mut snap::Snapshot) {
     for p in &mut s.panes {
         p.term = None;
         p.modes.clear();
@@ -243,7 +319,6 @@ fn without_terminals(s: &snap::Snapshot) -> snap::Snapshot {
             p.term = None;
         }
     }
-    s
 }
 
 /// Run the server until it exits. The signals blocked across the exec
@@ -264,6 +339,10 @@ fn run(mut server: Server) -> i32 {
 /// reads it (the listener comes in the snapshot), and a switch back
 /// passes it on.
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the attempts in order, each failing through to the next"
+)]
 pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) -> i32 {
     // Why the image that switched back to this one failed (it is taken out
     // of the environment either way).
@@ -276,11 +355,8 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
     // Decoded, then checked: a record that does not check (a page) is
     // the first attempt's failure, but the descriptors, the requester and
     // the last resort's sessions still come from the stream.
-    let decoded = decode_unchecked(&bytes);
-    let checked = decoded
-        .as_ref()
-        .map_err(Clone::clone)
-        .and_then(|s| super::snapshot::validate(s).map_err(|e| e.to_string()));
+    let mut decoded = decode_unchecked(&bytes);
+    let checked = decoded.as_ref().map_err(Clone::clone).and_then(check);
     let meta = (decoded.as_ref().ok().map(|s| s.meta.clone())).or_else(|| writer_meta(&bytes));
     // Every descriptor the snapshot names, taken once for every attempt,
     // and the executable of the image before, for the switch back.
@@ -295,15 +371,14 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
         .and_then(|m| m.binary_fd)
         .filter(|_| !switched_back)
         .and_then(|fd| sys::inherited(fd).ok());
-    let first = match (&decoded, checked) {
+    let first = match (&decoded, &checked) {
         (Ok(s), Ok(())) => guarded(|| match hook().as_deref() {
             Some("1") if !switched_back => Err(io::Error::other("test hook")),
             Some("always") => Err(io::Error::other("test hook")),
             Some("panic") if !switched_back => panic!("test hook"),
-            _ => restore(s, &kept, false),
+            _ => restore(s, &kept, false, None),
         }),
-        (Err(e), _) => Err(e.clone()),
-        (Ok(_), Err(e)) => Err(e),
+        (Err(e), _) | (Ok(_), Err(e)) => Err(e.clone()),
     };
     let me = this_image();
     let mut why = match (first, &note) {
@@ -328,6 +403,30 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
         }
         (Err(why), None) => format!("{me}: {why}"),
     };
+    // A stream that decodes but holds a part that does not check (a page
+    // past a reader's limits: a copy mode a writer before 8c94c6e exported
+    // over a long history) is this image's to rebuild without that part,
+    // as the last resort: the image before, which wrote it, can do no
+    // better (one before a548110 does not even keep the sessions). Only
+    // a stream this image cannot keep the panes of is switched back for.
+    let mut salvage_failed = None;
+    if checked.is_err()
+        && let Ok(s) = &mut decoded
+    {
+        match salvage(s, &kept) {
+            Ok((server, parts)) => {
+                drop((kept, exe, file, decoded, bytes));
+                return serve_salvaged(
+                    server,
+                    requester.as_ref(),
+                    handshake,
+                    &why,
+                    &salvaged_text(&parts),
+                );
+            }
+            Err(e) => salvage_failed = Some(e),
+        }
+    }
     // Decision 7: back to the image that wrote the snapshot, on the same
     // descriptors.
     if !switched_back && let Some(file) = &file {
@@ -348,22 +447,40 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
         let image = path.map_or_else(|| "the image before".into(), |p| p.display().to_string());
         why = format!("{why}; switching back to {image}: {e}");
     }
-    drop(exe);
-    // The last resort: serve the panes with no terminal state.
-    if let Some(stripped) = decoded.as_ref().ok().and_then(bare)
-        && let Ok(mut server) = guarded(|| restore(&stripped, &kept, false))
-    {
-        let message =
-            format!("live upgrade failed: {why}; panes restored without their terminal state");
-        server.add_message(message.clone());
-        answer(
-            Some(&mut server),
-            requester.as_ref(),
-            handshake.take(),
-            Err(message),
-        );
-        drop((kept, file));
-        return run(server);
+    drop((exe, bytes));
+    // The last resorts: the server without the parts that do not check
+    // or import, then without any terminal state.
+    if let Ok(mut s) = decoded {
+        if salvage_failed.is_none() {
+            match salvage(&mut s, &kept) {
+                Ok((server, parts)) => {
+                    drop((kept, file, s));
+                    return serve_salvaged(
+                        server,
+                        requester.as_ref(),
+                        handshake.take(),
+                        &why,
+                        &salvaged_text(&parts),
+                    );
+                }
+                Err(e) => salvage_failed = Some(e),
+            }
+        }
+        if let Some(stripped) = bare(s)
+            && let Ok(server) = guarded(|| restore(&stripped, &kept, false, None))
+        {
+            drop((kept, stripped, file));
+            if let Some(e) = &salvage_failed {
+                why = format!("{why}; keeping terminal state: {e}");
+            }
+            return serve_salvaged(
+                server,
+                requester.as_ref(),
+                handshake.take(),
+                &why,
+                "panes restored without their terminal state",
+            );
+        }
     }
     drop(file);
     answer(
@@ -995,7 +1112,7 @@ mod tests {
 
     #[test]
     fn the_last_resort_drops_terminal_state_and_modes_only() {
-        let s = snap::Snapshot {
+        let mut s = snap::Snapshot {
             panes: vec![snap::Pane {
                 id: 3,
                 term: Some(snap::TermState::default()),
@@ -1004,48 +1121,115 @@ mod tests {
             }],
             ..snap::Snapshot::default()
         };
-        let bare = without_terminals(&s);
-        assert_eq!(bare.panes[0].id, 3);
-        assert!(bare.panes[0].term.is_none() && bare.panes[0].modes.is_empty());
+        without_terminals(&mut s);
+        assert_eq!(s.panes[0].id, 3);
+        assert!(s.panes[0].term.is_none() && s.panes[0].modes.is_empty());
+    }
+
+    /// Placeholders for every descriptor `s` names, as the dry run makes
+    /// them ([`check_bytes`]).
+    fn placeholders(s: &snap::Snapshot) -> Vec<(snap::Role, OwnedFd)> {
+        s.descriptors
+            .iter()
+            .map(|d| {
+                let (ours, _) = std::os::unix::net::UnixStream::pair().unwrap();
+                (d.role.clone(), OwnedFd::from(ours))
+            })
+            .collect()
     }
 
     /// A page the dry run would refuse, in a pane's mode or terminal
-    /// state (which the last resort drops anyway), leaves the sessions to
-    /// the last resort: they are not all lost to the server that holds
-    /// only descriptors. Found by the chaos driver: a copy mode entered
-    /// during the dry run over more history than a page holds (before
-    /// 8c94c6e) was in the snapshot the exec carried, and both images
-    /// failed to read it.
+    /// state, costs only the part it is in: the last resort rebuilds the
+    /// server without it, every other pane's terminal state kept, where
+    /// it used to drop every pane's. A terminal state that checks but does
+    /// not import (a grid not its pane's size) costs only its own pane
+    /// too. Found by the chaos driver: a copy mode entered during the dry
+    /// run over more history than a page holds (before 8c94c6e) was in the
+    /// snapshot the exec carried, and both images failed to read it.
     #[test]
-    fn a_bad_page_in_a_mode_leaves_the_panes_to_the_last_resort() {
+    fn the_last_resort_leaves_out_only_the_parts_that_do_not_read() {
         use super::super::snapshot::tests as st;
         let d = dir("lastresort");
         let mut server = st::server(&d.0);
         st::ok(
             &mut server,
             &d.0,
-            &["new-session", "-d", "-s", "s", "cat", "-"],
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "s",
+                "-x",
+                "40",
+                "-y",
+                "15",
+                "cat",
+                "-",
+            ],
         );
+        for words in [
+            &["split-window", "-d", "-t", "s", "cat", "-"][..],
+            &["split-window", "-d", "-t", "s", "cat", "-"],
+        ] {
+            st::ok(&mut server, &d.0, words);
+        }
         let mut s = server.to_snapshot(snap::Meta::default());
+        let ids: Vec<u32> = s.panes.iter().map(|p| p.id).collect();
         let rows = vec![snap::Row::default(); snap::row::MAX_PAGE_ROWS as usize + 1];
-        let mut bad = snap::HistoryPage::from_rows(&rows, false);
+        let bad = snap::HistoryPage::from_rows(&rows, false);
         s.panes[0].modes = vec![snap::PaneMode::Copy(snap::CopyMode {
             history: vec![bad.clone()],
             ..snap::CopyMode::default()
         })];
-        let in_mode = snap::encode(&s);
-        assert!(decode(&in_mode).is_err(), "the dry run refuses it");
-        let last_resort = |bytes: &[u8]| bare(&decode_unchecked(bytes).unwrap());
-        let rebuilt = last_resort(&in_mode).expect("a snapshot to rebuild from");
-        assert_eq!(rebuilt.sessions.len(), 1);
-        assert_eq!(rebuilt.panes[0].modes, Vec::new());
-        // In the pane's own terminal state too.
-        s.panes[0].modes.clear();
-        bad.compressed = true;
-        s.panes[0].term.as_mut().unwrap().primary.history = vec![bad];
-        let in_term = snap::encode(&s);
-        assert!(decode(&in_term).is_err(), "the dry run refuses it");
-        assert!(last_resort(&in_term).is_some());
-        drop(server);
+        s.panes[1].term.as_mut().unwrap().primary.history = vec![bad];
+        s.panes[2].term.as_mut().unwrap().cols += 1;
+        let bytes = snap::encode(&s);
+        let refused = check_bytes(&bytes).unwrap_err();
+        assert_eq!(
+            refused,
+            format!(
+                "malformed snapshot: history page sizes don't add up, in %{0}'s copy mode: \
+                 leave copy mode in %{0} and run vtmux-upgrade again",
+                ids[0]
+            )
+        );
+
+        let mut s = decode_unchecked(&bytes).unwrap();
+        let unreadable: Vec<snap::Part> = s.unreadable().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(
+            unreadable,
+            [
+                snap::Part::PaneMode(ids[0], 0),
+                snap::Part::PaneTerm(ids[1])
+            ]
+        );
+        s.without(&unreadable);
+        let kept = placeholders(&s);
+        let mut more = Vec::new();
+        let rebuilt = restore(&s, &kept, true, Some(&mut more)).unwrap();
+        assert_eq!(more, [snap::Part::PaneTerm(ids[2])]);
+        assert_eq!(rebuilt.model.sessions.len(), 1);
+        assert_eq!(rebuilt.model.panes.len(), 3);
+        // The first pane keeps its terminal state (it imported), its copy
+        // mode gone.
+        assert!(s.panes[0].term.is_some());
+        assert!(
+            rebuilt.model.panes[&vtmux_core::ids::PaneId(ids[0])]
+                .modes
+                .is_empty()
+        );
+        assert_eq!(
+            salvaged_text(&[
+                snap::Part::PaneMode(ids[0], 0),
+                snap::Part::PaneTerm(ids[1])
+            ]),
+            format!(
+                "restored without %{}'s copy mode, %{}'s terminal state",
+                ids[0], ids[1]
+            )
+        );
+        // Strictly, the import fails.
+        assert!(restore(&s, &kept, true, None).is_err());
+        drop((rebuilt, server));
     }
 }

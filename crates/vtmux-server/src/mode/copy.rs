@@ -3288,6 +3288,12 @@ pub fn key_mode_in(n: u32) -> vtmux_vt::KeyMode {
     }
 }
 
+/// A test hook, read from the server's environment: [`CopyMode::export`]
+/// writes the frozen history as one snapshot page whatever its length, a
+/// page no reader accepts past `MAX_PAGE_ROWS` rows, as every vtmux
+/// before 8c94c6e exported it.
+const ONE_PAGE_HOOK: &str = "VTMUX_TEST_COPY_ONE_PAGE";
+
 impl CopyMode {
     /// The mode as a snapshot carries it (D27): the frozen grid, the view,
     /// the selection, the search and the jump. A mouse drag in progress is
@@ -3299,11 +3305,14 @@ impl CopyMode {
         let mut rows = rows;
         let screen = rows.split_off(hsize.min(rows.len()));
         // In pages a reader accepts: `history-limit` lets a pane keep more
-        // rows than one page holds.
+        // rows than one page holds. The test hook writes one page, however
+        // long, as a writer before 8c94c6e did (the live upgrade's last
+        // resort, crates/vtmux/tests/upgrade.rs).
+        let one_page = std::env::var_os(ONE_PAGE_HOOK).is_some();
         let mut history = Vec::new();
         let mut page = vtmux_snapshot::PageBuilder::new();
         for row in &rows {
-            if page.rows() > 0 && !page.fits(row) {
+            if page.rows() > 0 && !one_page && !page.fits(row) {
                 history.push(std::mem::take(&mut page).finish(false));
             }
             page.push(row);
