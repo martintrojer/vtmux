@@ -380,3 +380,11 @@ product reasons" category.
 - vtmux behaviour: these variables are empty (so `display-message -a` does not list them) and `-v` prints only the result. `#{window_cell_width}` and `#{window_cell_height}` are D-014.
 - Evidence: `new -d -s a cat -; display -p '#{history_added}|#{pane_output_generation}|#{pane_pb_state}|#{pane_command_running}'`: tmux `0|0|hidden|0`, vtmux `|||`. `display -pv '#{session_name}'`: tmux five `# ...` lines then `a`, vtmux `a`.
 - Category: Deferred (the counters need history bookkeeping beside Ghostty's (D-001's model), the OSC 133 and 9;4 state comes with tmux 3.8's pane events (`pane-command-started`, `pane-shell-prompt`, which vtmux has not got either) and a snapshot field each; `-v` needs a trace through the format engine).
+
+### D-047: text `format_draw` writes into a pane half under a floating pane keeps its visible end
+
+- Test / assertion: oracle `copy_position_under_floating` (annotated, the screen after `copy-mode`).
+- tmux behaviour: `screen_write_fast_copy` (screen-write.c:667-717), which `format_draw` writes through, sets each cell in the pane's screen and then `break`s at the first one a floating pane hides (`window_position_is_visible`), so the cells after it are never written, the visible ones included. Copy mode's position indicator (`copy-mode-position-format`, drawn with `format_draw` on line 0, window-copy.c `window_copy_write_line`) right-aligned in a 30-column pane under a floating pane whose border ends at column 27 loses its last two cells: tmux shows blanks where `0]` belongs, and a full redraw (`refresh-client`) still does. Text the program printed there shows (`screen_write_cell` writes every cell).
+- vtmux behaviour: the mode's screen holds the whole indicator, and the compositor draws what the floating pane leaves visible: `0]`.
+- Evidence: reference tmux 3.8, panes 30x15 and 29x15 side by side, a floating pane 30x3 at -3,1 (border columns 0-27, rows 0-4), `copy-mode` in the left pane: row 0 ends `┐` then two blanks; with `abcdefghijklmnopqrstuvwxyz0123` printed instead it ends `┐23`. Found by audit_layout_resize (a random mouse run: `M-MouseDrag1` moved the pane off the left edge, then a drag entered copy mode).
+- Category: Do not copy tmux bug (text on the pane is hidden from the screen).
