@@ -4575,6 +4575,26 @@ mod tests {
         assert_eq!(modes(b"\x1b[=c\x1b[>1u\x1b[?u").1, Vec::<u8>::new());
     }
 
+    /// DECALN fills the screen with default cells holding E, puts the
+    /// cursor top left and resets the region, and leaves the pen and origin
+    /// mode alone (`screen_write_alignmenttest`; patch 0031).
+    #[test]
+    fn decaln_writes_default_cells() {
+        let mut t = PaneTerm::new(4, 3, 0);
+        t.feed(b"\x1b[2;3r\x1b[?6h\x1b[1;31m\x1b#8X");
+        let opts = crate::capture::CaptureOpts {
+            escapes: true,
+            ..Default::default()
+        };
+        let text = String::from_utf8_lossy(&crate::capture::capture(&t, opts)).into_owned();
+        assert_eq!(text, "\x1b[1m\x1b[31mX\x1b[0mEEE\nEEEE\nEEEE\n");
+        let m = t.screen_modes();
+        assert_eq!(
+            (m.origin, m.scroll_region, t.cursor()),
+            (true, (0, 2), (1, 0))
+        );
+    }
+
     /// `CSI s` saves the cursor whatever its parameters (input.c
     /// `INPUT_CSI_SCP`); Ghostty took one with parameters for DECSLRM.
     #[test]

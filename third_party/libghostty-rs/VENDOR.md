@@ -984,6 +984,23 @@ Recorded per commit in git history; the list is kept current:
   Changes the patch stack, so an upgrade across it moves history as
   rows. Not an upstream candidate (the importer is vtmux's).
 
+- `patches/0031-decaln-as-tmux.patch` (`Terminal.zig` `decaln`): DECALN
+  fills the screen with default cells holding E, puts the cursor top
+  left and resets the region, and leaves the pen and origin mode alone,
+  as tmux's `screen_write_alignmenttest` (screen-write.c:
+  `grid_default_cell`). Ghostty wrote the Es in the pen's colours, then
+  kept only those colours in the pen (bold, blink and the rest were lost
+  for what followed) and turned origin mode off. No D4 arbiter verdict:
+  xterm's DECALN fills with its current video attributes, so neither
+  Ghostty's nor tmux's, and esctest checks only the Es, the margins and
+  the cursor; so tmux's. Test: new `Terminal: decaln writes default cells and keeps the
+  pen and origin mode (vtmux)` (Ghostty's `decaln preserves color`
+  still passes: the row SD inserts takes the pen's background); Rust
+  `term::tests::decaln_writes_default_cells`; oracle `decaln_as_tmux`.
+  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
+  -Dtest-filter=decaln -Dtest-filter=DECALN` (Debug) passes. Found by
+  `scripts/emu_fuzz.py`. Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

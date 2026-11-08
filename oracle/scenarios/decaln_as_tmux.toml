@@ -1,0 +1,12 @@
+name = "decaln_as_tmux"
+# DECALN fills the screen with default cells holding E, puts the cursor top
+# left and resets the region, and leaves the pen and origin mode alone
+# (screen-write.c screen_write_alignmenttest); Ghostty kept the pen's colours
+# for the Es, cleared the rest of the pen and turned origin mode off (patch
+# 0031). Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "6", "-y", "4", "sh", "-c", "printf 'ab\\033[2;3r\\033[?6h\\033[1;48;5;4m\\033#8X'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower}"] },
+]

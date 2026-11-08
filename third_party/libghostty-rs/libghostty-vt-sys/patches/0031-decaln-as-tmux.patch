@@ -1,0 +1,88 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -4730,15 +4730,11 @@
+ ///
+ /// Sets the cursor to the top left corner.
+ pub fn decaln(self: *Terminal) !void {
+-    // Clear our stylistic attributes. This is the only thing that can
+-    // fail so we do it first so we can undo it.
+-    const old_style = self.screens.active.cursor.style;
+-    self.screens.active.cursor.style = .{
+-        .bg_color = self.screens.active.cursor.style.bg_color,
+-        .fg_color = self.screens.active.cursor.style.fg_color,
+-    };
+-    errdefer self.screens.active.cursor.style = old_style;
+-    try self.screens.active.manualStyleUpdate();
++    // vtmux: tmux fills the screen with default cells holding E and
++    // leaves the pen and origin mode alone (screen_write_alignmenttest,
++    // screen-write.c: grid_default_cell, then the cursor to 0,0 and the
++    // region reset). Ghostty kept the pen's colours for the Es and
++    // cleared the rest of the pen and origin mode.
+ 
+     // Reset margins, also sets cursor to top-left
+     self.scrolling_region = .{
+@@ -4748,10 +4744,8 @@
+         .right = self.cols - 1,
+     };
+ 
+-    // Origin mode is disabled
+-    self.modes.set(.origin, false);
+-
+-    // Move our cursor to the top-left
++    // Move our cursor to the top-left (the region is the whole screen,
++    // so origin mode changes nothing here).
+     self.setCursorPos(1, 1);
+ 
+     // Use clearRows instead of eraseDisplay because we must NOT respect
+@@ -4771,22 +4765,12 @@
+         @memset(cells, .{
+             .content_tag = .codepoint,
+             .content = .{ .codepoint = .{ .data = 'E' } },
+-            .style_id = self.screens.active.cursor.style_id,
++            .style_id = style.default_id,
+ 
+             // DECALN does not respect protected state. Verified with xterm.
+             .protected = false,
+         });
+ 
+-        // If we have a ref-counted style, increase
+-        if (self.screens.active.cursor.style_id != style.default_id) {
+-            page.styles.useMultiple(
+-                page.memory,
+-                self.screens.active.cursor.style_id,
+-                @intCast(cells.len),
+-            );
+-            row.styled = true;
+-        }
+-
+         // We messed with the page so assert its integrity here.
+         page.assertIntegrity();
+ 
+@@ -14139,6 +14123,26 @@
+     }
+ }
+ 
++test "Terminal: decaln writes default cells and keeps the pen and origin mode (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .cols = 3, .rows = 3 });
++    defer t.deinit(alloc);
++
++    try t.setAttribute(.{ .bold = {} });
++    try t.setAttribute(.{ .direct_color_fg = .{ .r = 0xFF, .g = 0, .b = 0 } });
++    t.modes.set(.origin, true);
++    t.setTopAndBottomMargin(2, 3);
++    try t.decaln();
++    try testing.expectEqual(@as(usize, 0), t.screens.active.cursor.y);
++    try testing.expectEqual(@as(usize, 0), t.screens.active.cursor.x);
++    try testing.expect(t.modes.get(.origin));
++    try testing.expect(t.screens.active.cursor.style.flags.bold);
++    const e = t.screens.active.pages.getCell(.{ .active = .{ .x = 2, .y = 2 } }).?;
++    try testing.expectEqual(@as(u21, 'E'), e.cell.content.codepoint.data);
++    try testing.expectEqual(style.default_id, e.cell.style_id);
++}
++
+ test "Terminal: decaln preserves color" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

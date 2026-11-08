@@ -1,0 +1,90 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "decaln_as_tmux",
+  "inputs": {
+    "name": "decaln_as_tmux",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "6",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf 'ab\\033[2;3r\\033[?6h\\033[1;48;5;4m\\033#8X'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:",
+          "#{cursor_x},#{cursor_y} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[1m\u001b[48;5;4mX\u001b[0mEEEEE\nEEEEEE\nEEEEEE\nEEEEEE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0 1 0 3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
