@@ -11,17 +11,17 @@ steps = [
   { attach = { session = "a" } },
   # window-border.c:199: a pane border's format is a status format, so its
   # job's report redraws the border line.
-  { settle = { react = true } },
+  { wait_screen = { has = ["<one>"] } },
   { screen = {} },
   # A job starts again only in a later second than its last start
   # (format.c:437), so let one pass.
   { settle = { quiet_ms = 1300 } },
   { run = ["run-shell", 'echo two > "$HOME/f"'] },
   { run = ["refresh-client", "-S"] },
-  { settle = { react = true } },
+  { wait_screen = { has = ["<two>"] } },
   { screen = {} },
   { run = ["run-shell", 'echo three > "$HOME/f"'] },
   { run = ["set", "-g", "status-interval", "1"] },
-  { settle = { react = true, quiet_ms = 2600 } },
+  { wait_screen = { has = ["<three>"] } },
   { screen = {} },
 ]

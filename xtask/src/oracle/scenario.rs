@@ -45,6 +45,13 @@ pub enum Step {
     Settle(Settle),
     /// Run `wait-for <channel>`.
     WaitFor(String),
+    /// Wait until the attached client's screen (the one started with `id`,
+    /// if given) shows every `has` text and none of the `lacks` texts, each
+    /// within one row of the plain-text screen. For a state that another
+    /// process brings about (a job's report, an editor exiting), where no
+    /// quiet time is long enough on a loaded host. Observes nothing; a
+    /// screen that never gets there is a `timeout`.
+    WaitScreen(WaitScreen),
     /// Observe the attached client's screen (the one started with `id`,
     /// if given).
     Screen(ScreenSpec),
@@ -122,6 +129,17 @@ pub struct KeysTo {
 pub struct ScreenSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaitScreen {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub has: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lacks: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

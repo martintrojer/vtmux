@@ -69,14 +69,19 @@ pub trait Clock {
     fn now_ms(&self) -> u64;
 }
 
-/// The real clock: milliseconds elapsed since it was created.
+/// The real clock: the CPU time this thread has used since the clock was
+/// created, not wall time. An expansion runs on one thread from creation to
+/// the end, and the limit is there to stop a runaway one, which burns CPU.
+/// tmux counts wall time (`get_timer`, format.c:4750), so a host that
+/// preempts the process for [`TIME_LIMIT_MS`] in the middle of a finite
+/// template makes the rest of it empty (D-046).
 #[derive(Debug, Clone, Copy)]
-pub struct SystemClock(std::time::Instant);
+pub struct SystemClock(u64);
 
 impl SystemClock {
     #[must_use]
     pub fn new() -> Self {
-        Self(std::time::Instant::now())
+        Self(thread_cpu_ms())
     }
 }
 
@@ -88,8 +93,17 @@ impl Default for SystemClock {
 
 impl Clock for SystemClock {
     fn now_ms(&self) -> u64 {
-        u64::try_from(self.0.elapsed().as_millis()).unwrap_or(u64::MAX)
+        thread_cpu_ms().saturating_sub(self.0)
     }
+}
+
+/// `CLOCK_THREAD_CPUTIME_ID` in milliseconds.
+fn thread_cpu_ms() -> u64 {
+    let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+    u64::try_from(t.tv_sec)
+        .unwrap_or(0)
+        .saturating_mul(1000)
+        .saturating_add(u64::try_from(t.tv_nsec).unwrap_or(0) / 1_000_000)
 }
 
 /// Where variable values come from. The server implements this over its
@@ -1004,6 +1018,15 @@ mod tests {
             now: std::cell::Cell::new(0),
             step,
         }
+    }
+
+    /// A host that preempts the process does not cut a finite expansion
+    /// short (D-046): sleeping for longer than the limit costs no CPU time.
+    #[test]
+    fn system_clock_does_not_count_time_the_thread_is_off_the_cpu() {
+        let clock = SystemClock::new();
+        std::thread::sleep(std::time::Duration::from_millis(3 * TIME_LIMIT_MS));
+        assert!(clock.now_ms() < TIME_LIMIT_MS, "{}", clock.now_ms());
     }
 
     #[test]

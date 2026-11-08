@@ -420,3 +420,11 @@ product reasons" category.
 - vtmux behaviour: the sessions are visited in name order, each judged once the ones before it are gone: x and y go, z, the last of the group, stays (`base solo z`).
 - Evidence: reference tmux 3.8, the scenario's trace (`base\nsolo\ny\n`, log `[a][x][z]`).
 - Category: Do not copy tmux bug (iteration over a tree being removed from; copying it means modelling tmux's red-black tree).
+
+### D-052: the format expansion time limit counts CPU time, not wall time
+
+- Test / assertion: unit test `system_clock_does_not_count_time_the_thread_is_off_the_cpu` (vtmux-core `format.rs`); oracle `format_time` failed 1 run in 18 at a load of 130 on a Mac (`display -p '#{t/f/%%%%s|%%%%Y:@ts}'` printed a `ctime` date instead of `1781000000|2026`), and a loop of that command under 16 busy loops printed the date once in 9577 runs.
+- tmux behaviour: `format_check_time` (format.c:4750) stops an expansion that has run longer than `FORMAT_TIME_LIMIT` (100 ms, format.c:140) by wall time (`get_timer`): every further nested expansion is empty. It is there to end runaway re-expansion such as `@a='#{E:@a}#{E:@a}'`. A process that the host takes off the CPU for 100 ms in the middle of a finite template gets the rest of it empty: here the flags argument of `t/f/...` came out empty, so `t` fell back to its `ctime` form.
+- vtmux behaviour: `SystemClock` (the clock `expand` runs on) reads `CLOCK_THREAD_CPUTIME_ID`: a runaway expansion burns CPU and is cut off after the same 100 ms, a finite one is never cut by a busy host. Nothing else changes (the limit, and what is cut, are as in tmux; the injected-clock tests drive the limit as before).
+- Evidence: the loop above, 9576 x `1781000000|2026` and one `Tue Jun  9 11:13:20 2026` before the change, none after (see the task note of `flake_format_time_load`).
+- Category: Do not copy tmux bug (a finite format loses output because the host was busy).

@@ -53,6 +53,7 @@ steps = [ ... ]
 | `{ resize = [c, r] }` | resize the attached client's PTY |
 | `{ settle = {} }` | wait for the output a preceding input provoked, then 150 ms without output from any client (`quiet_ms` overrides); `react = true` first waits for any output since the previous settle, for steps that provoke a reaction without keys (a CLI `resize-window` that sends a pane SIGWINCH after its 250 ms timer) |
 | `{ wait_for = "chan" }` | `wait-for chan`; observes like `run` |
+| `{ wait_screen = { has = ["a"], lacks = ["b"] } }` | wait until a row of the attached client's plain-text screen contains every `has` text and none of the `lacks` texts (`id` as for `screen`); observes nothing, a screen that never gets there (60 s) is a `timeout`. For a state another process brings about (a job's report, an editor's exit) |
 | `{ screen = {} }` | settle, then observe the attached client's screen (`{ id = "b" }`: client `b`'s) |
 | `{ title = {} }` | settle, then observe the attached client's terminal title (OSC 0/2 from `set-titles`) as a `cli` observation: the title and a newline |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
@@ -72,7 +73,7 @@ depending on load).
 
 `replay --upgrade-every <n>` (in `scripts/check.sh`, so in CI, with `n` = 3) inserts an `upgrade` after every
 nth step of every scenario, and every scenario must still match its trace (live-upgrade spec, *Tests*). An
-inserted upgrade never comes between an input and the `settle` or `control_wait` that waits for its reaction,
+inserted upgrade never comes between an input and the `settle`, `control_wait` or `wait_screen` that waits for its reaction,
 nor after the last step; it first settles. The runs set `VTMUX_TEST_UPGRADE_STRICT=1` for vtmux (a server
 hook, never in the global environment): where an upgrade would wait for work in flight (a pane's `tmux
 wait-for`, a job) or change what a client sees (a mode, prompt or menu it closes by design, a status message,
@@ -109,4 +110,4 @@ against their `expect`.
 
 **Host names on screen.** A screen showing the recording machine's host name (the default `status-right`, or a pane title in `status-format[1]`) has padding that depends on the name's length, which no normalisation can undo elsewhere. `oracle record` refuses such a screen: pin `status-right` and the pane titles (`select-pane -T`). Pin the title of every pane a scenario creates, including ones split mid-scenario: a new pane's title is the host name, and screens that hide it only when it equals `#{host_short}` (the tree's default format) change on a host whose name has dots, which `record` can't see from a dotless one.
 
-**Races under load.** CI runners are slower than a laptop. A `screen` right after a `run` that changes the screen (zoom, resize, `display-message`, option changes) should be preceded by `{ settle = { react = true } }`, which waits for output since the last settle. A pane program that changes tty modes (`stty raw`) must signal with `tmux wait-for -S` and the scenario must `wait_for` it before sending keys. Check a new scenario with `oracle replay` five times under a CPU hog (`nproc` busy loops) before committing.
+**Races under load.** CI runners are slower than a laptop. A `screen` right after a `run` that changes the screen (zoom, resize, `display-message`, option changes) should be preceded by `{ settle = { react = true } }`, which waits for output since the last settle. A pane program that changes tty modes (`stty raw`) must signal with `tmux wait-for -S` and the scenario must `wait_for` it before sending keys. A state that another process brings about (a `#(...)` job's first report, an editor exiting) is waited for with `{ wait_screen = { has = [...], lacks = [...] } }`: no quiet time is long enough for a process to start on a host at a load of a hundred, and the output that arrives first (the attach's draw, the modal pane's) satisfies a `settle { react }` too early. The runner's own limits (a CLI call, a `wait_for`, an attach's first draw) only end a hang, tens of seconds, for the same reason. Check a new scenario with `oracle replay` five times under a CPU hog (`nproc` busy loops) before committing.

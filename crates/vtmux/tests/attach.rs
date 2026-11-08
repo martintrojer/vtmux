@@ -2,6 +2,7 @@
 mod common;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use std::cell::Cell;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -6134,8 +6135,60 @@ fn since(a: &Attached, mark: usize) -> String {
 /// second after its last `?2026h` (the sync timer). Dogfood bug 4: an
 /// Ink TUI clears and redraws inside `?2026`, and flashed blank.
 /// Modelled on the owner's synccheck.py.
+///
+/// The timer is wall-clock, so a check that something is *still* held is only
+/// valid inside its second: on a starved host a `sleep` or a CLI call alone can
+/// outlast it. A check that fails after the timer could have run out is
+/// inconclusive, not a failure (`SyncWindow`): the phase starts over from a
+/// reset screen. A check that fails inside the window, or a phase that never
+/// gets a window, still fails. Waits for output have no wall-clock bound a
+/// loaded host could miss (`LOAD_LIMIT` only ends a hang).
 #[test]
+#[allow(clippy::too_many_lines)]
 fn synchronized_output_holds_the_pane_until_it_ends() {
+    /// The sync timer (input.c `INPUT_SYNC_TIMER`, one second after the last `?2026h`).
+    const SYNC_TIMER: Duration = Duration::from_secs(1);
+    const LOAD_LIMIT: Duration = Duration::from_secs(60);
+    const ATTEMPTS: usize = 50;
+
+    struct Retry;
+    /// When the last `?2026h` was written: the timer cannot have run out
+    /// before `SYNC_TIMER` has passed since.
+    struct SyncWindow(Cell<Instant>);
+    impl SyncWindow {
+        /// Call before writing the `?2026h`.
+        fn arm(&self) {
+            self.0.set(Instant::now());
+        }
+        fn open(&self) -> bool {
+            self.0.get().elapsed() < SYNC_TIMER
+        }
+        fn check(&self, ok: bool, what: impl FnOnce() -> String) -> Result<(), Retry> {
+            if ok {
+                Ok(())
+            } else if self.open() {
+                panic!("{}", what())
+            } else {
+                Err(Retry)
+            }
+        }
+    }
+
+    /// Nothing of the held drawing reached the client since `mark`: its text
+    /// is not in the bytes and the left pane still shows `word0`..`word4`.
+    /// Not "no bytes at all": a redraw of the borders from an earlier event
+    /// can land late on a starved host (the reference does that), and is not
+    /// the pane's content.
+    fn held(a: &Attached, mark: usize, drawing: &str, word: &str) -> bool {
+        !since(a, mark).contains(drawing)
+            && (0..5).all(|y| {
+                pane_text(a)
+                    .lines()
+                    .nth(y)
+                    .is_some_and(|r| r.starts_with(&format!("{word}{y}")))
+            })
+    }
+
     for bin in bins() {
         let name = bin.display().to_string();
         let w = World::new(bin);
@@ -6157,66 +6210,106 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
         let row = |a: &Attached, y: usize| pane_text(a).lines().nth(y).unwrap_or("").to_owned();
         let rows_start =
             |a: &Attached, word: &str| (0..5).all(|y| row(a, y).starts_with(&format!("{word}{y}")));
+        let win = SyncWindow(Cell::new(Instant::now()));
 
-        for y in 0..5 {
-            write!(left, "OLD{y}\r\n").unwrap();
+        // Ends any sync and draws `word0`..`word4` in the left pane (and
+        // clears the right one): the starting point of every attempt.
+        let reset = |left: &mut std::fs::File, right: &mut std::fs::File, word: &str| {
+            left.write_all(b"\x1b[?2026l\x1b[2J\x1b[H").unwrap();
+            for y in 0..5 {
+                write!(left, "{word}{y}\r\n").unwrap();
+            }
+            right.write_all(b"\x1b[2J\x1b[H").unwrap();
+            a.wait_labelled(&name, LOAD_LIMIT, |a| {
+                rows_start(a, word) && !row(a, 0).contains("OTHER")
+            });
+            // Output that trails the last row must not count as sent during the sync.
+            thread::sleep(Duration::from_millis(200));
+        };
+
+        let hold = |left: &mut std::fs::File, right: &mut std::fs::File| {
+            // Mid-redraw: the screen is cleared and half drawn.
+            let mark = a.bytes.lock().unwrap().len();
+            win.arm();
+            left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HMIDSYNC").unwrap();
+            thread::sleep(Duration::from_millis(300));
+            win.check(held(&a, mark, "MIDSYNC", "OLD"), || {
+                format!(
+                    "{name}: bytes sent while the pane syncs: {:?}",
+                    since(&a, mark)
+                )
+            })?;
+            win.check(sync_flag() == "1", || format!("{name}: sync flag off"))?;
+
+            // Another pane is not held back. `?2026h` again re-arms the timer.
+            win.arm();
+            left.write_all(b"\x1b[?2026h").unwrap();
+            right.write_all(b"OTHER").unwrap();
+            a.wait_labelled(&name, LOAD_LIMIT, |a| row(a, 0).contains("OTHER"));
+            thread::sleep(Duration::from_millis(100));
+            win.check(rows_start(&a, "OLD"), || {
+                format!("{name}: the pane's last rows stay: {:?}", pane_text(&a))
+            })?;
+            win.check(sync_flag() == "1", || format!("{name}: sync flag off"))
+        };
+        let mut attempts = 0;
+        loop {
+            reset(&mut left, &mut right, "OLD");
+            if hold(&mut left, &mut right).is_ok() {
+                break;
+            }
+            attempts += 1;
+            assert!(
+                attempts < ATTEMPTS,
+                "{name}: the sync timer always ran out first"
+            );
         }
-        a.wait_labelled(&name, Duration::from_secs(5), |a| rows_start(a, "OLD"));
-        thread::sleep(Duration::from_millis(200));
 
-        // Mid-redraw: the screen is cleared and half drawn.
-        let mark = a.bytes.lock().unwrap().len();
-        left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HMIDSYNC").unwrap();
-        thread::sleep(Duration::from_millis(300));
-        assert_eq!(
-            since(&a, mark),
-            "",
-            "{name}: bytes sent while the pane syncs"
-        );
-        assert_eq!(sync_flag(), "1", "{name}");
-
-        // Another pane is not held back. `?2026h` again re-arms the timer.
-        left.write_all(b"\x1b[?2026h").unwrap();
-        right.write_all(b"OTHER").unwrap();
-        a.wait_labelled(&name, Duration::from_secs(5), |a| {
-            row(a, 0).contains("OTHER")
-        });
-        thread::sleep(Duration::from_millis(100));
-        assert!(
-            rows_start(&a, "OLD"),
-            "{name}: the pane's last rows stay: {:?}",
-            pane_text(&a)
-        );
-        assert_eq!(sync_flag(), "1", "{name}");
-
-        // ?2026l: the finished drawing, at once.
+        // ?2026l: the finished drawing, at once. No timer to race: ending
+        // the sync after it ran out draws the same rows.
         left.write_all(b"\x1b[2J\x1b[H").unwrap();
         for y in 0..5 {
             write!(left, "NEW{y}\r\n").unwrap();
         }
         left.write_all(b"\x1b[?2026l").unwrap();
-        a.wait_labelled(&name, Duration::from_secs(5), |a| rows_start(a, "NEW"));
+        a.wait_labelled(&name, LOAD_LIMIT, |a| rows_start(a, "NEW"));
         assert_eq!(sync_flag(), "0", "{name}");
 
-        // A program that never ends it: drawn once the timer is up.
-        thread::sleep(Duration::from_millis(200));
-        let mark = a.bytes.lock().unwrap().len();
-        let start = Instant::now();
-        left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HSTUCK").unwrap();
-        thread::sleep(Duration::from_millis(500));
-        assert_eq!(
-            since(&a, mark),
-            "",
-            "{name}: bytes sent while the pane syncs"
-        );
-        a.wait_labelled(&name, Duration::from_secs(5), |a| {
-            row(a, 0).starts_with("STUCK")
-        });
-        let took = start.elapsed();
-        assert!(
-            took >= Duration::from_millis(800) && took < Duration::from_secs(3),
-            "{name}: drawn after {took:?}"
-        );
+        // A program that never ends it: drawn once the timer is up, one
+        // second after its `?2026h`. The start is taken before the write, so
+        // a drawing earlier than the timer shows up as too early whatever the
+        // load; one later than three seconds only says the host was slow, and
+        // another attempt follows.
+        let mut attempts = 0;
+        loop {
+            thread::sleep(Duration::from_millis(200));
+            let mark = a.bytes.lock().unwrap().len();
+            let start = Instant::now();
+            win.arm();
+            left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HSTUCK").unwrap();
+            thread::sleep(Duration::from_millis(500));
+            let quiet = win.check(held(&a, mark, "STUCK", "NEW"), || {
+                format!(
+                    "{name}: bytes sent while the pane syncs: {:?}",
+                    since(&a, mark)
+                )
+            });
+            a.wait_labelled(&name, LOAD_LIMIT, |a| row(a, 0).starts_with("STUCK"));
+            let took = start.elapsed();
+            assert!(
+                took >= Duration::from_millis(800),
+                "{name}: drawn after {took:?}"
+            );
+            if quiet.is_ok() && took < Duration::from_secs(3) {
+                break;
+            }
+            attempts += 1;
+            assert!(
+                attempts < ATTEMPTS,
+                "{name}: drawn after {took:?}, in {attempts} attempts"
+            );
+            reset(&mut left, &mut right, "NEW");
+        }
         assert_eq!(sync_flag(), "0", "{name}: the timer ends the mode");
     }
 }

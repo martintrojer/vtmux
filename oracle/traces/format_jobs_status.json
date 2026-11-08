@@ -58,8 +58,10 @@
         }
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "[one]"
+          ]
         }
       },
       {
@@ -86,8 +88,10 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "[two]"
+          ]
         }
       },
       {
@@ -102,8 +106,10 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "[xtwo]"
+          ]
         }
       },
       {
@@ -124,9 +130,10 @@
         ]
       },
       {
-        "settle": {
-          "quiet_ms": 2600,
-          "react": true
+        "wait_screen": {
+          "has": [
+            "[xthree]"
+          ]
         }
       },
       {

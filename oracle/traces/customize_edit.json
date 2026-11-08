@@ -117,8 +117,13 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "@cm: old-new"
+          ],
+          "lacks": [
+            "w*O"
+          ]
         }
       },
       {
@@ -206,8 +211,13 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "Command: display-message old-new"
+          ],
+          "lacks": [
+            "w*O"
+          ]
         }
       },
       {
@@ -225,8 +235,11 @@
         "keys": "q"
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "lacks": [
+            "Window & Pane Options",
+            "w*O"
+          ]
         }
       },
       {

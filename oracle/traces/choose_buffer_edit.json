@@ -121,8 +121,13 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "plain=no newline-new"
+          ],
+          "lacks": [
+            "w*O"
+          ]
         }
       },
       {
@@ -155,8 +160,13 @@
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "nl=has newline-new"
+          ],
+          "lacks": [
+            "w*O"
+          ]
         }
       },
       {
@@ -237,6 +247,14 @@
           "-F",
           "#{buffer_name}"
         ]
+      },
+      {
+        "wait_screen": {
+          "lacks": [
+            "nl=has newline",
+            "w*O"
+          ]
+        }
       },
       {
         "screen": {}
@@ -587,7 +605,7 @@
       }
     },
     {
-      "step": 39,
+      "step": 40,
       "observation": {
         "kind": "screen",
         "rows": [

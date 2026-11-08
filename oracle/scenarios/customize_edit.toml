@@ -1,4 +1,4 @@
-# customize-mode `e` (window-customize.c window_customize_start_edit, spawn.c spawn_editor): the current option's value goes to `editor file`, which runs over the screen nine tenths of its size while the mode shows WAITING FOR EDITOR and takes only q, Escape and C-c; once the editor exits 0 the file (less one newline) is the option's new value. The editor here signals `opened`, waits for `go`, then appends `-new` to the file. A key binding's Command too, then q leaves the mode. The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after. The mode's redraw after `e` settles before `go`, so the `settle { react }` after `go` waits for the redraw the editor's exit brings (the README's *Races under load*: a busy host can take longer than the quiet time to finish the editor).
+# customize-mode `e` (window-customize.c window_customize_start_edit, spawn.c spawn_editor): the current option's value goes to `editor file`, which runs over the screen nine tenths of its size while the mode shows WAITING FOR EDITOR and takes only q, Escape and C-c; once the editor exits 0 the file (less one newline) is the option's new value. The editor here signals `opened`, waits for `go`, then appends `-new` to the file. A key binding's Command too, then q leaves the mode. The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after. The mode's redraw after `e` settles before `go`; after `go` the scenario waits for the screen to show the edit's result and no modal pane (`wait_screen`), since no quiet time is long enough for an editor on a busy host (the README's *Races under load*).
 name = "customize_edit"
 size = [80, 24]
 steps = [
@@ -20,7 +20,7 @@ steps = [
   { wait_for = "opened" },
   { settle = {} },
   { run = ["wait-for", "-S", "go"] },
-  { settle = { react = true } },
+  { wait_screen = { has = ["@cm: old-new"], lacks = ["w*O"] } },
   { screen = {} },
   { run = ["show", "-gv", "@cm"] },
   { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
@@ -39,10 +39,10 @@ steps = [
   { wait_for = "opened" },
   { settle = {} },
   { run = ["wait-for", "-S", "go"] },
-  { settle = { react = true } },
+  { wait_screen = { has = ["Command: display-message old-new"], lacks = ["w*O"] } },
   { screen = {} },
   { run = ["list-keys", "-T", "prefix", "User2"] },
   { keys = "q" },
-  { settle = { react = true } },
+  { wait_screen = { lacks = ["Window & Pane Options", "w*O"] } },
   { screen = {} },
 ]

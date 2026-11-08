@@ -24,7 +24,7 @@ use vtmux_vt::{CaptureOpts, PaneTerm, capture};
 use crate::reap;
 
 use super::normalize::Normalizer;
-use super::scenario::{Divergence, Observation, Scenario, Setup, Step};
+use super::scenario::{Divergence, Observation, Scenario, Settle, Setup, Step, WaitScreen};
 
 /// An observation plus where it came from.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -37,8 +37,15 @@ pub struct Item {
     pub divergence: Option<Divergence>,
 }
 
-const CLI_TIMEOUT: Duration = Duration::from_secs(10);
-const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+// The limits below only end a hang. A host at a load of a hundred starves a
+// process for tens of seconds (a fresh `tmux` client, a server start, an
+// attach's first draw), and a limit that runs out turns that into a
+// `timeout` observation and a cascade of failures behind it.
+const CLI_TIMEOUT: Duration = Duration::from_secs(120);
+const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
+/// After a CLI process exits, how long its output pipes may stay open.
+const DRAIN_LIMIT: Duration = Duration::from_secs(30);
+const WAIT_SCREEN_LIMIT: Duration = Duration::from_secs(60);
 const DEFAULT_QUIET: Duration = Duration::from_millis(150);
 const SETTLE_LIMIT: Duration = Duration::from_secs(30);
 /// How long `settle` waits for the first output a just-sent input provokes.
@@ -368,8 +375,10 @@ impl<'a> Runner<'a> {
             }
             thread::sleep(POLL);
         };
-        // The pipes close with the process unless a daemon inherited them.
-        let limit = Instant::now() + Duration::from_secs(2);
+        // The pipes close with the process unless a daemon inherited them. The
+        // readers are threads on a host that may starve them for seconds:
+        // stopping early would cut the output short.
+        let limit = Instant::now() + DRAIN_LIMIT;
         while !(od.load(Ordering::SeqCst) && ed.load(Ordering::SeqCst)) && Instant::now() < limit {
             thread::sleep(POLL);
         }
@@ -461,23 +470,12 @@ impl<'a> Runner<'a> {
                     self.size = [*c, *r];
                     self.expect_after = Some(total);
                 }
-                Step::Settle(s) => {
-                    if s.react && self.expect_after.is_none() {
-                        self.expect_after = Some(self.baseline);
-                    }
-                    if !self.settle(s.quiet_ms.map_or(DEFAULT_QUIET, Duration::from_millis)) {
-                        self.push(
-                            i,
-                            Observation::Timeout {
-                                what: "settle".into(),
-                            },
-                        );
-                    }
-                }
+                Step::Settle(s) => self.settle_step(i, s),
                 Step::WaitFor(chan) => {
                     let argv = vec!["wait-for".to_string(), chan.clone()];
                     self.cli(i, &argv, &format!("wait_for {chan}"))?;
                 }
+                Step::WaitScreen(w) => self.wait_screen_step(i, w)?,
                 Step::Screen(s) => {
                     let id = s.id.clone().unwrap_or_default();
                     self.observe_client(i, &id, "screen", false)?;
@@ -513,7 +511,14 @@ impl<'a> Runner<'a> {
             *due = true;
         }
         let next = self.sc.steps.get(i + 1);
-        if *due && next.is_some_and(|s| !matches!(s, Step::Settle(_) | Step::ControlWait(_))) {
+        if *due
+            && next.is_some_and(|s| {
+                !matches!(
+                    s,
+                    Step::Settle(_) | Step::ControlWait(_) | Step::WaitScreen(_)
+                )
+            })
+        {
             *due = !self.upgrade(i, true);
         }
     }
@@ -744,7 +749,7 @@ impl<'a> Runner<'a> {
             }
             thread::sleep(POLL);
         };
-        let limit = Instant::now() + Duration::from_secs(2);
+        let limit = Instant::now() + DRAIN_LIMIT;
         while !ctl.done.load(Ordering::SeqCst) && Instant::now() < limit {
             thread::sleep(POLL);
         }
@@ -890,6 +895,54 @@ impl<'a> Runner<'a> {
             }
         }
         Ok(term)
+    }
+
+    fn settle_step(&mut self, step: usize, s: &Settle) {
+        if s.react && self.expect_after.is_none() {
+            self.expect_after = Some(self.baseline);
+        }
+        if !self.settle(s.quiet_ms.map_or(DEFAULT_QUIET, Duration::from_millis)) {
+            self.push(
+                step,
+                Observation::Timeout {
+                    what: "settle".into(),
+                },
+            );
+        }
+    }
+
+    /// The `wait_screen` step: a `timeout` observation if it never gets there.
+    fn wait_screen_step(&mut self, step: usize, w: &WaitScreen) -> Result<()> {
+        if !self.wait_screen(w)? {
+            self.push(
+                step,
+                Observation::Timeout {
+                    what: format!("wait_screen {w:?}"),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Poll the client's screen until it shows every `has` and none of the
+    /// `lacks` texts. False if it never does within `WAIT_SCREEN_LIMIT`.
+    fn wait_screen(&self, w: &WaitScreen) -> Result<bool> {
+        let id = w.id.clone().unwrap_or_default();
+        let start = Instant::now();
+        loop {
+            let term = self.client_term(&id)?;
+            let text =
+                String::from_utf8_lossy(&capture(&term, CaptureOpts::default())).into_owned();
+            let rows: Vec<&str> = text.lines().collect();
+            let shown = |t: &String| rows.iter().any(|r| r.contains(t.as_str()));
+            if w.has.iter().all(shown) && !w.lacks.iter().any(shown) {
+                return Ok(true);
+            }
+            if start.elapsed() > WAIT_SCREEN_LIMIT {
+                return Ok(false);
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Settle, then observe the attached client's screen, or its terminal

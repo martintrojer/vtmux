@@ -1,4 +1,4 @@
-# choose-buffer `e` (window-buffer.c window_buffer_start_edit, window_buffer_edit_close_cb; spawn.c spawn_editor): the current buffer goes to `editor file`; once the editor exits 0 the file is the buffer's new data, less a newline the editor added to a buffer that did not end in one (a buffer that did keeps its own). The editor here signals `opened`, waits for `go`, then appends `-new` to the file. q sent to the pane while the editor runs ends the mode, and the edit is then dropped (spawn_cancel_editor). The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after. The mode's redraw after `e` settles before `go`, so the `settle { react }` after `go` waits for the redraw the editor's exit brings (the README's *Races under load*: a busy host can take longer than the quiet time to finish the editor).
+# choose-buffer `e` (window-buffer.c window_buffer_start_edit, window_buffer_edit_close_cb; spawn.c spawn_editor): the current buffer goes to `editor file`; once the editor exits 0 the file is the buffer's new data, less a newline the editor added to a buffer that did not end in one (a buffer that did keeps its own). The editor here signals `opened`, waits for `go`, then appends `-new` to the file. q sent to the pane while the editor runs ends the mode, and the edit is then dropped (spawn_cancel_editor). The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after. The mode's redraw after `e` settles before `go`; after `go` the scenario waits for the screen to show the edit's result and no modal pane (`wait_screen`), since no quiet time is long enough for an editor on a busy host (the README's *Races under load*).
 name = "choose_buffer_edit"
 size = [80, 24]
 steps = [
@@ -19,7 +19,7 @@ steps = [
   { wait_for = "opened" },
   { settle = {} },
   { run = ["wait-for", "-S", "go"] },
-  { settle = { react = true } },
+  { wait_screen = { has = ["plain=no newline-new"], lacks = ["w*O"] } },
   { screen = {} },
   { run = ["show-buffer", "-b", "plain"] },
   { keys = "k" },
@@ -27,7 +27,7 @@ steps = [
   { wait_for = "opened" },
   { settle = {} },
   { run = ["wait-for", "-S", "go"] },
-  { settle = { react = true } },
+  { wait_screen = { has = ["nl=has newline-new"], lacks = ["w*O"] } },
   { screen = {} },
   { run = ["show-buffer", "-b", "nl"] },
   { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
@@ -41,5 +41,6 @@ steps = [
   { settle = { react = true } },
   { run = ["show-buffer", "-b", "nl"] },
   { run = ["list-buffers", "-F", "#{buffer_name}"] },
+  { wait_screen = { lacks = ["nl=has newline", "w*O"] } },
   { screen = {} },
 ]
