@@ -328,6 +328,7 @@ impl Model {
             wrap_search: self.number_option(w, "wrap-search") != 0,
             mouse: false,
             slider: None,
+            dragging: false,
         })
     }
 

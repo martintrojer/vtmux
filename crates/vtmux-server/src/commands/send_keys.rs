@@ -227,11 +227,13 @@ fn mode_command(
     {
         server.model.set_active(w, p);
     }
+    let dragging = tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.mouse.drag_held()));
     let result = server
         .with_mode(p, |m, env| {
             let env = crate::mode::copy::Env {
                 mouse: mouse.is_some(),
                 slider,
+                dragging,
                 ..env.clone()
             };
             m.command(&env, name, rest, read_only)

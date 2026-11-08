@@ -1115,6 +1115,7 @@ mod tests {
             wrap_search: true,
             mouse: false,
             slider: None,
+            dragging: false,
         };
         NO_ASCII_COUNT.with(|f| f.set(slow));
         let before = ASCII_COUNTED.with(std::cell::Cell::get);

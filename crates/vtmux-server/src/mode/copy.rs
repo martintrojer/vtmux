@@ -73,6 +73,10 @@ impl SelectionMode {
 
 /// The options copy mode reads as it goes.
 #[derive(Clone, Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the options and the client state a copy mode command reads"
+)]
 pub struct Env {
     /// `mode-keys` is `vi`.
     pub vi: bool,
@@ -89,6 +93,10 @@ pub struct Env {
     /// pointer's row against the pane's top, where the slider was grabbed,
     /// the slider's height and the bar's. `None` without a client.
     pub slider: Option<(i64, i64, u32, u32)>,
+    /// The command's client holds a mouse button it has moved
+    /// (`cs->c->tty.mouse_drag_flag`): the scroll commands move the cursor,
+    /// and the selection's end with it, rather than only the view.
+    pub dragging: bool,
 }
 
 /// How a cell in view is painted (`window_copy_update_style`,
@@ -802,6 +810,7 @@ impl CopyMode {
             wrap_search: false,
             mouse: false,
             slider: None,
+            dragging: false,
         };
         self.size_changed(&env);
     }
@@ -1444,7 +1453,7 @@ impl CopyMode {
             }
             "scroll-up" => {
                 if self.oy != self.hsize() {
-                    if self.sel.is_some() {
+                    if self.sel.is_some() && !env.dragging {
                         // With a selection, only the view moves.
                         self.drag = Drag::None;
                         self.lineflag = LineSel::None;
@@ -1459,19 +1468,20 @@ impl CopyMode {
                     let exit = self.scroll_exit && self.sel.is_none();
                     return Some(if exit { Action::Cancel } else { Action::Stay }.into());
                 }
-                if self.sel.is_some() {
+                if self.sel.is_some() && !env.dragging {
                     self.drag = Drag::None;
                     self.lineflag = LineSel::None;
                     self.scroll_up(env, np as usize);
                     return Some(Action::Stay.into());
                 }
                 repeat(self, &mut |m| m.cursor_down(env, true));
-                if self.scroll_exit && self.oy == 0 {
+                // A drag's selection keeps the mode (window_copy_cmd_scroll_down).
+                if self.scroll_exit && self.oy == 0 && self.sel.is_none() {
                     return Some(Action::Cancel.into());
                 }
             }
             "scroll-down-and-cancel" => {
-                if self.sel.is_some() {
+                if self.sel.is_some() && !env.dragging {
                     self.drag = Drag::None;
                     self.lineflag = LineSel::None;
                     self.scroll_up(env, np as usize);
@@ -3521,6 +3531,7 @@ mod tests {
             wrap_search: true,
             mouse: false,
             slider: None,
+            dragging: false,
         }
     }
 
@@ -3772,6 +3783,7 @@ mod selection_tests {
             wrap_search: true,
             mouse: false,
             slider: None,
+            dragging: false,
         }
     }
 

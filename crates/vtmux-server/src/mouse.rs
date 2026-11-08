@@ -356,6 +356,14 @@ impl ClientMouse {
         self.click_deadline
     }
 
+    /// A button is held since it moved (`mouse_drag_flag`), which copy
+    /// mode's scroll commands check (window-copy.c
+    /// `window_copy_cmd_scroll_up`).
+    #[must_use]
+    pub fn drag_held(&self) -> bool {
+        self.drag_flag != 0
+    }
+
     /// A drag is going on: a button held since it moved
     /// (`mouse_drag_flag`), a scrollbar's slider held
     /// (`mouse_scrolling_flag`), or a command's drag callback installed.

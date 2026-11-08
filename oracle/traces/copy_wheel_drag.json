@@ -1,0 +1,562 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "copy_wheel_drag",
+  "inputs": {
+    "name": "copy_wheel_drag",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "11",
+          "sh",
+          "-c",
+          "i=1; while [ $i -le 40 ]; do echo \"word$i foo.bar baz-q x\"; i=$((i+1)); done; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R",
+          ";",
+          "set",
+          "-g",
+          "mouse",
+          "on",
+          ";",
+          "set",
+          "-g",
+          "set-clipboard",
+          "off",
+          ";",
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right][#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001b[<64;5;5M\u001b[<64;5;5M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;3;4M\u001b[<32;6;4M\u001b[<32;12;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<64;12;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{scroll_position} #{copy_cursor_x},#{copy_cursor_y} #{selection_start_x},#{selection_start_y} #{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<65;12;6M\u001b[<65;12;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{scroll_position} #{copy_cursor_x},#{copy_cursor_y} #{selection_start_x},#{selection_start_y} #{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;12;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "mode-keys",
+          "vi"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;5;5M\u001b[<64;5;5M"
+      },
+      {
+        "keys": "\u001b[<0;3;4M\u001b[<32;6;4M\u001b[<32;12;6M"
+      },
+      {
+        "keys": "\u001b[<64;12;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{scroll_position} #{copy_cursor_x},#{copy_cursor_y} #{selection_start_x},#{selection_start_y} #{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;12;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "8",
+          "cursor-up"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "begin-selection"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cursor-down"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;12;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{scroll_position} #{copy_cursor_x},#{copy_cursor_y} #{selection_start_x},#{selection_start_y} #{selection_end_x},#{selection_end_y}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word26 foo.bar baz-q x            \\e[30m\\e[43m[5/30]",
+          "\\e[39m\\e[49mword27 foo.bar baz-q x",
+          "word28 foo.bar baz-q x",
+          "word29 foo.bar baz-q x",
+          "word30 foo.bar baz-q x",
+          "word31 foo.bar baz-q x",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q x",
+          "word34 foo.bar baz-q x",
+          "word35 foo.bar baz-q x",
+          "word36 foo.bar baz-q x",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          22,
+          10
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word26 foo.bar baz-q x            \\e[30m\\e[43m[5/30]",
+          "\\e[39m\\e[49mword27 foo.bar baz-q x",
+          "word28 foo.bar baz-q x",
+          "wo\\e[30m\\e[43mrd29 foo.bar baz-q x",
+          "word30 foo.bar baz-q x",
+          "word31 foo.\\e[39m\\e[49mbar baz-q x",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q x",
+          "word34 foo.bar baz-q x",
+          "word35 foo.bar baz-q x",
+          "word36 foo.bar baz-q x",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          5
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word21 foo.bar baz-q x           \\e[30m\\e[43m[10/30]",
+          "\\e[39m\\e[49mword22 foo.bar baz-q x",
+          "word23 foo.bar baz-q x",
+          "word24 foo.bar baz-q x",
+          "word25 foo.bar baz-q x",
+          "word26 foo.\\e[30m\\e[43mbar baz-q x",
+          "word27 foo.bar baz-q x",
+          "word28 foo.bar baz-q x",
+          "wo\\e[39m\\e[49mrd29 foo.bar baz-q x",
+          "word30 foo.bar baz-q x",
+          "word31 foo.bar baz-q x",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          5
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "10 11,5 2,28 11,25\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43mword31 foo.bar baz-q x            [0/30]",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q x",
+          "word34 foo.bar baz-q x",
+          "word35 foo.bar baz-q x",
+          "word36 foo.\\e[39m\\e[49mbar baz-q x",
+          "word37 foo.bar baz-q x",
+          "word38 foo.bar baz-q x",
+          "word39 foo.bar baz-q x",
+          "word40 foo.bar baz-q x",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          5
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 11,5 2,28 11,35\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word31 foo.bar baz-q x",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q x",
+          "word34 foo.bar baz-q x",
+          "word35 foo.bar baz-q x",
+          "word36 foo.bar baz-q x",
+          "word37 foo.bar baz-q x",
+          "word38 foo.bar baz-q x",
+          "word39 foo.bar baz-q x",
+          "word40 foo.bar baz-q x",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "rd29 foo.bar baz-q x\nword30 foo.bar baz-q x\nword31 foo.bar baz-q x\nword32 foo.bar baz-q x\nword33 foo.bar baz-q x\nword34 foo.bar baz-q x\nword35 foo.bar baz-q x\nword36 foo.",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word21 foo.bar baz-q x           \\e[30m\\e[43m[10/30]",
+          "\\e[39m\\e[49mword22 foo.bar baz-q x",
+          "word23 foo.bar baz-q x",
+          "word24 foo.bar baz-q x",
+          "word25 foo.bar baz-q x",
+          "word26 foo.bar baz-q x",
+          "word27 foo.bar baz-q x",
+          "word28 foo.bar baz-q x",
+          "wo\\e[30m\\e[43mrd29 foo.bar baz-q x",
+          "word30 foo.bar baz-q x",
+          "word31 foo.b\\e[39m\\e[49mar baz-q x",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          10
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "10 11,10 2,28 11,30\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word31 foo.bar baz-q x",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q x",
+          "word34 foo.bar baz-q x",
+          "word35 foo.bar baz-q x",
+          "word36 foo.bar baz-q x",
+          "word37 foo.bar baz-q x",
+          "word38 foo.bar baz-q x",
+          "word39 foo.bar baz-q x",
+          "word40 foo.bar baz-q x",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "rd29 foo.bar baz-q x\nword30 foo.bar baz-q x\nword31 foo.b",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "word26 foo.bar baz-q x            \\e[30m\\e[43m[5/30]",
+          "\\e[39m\\e[49mword27 foo.bar baz-q x",
+          "word28 foo.bar baz-q x",
+          "word29 foo.bar baz-q x",
+          "word30 foo.bar baz-q x",
+          "word31 foo.bar baz-q x",
+          "word32 foo.bar baz-q x",
+          "word33 foo.bar baz-q \\e[30m\\e[43mx",
+          "word34 foo.bar baz-q x\\e[39m\\e[49m",
+          "word35 foo.bar baz-q x",
+          "word36 foo.bar baz-q x",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          21,
+          3
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "5 21,3 21,32 21,33\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
