@@ -4688,7 +4688,7 @@ mod tests {
         assert_eq!(text, "\x1b[1m\x1b[31mX\x1b[0mEEE\nEEEE\nEEEE\n");
         let m = t.screen_modes();
         assert_eq!(
-            (m.origin, m.scroll_region, t.cursor()),
+            (m.origin, t.scroll_region(), t.cursor()),
             (true, (0, 2), (1, 0))
         );
     }
