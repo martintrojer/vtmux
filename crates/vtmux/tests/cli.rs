@@ -1347,6 +1347,53 @@ fn startup_config_conditions() {
     });
 }
 
+/// The commands of a sourced file run in a state of their own
+/// (cfg.c `load_cfg_from_buffer`: `cmdq_copy_state(state, target)`): the
+/// `-t` target, or the target found without one, is their current state,
+/// so a `new -d` in the file does not move them to the new session, while
+/// `%if` is decided for the client (no `pi.fs`); a `-t` that finds nothing
+/// leaves them none. The copy keeps no formats, so a file a hook sources
+/// sees no `#{hook}`, while the hook's own next command does.
+#[test]
+fn source_file_runs_in_its_targets_state() {
+    compare("source_file_runs_in_its_targets_state", |w| {
+        let write = |name: &str, text: &str| {
+            let path = w.dir().join(name);
+            std::fs::write(&path, text).expect("write");
+            path.to_str().expect("utf-8").to_owned()
+        };
+        let cond = write(
+            "cond.conf",
+            "%if '#{==:#{session_name},other}'\n\
+             display -p if-other\n\
+             %else\n\
+             display -p if-not-other\n\
+             %endif\n\
+             display -p '#{session_name}'\n",
+        );
+        let new = write("new.conf", "new -d cat -\ndisplay -p '#{session_name}'\n");
+        let hook = write("hook.conf", "set -gF @h '[#{hook}]'\n");
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["new", "-d", "-s", "other", "cat", "-"]),
+            w.run(&["source", "-t", "a", &cond]),
+            w.run(&["source", &cond]),
+            w.run(&["source", "-t", "nosuch", &cond]),
+            w.run(&["source", "-t", "a", &new]),
+            w.run(&["source", &new]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "after-new-window",
+                &format!("source {hook} ; set -gF @h2 '[#{{hook}}]'"),
+            ]),
+            w.run(&["neww", "-d", "-t", "a", "cat", "-"]),
+            w.run(&["show", "-gv", "@h"]),
+            w.run(&["show", "-gv", "@h2"]),
+        ]
+    });
+}
+
 /// A `source-file` read by `source-file -v` is verbose too, also inside a
 /// `{ }` block: its parse flags hold `CMD_PARSE_VERBOSE`
 /// (cmd-source-file.c `cmd_source_file_exec`, `cmd_get_parse_flags`). A

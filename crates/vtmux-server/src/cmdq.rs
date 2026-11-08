@@ -430,6 +430,22 @@ impl Server {
         self.cmdq_insert_with_state(after, groups, state.as_ref())
     }
 
+    /// `cmdq_copy_state(state, current)` (cmd-queue.c): a new state for
+    /// commands to insert after `of`, with `current` as its current target
+    /// and `of`'s flags (no hooks), but none of its formats.
+    pub(crate) fn cmdq_copy_state(
+        &mut self,
+        of: StepId,
+        current: Option<crate::target::Found>,
+    ) -> Rc<StepState> {
+        let no_hooks = self.cmdq.state_of(of).is_some_and(|s| s.no_hooks);
+        Rc::new(StepState {
+            current: std::cell::Cell::new(current),
+            no_hooks,
+            formats: Vec::new(),
+        })
+    }
+
     /// [`Self::cmdq_insert_commands`] with a state of their own (a hook's).
     pub(crate) fn cmdq_insert_with_state(
         &mut self,

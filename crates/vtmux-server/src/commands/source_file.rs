@@ -109,6 +109,8 @@ pub fn exec(
         item,
         Cont {
             after: step,
+            step,
+            current: found.session.is_some().then_some(found),
             files,
             opts,
             failed,
@@ -127,13 +129,33 @@ enum File {
 
 /// Where a `source-file` is in its list of files
 /// (`struct cmd_source_file_data`): the step the next file's commands go
-/// after, the files still to read (last first), and whether one failed.
+/// after, the `source-file` step and its target (none if `-t` found
+/// nothing), the files still to read (last first), and whether one failed.
 #[derive(Debug)]
 pub(crate) struct Cont {
     after: StepId,
+    step: StepId,
+    current: Option<Found>,
     files: Vec<File>,
     opts: LoadOpts,
     failed: bool,
+}
+
+impl Cont {
+    /// `load_cfg_from_buffer` (cfg.c): a file's commands go after the
+    /// last file's, in a state copied from the `source-file`'s with its
+    /// target as their current state (`cmdq_copy_state`): a new session
+    /// one of them makes does not become the current one for the rest,
+    /// and a hook's formats stay behind.
+    fn queue(&mut self, server: &mut Server, groups: Groups) {
+        if groups.is_empty() {
+            return;
+        }
+        let state = server.cmdq_copy_state(self.step, self.current);
+        self.after = server
+            .cmdq_insert_with_state(self.after, groups, Some(&state))
+            .unwrap_or(self.after);
+    }
 }
 
 /// `cmd_source_file_done` for each file in turn: a file's commands go in
@@ -147,9 +169,7 @@ fn load_files(server: &mut Server, item: &mut Item, mut cont: Cont) {
                 let before = server.causes.len();
                 let groups = parse(server, item, &path, cont.opts);
                 cont.failed |= server.causes.len() > before;
-                cont.after = server
-                    .cmdq_insert_commands(cont.after, groups)
-                    .unwrap_or(cont.after);
+                cont.queue(server, groups);
             }
             File::Stdin => {
                 // file_read always completes through its callback; the
@@ -192,9 +212,7 @@ pub(crate) fn stdin_done(
         let text = vtmux_core::rawstr::from_vec(data);
         let groups = parse_text(server, item, "-", &text, cont.opts);
         cont.failed |= server.causes.len() > before;
-        cont.after = server
-            .cmdq_insert_commands(cont.after, groups)
-            .unwrap_or(cont.after);
+        cont.queue(server, groups);
     }
     load_files(server, item, cont);
 }
