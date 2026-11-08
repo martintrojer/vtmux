@@ -2438,8 +2438,9 @@ impl Server {
     /// `server_client_suspend` (server-client.c:598-610): the terminal is
     /// restored (`tty_stop_tty`) and the client told to stop itself. A
     /// client without a session, on its way out or already suspended is
-    /// left alone. vtmux sends nothing to a control client either: it has
-    /// no terminal to give back.
+    /// left alone. So is a control client, which tmux marks suspended for
+    /// good (it never reads `MSG_SUSPEND`, so never wakes) and starves of pane
+    /// output: compat/DIVERGENCES.md D-048.
     pub fn suspend_client(&mut self, id: ClientId) {
         let Some(c) = self.clients.get(&id) else {
             return;

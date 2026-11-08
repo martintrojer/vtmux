@@ -1,0 +1,221 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "suspend_client_control",
+  "inputs": {
+    "name": "suspend_client_control",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "read l; echo got; tmux wait-for -S got; exec cat -"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "k"
+        }
+      },
+      {
+        "run": [
+          "suspend-client"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-048",
+          "expect": {
+            "kind": "cli",
+            "stdout": "a|attached,focused,control-mode,UTF-8\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}|#{client_flags}"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-048",
+          "expect": {
+            "kind": "cli",
+            "stdout": "1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{session_attached}"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "k",
+          "line": "display -p still"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "k",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x",
+          "Enter"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "control_send": {
+          "id": "k",
+          "line": "lsc -F '#{client_flags}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "k",
+          "until": "%end"
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-048",
+          "expect": {
+            "kind": "control",
+            "lines": [
+              "%begin <TIME> #1 0",
+              "%end <TIME> #1 0",
+              "%session-changed $0 a",
+              "%begin <TIME> #2 1",
+              "still",
+              "%end <TIME> #2 1",
+              "%output %0 x\\r\\ngot\\r\\n",
+              "%begin <TIME> #3 1",
+              "attached,focused,control-mode,UTF-8",
+              "%end <TIME> #3 1",
+              "%exit"
+            ],
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "control_close": {
+          "id": "k"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "still",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
