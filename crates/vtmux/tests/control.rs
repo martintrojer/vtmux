@@ -1427,3 +1427,24 @@ fn manual_window_size_gives_way_to_a_control_window_size() {
         },
     );
 }
+
+/// control.c `control_ready`: stdin is read only once the argv command is
+/// done, so an EOF that comes while it waits (here on a config whose
+/// `if-shell` runs a job) does not stop it: the session is made, then the
+/// client exits (if-shell-error.sh, whose server otherwise went away and
+/// lost the script's next client under load).
+#[test]
+fn eof_before_the_argv_command_is_done_waits_for_it() {
+    compare("eof_before_the_argv_command_is_done_waits_for_it", |w| {
+        let conf = w.dir.path().join("rv.conf");
+        std::fs::write(&conf, "if-shell 'true' 'set -g @rvcfg 1'\n").unwrap();
+        let conf = conf.to_string_lossy().into_owned();
+        let c = w.control(&["-f", &conf, "new", "-n", "w", "cat", "-"]);
+        let (out, _, code) = c.close();
+        (
+            normalise_guards(&w.normalise(&out)),
+            code,
+            w.run(&["ls", "-F", "#{session_name} #{@rvcfg}"]),
+        )
+    });
+}

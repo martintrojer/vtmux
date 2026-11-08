@@ -656,6 +656,14 @@ impl Server {
     /// after a command made the client exit, as in tmux.
     pub(crate) fn control_read(&mut self, id: ClientId) {
         loop {
+            // Stdin is not read before the argv command is done
+            // (control_ready): an EOF or a line meanwhile waits for it.
+            if self
+                .control_mut(id)
+                .is_none_or(|cs| !cs.ready || cs.finished)
+            {
+                return;
+            }
             // A blocked line holds the queue: the lines behind it wait.
             // tmux reads them all the same (they queue behind it), so
             // an empty line among them makes the client exit now, with
@@ -673,9 +681,6 @@ impl Server {
             let Some(cs) = self.control_mut(id) else {
                 return;
             };
-            if !cs.ready || cs.finished {
-                return;
-            }
             let Some(nl) = cs.inbuf.iter().position(|&b| b == b'\n') else {
                 break;
             };
