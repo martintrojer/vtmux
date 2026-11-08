@@ -376,8 +376,8 @@ product reasons" category.
 ### D-046: format variables tmux 3.8 tracks that vtmux does not yet, and `display-message -v`
 
 - Test / assertion: cli `display_message_all` leaves these names out of both sides; everything else `display-message -a` lists is compared.
-- tmux behaviour: `#{history_added}`, `#{history_collected}` and `#{history_generation}` count the lines scrolled into history, the lines the limit collected (a tenth of `history-limit` at a time, grid.c `grid_collect_history`) and the clears and reflows (`scroll_added`, `scroll_collected`, `scroll_generation`, grid.c:455-521, 1609); `#{pane_output_generation}` counts the reads parsed (input.c:1052) and `#{pane_last_output_time}` is the last one's time (input.c:1037); `#{pane_command_running}` is set by OSC 133 `C` and cleared by `D`, `#{pane_command_start_time}`, `#{pane_command_end_time}`, `#{pane_command_duration}` and `#{pane_command_status}` are their times and `D`'s status, and `#{pane_last_prompt_time}` is OSC 133 `A`'s time (input.c:3288-3326); `#{pane_pb_state}` and `#{pane_pb_progress}` are the OSC 9;4 progress bar (input.c:3028-3062, `hidden` and 0 before one). `display-message -v` writes each step of the expansion before the result (`format_log`, `FORMAT_VERBOSE`).
-- vtmux behaviour: these variables are empty (so `display-message -a` does not list them) and `-v` prints only the result. `#{window_cell_width}` and `#{window_cell_height}` are D-014.
+- tmux behaviour: `#{history_added}`, `#{history_collected}` and `#{history_generation}` count the lines scrolled into history, the lines the limit collected (a tenth of `history-limit` at a time, grid.c `grid_collect_history`) and the clears and reflows (`scroll_added`, `scroll_collected`, `scroll_generation`, grid.c:455-521, 1609); `#{pane_output_generation}` counts the reads parsed (input.c:1052) and `#{pane_last_output_time}` is the last one's time (input.c:1037); `#{pane_command_running}` is set by OSC 133 `C` and cleared by `D`, `#{pane_command_start_time}`, `#{pane_command_end_time}`, `#{pane_command_duration}` and `#{pane_command_status}` are their times and `D`'s status, and `#{pane_last_prompt_time}` is OSC 133 `A`'s time (input.c:3288-3326); `#{pane_pb_state}` and `#{pane_pb_progress}` are the OSC 9;4 progress bar (input.c:3028-3062, `hidden` and 0 before one), which a redraw also writes to a terminal with `Spb` (the `progressbar` feature) when the active pane's changes (server-client.c `server_client_set_progress_bar`, tty.c:3219-3223). `display-message -v` writes each step of the expansion before the result (`format_log`, `FORMAT_VERBOSE`).
+- vtmux behaviour: these variables are empty (so `display-message -a` does not list them), no progress bar reaches the terminal, and `-v` prints only the result. `#{window_cell_width}` and `#{window_cell_height}` are D-014.
 - Evidence: `new -d -s a cat -; display -p '#{history_added}|#{pane_output_generation}|#{pane_pb_state}|#{pane_command_running}'`: tmux `0|0|hidden|0`, vtmux `|||`. `display -pv '#{session_name}'`: tmux five `# ...` lines then `a`, vtmux `a`.
 - Category: Deferred (the counters need history bookkeeping beside Ghostty's (D-001's model), the OSC 133 and 9;4 state comes with tmux 3.8's pane events (`pane-command-started`, `pane-shell-prompt`, which vtmux has not got either) and a snapshot field each; `-v` needs a trace through the format engine).
 
@@ -436,3 +436,19 @@ product reasons" category.
 - vtmux behaviour: a control client is not suspended (it has no terminal to give back), as `lock-client` already leaves it (`server_lock_client` returns early for `CLIENT_CONTROL`): it stays listed, attached and fed with pane output.
 - Evidence: reference tmux 3.8, `new -d -s a`, a control client `attach -t a`, then `suspend-client` from the shell: `lsc` prints nothing, `#{session_attached}` is `0`, and after `send-keys x Enter` the control client gets no `%output` but still answers `display -p still`; vtmux lists it, counts it and sends it the output (audit_nested_misc).
 - Category: Do not copy tmux bug (a control client loses all pane output from then on, with nothing to bring it back).
+
+### D-054: a title longer than 2047 bytes is not set
+
+- Test / assertion: none (found by audit_passthrough_osc's differential probes `osc2-len*`, `apc-len*`).
+- tmux behaviour: OSC 0, OSC 2 and APC collect up to `input-buffer-size` (1 MiB by default, `input_input`) and `screen_set_title` takes the whole string: a 5000-byte OSC 2 makes a 5000-byte `#{pane_title}`.
+- vtmux behaviour: titles go through Ghostty's OSC parser, whose fixed buffer holds 2047 bytes; a longer OSC 0/2 (or APC, which vtmux hands Ghostty as an OSC 2) is dropped and the title stays as it was.
+- Evidence: reference tmux 3.8, `printf '\033]2;%s\007' "$(head -c 2048 /dev/zero | tr '\0' x)"`: `#{n:pane_title}` 2048; vtmux keeps the previous title. 1000 bytes match.
+- Category: Deferred (needs the title read by vtmux's scanner, or a vendored patch to Ghostty's OSC buffer).
+
+### D-055: passthrough goes after the frame of the same loop turn
+
+- Test / assertion: none (audit_passthrough_osc, probes `pt-on-*`, byte order of the client's output).
+- tmux behaviour: a `DCS tmux;` payload is written to the client terminal when the parser reaches it (`screen_write_rawstring`, `tty_cmd_rawstring`), ahead of the text of the same read that `screen_write_collect` still holds (text before the payload on the same line included), and tmux then forgets its idea of the terminal's cursor and attributes (`tty_invalidate`).
+- vtmux behaviour: the payloads of a loop turn are written after that turn's frame (D14: frames are composed whole), which already shows all the text of the read, and the cursor is put back where the frame left it. What the terminal ends up showing differs only where a payload draws over cells (a sixel or kitty image placed at the cursor) that the same read also writes.
+- Evidence: reference tmux 3.8, `printf 'a\033Ptmux;\033\033]52;c;aGk=\007\033\\b'` with `allow-passthrough on`: tmux writes the OSC 52, then `ab`; vtmux the frame with `ab`, then the OSC 52.
+- Category: Deferred (needs frames cut at each payload).
