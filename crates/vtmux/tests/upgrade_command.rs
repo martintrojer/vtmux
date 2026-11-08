@@ -141,6 +141,120 @@ fn a_running_job_refuses_the_upgrade() {
     assert!(err.starts_with(&want) && err.ends_with('\n'), "{err}");
 }
 
+/// Waits for `done`, up to 20 s.
+fn wait(what: &str, mut done: impl FnMut() -> bool) {
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while !done() {
+        assert!(
+            std::time::Instant::now() < end,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `vtmux-upgrade` while the server is told to exit (`kill-server` or
+/// SIGTERM), its dry run held (`held`) or not yet started, a `run-shell`
+/// job holding up the preflight wait: the refusal "the server is exiting"
+/// must be a failure a script sees. The shutdown's own `Exit` for a
+/// waiting client carries 0 (`server_send_exit`, `MSG_SHUTDOWN` without a
+/// status), and it overrode the refusal's 1, as tmux's client exits 1
+/// when the server goes under it (client.c `client_dispatch_attached`,
+/// `CLIENT_EXIT_SERVER_EXITED`: `client_exitval = 1`).
+fn upgrade_cut_short(held: bool, stop: impl FnOnce(&Server)) {
+    let server = Server::start();
+    let started = server.dir.path().join("started");
+    let release = server.dir.path().join("release");
+    // Held at most 20 s, so a failing run leaves no dry run behind.
+    let pause = if held {
+        format!(
+            "i=0; while [ ! -e '{}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done",
+            release.display()
+        )
+    } else {
+        ":".to_owned()
+    };
+    let binary = server.script(
+        "slow",
+        &format!(
+            "case \"$1\" in --vtmux-check-snapshot) : >'{}'; {pause};; esac\nexec '{VTMUX}' \"$@\"",
+            started.display()
+        ),
+    );
+    if !held {
+        assert_eq!(server.run(&["run-shell", "-b", "tmux wait-for never"]).2, 0);
+    }
+    let (out, err, code) = std::thread::scope(|scope| {
+        let asked = scope.spawn(|| server.run(&["vtmux-upgrade", "-b", binary.to_str().unwrap()]));
+        if held {
+            // The request is in: its dry run has started.
+            wait("the dry run to start", || started.exists());
+        } else {
+            // The dry run waits for the job: the request is in once a
+            // second one is refused for it (no side effect: without one
+            // pending, the missing binary is what is refused).
+            let missing = server.dir.path().join("missing");
+            wait("the upgrade to be pending", || {
+                server
+                    .run(&["vtmux-upgrade", "-b", missing.to_str().unwrap()])
+                    .1
+                    == "an upgrade is already running\n"
+            });
+        }
+        stop(&server);
+        asked.join().unwrap()
+    });
+    let _ = std::fs::write(&release, "");
+    assert_eq!(out, "");
+    assert_eq!((err.as_str(), code), ("the server is exiting\n", 1));
+}
+
+fn server_pid(server: &Server) -> String {
+    server.run(&["display", "-p", "#{pid}"]).0.trim().to_owned()
+}
+
+#[test]
+fn kill_server_during_the_dry_run_fails_the_upgrade() {
+    upgrade_cut_short(true, |server| {
+        assert_eq!(server.run(&["kill-server"]).2, 0);
+    });
+}
+
+#[test]
+fn sigterm_during_the_dry_run_fails_the_upgrade() {
+    upgrade_cut_short(true, |server| {
+        let pid = server_pid(server);
+        assert!(
+            Command::new("kill")
+                .args(["-TERM", &pid])
+                .status()
+                .unwrap()
+                .success()
+        );
+    });
+}
+
+#[test]
+fn kill_server_during_the_preflight_wait_fails_the_upgrade() {
+    upgrade_cut_short(false, |server| {
+        assert_eq!(server.run(&["kill-server"]).2, 0);
+    });
+}
+
+#[test]
+fn sigterm_during_the_preflight_wait_fails_the_upgrade() {
+    upgrade_cut_short(false, |server| {
+        let pid = server_pid(server);
+        assert!(
+            Command::new("kill")
+                .args(["-TERM", &pid])
+                .status()
+                .unwrap()
+                .success()
+        );
+    });
+}
+
 /// Decision 22: without `-b` the server moves onto the path it was
 /// started as, resolved at request time: after a relink of that path the
 /// new binary runs the dry run.

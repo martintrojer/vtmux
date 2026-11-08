@@ -1155,7 +1155,18 @@ impl Server {
             .map(|(&id, _)| id)
             .collect();
         for id in ids {
-            self.finish_client(id, 0);
+            // A command that ended this turn (a refused `vtmux-upgrade`:
+            // "the server is exiting") has its status waiting; it is not
+            // overridden by the shutdown's 0, which a script would take
+            // for success.
+            let mut code = 0;
+            self.pending_exits.retain(|&(waiting, status)| {
+                if waiting == id {
+                    code = status;
+                }
+                waiting != id
+            });
+            self.finish_client(id, code);
         }
     }
 
