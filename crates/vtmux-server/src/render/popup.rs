@@ -155,12 +155,13 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
         let mut cells = draw_row(y, true);
         // tmux draws the empty popup once, then writes the job's output
         // into it as it comes (popup_job_update_cb): past what the job
-        // wrote on a row, a bordered row stays as that draw of the empty
-        // popup left it until a full redraw, and the spaces the job wrote
-        // stay spaces in the colours it wrote them in (tty_cmd_cells), not
-        // runs the draw would erase. Without a border an empty row has no
-        // cells at all (cellsize 0, tty-draw.c:241-245), so it is erased,
-        // first draw or not.
+        // wrote on a row, the row stays as that draw of the empty popup
+        // left it until a full redraw (with a border or without: one run
+        // the inner width, erased from ten cells), and the spaces the job
+        // wrote stay spaces in the colours it wrote them in
+        // (tty_cmd_cells), not runs the draw would erase. After a full
+        // redraw, without a border the rest of a row is a run of its own
+        // (cellsize, tty-draw.c:241-245).
         let boxed_row = framed && sx > 2 && sy > 2 && (1..sy - 1).contains(&y);
         let first = !p.redrawn;
         if (first && boxed_row) || !framed {
@@ -172,12 +173,14 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
                 let empty = draw_row(y, false);
                 cells[from..end].clone_from_slice(&empty[from..end]);
             } else {
-                // The tail is its own run of empty cells: spaces in the
-                // defaults' colours when short, erased from ten.
-                let mut tail: Vec<Cell> = (from..end).map(|_| content(None).0).collect();
+                // The tail is a run of empty cells: spaces in the
+                // defaults' colours when short, erased from ten. Before a
+                // full redraw the run is the empty popup's whole row.
+                let start = if first { 0 } else { from };
+                let mut tail: Vec<Cell> = (start..end).map(|_| content(None).0).collect();
                 let bgs = vec![p.defaults.bg; tail.len()];
                 draw_line_by(&mut tail, &bgs, p.defaults.bg, clear, false);
-                cells[from..end].clone_from_slice(&tail);
+                cells[from..end].clone_from_slice(&tail[from - start..]);
             }
             if first {
                 for x in 0..used.min(end - off) {

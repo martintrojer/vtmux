@@ -1,0 +1,44 @@
+# A popup without a border (-B) before and after a full redraw
+# (popup.c popup_draw_cb, popup_job_update_cb, tty-draw.c tty_draw_line):
+# the first draw erases each 10-wide row as one run (fg default) and the
+# job's output is written over it, so the rest of the row keeps the erase;
+# after refresh-client the rest of the row is a run of its own, spaces in
+# popup-style's colours when under ten cells. Rows of 16 (erased either
+# way) and 8 (spaces either way).
+name = "popup_unboxed_tail"
+size = [40, 14]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "13", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["splitw", "-h", "-t", "a:0", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 500 } },
+  { run = ["bind", "-n", "M-d", "display-popup", "-B", "-w", "10", "-h", "3", "echo nob; exec cat"] },
+  { run = ["bind", "-n", "M-e", "display-popup", "-B", "-w", "16", "-h", "3", "echo nob; exec cat"] },
+  { run = ["bind", "-n", "M-f", "display-popup", "-B", "-w", "8", "-h", "3", "echo nob; exec cat"] },
+  { keys = "\u001bd" },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  { keys = "\u001be" },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  { keys = "\u001bf" },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+]
