@@ -111,7 +111,7 @@ pub(crate) fn is_palette_osc(prefix: &[u8]) -> bool {
 
 /// `input_exit_osc`'s split: the number (a `u_int`, wrapping) and the rest
 /// after its `;`.
-fn osc_number(p: &[u8]) -> Option<(u32, &[u8])> {
+pub(crate) fn osc_number(p: &[u8]) -> Option<(u32, &[u8])> {
     let digits = p.iter().take_while(|b| b.is_ascii_digit()).count();
     if digits == 0 {
         return None;

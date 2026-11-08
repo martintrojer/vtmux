@@ -80,10 +80,9 @@ pub fn exec(
     if let Some(t) = args.value('T') {
         let title = expand(server, found, t);
         if let Some(p) = server.model.panes.get_mut(&wp) {
-            // screen_set_title: a change redraws the status.
-            let before = p.term.title();
-            p.term.set_title(&title);
-            if p.term.title() != before {
+            // cmd-select-pane.c:259-269: a title screen_set_title takes,
+            // changed or not, redraws the status and fires the hook.
+            if p.term.set_title(&title) {
                 server.model.redraw(Redraw::WindowStatus(w));
                 // cmd-select-pane.c:259-266.
                 let ev = crate::events::Event::new("pane-title-changed")

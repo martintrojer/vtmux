@@ -1,0 +1,40 @@
+# What sets a pane's title from its program (input.c input_exit_osc,
+# input_exit_apc): OSC 0 and 2 read the number as a u_int (`02` is 2, one
+# that wraps to 2 is 2), no `;` is an empty title, CAN ends the OSC and
+# applies it, OSC 1 is ignored; an APC string is a title too, a BEL inside
+# it is part of it; screen_set_title refuses a title utf8_isvalid fails
+# (DEL, a byte not UTF-8), and takes the rest untrusted (`#(` becomes `_(`).
+# pane-title-changed carries the text as it came. allow-set-title off
+# keeps the title for OSC and APC alike (no hook). select-pane -T refuses
+# a title with a tab and fires the hook for one it takes, the same or not
+# (cmd-select-pane.c:257-269); split-window -T fires it whether or not
+# the title was taken (cmd-split-window.c:264-275).
+name = "pane_title_sources"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "tmux wait-for go; printf '\\033]02;zero\\007\\033]4294967298;w\\033\\\\\\033]0;can\\030\\033]1;icon\\007\\033_a\\007b#(c)\\033\\\\\\033]2;a\\177b\\007\\033]2;a\\377b\\007\\033]2\\007\\033]2;end\\007'; tmux wait-for go2; printf '\\033]2;no\\007\\033_no\\033\\\\\\007'; exec cat -"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @log '[#{hook_pane}:#{hook_new_title}|#{pane_title}]'"] },
+  { run = ["set-hook", "-g", "pane-title-changed[1]", "if -F '#{==:#{hook_new_title},end}' 'wait-for -S done'"] },
+  { run = ["set-hook", "-g", "pane-bell", "wait-for -S bell"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_title}]"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["select-pane", "-t", "%0", "-T", "kept"] },
+  { run = ["setw", "-g", "allow-set-title", "off"] },
+  { run = ["wait-for", "-S", "go2"] },
+  { wait_for = "bell" },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_title}]"] },
+  { run = ["setw", "-g", "allow-set-title", "on"] },
+  { run = ["select-pane", "-t", "%0", "-T", "a\tb"] },
+  { run = ["select-pane", "-t", "%0", "-T", "kept"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @log '[#{hook_new_title}]'"] },
+  { run = ["splitw", "-d", "-t", "%0", "-T", "x\ty", "cat", "-"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["display", "-p", "-t", "%1", "#{==:#{pane_title},#{host}}"] },
+  { run = ["kill-server"] },
+]

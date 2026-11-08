@@ -274,8 +274,10 @@ pub struct PaneTerm {
     /// What the program's output did that the server reports, since the
     /// last [`PaneTerm::take_events`], in input order.
     events: Rc<RefCell<Events>>,
-    /// The server's title over Ghostty's, and tmux's title stack.
-    titles: Rc<RefCell<Titles>>,
+    /// The pane's title as tmux keeps it, and tmux's title stack.
+    titles: Titles,
+    /// The pane's `allow-set-title`: OSC 0/2 and APC may set the title.
+    allow_set_title: bool,
     history_lines: usize,
     /// tmux's `GRID_HISTORY`: the pane was made with a non-zero limit
     /// (`grid_create`, grid.c:381-382), so it keeps history for good,
@@ -452,9 +454,6 @@ impl PaneTerm {
         let mouse_scan = Rc::clone(&mouse);
         let events = Rc::new(RefCell::new(Events::default()));
         let belled = Rc::clone(&events);
-        let retitled_events = Rc::clone(&events);
-        let titles = Rc::new(RefCell::new(Titles::default()));
-        let retitled = Rc::clone(&titles);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
@@ -485,9 +484,6 @@ impl PaneTerm {
                     })
                 })
             })
-            .and_then(|t| {
-                t.on_title_changed(move |term| Titles::program(&retitled, &retitled_events, term))
-            })
             .and_then(|t| t.on_bell(move |_| belled.borrow_mut().push(TermEvent::Bells(1))))
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")));
@@ -508,7 +504,8 @@ impl PaneTerm {
             term,
             replies,
             events,
-            titles,
+            titles: Titles::default(),
+            allow_set_title: true,
             history_lines,
             history: history_lines > 0,
             alt_collected: 0,
@@ -752,14 +749,12 @@ impl PaneTerm {
                     // OSC 133 only marks the line in tmux (input.c
                     // `input_osc_133`): Ghostty's `133;A` would start a
                     // fresh line, and its prompt rows are erased on resize
-                    // and change ED 2. Ghostty never sees it end; a BEL that
-                    // ended it is not a bell. The ESC that ended it starts a
-                    // new sequence, as in tmux.
-                    ScanEvent::Osc133 => {
-                        self.term.vt_write(b"\x18");
-                        if bytes[i] != 0x07 {
-                            self.feed_piece(&bytes[i..=i]);
-                        }
+                    // and change ED 2.
+                    ScanEvent::Osc133 => self.cancel_string(bytes[i]),
+                    // An OSC 0 or 2 is tmux's alone (`input_exit_osc`):
+                    // Ghostty never keeps a title of its own.
+                    ScanEvent::Title if self.scan.title_done.as_ref().is_some_and(|t| !t.apc) => {
+                        self.cancel_string(bytes[i]);
                     }
                     ScanEvent::EraseBelow | ScanEvent::EraseScreen
                         if self.clear_into_history(e) =>
@@ -823,6 +818,16 @@ impl PaneTerm {
         }
     }
 
+    /// Ghostty gets CAN for the OSC the scanner's byte `end` ended, so it
+    /// acts on none of it: a BEL that ended it is not a bell, and the ESC
+    /// that ended it starts a new sequence, as in tmux.
+    fn cancel_string(&mut self, end: u8) {
+        self.term.vt_write(b"\x18");
+        if end != 0x07 {
+            self.feed_piece(&[end]);
+        }
+    }
+
     /// What the scanner collected for an OSC 133 or an XTWINOPS title
     /// stack sequence that just ended, applied after Ghostty saw it.
     fn scanned_strings(&mut self, e: ScanEvent) {
@@ -854,6 +859,14 @@ impl PaneTerm {
                 }
             }
         }
+        if e == ScanEvent::Title
+            && let Some(TitleDone {
+                text: Some(text), ..
+            }) = self.scan.title_done.take()
+        {
+            self.program_title(&text);
+        }
+        self.scan.title_done = None;
     }
 
     /// Answer a DECRQSS that just ended (`input_handle_decrqss`,
@@ -1162,6 +1175,8 @@ impl PaneTerm {
         self.scan.end_dcs();
         self.scan.state = ScanState::Ground;
         self.scan.palette_osc = None;
+        self.scan.title = None;
+        self.scan.title_done = None;
     }
 
     /// Set `input-buffer-size` (`input_set_buffer_size`).
@@ -1823,12 +1838,14 @@ impl PaneTerm {
         let state = self.scan.state;
         match state {
             ScanState::Ground | ScanState::Dcs | ScanState::Rename => return Vec::new(),
-            ScanState::Str if self.pending.len() > PENDING_MAX => return b"\x1b];".to_vec(),
+            ScanState::Str | ScanState::Apc if self.pending.len() > PENDING_MAX => {
+                return b"\x1b];".to_vec();
+            }
             _ => {}
         }
         let from = self.pending.iter().rposition(|&b| b == 0x1b).unwrap_or(0);
         let keep = |b: u8| match state {
-            ScanState::Str => true,
+            ScanState::Str | ScanState::Apc => true,
             ScanState::Csi => b == 0x1b || (0x20..0x7f).contains(&b),
             _ => b == 0x1b || b >= 0x20,
         };
@@ -1984,9 +2001,11 @@ impl PaneTerm {
     /// Pane title as tmux stores it (`screen_set_title`, screen.c:264-274).
     #[must_use]
     pub fn title(&self) -> String {
-        if let Some(t) = self.titles.borrow().server.as_ref() {
+        if let Some(t) = self.titles.server.as_ref() {
             return t.clone();
         }
+        // Only a state imported from a build that kept the program's title
+        // in Ghostty: OSC 0 and 2 never reach it now.
         self.term
             .title()
             .map(|t| clean_name(t, true))
@@ -2024,7 +2043,7 @@ impl PaneTerm {
 
     fn title_stack_op(&mut self, push: bool) {
         let title = self.title();
-        let mut titles = self.titles.borrow_mut();
+        let titles = &mut self.titles;
         if push {
             titles.stack.truncate(9);
             titles.stack.insert(0, title);
@@ -2034,16 +2053,47 @@ impl PaneTerm {
             let title = titles.stack.remove(0);
             titles.server = Some(title);
         }
-        drop(titles);
         let title = self.title();
         self.events.borrow_mut().push(TermEvent::Title(title));
     }
 
     /// Set the title from the server side (`select-pane -T`,
     /// `split-window -T`): `screen_set_title(s, title, 0)`, a trusted
-    /// clean, so `#(` stays.
-    pub fn set_title(&mut self, title: &str) {
-        self.titles.borrow_mut().server = Some(clean_name(title, false));
+    /// clean, so `#(` stays. False, and the title unchanged, for a title
+    /// `clean_name` refuses (`utf8_isvalid`: an ASCII control character
+    /// or DEL).
+    pub fn set_title(&mut self, title: &str) -> bool {
+        if !valid_name(title) {
+            return false;
+        }
+        self.titles.server = Some(clean_name(title, false));
+        true
+    }
+
+    /// The pane's `allow-set-title` (input.c:2726, 2804): whether the
+    /// program may set the title with OSC 0, OSC 2 or an APC string.
+    pub fn set_allow_set_title(&mut self, allow: bool) {
+        self.allow_set_title = allow;
+    }
+
+    /// A title from the program, an OSC 0 or 2's text or an APC string
+    /// (`input_exit_osc`, `input_exit_apc`): with `allow-set-title` on and
+    /// a text `utf8_isvalid` takes, the title, untrusted (`#(` becomes
+    /// `_(`), and a `pane-title-changed` with the text as it came.
+    fn program_title(&mut self, text: &[u8]) {
+        if !self.allow_set_title {
+            return;
+        }
+        let Ok(text) = std::str::from_utf8(text) else {
+            return;
+        };
+        if !valid_name(text) {
+            return;
+        }
+        self.titles.server = Some(clean_name(text, true));
+        self.events
+            .borrow_mut()
+            .push(TermEvent::Title(text.to_owned()));
     }
 
     /// Path from OSC 7 as tmux stores it (`screen_set_path`, screen.c:278-288).
@@ -2639,6 +2689,11 @@ struct AltModeScanner {
     /// The title stack operations and size reports of the XTWINOPS that
     /// just ended, in order.
     title_ops: Vec<WinOp>,
+    /// The OSC (while it can be an OSC 0 or 2) or APC string in progress,
+    /// collected as tmux's `input_buf`, for the pane title.
+    title: Option<TitleString>,
+    /// The title string that just ended ([`ScanEvent::Title`]).
+    title_done: Option<TitleDone>,
     /// tmux's UTF-8 decoder state (`utf8started`, `utf8data`).
     utf8: Utf8,
     /// What a character the decoder finished turns into, for
@@ -3106,26 +3161,16 @@ impl Events {
     }
 }
 
-/// A pane's title as tmux keeps it, beside Ghostty's.
+/// A pane's title as tmux keeps it (`s->title`).
 #[derive(Debug, Default)]
 struct Titles {
-    /// A title set by the server (`select-pane -T`, a title pop, RIS
-    /// keeping the old one); the next OSC 0/2 from the program replaces it,
-    /// as both write the one `s->title`.
+    /// The title, from the server (`select-pane -T`), the program (OSC 0
+    /// or 2, APC) or a title pop. `None` only before the first: the
+    /// title is then Ghostty's (an imported state's).
     server: Option<String>,
     /// tmux's title stack (`s->titles`, `CSI 22 t` / `CSI 23 t`), newest
     /// first; Ghostty ignores both.
     stack: Vec<String>,
-}
-
-impl Titles {
-    /// An OSC 0/2 from the program: it replaces the server's title, and
-    /// the event carries the OSC's text (input.c:2725-2731).
-    fn program(titles: &RefCell<Self>, events: &RefCell<Events>, term: &Terminal<'_, '_>) {
-        titles.borrow_mut().server = None;
-        let title = term.title().unwrap_or_default().to_owned();
-        events.borrow_mut().push(TermEvent::Title(title));
-    }
 }
 
 /// What an XTWINOPS does that tmux handles itself.
@@ -3218,6 +3263,9 @@ enum ScanEvent {
     DcsStart,
     /// An XTWINOPS tmux handles: `AltModeScanner::title_ops` has what.
     TitleStack,
+    /// An OSC 0 or 2, or an APC string, ended:
+    /// `AltModeScanner::title_done` has it.
+    Title,
     /// `ESC k`: a screen-style window name starts (on the `k`).
     RenameStart,
     /// The final byte of a CSI tmux ignores and Ghostty acts on, or the
@@ -3249,12 +3297,33 @@ enum ScanState {
     /// second one, which no entry of `input_esc_table` has.
     EscIntermediate(Option<u8>),
     Csi,
-    /// OSC, APC, PM or SOS: skipped to ST (or BEL).
+    /// OSC: skipped to ST or BEL.
     Str,
+    /// APC, PM or SOS: skipped to ST; a BEL is part of the string
+    /// (`input_state_apc_string_table`, `input_state_consume_st_table`).
+    Apc,
     /// Inside a DCS, which [`Dcs`] reads.
     Dcs,
     /// Inside `ESC k ... ST`, which [`PaneTerm::feed`] reads.
     Rename,
+}
+
+/// An OSC or APC string read for the pane title: tmux's `input_buf`
+/// and `INPUT_DISCARD`.
+#[derive(Debug, Default)]
+struct TitleString {
+    apc: bool,
+    buf: Vec<u8>,
+    discard: bool,
+}
+
+/// A title string that ended: an APC (`apc`) or an OSC 0 or 2, and its
+/// text (`None`: tmux discarded it, it was longer than
+/// `input-buffer-size`).
+#[derive(Debug)]
+struct TitleDone {
+    apc: bool,
+    text: Option<Vec<u8>>,
 }
 
 /// A window name being read (`ESC k`): tmux's `input_buf` and
@@ -3273,7 +3342,13 @@ impl AltModeScanner {
         if self.state == ScanState::Str {
             self.push_palette_osc(b);
         }
+        if matches!(self.state, ScanState::Str | ScanState::Apc) {
+            self.push_title(b);
+        }
         let event = self.push_state(b);
+        if event.is_none() && self.title_done.is_some() {
+            return Some(ScanEvent::Title);
+        }
         if event.is_none() && !self.answers.is_empty() {
             return Some(ScanEvent::Answer);
         }
@@ -3307,6 +3382,51 @@ impl AltModeScanner {
                 }
             }
         }
+    }
+
+    /// tmux's view of a string that may set the title (`input_input`
+    /// collects 0x20-0xff; `input_exit_osc`, `input_exit_apc` read it): an
+    /// OSC ends on BEL, either on CAN, SUB or ESC where they stand. An
+    /// OSC whose number is not 0 or 2 is dropped as soon as that shows.
+    fn push_title(&mut self, b: u8) {
+        let Some(t) = self.title.as_mut() else {
+            return;
+        };
+        match b {
+            0x07 if !t.apc => {}
+            0x18 | 0x1a | 0x1b => {}
+            0x20.. => {
+                if t.buf.len() >= self.osc_cap {
+                    t.discard = true;
+                } else if !t.discard {
+                    t.buf.push(b);
+                    if !t.apc
+                        && !t.buf.iter().all(u8::is_ascii_digit)
+                        && !matches!(palette::osc_number(&t.buf), Some((0 | 2, _)))
+                    {
+                        self.title = None;
+                    }
+                }
+                return;
+            }
+            _ => return,
+        }
+        let Some(t) = self.title.take() else {
+            return;
+        };
+        let text = if t.apc {
+            Some(t.buf)
+        } else {
+            match palette::osc_number(&t.buf) {
+                Some((0 | 2, rest)) => Some(rest.to_vec()),
+                // An empty OSC, which tmux ignores.
+                _ => return,
+            }
+        };
+        self.title_done = Some(TitleDone {
+            apc: t.apc,
+            text: text.filter(|_| !t.discard),
+        });
     }
 
     /// Track the OSC being skipped, to find OSC 133 and the OSC 8s tmux
@@ -3363,7 +3483,7 @@ impl AltModeScanner {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
             // Strings are skipped; further intermediates change nothing we track.
-            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _) => {}
+            (ScanState::Str | ScanState::Apc | ScanState::Dcs | ScanState::Rename, _) => {}
             (ScanState::EscIntermediate(_), 0x20..=0x2f) => {
                 self.state = ScanState::EscIntermediate(None);
             }
@@ -3406,6 +3526,7 @@ impl AltModeScanner {
                 self.palette_osc = Some(Vec::new());
                 self.palette_discard = false;
                 self.osc = Some(Vec::new());
+                self.title = Some(TitleString::default());
             }
             (ScanState::Esc, b'P' | b'k') => {
                 let (state, event) = if b == b'P' {
@@ -3416,7 +3537,13 @@ impl AltModeScanner {
                 self.state = state;
                 return Some(event);
             }
-            (ScanState::Esc, b'_' | b'^' | b'X') => self.state = ScanState::Str,
+            (ScanState::Esc, b'_' | b'^' | b'X') => {
+                self.state = ScanState::Apc;
+                self.title = (b == b'_').then(|| TitleString {
+                    apc: true,
+                    ..TitleString::default()
+                });
+            }
             (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(Some(b)),
             (ScanState::Esc, _) => {
                 self.state = ScanState::Ground;
@@ -3546,7 +3673,8 @@ impl AltModeScanner {
             // (`input_top_bit_set`, the Utf8 arm). ESC only starts a
             // sequence and DEL does nothing.
             (_, 0x18 | 0x1a) => true,
-            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _) | (_, 0x1b | 0x7f) => false,
+            (ScanState::Str | ScanState::Apc | ScanState::Dcs | ScanState::Rename, _)
+            | (_, 0x1b | 0x7f) => false,
             (ScanState::Ground, 0x80..) | (_, 0x00..=0x1f) => true,
             // OSC, DCS, APC and the rename string clear it as they start
             // (`input_enter_osc` and the others); PM and SOS (`^`, `X`)
@@ -4264,6 +4392,12 @@ fn decrqm_reply(
 /// tmux's `clean_name` (tmux.c:303-317): reject nothing here (Ghostty already
 /// guarantees UTF-8), neutralise `#(` from untrusted sources, then `vis`
 /// with `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL`.
+/// `utf8_isvalid` (utf8.c:827-847) for a `&str`: no ASCII control
+/// character or DEL.
+fn valid_name(s: &str) -> bool {
+    !s.chars().any(|c| c.is_ascii_control())
+}
+
 fn clean_name(raw: &str, untrusted: bool) -> String {
     let raw = if untrusted {
         raw.replace("#(", "_(")
@@ -5096,12 +5230,72 @@ mod tests {
     fn server_title_holds_until_the_program_sets_one() {
         let mut t = PaneTerm::new(20, 5, 100);
         t.feed(b"\x1b]2;prog\x07");
-        t.set_title("a#(b)\tc");
-        assert_eq!(t.title(), "a#(b)\\tc");
+        assert!(t.set_title("a#(b)\\c"));
+        assert_eq!(t.title(), "a#(b)\\\\c");
         t.feed(b"x");
-        assert_eq!(t.title(), "a#(b)\\tc");
+        assert_eq!(t.title(), "a#(b)\\\\c");
         t.feed(b"\x1b]2;next\x07");
         assert_eq!(t.title(), "next");
+        // Reference: `select-pane -T` of a title with a tab or DEL leaves
+        // the title (clean_name fails utf8_isvalid).
+        assert!(!t.set_title("a\tb"));
+        assert!(!t.set_title("a\x7fb"));
+        assert_eq!(t.title(), "next");
+    }
+
+    /// Reference (tmux 3.8 on the same input): the OSC number is read as
+    /// tmux's `input_exit_osc` reads it (`02` is 2, no `;` is an empty
+    /// title, a `u_int` that wraps), CAN and SUB end the OSC and apply it,
+    /// an APC string is a title too (a BEL inside is part of it), and
+    /// `allow-set-title` off keeps the title. Each title is one event.
+    #[test]
+    fn program_titles_as_tmux_reads_them() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        let title = |t: &mut PaneTerm, bytes: &[u8]| {
+            t.take_events();
+            t.feed(bytes);
+            let events = t.take_events();
+            (t.title(), events)
+        };
+        let ev = |s: &str| vec![TermEvent::Title(s.to_owned())];
+        assert_eq!(
+            title(&mut t, b"\x1b]02;zero\x07"),
+            ("zero".into(), ev("zero"))
+        );
+        assert_eq!(title(&mut t, b"\x1b]2\x07"), (String::new(), ev("")));
+        assert_eq!(
+            title(&mut t, b"\x1b]4294967298;w\x1b\\"),
+            ("w".into(), ev("w"))
+        );
+        assert_eq!(title(&mut t, b"\x1b]0;can\x18x"), ("can".into(), ev("can")));
+        assert_eq!(title(&mut t, b"\x1b]1;icon\x07"), ("can".into(), vec![]));
+        assert_eq!(title(&mut t, b"\x1b]2x;no\x07"), ("can".into(), vec![]));
+        assert_eq!(
+            title(&mut t, b"\x1b_a\x07b#(c)\x1b\\"),
+            ("ab_(c)".into(), ev("ab#(c)"))
+        );
+        // utf8_isvalid: DEL and invalid UTF-8 are refused.
+        assert_eq!(
+            title(&mut t, b"\x1b]2;a\x7fb\x07"),
+            ("ab_(c)".into(), vec![])
+        );
+        assert_eq!(
+            title(&mut t, b"\x1b]2;a\xffb\x07"),
+            ("ab_(c)".into(), vec![])
+        );
+        t.set_allow_set_title(false);
+        assert_eq!(
+            title(&mut t, b"\x1b]2;no\x07\x1b_no\x1b\\"),
+            ("ab_(c)".into(), vec![])
+        );
+        t.set_allow_set_title(true);
+        // Longer than input-buffer-size: discarded.
+        t.set_input_buffer_size(64);
+        let long = [b"\x1b]2;".as_slice(), &[b'a'; 80], b"\x07"].concat();
+        assert_eq!(title(&mut t, &long), ("ab_(c)".into(), vec![]));
+        // The BEL that ended an OSC title is no bell; the grid is untouched.
+        assert_eq!(title(&mut t, b"\x1b]2;t\x07"), ("t".into(), ev("t")));
+        assert_eq!(captured(&t), "x", "only the x after the CAN");
     }
 
     #[test]
@@ -5374,6 +5568,7 @@ mod tests {
                     | ScanEvent::Sync
                     | ScanEvent::Deccolm
                     | ScanEvent::TitleStack
+                    | ScanEvent::Title
                     | ScanEvent::Answer
                     | ScanEvent::Rewrite
                     | ScanEvent::Skip => None,

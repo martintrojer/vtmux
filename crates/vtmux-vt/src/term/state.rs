@@ -1205,7 +1205,7 @@ impl PaneTerm {
         };
         let c = self.scan.charset;
         let cs = self.cursor.get();
-        let titles = self.titles.borrow();
+        let titles = &self.titles;
         PaneState {
             history_limit: self.history_lines,
             keeps_history: self.history,
@@ -1335,7 +1335,7 @@ impl PaneTerm {
         self.scan.last_print = p.last_print;
         self.scan.palette.restore(&p.palette);
         {
-            let mut titles = self.titles.borrow_mut();
+            let titles = &mut self.titles;
             titles.server.clone_from(&p.title);
             titles.stack.clone_from(&p.title_stack);
         }

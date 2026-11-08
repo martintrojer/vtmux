@@ -945,12 +945,35 @@ impl<'a> Runner<'a> {
         }
     }
 
+    /// The title the attached client's terminal ends up with, as a
+    /// terminal reads it (xterm: OSC 0 or 2, ended by BEL or ST); not a
+    /// pane's rules, under which an APC string is a title too.
+    fn client_title(&self, id: &str) -> Result<String> {
+        let a = self
+            .attaches
+            .get(id)
+            .ok_or_else(|| format!("no attached client {id:?}"))?;
+        let bytes: Vec<u8> = a
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                Event::Bytes(b) => Some(b.as_slice()),
+                Event::Resize(..) => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        Ok(terminal_title(&bytes))
+    }
+
     /// Settle, then observe the attached client's screen, or its terminal
     /// title as a `cli` observation.
     fn observe_client(&mut self, step: usize, id: &str, what: &str, title: bool) -> Result<()> {
         let obs = if self.settle(DEFAULT_QUIET) {
             if title {
-                let title = self.client_term(id)?.title();
+                let title = self.client_title(id)?;
                 Observation::Cli {
                     stdout: self.norm.text(&format!("{title}\n")),
                     stderr: String::new(),
@@ -990,6 +1013,30 @@ impl<'a> Runner<'a> {
     }
 }
 
+/// The last title an OSC 0 or 2 in `bytes` set (`OSC Ps ; Pt`, ended by
+/// BEL or ESC), as a terminal keeps it.
+fn terminal_title(bytes: &[u8]) -> String {
+    let mut title = String::new();
+    let mut rest = bytes;
+    while let Some(at) = rest.windows(2).position(|w| w == b"\x1b]") {
+        rest = &rest[at + 2..];
+        let end = rest
+            .iter()
+            .position(|b| matches!(b, 0x07 | 0x1b))
+            .unwrap_or(rest.len());
+        let osc = &rest[..end];
+        let digits = osc.iter().take_while(|b| b.is_ascii_digit()).count();
+        if matches!(&osc[..digits], b"0" | b"2")
+            && osc.get(digits) == Some(&b';')
+            && end < rest.len()
+        {
+            title = String::from_utf8_lossy(&osc[digits + 1..]).into_owned();
+        }
+        rest = &rest[end..];
+    }
+    title
+}
+
 /// True if a line of `buf[from..]` starts with `prefix`.
 fn has_line(buf: &[u8], from: usize, prefix: &str) -> bool {
     let from = from.min(buf.len());
@@ -1011,6 +1058,16 @@ mod tests {
         let socket = socket.unwrap();
         assert!(socket.starts_with(ROOT_BASE), "{}", socket.display());
         assert_eq!(socket.as_os_str().len(), "/tmp/vto-xxxxxx/s".len());
+    }
+
+    #[test]
+    fn terminal_title_is_the_last_osc_0_or_2() {
+        assert_eq!(terminal_title(b"x\x1b]2;one\x07\x1b]0;two\x1b\\y"), "two");
+        assert_eq!(
+            terminal_title(b"\x1b]2;a\x07\x1b_Gx\x1b\\\x1b]1;icon\x07"),
+            "a"
+        );
+        assert_eq!(terminal_title(b"\x1b]2;a\x07\x1b]2;unended"), "a");
     }
 
     #[test]

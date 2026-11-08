@@ -4709,7 +4709,6 @@ impl Server {
     /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
     /// starts as the host name (window.c:1479-1480). The caller links the
     /// returned pane into the model.
-    #[expect(clippy::too_many_lines, reason = "one line per field of the new pane")]
     pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
         let mut child = self.pane_environ(ps);
         // The shell and history budget come from the session's options,
@@ -4760,12 +4759,8 @@ impl Server {
         // screen_init: the new screen's key mode follows `extended-keys`.
         term.set_extended_keys(self.model.extended_keys());
         term.reset_key_mode();
-        let host = &self.info.host;
-        if !host.chars().any(char::is_control) {
-            term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
-            // screen_init sets the title directly: no event.
-            term.take_events();
-        }
+        // window.c:1479-1480: the host name, set directly (no event).
+        term.set_title(&self.info.host);
         if ps.empty {
             empty_pane_modes(&mut term);
         }
@@ -5169,12 +5164,14 @@ impl Server {
             .number_option(TreeId::Server, "input-buffer-size");
         let extended_keys = self.model.extended_keys();
         let scroll_on_clear = self.model.number_option(TreeId::Pane(p), "scroll-on-clear") != 0;
+        let allow_set_title = self.model.number_option(TreeId::Pane(p), "allow-set-title") != 0;
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
         };
         pane.term.set_cursor_style_option(cursor_style);
         pane.term.set_scroll_on_clear(scroll_on_clear);
+        pane.term.set_allow_set_title(allow_set_title);
         let before = (pane.term.title(), pane.term.pwd());
         let alternate = pane.term.alternate_on();
         pane.term
