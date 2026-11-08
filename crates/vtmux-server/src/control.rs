@@ -657,7 +657,17 @@ impl Server {
     pub(crate) fn control_read(&mut self, id: ClientId) {
         loop {
             // A blocked line holds the queue: the lines behind it wait.
+            // tmux reads them all the same (they queue behind it), so
+            // an empty line among them makes the client exit now, with
+            // the blocked command and those lines never run.
             if self.is_parked(id) {
+                if let Some(cs) = self.control_mut(id)
+                    && (cs.inbuf.first() == Some(&b'\n')
+                        || cs.inbuf.windows(2).any(|w| w == b"\n\n"))
+                {
+                    cs.exit.get_or_insert(Exit::Return);
+                    cs.inbuf.clear();
+                }
                 break;
             }
             let Some(cs) = self.control_mut(id) else {

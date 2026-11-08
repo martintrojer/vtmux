@@ -1319,3 +1319,36 @@ fn kill_server_tells_no_control_client_another_left() {
         (lines(&ta), ca, lines(&tb), cb)
     });
 }
+
+/// control.c `control_read_callback` reads every line as it comes and
+/// queues it, also behind a command that waits; an empty line among them
+/// makes the client exit at once (server-client.c
+/// `server_client_check_exit` waits for its output, not its queue), with
+/// the status the commands so far earned, and the waiting command and the
+/// lines behind it never run.
+#[test]
+fn empty_line_behind_a_waiting_command_exits() {
+    compare("empty_line_behind_a_waiting_command_exits", |w| {
+        w.run(&["new", "-d", "-s", "c", "-n", "w", "cat", "-"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        script(w, &mut c, &["set -g nonexist 1"]);
+        c.send("wait-for rvnever");
+        c.send("set -g @rvskipped 1");
+        c.send("");
+        // stdin stays open: the empty line is what ends it.
+        let end = Instant::now() + WAIT;
+        while c.child.try_wait().unwrap().is_none() {
+            assert!(
+                Instant::now() < end,
+                "{}: still attached: {:?}",
+                w.bin.display(),
+                c.text()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let (text, _, code) = c.close();
+        let out = normalise_guards(&w.normalise(&text));
+        (out, code, w.run(&["show", "-gv", "@rvskipped"]))
+    });
+}
