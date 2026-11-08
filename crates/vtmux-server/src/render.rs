@@ -415,8 +415,52 @@ pub struct Compositor {
     /// them, as (row, first column, count): the lines of a pane whose
     /// synchronized output ended ([`Self::force`]).
     forced: Vec<(u16, u16, u16)>,
+    /// What a frame hides the cursor with and shows it with.
+    cursor_codes: CursorCodes,
 }
+
+/// The terminal's `civis` and what ends a frame's hidden cursor. tmux
+/// hides the cursor with `civis` (`tty_update_cursor`, tty.c:805) and
+/// shows it with `cnorm`; on the Linux console `civis` is `ESC[?25l
+/// ESC[?1c`, which `ESC[?25h` alone does not undo, so there a frame ends
+/// with `cnorm`. A terminal with no `civis` gets none (`tty_putcode`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CursorCodes {
+    hide: String,
+    show: String,
+}
+
+impl Default for CursorCodes {
+    /// xterm's: DECTCEM.
+    fn default() -> Self {
+        Self {
+            hide: "\x1b[?25l".into(),
+            show: "\x1b[?25h".into(),
+        }
+    }
+}
+
+impl CursorCodes {
+    #[must_use]
+    pub fn from_term(term: &Term) -> Self {
+        let hide = term.code("civis", &[]).unwrap_or_default();
+        // The style and blink bits come after the frame, from
+        // `OuterCursor`: `cnorm` itself only where `civis` is more than
+        // DECTCEM.
+        let show = if hide == Self::default().hide {
+            Self::default().show
+        } else {
+            term.code("cnorm", &[]).unwrap_or_default()
+        };
+        Self { hide, show }
+    }
+}
+
 impl Compositor {
+    /// Hide and show the cursor with `term`'s codes from now on.
+    pub fn set_cursor_codes(&mut self, codes: CursorCodes) {
+        self.cursor_codes = codes;
+    }
     /// Whether a frame may be composed `now`, with a pane flooding or not.
     /// If not, the frame is due once the interval since the last one is
     /// over ([`Self::due`]).
@@ -615,7 +659,7 @@ impl Compositor {
         if caps.sync {
             out.push_str("\x1b[?2026h");
         }
-        out.push_str("\x1b[?25l");
+        out.push_str(&self.cursor_codes.hide);
         let mut style = Style::default();
         out.push_str("\x1b[0m");
         // Where the terminal's cursor is, when known: a cell written there
@@ -736,7 +780,7 @@ impl Compositor {
         }
         place_cursor(&mut out, &mut style, &screen, caps);
         if screen.cursor_visible {
-            out.push_str("\x1b[?25h");
+            out.push_str(&self.cursor_codes.show);
         }
         if caps.sync {
             out.push_str("\x1b[?2026l");
@@ -1213,6 +1257,35 @@ mod tests {
             ..Attrs::XTERM
         });
         assert!(palette.contains("\x1b[4:2m\x1b[58:5:196md"), "{palette:?}");
+    }
+
+    /// `tty_update_cursor` hides the cursor with `civis` (tty.c:805), which
+    /// is `ESC[?25l ESC[?1c` on the console: a frame hides it so, and ends
+    /// with `cnorm`, since `ESC[?25h` alone leaves the console's hardware
+    /// cursor off. xterm's are DECTCEM; a terminal with no `civis` gets
+    /// nothing.
+    #[test]
+    fn a_frame_hides_the_cursor_with_the_terminals_civis() {
+        let frame_of = |name: &str| {
+            let term = Term::open(name, &[], None, &[], &[]).unwrap();
+            let mut pane = vtmux_vt::PaneTerm::new(4, 1, 0);
+            pane.feed(b"ab");
+            let mut compositor = Compositor::default();
+            compositor.set_cursor_codes(CursorCodes::from_term(&term));
+            let caps = Caps {
+                sync: false,
+                ..test_caps()
+            };
+            String::from_utf8(compositor.frame(vtmux_vt::snapshot(&pane), caps)).unwrap()
+        };
+        let xterm = frame_of("xterm-256color");
+        assert!(xterm.starts_with("\x1b[?25l\x1b[0m"), "{xterm:?}");
+        assert!(xterm.ends_with("\x1b[?25h"), "{xterm:?}");
+        let linux = frame_of("linux");
+        assert!(linux.starts_with("\x1b[?25l\x1b[?1c\x1b[0m"), "{linux:?}");
+        assert!(linux.ends_with("\x1b[?25h\x1b[?0c"), "{linux:?}");
+        let vt100 = frame_of("vt100");
+        assert!(!vt100.contains("\x1b[?25"), "{vt100:?}");
     }
 
     /// `tty_attributes` writes an attribute with the terminal's

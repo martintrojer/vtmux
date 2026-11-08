@@ -47,7 +47,7 @@ xterm-color xterm-direct xterm-ghostty xterm-kitty xterm-mono xterm-new
 # ncurses in 6.3; its terminfo is xterm-derived).
 ALIASES = {'foot': 'xterm-256color', 'foot-direct': 'xterm-direct'}
 
-STRINGS = ['clear', 'smcup', 'rmcup', 'smkx', 'rmkx', 'cnorm', 'E3', 'ind', 'tsl', 'fsl',
+STRINGS = ['clear', 'smcup', 'rmcup', 'smkx', 'rmkx', 'cnorm', 'civis', 'E3', 'ind', 'tsl', 'fsl',
            'Ms', 'Eneks', 'Dseks'] + ['kf%d' % i for i in range(1, 13)] + \
     ['kich1', 'kdch1', 'khome', 'kend', 'knp', 'kpp', 'kcbt'] + \
     ['cvvis', 'smso', 'Ss', 'Se', 'Cs', 'Cr', 'Smulx', 'Setulc', 'Smol']
@@ -213,4 +213,5 @@ pub(super) const TERMINALS: &[(&str, Entry)] = &[
     subprocess.run(['rustfmt', '--edition', '2024', OUT], check=True)
 
 
-main()
+if __name__ == '__main__':
+    main()

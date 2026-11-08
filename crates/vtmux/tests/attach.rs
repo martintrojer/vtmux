@@ -5225,6 +5225,54 @@ fn cursor_style_and_colour_reach_the_terminal() {
     }
 }
 
+/// `tty_update_cursor` (tty.c:805) hides the cursor with `civis` and
+/// `tty_update_mode` shows it with `cnorm`. On the Linux console those are
+/// `ESC[?25l ESC[?1c` and `ESC[?25h ESC[?0c`, so every hide carries the
+/// `?1c` (the console keeps its hardware cursor off after a bare
+/// `ESC[?25h`), and the last of the two a shown cursor leaves is `cnorm`'s.
+#[test]
+fn the_console_cursor_is_hidden_with_civis() {
+    // The console's cursor is off at the end of `text`: the last of its
+    // hides, DECTCEM or `?1c`, is later than the last of its shows.
+    let hidden = |text: &str| {
+        let last = |pat: &str| text.rfind(pat);
+        let off = last("\x1b[?25l").max(last("\x1b[?1c"));
+        let on = last("\x1b[?25h").max(last("\x1b[?0c"));
+        off > on
+    };
+    for bin in bins() {
+        let what = bin.display().to_string();
+        let w = World::new(bin);
+        let script = r"stty -echo; printf A; read x; printf '\033[?25l'; read x; printf '\033[?25hB'; exec cat";
+        let new = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "10"];
+        assert!(
+            w.cli(&[&new[..], &["sh", "-c", script]].concat())
+                .status
+                .success()
+        );
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", "linux")]);
+        a.wait(|a| pane_text(a).starts_with('A'));
+        a.wait_labelled(&what, Duration::from_secs(5), |a| !hidden(&a.text()));
+        let at = a.text().len();
+        assert!(w.cli(&["send", "-t", "a", "Enter"]).status.success());
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            a.text()[at..].contains("\x1b[?25l\x1b[?1c") && hidden(&a.text())
+        });
+        assert!(w.cli(&["send", "-t", "a", "Enter"]).status.success());
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            pane_text(a).starts_with("AB") && !hidden(&a.text())
+        });
+        // No hide anywhere is a bare DECTCEM.
+        let text = a.text();
+        assert_eq!(
+            text.matches("\x1b[?25l").count(),
+            text.matches("\x1b[?25l\x1b[?1c").count(),
+            "{what}: {text:?}"
+        );
+    }
+}
+
 /// `tty_update_features` and `tty_stop_tty` (tty.c:506, 565): a terminal
 /// with the `appesc` feature (mintty's) gets `Enesc` once its features
 /// are known and `Dsesc` when the client detaches.

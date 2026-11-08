@@ -2062,6 +2062,8 @@ impl Server {
                 }
                 c.decoder.set_terminal(&term);
                 c.caps = Some(caps);
+                c.compositor
+                    .set_cursor_codes(crate::render::CursorCodes::from_term(&term));
                 c.term = Some(Rc::new(term));
                 c.term_options = (features, overrides);
                 c.update_theme();

@@ -2140,6 +2140,9 @@ impl Server {
         if let Some(caps) = client.caps.as_mut() {
             caps.isolates = crate::render::Caps::from_term(&term).isolates;
         }
+        client
+            .compositor
+            .set_cursor_codes(crate::render::CursorCodes::from_term(&term));
         client.term = Some(std::rc::Rc::new(term));
         client.compositor.invalidate();
         client.attached = Some(s);
