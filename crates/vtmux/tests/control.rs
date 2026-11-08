@@ -686,6 +686,30 @@ fn script(w: &World, c: &mut Control, lines: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// display-panes enters a mode, and a bad `-d` fails the mode's init
+/// (window-panes.c:912-918), not the command: `cmd_choose_tree_exec` returns
+/// `CMD_RETURN_NORMAL` (cmd-choose-tree.c:154-155), so the error is inside
+/// an `%end` guard and `after-display-panes` runs.
+#[test]
+fn display_panes_bad_delay_is_not_a_command_error() {
+    compare("display_panes_bad_delay_is_not_a_command_error", |w| {
+        w.run(&["new", "-d", "-s", "c", "cat", "-"]);
+        w.run(&[
+            "set-hook",
+            "-g",
+            "after-display-panes",
+            "set -g @hooked yes",
+        ]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        script(
+            w,
+            &mut c,
+            &["display-panes -d x", "display -p '#{@hooked}'"],
+        )
+    });
+}
+
 /// cmd-refresh-client.c:196-284 and server-client.c:3120-3199 on a control
 /// client: `-f` flags (a flag that does not apply to a control client, an
 /// unknown one, `!` to clear, read-only that stays), `-F` as `-f`, the
