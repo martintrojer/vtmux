@@ -402,6 +402,35 @@ fn sixty_lines() -> PaneTerm {
     pane(80, 20, 2000, &text)
 }
 
+/// A snapshot from a build before tmux's `hscrolled` was kept (no
+/// `HistoryState::hscrolled`): after a width change then a taller screen
+/// it left the times' start at the rows scrolled before the pull, past the
+/// newest row, which this build's check refuses. The import starts them
+/// where they end instead, so an upgrade from that build goes through.
+#[test]
+fn an_older_writers_times_start_where_they_end() {
+    let mut a = sixty_lines();
+    a.resize(40, 20);
+    let before = term_to_snapshot(&a, Form::Rows).history.scrolled;
+    a.resize(40, 30);
+    let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+    assert!(
+        t.history.scrolled < before,
+        "a taller screen pulled rows back"
+    );
+    assert!(t.history.times.is_empty(), "a reflow drops the times");
+    t.history.times_base = before;
+    let refused = term_from_snapshot(&t, PATCH_STACK).map(|_| ()).unwrap_err();
+    assert!(refused.to_string().contains("history ids"), "{refused}");
+    t.history.hscrolled = None;
+    let mut b = term_from_snapshot(&t, PATCH_STACK).expect("an older writer's snapshot");
+    a.feed(b"\r\nmore\r\n");
+    b.feed(b"\r\nmore\r\n");
+    for y in [0, a.history_size() - 1] {
+        assert_eq!(b.history_id(y), a.history_id(y), "history row {y}");
+    }
+}
+
 /// The cursor row the primary screen is resized with when the alternate
 /// one ends goes in the snapshot; without it (an older writer) the import
 /// takes the last row with anything in it.

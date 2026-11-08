@@ -302,7 +302,9 @@ record! {
         /// The emulator's history byte budget.
         10 => opt max_bytes: Option<u64>,
         /// tmux's `hscrolled`: the newest history rows a taller screen
-        /// pulls back. A reader takes all of `hsize` without it.
+        /// pulls back. A reader takes all of `hsize` without it, and
+        /// starts the times no later than where they end (a writer without
+        /// it could leave `times_base` past the newest row).
         11 => opt hscrolled: Option<u64>,
     }
 }

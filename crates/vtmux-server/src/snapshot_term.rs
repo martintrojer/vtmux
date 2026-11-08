@@ -1527,6 +1527,17 @@ pub fn term_from_snapshot_with(
             .and_then(|rows| rows.iter().rposition(|r| !r.cells.is_empty()))
             .map_or(0, |y| u16::try_from(y).unwrap_or(u16::MAX)),
     };
+    let scrolled_rows = usize_of(h.scrolled, "history rows")?;
+    let times = times_in(&h.times, scrolled_rows)?;
+    // The times end at the newest row. A writer from before `hscrolled`
+    // was kept left their start past it after a resize pulled rows back
+    // (it kept the start of the rows that went): it starts where they end.
+    let times_base = if h.hscrolled.is_some() {
+        h.times_base
+    } else {
+        h.times_base
+            .min(h.scrolled.saturating_sub(times.len() as u64))
+    };
     let ghostty = GhosttyState {
         scroll_region: (
             narrow(t.scroll_region.top, "scroll region")?,
@@ -1581,10 +1592,10 @@ pub fn term_from_snapshot_with(
             .unwrap_or(hsize),
         scrolled: h.scrolled,
         generation: h.generation,
-        times_base: h.times_base,
+        times_base,
         // Times are kept for retained rows only; bound by what history the
         // pane could hold.
-        times: times_in(&h.times, usize_of(h.scrolled, "history rows")?)?,
+        times,
         alt_collected: usize_of(alt.collected, "collected rows")?,
         clear_primary_history: alt.clear_primary_history,
         redraw: t.redraw,
