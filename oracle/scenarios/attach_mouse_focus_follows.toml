@@ -1,0 +1,35 @@
+# focus-follows-mouse (server-client.c server_client_check_mouse,
+# 1183-1192): motion over a pane other than the active one makes it active
+# (borders, status and window-pane-changed follow); motion over the active
+# pane or the border changes nothing. The option also turns on all-motion
+# mode in the outer terminal (server_client_reset_state), so the motion
+# reports come without a button.
+name = "attach_mouse_focus_follows"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["set", "-g", "focus-follows-mouse", "on"] },
+  { run = ["splitw", "-v", "-t", "a:0.1", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:0.2", "-T", "t"] },
+  { run = ["set-hook", "-g", "window-pane-changed", "set -ga @h x"] },
+  { run = ["set", "-g", "status-right", "#{@h}"] },
+  { attach = { session = "a" } },
+  { screen = {  } },
+  { keys = "\u001b[<35;30;4M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}#{pane_in_mode}#{pane_mode}|#{window_index}|#{session_name}"] },
+  { keys = "\u001b[<35;5;4M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}#{pane_in_mode}#{pane_mode}|#{window_index}|#{session_name}"] },
+  { keys = "\u001b[<35;21;4M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}#{pane_in_mode}#{pane_mode}|#{window_index}|#{session_name}"] },
+  { keys = "\u001b[<35;30;9M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}#{pane_in_mode}#{pane_mode}|#{window_index}|#{session_name}"] },
+]

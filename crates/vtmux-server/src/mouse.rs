@@ -513,6 +513,21 @@ impl Server {
         if let Some((action, ev)) = released {
             self.drag_release(id, action, &ev);
         }
+        // server-client.c:1183-1192: with focus-follows-mouse, motion over
+        // a pane other than the active one makes it active.
+        if let Located::Key(ev) = &located
+            && ev.key == Key::mouse(MouseKind::Move, 0, MouseLocation::Pane)
+            && let Some(p) = ev.target.pane
+            && self.model.windows.get(&w).is_some_and(|x| x.active() != p)
+            && self
+                .model
+                .number_option(TreeId::Session(s), "focus-follows-mouse")
+                != 0
+            && self.model.switch_active(w, p)
+        {
+            self.model.redraw(crate::model::Redraw::WindowBorders(w));
+            self.model.redraw(crate::model::Redraw::WindowStatus(w));
+        }
         located
     }
 
@@ -802,8 +817,7 @@ impl Server {
 
         let mut key = None;
         if kind == MouseKind::Move && loc == Some(MouseLocation::Pane) {
-            // focus-follows-mouse (off by default) needs all-motion mode,
-            // which is only on when a pane asks for it.
+            // focus-follows-mouse is applied by `check_mouse`.
             key = Some(Key::mouse(MouseKind::Move, 0, MouseLocation::Pane));
         }
         let dragging = if kind == MouseKind::Drag {
