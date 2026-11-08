@@ -2479,6 +2479,8 @@ fn run_shell_cli() {
             &["run", "-d", "abc", "echo x"],
             &["run", "-d", "0x", "echo x"],
             &["run", "-d", "0.1", "echo delayed"],
+            // strtod takes C99 hex floats: 0x0.1p1 is 0.125 s.
+            &["run", "-d", "0x0.1p1", "echo hex"],
             &["run", "-d", "inf"],
             &["run"],
             &["run", "echo a", ";", "display", "-p", "b"],

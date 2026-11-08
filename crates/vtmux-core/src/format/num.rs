@@ -46,7 +46,8 @@ fn starts_with_ci(b: &[u8], word: &str) -> bool {
 /// glibc `strtod` in the C locale: the value and how many bytes it consumed. Zero bytes
 /// consumed means there was no conversion (the value is then 0).
 #[allow(clippy::many_single_char_names)]
-pub(super) fn strtod(s: &str) -> (f64, usize) {
+#[must_use]
+pub fn strtod(s: &str) -> (f64, usize) {
     let b = s.as_bytes();
     let mut i = 0;
     while b.get(i).is_some_and(|&c| is_space(c)) {

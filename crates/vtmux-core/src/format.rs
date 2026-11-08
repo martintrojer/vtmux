@@ -33,6 +33,7 @@ mod loops;
 mod matching;
 mod mods;
 mod num;
+pub use num::strtod;
 mod parse;
 mod text;
 mod time;

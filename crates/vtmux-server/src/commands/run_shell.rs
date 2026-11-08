@@ -260,48 +260,23 @@ pub fn exec(
     Ok(())
 }
 
-/// `strtod` for `-d` (cmd-run-shell.c:131-136): the whole string, leading
-/// space allowed; empty is 0. tmux converts with `(time_t)d`, so a delay
-/// past what `time_t` holds (`inf`, `1e30`) fires at once in practice, as
-/// do negative ones and NaN.
+/// `strtod` for `-d` (cmd-run-shell.c:131-136): glibc's, over the whole
+/// string (hex floats too); empty is 0. tmux converts with `(time_t)d`, so
+/// a delay past what `time_t` holds (`inf`, `1e30`) fires at once in
+/// practice, as do negative ones and NaN.
 fn parse_delay(text: &str) -> Option<Duration> {
-    // An empty string converts nothing and leaves `end` at its NUL: 0.
-    if text.is_empty() {
-        return Some(Duration::ZERO);
+    // No conversion leaves `end` at the start: valid only when that is the
+    // NUL of an empty string.
+    let (d, used) = vtmux_core::format::strtod(text);
+    if used != text.len() {
+        return None;
     }
-    let d = strtod(text.trim_start())?;
     // time_t holds seconds up to 2^63; beyond that the conversion is
     // undefined and tmux 3.8 runs the command now.
     if !(d > 0.0 && d < 9.2e18) {
         return Some(Duration::ZERO);
     }
     Some(Duration::try_from_secs_f64(d).unwrap_or(Duration::ZERO))
-}
-
-/// `strtod` over a whole string: decimal as Rust parses it (which takes
-/// `inf`, `infinity` and `nan` in any case, as strtod does), or a C99 hex
-/// integer (`0x10`; hex fractions are rare enough to leave out).
-fn strtod(t: &str) -> Option<f64> {
-    let (sign, body) = match t.as_bytes().first() {
-        Some(b'-') => (-1.0, &t[1..]),
-        Some(b'+') => (1.0, &t[1..]),
-        _ => (1.0, t),
-    };
-    if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        #[expect(clippy::cast_precision_loss, reason = "strtod rounds too")]
-        return u64::from_str_radix(hex, 16).ok().map(|n| sign * n as f64);
-    }
-    // `nan(chars)` is NaN.
-    if body.len() > 4
-        && body[..4].eq_ignore_ascii_case("nan(")
-        && body.ends_with(')')
-        && body[4..body.len() - 1]
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    {
-        return Some(f64::NAN);
-    }
-    t.parse().ok()
 }
 
 /// `cmd_run_shell_timer` (cmd-run-shell.c:195-245).
