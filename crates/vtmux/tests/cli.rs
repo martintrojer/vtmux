@@ -1602,6 +1602,39 @@ fn unparsable_option_error(stderr: &str) -> String {
     stderr.replace("ambiguous option: ", "invalid option: ")
 }
 
+/// A client with no command runs `default-client-command`
+/// (server-client.c:2804-2819, 2868-2870), read when it runs: a list,
+/// a format left for the command, the first client's config setting it,
+/// and `new-session` again once it is unset (no terminal here).
+#[test]
+fn default_client_command() {
+    compare("default_client_command", |w| {
+        let cfg = w.dir().join("cfg");
+        std::fs::write(
+            &cfg,
+            "set -g default-client-command \"display -p fromcfg\"\n",
+        )
+        .expect("write cfg");
+        let label = format!("{}c", w.label);
+        let cfg_label = ["-L", label.as_str(), "-f", cfg.to_str().expect("utf-8")];
+        vec![
+            // No session: that server exits on its own (exit-empty).
+            w.raw(&cfg_label),
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&[
+                "set",
+                "-g",
+                "default-client-command",
+                "display -p hello ; display -p '#{session_name}'",
+            ]),
+            w.run(&[]),
+            w.run(&["show", "-gv", "default-client-command"]),
+            w.run(&["set", "-gu", "default-client-command"]),
+            w.run(&[]),
+        ]
+    });
+}
+
 /// server.c `server_loop` (285-306): with exit-unattached on, the server
 /// exits once no client is attached to a session, sessions or not, but not
 /// while exit-empty is off; an attached (here control) client keeps it.

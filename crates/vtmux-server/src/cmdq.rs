@@ -62,6 +62,10 @@ pub enum Work {
     /// so it runs after the commands earlier keys queued, and waits while
     /// the queue waits (a prompt without `-b`).
     Key(crate::key_dispatch::KeyEvent),
+    /// `server_client_default_command`: a client sent no command, so
+    /// `default-client-command` runs, as it is set when the step fires
+    /// (after the config the first client waits for).
+    DefaultCommand,
     /// A batch's last step.
     End(End),
 }
@@ -695,6 +699,10 @@ impl Server {
                 self.fire_key(id, &event);
                 false
             }
+            Work::DefaultCommand => {
+                self.fire_default_command(id, batch);
+                false
+            }
             Work::End(end) => {
                 if let Some(item) = self.cmdq.batches.remove(&batch) {
                     self.end_batch(end, item);
@@ -702,6 +710,37 @@ impl Server {
                 false
             }
         }
+    }
+
+    /// `server_client_default_command` (server-client.c:2804-2819): the
+    /// global `default-client-command` goes right after step `id`, or
+    /// `client is read-only` for a read-only client unless every command
+    /// in it may run.
+    fn fire_default_command(&mut self, id: StepId, batch: BatchId) {
+        let list = match self
+            .model
+            .options
+            .get(
+                vtmux_core::options::TreeId::Server,
+                "default-client-command",
+            )
+            .map(|e| &e.value)
+        {
+            Some(vtmux_core::options::OptionValue::Single(
+                vtmux_core::options::Value::Command(list),
+            )) => list.clone(),
+            _ => return,
+        };
+        let Some(mut item) = self.cmdq.batches.remove(&batch) else {
+            return;
+        };
+        let calls = match item.client {
+            Some(c) => self.read_only_gate(c, &mut item, list.calls),
+            None => list.calls,
+        };
+        self.flush_item(&mut item);
+        self.cmdq.batches.insert(batch, item);
+        self.cmdq_insert_commands(id, vec![(None, calls)]);
     }
 
     fn end_batch(&mut self, end: End, mut item: Item) {

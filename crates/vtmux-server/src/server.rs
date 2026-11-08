@@ -1906,17 +1906,20 @@ impl Server {
         }
         // Config causes wait for an attached session (cfg.c
         // cfg_show_causes): a command client never sees them.
-        // No command: new-session (server_client_default_command).
-        let argv = if argv.is_empty() {
-            vec![b"new-session".to_vec()]
-        } else {
-            argv
-        };
         let end = if control {
             crate::cmdq::End::ControlArgv
         } else {
             crate::cmdq::End::Client
         };
+        // No command: default-client-command, read when it runs
+        // (server-client.c:2868-2870, server_client_default_command).
+        if argv.is_empty() {
+            let mut batch = crate::cmdq::NewBatch::new(item, Vec::new(), end);
+            batch.before.push(crate::cmdq::Work::DefaultCommand);
+            self.cmdq_append(Some(id), batch);
+            self.cmdq_process();
+            return;
+        }
         let calls = match cmd::parse_argv_bytes(&argv) {
             Ok(calls) => calls,
             Err(e) => {
