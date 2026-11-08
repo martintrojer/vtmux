@@ -2544,7 +2544,7 @@ struct AltModeScanner {
     charset: Charset,
     /// Ghostty's protection bit may differ from `charset`: set by a charset
     /// change, and by what changes Ghostty's protection or cursor state
-    /// where tmux changes nothing (DECSCA, SPA, EPA, DECSTR, a screen
+    /// where tmux changes nothing (DECSCA, DECSTR, a screen
     /// switch). Fixed once the parser is back in the ground state.
     resync: bool,
     /// The start of the OSC being skipped, kept to find OSC 133.
@@ -2978,8 +2978,9 @@ enum ScanState {
     #[default]
     Ground,
     Esc,
-    /// `ESC` then an intermediate byte (`(`, `)`, `#`, ...).
-    EscIntermediate(u8),
+    /// `ESC` then an intermediate byte (`(`, `)`, `#`, ...); `None` after a
+    /// second one, which no entry of `input_esc_table` has.
+    EscIntermediate(Option<u8>),
     Csi,
     /// OSC, APC, PM or SOS: skipped to ST (or BEL).
     Str,
@@ -3095,8 +3096,10 @@ impl AltModeScanner {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
             // Strings are skipped; further intermediates change nothing we track.
-            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _)
-            | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {}
+            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _) => {}
+            (ScanState::EscIntermediate(_), 0x20..=0x2f) => {
+                self.state = ScanState::EscIntermediate(None);
+            }
             // SO and SI are executed anywhere outside a string, even inside
             // an escape sequence.
             (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
@@ -3147,7 +3150,7 @@ impl AltModeScanner {
                 return Some(event);
             }
             (ScanState::Esc, b'_' | b'^' | b'X') => self.state = ScanState::Str,
-            (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
+            (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(Some(b)),
             (ScanState::Esc, _) => {
                 self.state = ScanState::Ground;
                 match b {
@@ -3164,16 +3167,22 @@ impl AltModeScanner {
                         self.charset_op(CharsetOp::Reset);
                         return Some(ScanEvent::Reset);
                     }
-                    b'V' | b'W' => self.resync = true,
-                    _ => {}
+                    b'=' | b'>' | b'D' | b'E' | b'H' | b'M' | b'\\' => {}
+                    // A final input_esc_table lacks dispatches nothing
+                    // (input_esc_dispatch); Ghostty would run DECBI, DECFI,
+                    // SS2, SS3, LS2, LS3, SPA, EPA or answer DECID.
+                    _ => return Some(ScanEvent::Drop),
                 }
             }
             (ScanState::EscIntermediate(i), _) => {
                 self.state = ScanState::Ground;
                 match (i, b) {
-                    (b'(', b'0' | b'B') => self.charset_op(CharsetOp::G0(b == b'0')),
-                    (b')', b'0' | b'B') => self.charset_op(CharsetOp::G1(b == b'0')),
-                    _ => {}
+                    (Some(b'('), b'0' | b'B') => self.charset_op(CharsetOp::G0(b == b'0')),
+                    (Some(b')'), b'0' | b'B') => self.charset_op(CharsetOp::G1(b == b'0')),
+                    (Some(b'#'), b'8') => {}
+                    // G2 and G3, the national sets, DECDHL, S7C1T and the
+                    // rest: not in input_esc_table.
+                    _ => return Some(ScanEvent::Drop),
                 }
             }
             (ScanState::Csi, b'?')
@@ -3278,7 +3287,10 @@ impl AltModeScanner {
             // not know dispatches nothing and leaves the flag.
             (ScanState::Esc, _) => b"]P_k78=>DEHM\\c".contains(&b),
             (ScanState::EscIntermediate(i), _) => {
-                matches!((i, b), (b'(' | b')', b'0' | b'B') | (b'#', b'8'))
+                matches!(
+                    (i, b),
+                    (Some(b'(' | b')'), b'0' | b'B') | (Some(b'#'), b'8')
+                )
             }
             (ScanState::Csi, 0x40..=0x7e) => !self.csi_ignored && self.csi_in_tmux_table(b),
             _ => false,
@@ -4281,6 +4293,34 @@ mod tests {
         t.feed("a\x1b(\u{e9}0q".as_bytes());
         assert_eq!((captured(&t), t.cursor()), ("aq".to_owned(), (2, 0)));
         assert!(crate::snapshot(&t).cell(1, 0).unwrap().acs);
+    }
+
+    /// An escape tmux's `input_esc_table` lacks dispatches nothing
+    /// (input.c `input_esc_dispatch`): DECBI and DECFI do not move, SS2,
+    /// SS3, the G2/G3 designations and the national sets change no
+    /// character, two intermediates match no entry, DECID gets no reply.
+    #[test]
+    fn escapes_tmux_lacks_do_nothing() {
+        let after = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            let acs = crate::snapshot(&t).cell(0, 0).unwrap().acs;
+            (captured(&t), t.cursor(), acs, t.take_replies())
+        };
+        let plain = |s: &str, x: u16| (s.to_owned(), (x, 0), false, Vec::new());
+        assert_eq!(after(b"ab\x1b6c"), plain("abc", 3));
+        assert_eq!(after(b"\x1b9pa"), plain("pa", 2));
+        assert_eq!(after(b"\x1b*0\x1bNq"), plain("q", 1));
+        assert_eq!(after(b"\x1b+0\x1bOq"), plain("q", 1));
+        assert_eq!(after(b"\x1b*0\x1bnq"), plain("q", 1));
+        assert_eq!(after(b"\x1b(A#"), plain("#", 1));
+        assert_eq!(after(b"\x1b((0q"), plain("q", 1));
+        assert_eq!(after(b"\x1bZx"), plain("x", 1));
+        // What tmux knows still works.
+        assert_eq!(
+            after(b"\x1b(0q"),
+            ("q".to_owned(), (1, 0), true, Vec::new())
+        );
     }
 
     /// Reference: 20x5 after `l0\nl1\nl2`, cursor at 4,2 (row 2 col 4):

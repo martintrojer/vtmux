@@ -1,0 +1,13 @@
+name = "esc_tmux_lacks"
+# An escape input_esc_table does not have dispatches nothing (input.c
+# input_esc_dispatch): DECBI (ESC 6) and DECFI (ESC 9) leave the cursor, SS2,
+# SS3 and LS2 with a G2 or G3 line drawing set, a national set (ESC ( A) and
+# two intermediates (ESC ( ( 0) change no character, DECID (ESC Z) is not
+# answered. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "5", "sh", "-c", "printf 'ab\\0336c\\015\\012\\0339pa\\015\\012\\033*0\\033Nq\\033+0\\033Oq\\033nq\\033(A#\\033((0q\\033Zx\\015\\012'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y}"] },
+]
