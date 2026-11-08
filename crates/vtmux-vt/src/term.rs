@@ -1894,6 +1894,8 @@ impl PaneTerm {
     /// What the program's output did since the last call that the server
     /// reports (title changes, BELs, OSC 133 prompts and commands), oldest
     /// first, as tmux fires them while it parses (`input_parse_buffer`).
+    /// Nothing is dropped, so a caller takes them after every
+    /// [`Self::feed`].
     pub fn take_events(&mut self) -> Vec<TermEvent> {
         std::mem::take(&mut self.events.borrow_mut().list)
     }
@@ -2732,10 +2734,6 @@ fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
     Some(out)
 }
 
-/// Events kept for [`PaneTerm::take_events`]; older ones are dropped from
-/// a terminal nobody drains (a popup's).
-const MAX_EVENTS: usize = 1024;
-
 /// Something a pane's program did that the server reports
 /// ([`PaneTerm::take_events`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2754,7 +2752,10 @@ pub enum TermEvent {
     CommandFinished(u8),
 }
 
-/// The events not yet taken, BELs in a row counted in one.
+/// The events not yet taken, BELs in a row counted in one. Unbounded:
+/// tmux fires every one as it parses, so whoever feeds a terminal takes
+/// them after each feed (a popup's are dropped then), which bounds the
+/// list by one read.
 #[derive(Debug, Default)]
 struct Events {
     list: Vec<TermEvent>,
@@ -2766,9 +2767,6 @@ impl Events {
         {
             *last = last.saturating_add(*n);
             return;
-        }
-        if self.list.len() >= MAX_EVENTS {
-            self.list.remove(0);
         }
         self.list.push(event);
     }
@@ -4212,6 +4210,28 @@ mod tests {
             ]
         );
         assert_eq!(t.take_events(), Vec::<TermEvent>::new());
+    }
+
+    /// One read with more events than any cap keeps them all: tmux fires
+    /// each as it parses, so a bell and title flood reaches every hook.
+    #[test]
+    fn a_read_keeps_every_event() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(&b"\x1b]2;t\x07x\x07".repeat(20_000));
+        let events = t.take_events();
+        let bells: u32 = events
+            .iter()
+            .map(|e| match e {
+                TermEvent::Bells(n) => *n,
+                _ => 0,
+            })
+            .sum();
+        let titles = events
+            .iter()
+            .filter(|e| matches!(e, TermEvent::Title(_)))
+            .count();
+        assert_eq!((titles, bells), (20_000, 20_000));
+        assert_eq!(events.len(), 40_000);
     }
 
     /// Reference: OSC 133;A only marks the line (no fresh line), a BEL

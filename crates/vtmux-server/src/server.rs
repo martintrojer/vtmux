@@ -5929,6 +5929,32 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A read with a flood of BELs and titles fires `pane-bell` and
+    /// `pane-title-changed` for every one, as tmux does while it parses
+    /// (input.c `input_c0_dispatch`, `input_exit_osc`): none is dropped
+    /// however many one read holds.
+    #[test]
+    fn a_flooding_read_fires_every_bell_and_title() {
+        use crate::events::Queued;
+        let (mut server, p, _, _, dir) = setup();
+        server.model.events.clear();
+        server.render_and_exit();
+        server.pane_input(p, &b"\x1b]2;t\x07x\x07".repeat(8000), false);
+        let count = |name: &str| {
+            server
+                .model
+                .events
+                .iter()
+                .filter(|q| matches!(q, Queued::Event(ev) if ev.name == name))
+                .count()
+        };
+        assert_eq!(
+            (count("pane-bell"), count("pane-title-changed")),
+            (8000, 8000)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// A `pane-activity` nothing would run commands for is only counted
     /// (`options_hook_fired`), without an event; a hook command makes it
     /// an event again.

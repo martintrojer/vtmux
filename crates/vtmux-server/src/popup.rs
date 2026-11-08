@@ -473,6 +473,9 @@ impl Server {
                 ReadResult::Data(bytes) => {
                     p.term.set_extended_keys(extended_keys);
                     p.term.feed(&bytes);
+                    // A popup fires no pane hooks (it has no pane), and
+                    // its terminal keeps every event until taken.
+                    let _ = p.term.take_events();
                 }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
