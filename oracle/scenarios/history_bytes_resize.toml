@@ -1,0 +1,35 @@
+# #{history_bytes} after the width changes (D-001). tmux keeps each line's
+# allocation (grid_line cellsize) through grid_reflow: a line that fits is
+# moved with its cells, so narrowing and widening again leave the size the
+# line was first written at (a quarter, half or all of that width). vtmux
+# has no per-line allocation and counts the cells each line holds at the
+# width it has now, so it differs once a width change moves lines between
+# allocation steps. Short lines show it going narrow and wide; longer ones
+# widened and then narrowed again; the other rows of each run agree.
+name = "history_bytes_resize"
+steps = [
+  { run = ["new", "-d", "-s", "short", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "i=1; while [ $i -le 200 ]; do echo $i; i=$((i+1)); done; tmux wait-for -S hbr-short; exec cat -"] },
+  { run = ["new", "-d", "-s", "long", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "i=1; while [ $i -le 200 ]; do echo \"$i some filler text here to make it long enough\"; i=$((i+1)); done; tmux wait-for -S hbr-long; exec cat -"] },
+  { wait_for = "hbr-short" },
+  { wait_for = "hbr-long" },
+  { run = ["display", "-p", "-t", "short:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "short:w", "-x", "30"] },
+  { divergence = { id = "D-001", expect = { kind = "cli", stdout = "177 15040 30\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "short:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "short:w", "-x", "120"] },
+  { divergence = { id = "D-001", expect = { kind = "cli", stdout = "177 38040 120\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "short:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "short:w", "-x", "80"] },
+  { run = ["display", "-p", "-t", "short:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["splitw", "-d", "-h", "-t", "short:w", "cat", "-"] },
+  { divergence = { id = "D-001", expect = { kind = "cli", stdout = "177 18040 40\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "short:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["display", "-p", "-t", "long:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "long:w", "-x", "30"] },
+  { run = ["display", "-p", "-t", "long:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "long:w", "-x", "120"] },
+  { run = ["display", "-p", "-t", "long:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+  { run = ["resize-window", "-t", "long:w", "-x", "80"] },
+  { divergence = { id = "D-001", expect = { kind = "cli", stdout = "177 88040 80\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "long:w.0", "#{history_size} #{history_bytes} #{pane_width}"] },
+]
