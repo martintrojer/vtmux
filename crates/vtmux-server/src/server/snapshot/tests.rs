@@ -1868,3 +1868,29 @@ fn copy_mode_over_a_long_history_goes_in_pages() {
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A title goes into the snapshot as `#{pane_title}` reads it, escaped
+/// already (`clean_name`); restored without its terminal (a `vtmux-persist
+/// layout` checkpoint, or the last resort) it is not escaped again.
+#[test]
+fn a_title_restored_without_its_terminal_is_not_escaped_again() {
+    let dir = temp_dir("title");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["select-pane", "-t", "s", "-T", "a\\b\tc"]);
+    let title = ["display", "-p", "-t", "s", "#{pane_title}"];
+    let before = run(&mut a, &dir, &title);
+    assert!(before.contains("\na\\\\b\\tc\n"), "{before:?}");
+    let mut taken = a.to_snapshot(snap::Meta::default());
+    for p in &mut taken.panes {
+        p.term = None;
+    }
+    let decoded = snap::decode(&snap::encode(&taken)).unwrap();
+    let (l, _) = listener(&dir, "b");
+    let mut b =
+        Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| adopt(&a, r)).unwrap();
+    assert_eq!(run(&mut b, &dir, &title), before);
+    drop(b);
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}

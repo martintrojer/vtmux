@@ -508,7 +508,8 @@ fn fresh_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
     if p.empty {
         empty_pane_modes(&mut term);
     }
-    term.set_title(&p.title);
+    // p.title is what `PaneTerm::title` read, cleaned already.
+    term.restore_title(&p.title);
     term.take_events();
     Ok(term)
 }

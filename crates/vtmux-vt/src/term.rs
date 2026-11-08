@@ -2098,6 +2098,12 @@ impl PaneTerm {
             .push(TermEvent::Title(text.to_owned()));
     }
 
+    /// Give back a title [`Self::title`] read (a snapshot's): it is
+    /// already cleaned, so it is kept as it is.
+    pub fn restore_title(&mut self, title: &str) {
+        self.titles.server = Some(title.to_owned());
+    }
+
     /// Path from OSC 7 as tmux stores it (`screen_set_path`, screen.c:278-288).
     #[must_use]
     pub fn pwd(&self) -> String {
@@ -5324,6 +5330,17 @@ mod tests {
         // The BEL that ended an OSC title is no bell; the grid is untouched.
         assert_eq!(title(&mut t, b"\x1b]2;t\x07"), ("t".into(), ev("t")));
         assert_eq!(captured(&t), "x", "only the x after the CAN");
+    }
+
+    #[test]
+    fn a_title_given_back_is_kept_as_it_was_read() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_title("a\\b\tc#(d)");
+        let shown = t.title();
+        assert_eq!(shown, "a\\\\b\\tc#(d)");
+        let mut back = PaneTerm::new(20, 5, 100);
+        back.restore_title(&shown);
+        assert_eq!(back.title(), shown);
     }
 
     #[test]
