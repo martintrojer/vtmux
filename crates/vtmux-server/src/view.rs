@@ -3,10 +3,16 @@
 //! pane's cursor unless the client panned it by hand (`refresh-client
 //! -U/-D/-L/-R`, cmd-refresh-client.c:171-233).
 //!
-//! The view is the client's, worked out again whenever its frame is drawn
-//! and when it pans (tmux's `tty_update_client_offset`); the scene, the
-//! cursor, mouse positions, menus, popups and the `window_offset_*`
-//! formats all read the one stored in the client.
+//! The view is the client's, worked out again only when tmux does
+//! (`tty_update_client_offset`, `tty_update_window_offset`): when it
+//! attaches or pans, when its window is sized again (`recalculate_size`,
+//! which every client leaving and every option set run), when the window
+//! changes active pane or becomes current, and after a cursor moves in a
+//! pane of the window (`screen_write_offset_timer`). In between it stays,
+//! even when what it follows has moved: a copy mode that ends leaves the
+//! view where its cursor put it. The scene, the cursor, mouse positions,
+//! menus, popups and the `window_offset_*` formats all read the one stored
+//! in the client.
 
 use vtmux_core::ids::WindowId;
 
@@ -171,14 +177,58 @@ impl Server {
         }
     }
 
-    /// [`Self::update_view`] for each of `clients` before their frames:
-    /// tmux updates the offsets after the cursor moves
-    /// (`screen_write_offset_timer`), on a resize and on a change of window
-    /// or pane, so each frame, its status line and the commands after it
-    /// see the same view.
-    pub(crate) fn update_views(&mut self, clients: impl IntoIterator<Item = ClientId>) {
-        for id in clients {
+    /// `tty_update_window_offset` (tty.c:1038-1050): the view of every
+    /// client showing window `w` worked out again.
+    pub(crate) fn update_window_offset(&mut self, w: WindowId) {
+        let ids: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| {
+                c.attached
+                    .and_then(|s| self.model.current_of(s))
+                    .is_some_and(|(_, cw, _)| cw == w)
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
             self.update_view(id);
+        }
+    }
+
+    /// `screen_write_set_cursor`'s offset timer (screen-write.c:83-120),
+    /// run before frames: each window where a cursor moved since the last
+    /// frames, its views worked out again. A cursor moved by pane output
+    /// (marked by [`Self::cursor_moved_in`]) or in a copy mode, which
+    /// tmux draws through the pane; a mode drawn on its own screen alone
+    /// (tree, clock, a copy mode's first draw) moves none.
+    pub(crate) fn update_moved_offsets(&mut self) {
+        for pane in self.model.panes.values_mut() {
+            let copy = match pane.modes.first_mut() {
+                Some(crate::mode::Mode::Copy(m)) => m.as_mut(),
+                Some(crate::mode::Mode::View(v)) => &mut v.copy,
+                _ => continue,
+            };
+            if copy.moved_since_offset() {
+                self.offset_due.insert(pane.window);
+            }
+        }
+        for w in std::mem::take(&mut self.offset_due) {
+            self.update_window_offset(w);
+        }
+    }
+
+    /// A cursor in window `w` moved (`screen_write_set_cursor` with a
+    /// pane): its views are worked out again before the next frames.
+    pub(crate) fn cursor_moved_in(&mut self, w: WindowId) {
+        self.offset_due.insert(w);
+    }
+
+    /// `recalculate_sizes` from `options_push_changes`
+    /// (options.c:1471): every view worked out again.
+    pub(crate) fn update_all_offsets(&mut self) {
+        let windows: Vec<WindowId> = self.model.windows.keys().copied().collect();
+        for w in windows {
+            self.update_window_offset(w);
         }
     }
 

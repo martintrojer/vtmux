@@ -813,6 +813,24 @@ record! {
         /// it holds. Like [`Self::terminal_title`], only how the window
         /// is shown: not required.
         46 => opt pan: Option<ClientPan>,
+        /// The part of its window the client shows (`tty->oox`, `ooy`,
+        /// `osx`, `osy`, `oflag`), as last worked out: tmux works it out
+        /// only on some events, so it may differ from what the window
+        /// would give now. Not required: without it the view is worked
+        /// out afresh.
+        47 => opt view: Option<ClientView>,
+    }
+}
+
+record! {
+    /// A client's view: `sx` x `sy` cells from column `ox`, row `oy` of
+    /// its window, and whether the window is bigger than the client.
+    pub struct ClientView {
+        1 => one ox: u32,
+        2 => one oy: u32,
+        3 => one sx: u32,
+        4 => one sy: u32,
+        5 => one bigger: bool,
     }
 }
 
@@ -1487,6 +1505,8 @@ pub(crate) mod tests {
             terminal_title: None,
             // Added within v1 too (a_clients_pan_round_trips).
             pan: None,
+            // Added within v1 too (a_clients_view_round_trips).
+            view: None,
         }
     }
 

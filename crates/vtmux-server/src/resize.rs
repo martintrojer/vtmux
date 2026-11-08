@@ -281,17 +281,23 @@ impl Server {
             .number_option(TreeId::Window(w), "aggressive-resize")
             != 0;
         let among = Among::Window { window: w, current };
+        // resize.c:392-422: a size that does not change, or waits, still
+        // works the window's views out again (tty_update_window_offset);
+        // a resize does it in resize_window.
         let Some(size) = self.clients_calculate_size(policy, None, &among, Some(w)) else {
+            self.update_window_offset(w);
             return;
         };
         let window = &self.model.windows[&w];
         if !now && window.pending_size.unwrap_or((window.sx(), window.sy())) == size {
+            self.update_window_offset(w);
             return;
         }
         if now || policy == SizePolicy::Manual {
             self.model.resize_window(w, size.0, size.1);
         } else if let Some(window) = self.model.windows.get_mut(&w) {
             window.pending_size = Some(size);
+            self.update_window_offset(w);
         }
     }
 

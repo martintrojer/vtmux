@@ -219,6 +219,13 @@ impl Model {
         self.events.push(Queued::Focus(p));
     }
 
+    /// Queue `tty_update_window_offset` for window `w`: the views of the
+    /// clients showing it are worked out again
+    /// ([`crate::server::Server::update_window_offset`]).
+    pub fn update_offset(&mut self, w: WindowId) {
+        self.events.push(Queued::Offset(w));
+    }
+
     /// `focus-events`, which gates the focus checks in
     /// `window_set_active_pane` and `session_set_current`.
     #[must_use]
@@ -295,6 +302,8 @@ impl Model {
 pub enum Queued {
     Event(Event),
     Focus(PaneId),
+    /// `tty_update_window_offset` for a window.
+    Offset(WindowId),
     /// A session went: its clients move on before its `session-closed`
     /// ([`crate::server::Server::session_destroyed`]).
     Destroyed(Destroyed),
@@ -349,6 +358,7 @@ impl Server {
                             self.fire_event(&ev);
                         }
                     }
+                    Queued::Offset(w) => self.update_window_offset(w),
                     Queued::Destroyed(d) => {
                         // The client-session-changed events this fires
                         // come before the session's session-closed.

@@ -540,6 +540,9 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// Windows where a cursor moved since the last frames, whose views are
+    /// worked out again before the next ([`Self::update_moved_offsets`]).
+    pub(crate) offset_due: std::collections::BTreeSet<WindowId>,
     /// Pane output some control client has not been sent yet.
     pub(crate) control_streams: crate::control_queue::Streams,
     /// Panes whose output this turn started a burst (they were not in the
@@ -810,6 +813,7 @@ impl Server {
             key_after: None,
             jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
+            offset_due: std::collections::BTreeSet::new(),
             control_streams: crate::control_queue::Streams::default(),
             burst_started: std::collections::BTreeSet::new(),
             mode_drawn: std::collections::BTreeSet::new(),
@@ -2841,7 +2845,7 @@ impl Server {
         // The rows each pane wrote under synchronized output that ended,
         // drawn whole for every client ([`Self::force_sync_flush`]).
         let mut flushed: BTreeMap<PaneId, Vec<bool>> = BTreeMap::new();
-        self.update_views(attached.iter().map(|&(id, _)| id));
+        self.update_moved_offsets();
         for (id, s) in attached {
             if self.render_skips(id, s) {
                 continue;
@@ -4906,6 +4910,9 @@ impl Server {
             .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
         pane.term.set_extended_keys(extended_keys);
         pane.term.feed(bytes);
+        // input.c:1065-1068: output to a pane not in a mode is written
+        // through it, so its cursor moves arm the window's offset timer.
+        let cursor_moved = pane.modes.is_empty();
         let passthrough = pane.term.take_passthrough();
         let renames = pane.term.take_renames();
         let now = Instant::now();
@@ -4930,6 +4937,9 @@ impl Server {
         // non-empty read (input.c:1053): W/t sorts and lsw -O
         // activity order by it.
         let window = pane.window;
+        if cursor_moved {
+            self.cursor_moved_in(window);
+        }
         let stamp = self.model.touch();
         if let Some(w) = self.model.windows.get_mut(&window) {
             w.activity = stamp;

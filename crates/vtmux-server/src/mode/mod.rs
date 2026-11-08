@@ -708,11 +708,19 @@ impl Server {
             env.as_ref()
                 .is_some_and(|e| !m.line_numbers_active(e.line_numbers))
         });
+        // Drawn through the pane, a moved cursor (or the lines the mode
+        // drew) works the window's views out again, even if the mode then
+        // ends (screen_write_offset_timer fires after).
+        let moved = direct && mode.as_copy_mut().is_some_and(CopyMode::moved_since_offset);
         if let Some(pane) = self.model.panes.get_mut(&p) {
             if let Some(m) = mode.as_copy() {
                 pane.search.clone_from(&m.pane_search);
             }
             pane.modes.insert(0, mode);
+            if moved {
+                let w = pane.window;
+                self.cursor_moved_in(w);
+            }
         }
         if direct {
             self.mode_drawn.insert(p);

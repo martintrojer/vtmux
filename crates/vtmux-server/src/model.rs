@@ -804,6 +804,8 @@ impl Model {
             }
             self.push_focus_check(p);
         }
+        // window.c:781-782: tty_update_window_offset, server_redraw_window.
+        self.update_offset(w);
         self.redraw(Redraw::Window(w));
         self.fire_pane_changed(w, p, old);
         true
@@ -1212,6 +1214,8 @@ impl Model {
         }
         self.alerts_clear_window(w);
         self.alerts_queue(w, crate::alerts::ACTIVITY);
+        // session.c:523.
+        self.update_offset(w);
         self.fire_window_changed(s, index, old_w.map(|ow| (ow, old)));
         Some(true)
     }
@@ -1610,6 +1614,8 @@ impl Model {
         if let Some(p) = zoomed {
             self.zoom(w, p);
         }
+        // resize.c:79: tty_update_window_offset.
+        self.update_offset(w);
         // resize.c:80-82, resize_fire_window_resized (resize.c:27-40).
         self.layout_changed(w);
         let Some(window) = self.windows.get(&w) else {

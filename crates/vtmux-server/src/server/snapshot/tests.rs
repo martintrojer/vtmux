@@ -1111,6 +1111,28 @@ fn a_clients_pan_is_kept() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A client's view comes back as it was, not worked out again: tmux works
+/// it out only on some events, so it may lag what it follows.
+#[test]
+fn a_clients_view_is_kept() {
+    let dir = temp_dir("view");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let view = crate::view::View {
+        ox: 1,
+        oy: 2,
+        sx: 3,
+        sy: 4,
+        bigger: true,
+    };
+    a.clients.get_mut(&client).unwrap().view = view;
+    let b = rebuild(&a, &dir, "b");
+    assert_eq!(b.clients[&client].view, view);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A downgrade to the build before works with an ordinary attached client
 /// (decision 6 refuses a newer format, not a feature a fix adds): nothing
 /// such a client produces, its terminal's answered queries and a title set

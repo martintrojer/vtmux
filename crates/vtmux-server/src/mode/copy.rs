@@ -303,6 +303,9 @@ pub struct CopyMode {
     /// The view moved since [`Self::take_scrolled`]: where tmux calls
     /// `window_pane_scrollbar_show(wp, 1)`.
     scrolled: bool,
+    /// The cursor, scroll offset and selection as of the last
+    /// [`Self::moved_since_offset`].
+    offset_seen: (usize, usize, usize, bool),
 }
 
 /// How often a drag held at the top or bottom row scrolls
@@ -717,7 +720,19 @@ impl CopyMode {
             refresh_due: None,
             drag_due: None,
             scrolled: false,
+            offset_seen: (cx, cy, oy, false),
         }
+    }
+
+    /// Whether the mode moved its cursor, scrolled or changed its
+    /// selection since the last call (or since it began): tmux draws such a
+    /// change through the pane (`screen_write_start_pane`), moving the
+    /// cursor, which works the window's offset out again
+    /// (screen-write.c:92-120). Its first draw is on its own screen
+    /// (`window_copy_init`, window-copy.c:639-643), so it moves nothing.
+    pub fn moved_since_offset(&mut self) -> bool {
+        let now = (self.cx, self.cy, self.oy, self.sel.is_some());
+        std::mem::replace(&mut self.offset_seen, now) != now
     }
 
     /// `window_copy_view_init` (window-copy.c:652-674): view mode's copy of
@@ -3257,6 +3272,7 @@ impl CopyMode {
     ///
     /// # Errors
     /// A history page that does not decode.
+    #[expect(clippy::too_many_lines, reason = "one field after another")]
     pub fn import(
         r: &vtmux_snapshot::CopyMode,
         now: Instant,
@@ -3360,6 +3376,8 @@ impl CopyMode {
             refresh_due: r.refresh_in_ms.map(|ms| now + Duration::from_millis(ms)),
             drag_due: None,
             scrolled: r.scrolled,
+            // The frames before the snapshot saw every change.
+            offset_seen: (r.cx as usize, r.cy as usize, us(r.oy), r.sel.is_some()),
         })
     }
 }

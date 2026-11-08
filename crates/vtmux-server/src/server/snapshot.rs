@@ -1277,6 +1277,7 @@ impl Server {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "one field after another")]
     fn client_out(
         &self,
         id: ClientId,
@@ -1326,6 +1327,13 @@ impl Server {
                 window: p.window.0,
                 ox: p.ox,
                 oy: p.oy,
+            }),
+            view: Some(snap::ClientView {
+                ox: c.view.ox,
+                oy: c.view.oy,
+                sx: c.view.sx,
+                sy: c.view.sy,
+                bigger: c.view.bigger,
             }),
             control: c.control.as_ref().map(|cs| {
                 let mut out = control_out(cs, &self.control_streams, level, now);
@@ -1721,6 +1729,13 @@ impl Server {
                 server.lock_timers.insert(id, after(now, ms));
             }
         }
+        // A client from a snapshot without its view has it worked out
+        // afresh.
+        for x in &snapshot.clients {
+            if x.view.is_none() {
+                server.update_view(ClientId(x.id as usize));
+            }
+        }
         server.status_timer_start_all();
         Ok(server)
     }
@@ -1883,6 +1898,16 @@ impl Server {
             ox: p.ox,
             oy: p.oy,
         });
+        c.view = x
+            .view
+            .as_ref()
+            .map_or_else(crate::view::View::default, |v| crate::view::View {
+                ox: v.ox,
+                oy: v.oy,
+                sx: v.sx,
+                sy: v.sy,
+                bigger: v.bigger,
+            });
         let mut palette = crate::term_queries::Reported::default().palette;
         for e in &x.palette {
             if let Some(slot) = palette.get_mut(e.index as usize) {

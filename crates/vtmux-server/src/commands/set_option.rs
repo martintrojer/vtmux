@@ -274,6 +274,10 @@ impl Server {
             // options.c:1464-1466: session_update_history.
             self.model.update_history();
         }
+        // options.c:1471: recalculate_sizes, whose offset part is that
+        // every view is worked out again (a status line that comes or goes
+        // changes the area).
+        self.update_all_offsets();
         self.push_option_changes();
     }
 }

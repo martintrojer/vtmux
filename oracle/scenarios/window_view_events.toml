@@ -1,0 +1,55 @@
+name = "window_view_events"
+size = [40, 12]
+steps = [
+  # A 100x30 window (window-size manual) on a 40x12 client, the default
+  # status-right's offset part on the status line. tmux works a client's
+  # view out again only on some events (tty.c tty_update_window_offset):
+  # a cursor moved in the window (screen-write.c screen_write_offset_timer),
+  # an active pane or current window change, and every recalculate_sizes,
+  # which a client leaving runs (server-client.c server_client_lost).
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "100", "-y", "30", "cat", "-"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "status-right", "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}],-}"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["bind", "-n", "F2", "copy-mode"] },
+  { run = ["bind", "-n", "F3", "send-keys", "-X", "history-top"] },
+  { run = ["bind", "-n", "F4", "send-keys", "-X", "cancel"] },
+  { attach = { session = "a" } },
+  # Row 18: the view's last row is the cursor's, [0,8].
+  { feed = { pane = "%0", bytes = "\r\r\r\r\r\r\r\r\r" } },
+  { settle = {} },
+  { screen = {} },
+  # A drag from screen row 2 (window row 10): copy mode -M, its cursor
+  # under the pointer moves the view to [0,0].
+  { keys = "\u001b[<0;5;3M\u001b[<32;6;3M" },
+  { settle = {} },
+  { screen = {} },
+  # The drag's end leaves copy mode (copy-pipe-and-cancel), which moves no
+  # cursor: the view stays, and the program's cursor at row 18 is outside
+  # it, hidden at 0,0.
+  { keys = "\u001b[<0;6;3m" },
+  { settle = {} },
+  { screen = {} },
+  # A command reads the view as it stands; the command client leaving
+  # works it out again from the program's cursor.
+  { run = ["display", "-p", "#{pane_in_mode}:#{window_offset_x}:#{window_offset_y}"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # The same from keys: entering copy mode draws on its own screen and
+  # moves nothing; history-top moves its cursor to the top, and the view
+  # with it; cancel leaves the view there.
+  { keys = "\u001bOQ" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u001bOR" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u001bOS" },
+  { settle = {} },
+  { screen = {} },
+  # The program's echo moves its cursor: the view follows it again.
+  { keys = "x" },
+  { settle = {} },
+  { screen = {} },
+]

@@ -1000,7 +1000,17 @@ impl Server {
         }
         // Extended keys and focus reports asked for again, then the redraw.
         self.update_features(old);
+        // Sizes worked out again, but not the views: tmux has no such event,
+        // so a view that its last event left behind what it follows stays.
+        // A window the sizes change works its own out when its event is
+        // drained, and a resize meanwhile (above) did already.
+        let views: Vec<_> = self.clients.iter().map(|(&id, c)| (id, c.view)).collect();
         self.recalculate_sizes();
+        for (id, view) in views {
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.view = view;
+            }
+        }
     }
 
     /// The old connection of a client sent its notice closed: it is
