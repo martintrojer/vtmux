@@ -790,8 +790,8 @@ Recorded per commit in git history; the list is kept current:
   `eraseLine`, `tmuxLineUnwritten`, `index`, `scrollUp`, `scrollDown`,
   `tmuxUnwrapAboveRegionWithoutHistory`, `tmuxFixRegionContinuations`,
   `insertLinesTmux`, `insertLinesRowsTmux`, `tmuxOutsideRegion`,
-  `deleteLinesTmux`): corners of tmux's grid bookkeeping (D-040 closed,
-  D-006 narrowed).
+  `deleteLinesTmux`; `stream.zig` `csiDispatch`): corners of tmux's grid
+  bookkeeping (D-040 closed, D-006 narrowed).
   - Reflow of a cell wider than the pane (a tab, D-040). tmux's
     `grid_reflow_split` moves to the next line before every cell for
     which `width + gc.data.width > sx`, also with nothing on the line
@@ -847,12 +847,24 @@ Recorded per commit in git history; the list is kept current:
     `grid_move_lines` alone (no `grid_clear`, so not its unwrap), and a
     count reaching the bottom moves no line and changes nothing. The
     cursor stays, as in the region (patch 0011).
+  - A zero count is 1 for IL, DL, DCH, SU, SD and CBT (`stream.zig`
+    `csiDispatch`: `@max(1, params[0])`, as ICH had): tmux reads every
+    count with `input_get(ictx, 0, 1, 1)` (input.c), where Ghostty passed
+    the 0 on and `insertLinesTmux`, `deleteLinesTmux`, `deleteChars`,
+    `scrollUp`, `scrollDown` and CBT's loop do nothing for it. A sweep of
+    every count final (`@ A B C D E F G H I L M P S T X Z a b d e` and
+    backquote, counts 0, 1, 2, 65535) against tmux 3.8 found only these
+    six; the others already took 0 as 1. Not changed: extra parameters
+    (`CSI 3;1 L`: tmux uses the first, Ghostty drops the sequence) and a
+    colon in a later parameter.
 
-  Tests: new `Terminal: reflow leaves empty rows before a tab wider than
+  Tests: new `stream: a zero count is one for IL, DL, DCH, SU, SD and CBT
+  (vtmux)` (fails without the change), `Terminal: reflow leaves empty rows before a tab wider than
   the pane (vtmux)` (fails without the PageList change: no empty rows)
   and `Terminal: tmux grid bookkeeping corners (vtmux)`; oracle
   `reflow_wide_tab`, `wrap_flag_corners`, `reflow_tmux_quirks` (scene
-  `tabwide` no longer annotated). A random reflow probe against tmux 3.8
+  `tabwide` no longer annotated), `csi_zero_count` (every count final with
+  0, IL and DL in, above and below a region, ED 2 after a background). A random reflow probe against tmux 3.8
   (780 seeds of letters, tabs, wide characters, erases and CRLF on
   20x6, 2 to 7 resizes of 2 to 20 columns, some of the height) matches
   but for the 14 seeds of D-041. `-Doptimize=ReleaseSafe` with test filters

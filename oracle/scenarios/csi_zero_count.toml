@@ -1,0 +1,167 @@
+name = "csi_zero_count"
+size = [20, 6]
+# A CSI whose count is an explicit 0 counts as 1 (input.c input_get with
+# minval 1 for IL, DL, ICH, DCH, ECH, SU, SD, CUU..CUB, CNL, CPL, CHA, HPA,
+# HPR, VPA, VPR, CBT, REP; CUP's too). Each case seeds six rows, moves the
+# cursor, sends the sequence with a 0 count and dumps history size, cursor
+# and grid (history included). IL and DL run with no scroll region and with
+# the cursor in, above and below one (screen_write_insertline,
+# screen_write_deleteline); the _one cases are the same with an explicit 1.
+# The ed2_ cases are ED 2 under scroll-on-clear after a background colour
+# touched the 24-row grid below its text: grid_view_clear_history scrolls
+# only the lines with cells used (a partial erase leaves cellused as it
+# was; ICH and DCH raise it to the cells they moved).
+steps = [
+  # il_plain
+  { run = ["new", "-d", "-s", "il_plain", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0L'; tmux wait-for -S zil_plain; exec cat"] },
+  { wait_for = "zil_plain" },
+  { run = ["display", "-p", "-t", "il_plain:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "il_plain:"] },
+  # il_in
+  { run = ["new", "-d", "-s", "il_in", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[3;6H\\033[0L'; tmux wait-for -S zil_in; exec cat"] },
+  { wait_for = "zil_in" },
+  { run = ["display", "-p", "-t", "il_in:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "il_in:"] },
+  # il_above
+  { run = ["new", "-d", "-s", "il_above", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[1;6H\\033[0L'; tmux wait-for -S zil_above; exec cat"] },
+  { wait_for = "zil_above" },
+  { run = ["display", "-p", "-t", "il_above:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "il_above:"] },
+  # il_below
+  { run = ["new", "-d", "-s", "il_below", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[5;6H\\033[0L'; tmux wait-for -S zil_below; exec cat"] },
+  { wait_for = "zil_below" },
+  { run = ["display", "-p", "-t", "il_below:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "il_below:"] },
+  # il_one
+  { run = ["new", "-d", "-s", "il_one", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[3;6H\\033[1L'; tmux wait-for -S zil_one; exec cat"] },
+  { wait_for = "zil_one" },
+  { run = ["display", "-p", "-t", "il_one:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "il_one:"] },
+  # dl_plain
+  { run = ["new", "-d", "-s", "dl_plain", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0M'; tmux wait-for -S zdl_plain; exec cat"] },
+  { wait_for = "zdl_plain" },
+  { run = ["display", "-p", "-t", "dl_plain:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dl_plain:"] },
+  # dl_in
+  { run = ["new", "-d", "-s", "dl_in", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[3;6H\\033[0M'; tmux wait-for -S zdl_in; exec cat"] },
+  { wait_for = "zdl_in" },
+  { run = ["display", "-p", "-t", "dl_in:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dl_in:"] },
+  # dl_above
+  { run = ["new", "-d", "-s", "dl_above", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[1;6H\\033[0M'; tmux wait-for -S zdl_above; exec cat"] },
+  { wait_for = "zdl_above" },
+  { run = ["display", "-p", "-t", "dl_above:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dl_above:"] },
+  # dl_below
+  { run = ["new", "-d", "-s", "dl_below", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[5;6H\\033[0M'; tmux wait-for -S zdl_below; exec cat"] },
+  { wait_for = "zdl_below" },
+  { run = ["display", "-p", "-t", "dl_below:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dl_below:"] },
+  # dl_one
+  { run = ["new", "-d", "-s", "dl_one", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[3;6H\\033[1M'; tmux wait-for -S zdl_one; exec cat"] },
+  { wait_for = "zdl_one" },
+  { run = ["display", "-p", "-t", "dl_one:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dl_one:"] },
+  # ich
+  { run = ["new", "-d", "-s", "ich", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0@'; tmux wait-for -S zich; exec cat"] },
+  { wait_for = "zich" },
+  { run = ["display", "-p", "-t", "ich:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ich:"] },
+  # dch
+  { run = ["new", "-d", "-s", "dch", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0P'; tmux wait-for -S zdch; exec cat"] },
+  { wait_for = "zdch" },
+  { run = ["display", "-p", "-t", "dch:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "dch:"] },
+  # ech
+  { run = ["new", "-d", "-s", "ech", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0X'; tmux wait-for -S zech; exec cat"] },
+  { wait_for = "zech" },
+  { run = ["display", "-p", "-t", "ech:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ech:"] },
+  # su
+  { run = ["new", "-d", "-s", "su", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0S'; tmux wait-for -S zsu; exec cat"] },
+  { wait_for = "zsu" },
+  { run = ["display", "-p", "-t", "su:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "su:"] },
+  # sd
+  { run = ["new", "-d", "-s", "sd", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0T'; tmux wait-for -S zsd; exec cat"] },
+  { wait_for = "zsd" },
+  { run = ["display", "-p", "-t", "sd:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "sd:"] },
+  # sd_region
+  { run = ["new", "-d", "-s", "sd_region", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[2;4r\\033[3;6H\\033[0T'; tmux wait-for -S zsd_region; exec cat"] },
+  { wait_for = "zsd_region" },
+  { run = ["display", "-p", "-t", "sd_region:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "sd_region:"] },
+  # cuu
+  { run = ["new", "-d", "-s", "cuu", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0A'; tmux wait-for -S zcuu; exec cat"] },
+  { wait_for = "zcuu" },
+  { run = ["display", "-p", "-t", "cuu:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cuu:"] },
+  # cud
+  { run = ["new", "-d", "-s", "cud", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0B'; tmux wait-for -S zcud; exec cat"] },
+  { wait_for = "zcud" },
+  { run = ["display", "-p", "-t", "cud:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cud:"] },
+  # cuf
+  { run = ["new", "-d", "-s", "cuf", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0C'; tmux wait-for -S zcuf; exec cat"] },
+  { wait_for = "zcuf" },
+  { run = ["display", "-p", "-t", "cuf:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cuf:"] },
+  # cub
+  { run = ["new", "-d", "-s", "cub", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0D'; tmux wait-for -S zcub; exec cat"] },
+  { wait_for = "zcub" },
+  { run = ["display", "-p", "-t", "cub:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cub:"] },
+  # cnl
+  { run = ["new", "-d", "-s", "cnl", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0E'; tmux wait-for -S zcnl; exec cat"] },
+  { wait_for = "zcnl" },
+  { run = ["display", "-p", "-t", "cnl:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cnl:"] },
+  # cpl
+  { run = ["new", "-d", "-s", "cpl", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0F'; tmux wait-for -S zcpl; exec cat"] },
+  { wait_for = "zcpl" },
+  { run = ["display", "-p", "-t", "cpl:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cpl:"] },
+  # cha
+  { run = ["new", "-d", "-s", "cha", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0G'; tmux wait-for -S zcha; exec cat"] },
+  { wait_for = "zcha" },
+  { run = ["display", "-p", "-t", "cha:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cha:"] },
+  # hpa
+  { run = ["new", "-d", "-s", "hpa", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0`'; tmux wait-for -S zhpa; exec cat"] },
+  { wait_for = "zhpa" },
+  { run = ["display", "-p", "-t", "hpa:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "hpa:"] },
+  # hpr
+  { run = ["new", "-d", "-s", "hpr", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0a'; tmux wait-for -S zhpr; exec cat"] },
+  { wait_for = "zhpr" },
+  { run = ["display", "-p", "-t", "hpr:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "hpr:"] },
+  # vpa
+  { run = ["new", "-d", "-s", "vpa", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0d'; tmux wait-for -S zvpa; exec cat"] },
+  { wait_for = "zvpa" },
+  { run = ["display", "-p", "-t", "vpa:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "vpa:"] },
+  # vpr
+  { run = ["new", "-d", "-s", "vpr", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0e'; tmux wait-for -S zvpr; exec cat"] },
+  { wait_for = "zvpr" },
+  { run = ["display", "-p", "-t", "vpr:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "vpr:"] },
+  # cbt
+  { run = ["new", "-d", "-s", "cbt", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;16H\\033[0Z'; tmux wait-for -S zcbt; exec cat"] },
+  { wait_for = "zcbt" },
+  { run = ["display", "-p", "-t", "cbt:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cbt:"] },
+  # rep
+  { run = ["new", "-d", "-s", "rep", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6Hx\\033[0b'; tmux wait-for -S zrep; exec cat"] },
+  { wait_for = "zrep" },
+  { run = ["display", "-p", "-t", "rep:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "rep:"] },
+  # cup
+  { run = ["new", "-d", "-s", "cup", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[2J\\033[HABCDEFGHIJKLMNOPQRS\\r\\nBCDEFGHIJKLMNOPQRST\\r\\nCDEFGHIJKLMNOPQRSTA\\r\\nDEFGHIJKLMNOPQRSTAB\\r\\nEFGHIJKLMNOPQRSTABC\\r\\nFGHIJKLMNOPQRSTABCD\\033[3;6H\\033[0;0H'; tmux wait-for -S zcup; exec cat"] },
+  { wait_for = "zcup" },
+  { run = ["display", "-p", "-t", "cup:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "cup:"] },
+  # su_text
+  { run = ["new", "-d", "-s", "su_text", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf 'A\\r\\nB\\r\\nC\\r\\nD\\033[0S'; tmux wait-for -S zsu_text; exec cat"] },
+  { wait_for = "zsu_text" },
+  { run = ["display", "-p", "-t", "su_text:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "su_text:"] },
+  # ed2_bg_el
+  { run = ["new", "-d", "-s", "ed2_bg_el", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;5H\\033[K\\033[2J'; tmux wait-for -S zed2_bg_el; exec cat"] },
+  { wait_for = "zed2_bg_el" },
+  { run = ["display", "-p", "-t", "ed2_bg_el:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_el:"] },
+  # ed2_bg_ech
+  { run = ["new", "-d", "-s", "ed2_bg_ech", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;5H\\033[3X\\033[2J'; tmux wait-for -S zed2_bg_ech; exec cat"] },
+  { wait_for = "zed2_bg_ech" },
+  { run = ["display", "-p", "-t", "ed2_bg_ech:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_ech:"] },
+  # ed2_bg_el1
+  { run = ["new", "-d", "-s", "ed2_bg_el1", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;5H\\033[1K\\033[2J'; tmux wait-for -S zed2_bg_el1; exec cat"] },
+  { wait_for = "zed2_bg_el1" },
+  { run = ["display", "-p", "-t", "ed2_bg_el1:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_el1:"] },
+  # ed2_bg_ich
+  { run = ["new", "-d", "-s", "ed2_bg_ich", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;5H\\033[3@\\033[2J'; tmux wait-for -S zed2_bg_ich; exec cat"] },
+  { wait_for = "zed2_bg_ich" },
+  { run = ["display", "-p", "-t", "ed2_bg_ich:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_ich:"] },
+  # ed2_bg_dch
+  { run = ["new", "-d", "-s", "ed2_bg_dch", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;1H\\033[2P\\033[2J'; tmux wait-for -S zed2_bg_dch; exec cat"] },
+  { wait_for = "zed2_bg_dch" },
+  { run = ["display", "-p", "-t", "ed2_bg_dch:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_dch:"] },
+  # ed2_bg_il
+  { run = ["new", "-d", "-s", "ed2_bg_il", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;1H\\033[L\\033[2J'; tmux wait-for -S zed2_bg_il; exec cat"] },
+  { wait_for = "zed2_bg_il" },
+  { run = ["display", "-p", "-t", "ed2_bg_il:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_il:"] },
+  # ed2_bg_twice
+  { run = ["new", "-d", "-s", "ed2_bg_twice", "-n", "w", "-x", "20", "-y", "24", "sh", "-c", "printf 'A\\033[44m\\033[13;5H\\033[2J\\033[2J'; tmux wait-for -S zed2_bg_twice; exec cat"] },
+  { wait_for = "zed2_bg_twice" },
+  { run = ["display", "-p", "-t", "ed2_bg_twice:", "#{history_size} #{cursor_x},#{cursor_y}", ";", "capture-pane", "-p", "-S", "-", "-t", "ed2_bg_twice:"] },
+]

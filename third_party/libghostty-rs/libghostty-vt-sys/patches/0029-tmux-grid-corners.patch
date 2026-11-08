@@ -736,3 +736,111 @@ index e93a35d93..e5da8673c 100644
  test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
+diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
+index d070ebb20..e37ac5965 100644
+--- a/src/terminal/stream.zig
++++ b/src/terminal/stream.zig
+@@ -1878,7 +1878,7 @@ pub fn Stream(comptime H: type) type {
+                 'L' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.insert_lines, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid IL command: {f}", .{input});
+                             return;
+@@ -1896,7 +1896,7 @@ pub fn Stream(comptime H: type) type {
+                 'M' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.delete_lines, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid DL command: {f}", .{input});
+                             return;
+@@ -1913,7 +1913,7 @@ pub fn Stream(comptime H: type) type {
+                 'P' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.delete_chars, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid delete characters command: {f}", .{input});
+                             return;
+@@ -1931,7 +1931,7 @@ pub fn Stream(comptime H: type) type {
+                 'S' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.scroll_up, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid scroll up command: {f}", .{input});
+                             return;
+@@ -1948,7 +1948,7 @@ pub fn Stream(comptime H: type) type {
+                 'T' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.scroll_down, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid scroll down command: {f}", .{input});
+                             return;
+@@ -2029,7 +2029,7 @@ pub fn Stream(comptime H: type) type {
+                 'Z' => switch (input.intermediates.len) {
+                     0 => self.handler.vt(.horizontal_tab_back, switch (input.params.len) {
+                         0 => 1,
+-                        1 => input.params[0],
++                        1 => @max(1, input.params[0]),
+                         else => {
+                             log.warn("invalid horizontal tab back command: {f}", .{input});
+                             return;
+@@ -4826,6 +4826,49 @@ test "stream: insert characters explicit zero clamps to 1" {
+     try testing.expectEqual(@as(usize, 1), s.handler.value.?);
+ }
+ 
++test "stream: a zero count is one for IL, DL, DCH, SU, SD and CBT (vtmux)" {
++    // tmux reads these counts with input.c `input_get(ictx, 0, 1, 1)`:
++    // an explicit 0 is 1, as for ICH above.
++    const H = struct {
++        const Self = @This();
++        last: usize = 0,
++        calls: usize = 0,
++
++        pub fn vt(
++            self: *Self,
++            comptime action: anytype,
++            value: anytype,
++        ) void {
++            switch (action) {
++                .insert_lines,
++                .delete_lines,
++                .delete_chars,
++                .scroll_up,
++                .scroll_down,
++                .horizontal_tab_back,
++                => {
++                    self.last = value;
++                    self.calls += 1;
++                },
++                else => {},
++            }
++        }
++    };
++
++    var s: Stream(H) = .init(.{ .handler = .{} });
++    const finals = "LMPSTZ";
++    inline for (finals) |f| {
++        s.handler = .{};
++        for ("\x1B[0" ++ [1]u8{f}) |c| s.next(c);
++        try testing.expectEqual(@as(usize, 1), s.handler.calls);
++        try testing.expectEqual(@as(usize, 1), s.handler.last);
++        for ("\x1B[" ++ [1]u8{f}) |c| s.next(c);
++        try testing.expectEqual(@as(usize, 1), s.handler.last);
++        for ("\x1B[3" ++ [1]u8{f}) |c| s.next(c);
++        try testing.expectEqual(@as(usize, 3), s.handler.last);
++    }
++}
++
+ test "stream: DECIC and DECDC" {
+     const H = struct {
+         const Self = @This();
