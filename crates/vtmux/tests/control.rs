@@ -1133,7 +1133,7 @@ fn flood_with_a_stalled_client(w: &World, args: &[&str]) -> (Child, Control) {
 /// (`control_append_data`).
 ///
 /// The pane is turned off (`%0:off`) before stdin closes: tmux 3.8 dies on
-/// an EOF that comes while output for the pane is queued (D-046).
+/// an EOF that comes while output for the pane is queued (D-048).
 #[test]
 fn pause_after_pauses_a_pane_the_client_is_behind_on() {
     compare("pause_after_pauses_a_pane_the_client_is_behind_on", |w| {
@@ -1180,7 +1180,7 @@ fn pause_after_pauses_a_pane_the_client_is_behind_on() {
     });
 }
 
-/// D-046: stdin closes while output from a flooding pane is queued for the
+/// D-048: stdin closes while output from a flooding pane is queued for the
 /// client. It exits 0 with `%exit` and the server and session stay. tmux
 /// 3.8 can die here (`fatalx("not enough data")`, control.c
 /// `control_append_data`), so only vtmux runs it.
