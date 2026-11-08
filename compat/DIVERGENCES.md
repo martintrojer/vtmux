@@ -92,13 +92,13 @@ product reasons" category.
 - Evidence: reference tmux 3.8, isolated: `new -d -s a cat; new -d -s k cat; splitw -d -t a cat; resizep -Z -t a:0.1; respawnw -k -t a; display -p -t a '#{window_layout}'` -> `server exited unexpectedly`, exit 1, and every later command says `no server running`.
 - Category: Do not copy tmux bug
 
-### D-009: config causes are not shown in view mode once a session is attached
+### D-009: a tab or `\001` in a config cause is not drawn as tmux draws it
 
-- Test / assertion: none fails; the startup config's causes for an attached terminal client (`cfg_show_causes`).
-- tmux behaviour: once a session is attached (`new-session`, `attach-session`, cfg.c:239-280), the causes go into the view mode of its active pane, written unparsed (`window_copy_add(wp, 0, ...)`, escapes shown as text).
-- vtmux behaviour: view mode exists (`cmdq_print` from an attached client, `run-shell` output to a pane, parsed as tmux parses them; oracle `view_*`, regress `run-shell-output.sh`), but the config causes stay queued until the next `source-file` prints them; a control client gets them as `%config-error` as in tmux.
-- Evidence: reference tmux 3.8 with a config holding a bad command: `new` shows the cause in view mode; vtmux shows the shell.
-- Category: Deferred
+- Test / assertion: cli (attach) `config_causes_show_in_view_mode_once_attached`; oracle `config_causes_view` (neither holds a tab or `\001`).
+- tmux behaviour: once a session is attached (`new-session`, `attach-session`, cfg.c:239-280), the startup config's causes go into view mode of its active pane, written unparsed (`window_copy_add(wp, 0, ...)` through `screen_write_vnputs`, screen-write.c:607-661): a control character is dropped, so an ESC shows as text, except that a tab is written as a cell holding the tab byte and `\001` toggles the ACS charset for the cells after it (`set -g "a<TAB>b<^A>c" 1` draws `a`, a tab, `b`, then `c` as `␌`).
+- vtmux behaviour: `cfg_show_causes` does the same (`Server::cfg_show_causes`: from `cfg_done`, and at the end of `new-session` and `attach-session` once `cfg_finished`; the oldest client a control client gets `%config-error`; no attached session keeps them queued; the text is `unparsed`, as `screen_write_vnputs` writes it). Only a tab and `\001` differ: both are dropped (`abc` where tmux draws a tab and `␌`). Everything else, including the escape shown as `[31mred`, matches.
+- Evidence: reference tmux 3.8 on a PTY client, a config with `set -g nosuchopt 1` and `set -g "\033[31mred" 1`: both screens equal; with `a<TAB>b<^A>c` tmux's output has `a\tb\u240c`, vtmux `abc`.
+- Category: Deferred (the two control characters; the cell and the charset toggle need the backing terminal to hold a tab cell and an ACS attribute)
 
 ### D-010: copy mode is partial (U1, U2 and U3 of the copy-mode split)
 

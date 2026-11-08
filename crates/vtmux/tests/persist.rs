@@ -877,7 +877,8 @@ fn config_edits_since_the_save_win() {
         w.ok(&["list-windows", "-a", "-F", "#{session_name} #{window_name}"]),
         "a saved\nc cw\n"
     );
-    // cfg.c `cfg_add_cause`: shown by the next source-file (D-009).
+    // cfg.c `cfg_add_cause`: no client is attached, so `cfg_show_causes`
+    // keeps them for the next source-file.
     let (out, err, _) = w.run(&["source-file", "/dev/null"]);
     assert_eq!(
         out + &err,

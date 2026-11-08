@@ -3957,6 +3957,61 @@ fn set_titles_needs_the_title_feature() {
     }
 }
 
+/// The startup config's causes, once a session is attached (cfg.c
+/// `cfg_show_causes`, from `cfg_done`, new-session and attach-session): view
+/// mode of the session's active pane, each written unparsed
+/// (`window_copy_add(wp, 0, ...)`), so an escape in a command name shows as
+/// text. Detached start first: they wait for the attach (D-009).
+#[test]
+fn config_causes_show_in_view_mode_once_attached() {
+    let mut screens = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let conf = w.home.path().join("c.conf");
+        std::fs::write(
+            &conf,
+            "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g \"\\033[31mred\" 1\nset -g status-interval x\n",
+        )
+        .unwrap();
+        let conf = conf.to_str().unwrap().to_owned();
+        let dir = w.home.path().to_str().unwrap().to_owned();
+        let shown = |a: &Attached| screen_text(a).replace(&dir, "DIR");
+        let mut seen = Vec::new();
+        // new-session attached: the causes are in view mode when it ends.
+        let mut a = w.attach(&["-f", &conf, "new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|a| screen_text(a).contains("[31mred"));
+        seen.push(shown(&a));
+        // The mode is the pane's own: `q` leaves it, and nothing comes back.
+        a.keys(b"q");
+        a.wait(|a| !screen_text(a).contains("nosuchopt"));
+        seen.push(shown(&a));
+        a.keys(b"\x02d");
+        a.exited(0);
+        // Started detached: the causes wait for the attach.
+        assert!(w.cli(&["kill-server"]).status.success());
+        let out = w.cli(&["-f", &conf, "new", "-d", "-s", "b", "-n", "w", "cat", "-"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut b = w.attach(&["attach", "-t", "b"]);
+        b.wait(|a| screen_text(a).contains("[31mred"));
+        seen.push(shown(&b));
+        b.keys(b"\x02d");
+        b.exited(0);
+        // Shown once: a later attach finds a plain shell.
+        let mut c = w.attach(&["attach", "-t", "b"]);
+        c.wait(|a| status_row(a).contains("0:w"));
+        seen.push(shown(&c));
+        c.keys(b"\x02d");
+        c.exited(0);
+        screens.push(seen);
+    }
+    assert!(screens[0][0].contains("nosuchopt"), "{}", screens[0][0]);
+    assert_eq!(screens[0], screens[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
 /// The screen as plain text, trailing spaces trimmed per line.
 fn screen_text(a: &Attached) -> String {
     String::from_utf8(capture(&a.screen(), CaptureOpts::default()))

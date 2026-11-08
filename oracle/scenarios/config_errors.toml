@@ -9,8 +9,7 @@ size = [60, 8]
 # the errors go to show-messages as `message: file:line: text`. A startup
 # config's errors reach a control client as `%config-error` lines
 # (cfg_show_causes); for an attached terminal client they go to view mode
-# (D-009, not done for config causes), so no scenario attaches one. Line numbers count
-# lines of the file, also after a %if.
+# (`config_causes_view`). Line numbers count lines of the file, also after a %if.
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["set-buffer", "-b", "b-bad.conf", "set -g @one 1\nset -g nosuchopt 1\nset -g @two 2\nset -g status-interval notanumber\nbind -n nosuchkey x\nbind-key -T nosuchtab y display\nset -g @three 3\nif-shell 'true' 'set -g nosuchopt2 x'\nrun-shell 'exit 3'\n%if \"1\"\nset -g @four 4\ndisplay-message -p \"ok-after\"\n%endif\nset-hook -g nosuchhook 'display -p x'\nswitch-client -t nosuchsession\nset -g @five 5\n"] },

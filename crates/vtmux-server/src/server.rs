@@ -4132,18 +4132,7 @@ impl Server {
         }
         self.cfg_finished = true;
         self.prompt_load_history();
-        // cfg_show_causes(NULL) (cfg.c:239-280): the first client, if it
-        // is a control client, gets them as `%config-error`. Otherwise they
-        // wait for an attached session's view mode, written unparsed
-        // (`window_copy_add(wp, 0, ...)`), which vtmux does not do yet
-        // (D-009): they stay queued, and the next source-file prints them.
-        if let Some(&first) = self.clients.keys().next()
-            && self.is_control(first)
-        {
-            for cause in std::mem::take(&mut self.causes) {
-                self.control_config_error(first, &cause);
-            }
-        }
+        self.cfg_show_causes(None);
         if let Some(step) = self.cfg_wait.take() {
             self.cmdq_continue(step);
         }

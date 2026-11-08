@@ -176,6 +176,47 @@ impl Server {
         self.model.redraw_panes.insert(p);
     }
 
+    /// `cfg_show_causes` (cfg.c:239-280): the config's causes, once there is
+    /// somewhere to show them. The oldest client, if it is a control client,
+    /// gets them as `%config-error`. Otherwise they go to view mode of the
+    /// active pane of `s` (the oldest client's session, else the first
+    /// session by name), written unparsed (`window_copy_add(wp, 0, ...)`),
+    /// and wait while that session has no client attached. Called when the
+    /// config has run (`cfg_done`, `s` none) and as `attach-session` and
+    /// `new-session` end once it has (`cfg_finished`).
+    pub(crate) fn cfg_show_causes(&mut self, s: Option<vtmux_core::ids::SessionId>) {
+        if self.causes.is_empty() {
+            return;
+        }
+        let first = self.clients.keys().next().copied();
+        if let Some(c) = first.filter(|&c| self.is_control(c)) {
+            for cause in std::mem::take(&mut self.causes) {
+                self.control_config_error(c, &cause);
+            }
+            return;
+        }
+        let Some(s) = s
+            .or_else(|| first.and_then(|c| self.client_session(c)))
+            .or_else(|| {
+                let first_by_name = self.model.sessions.values().min_by_key(|s| &s.name);
+                first_by_name.map(|s| s.id)
+            })
+        else {
+            return;
+        };
+        if self.session_clients(s).is_empty() {
+            return; // wait for an attached session
+        }
+        let Some(p) = crate::target::Found::from_session(&self.model, s).pane else {
+            return;
+        };
+        let causes: Vec<Vec<u8>> = std::mem::take(&mut self.causes)
+            .iter()
+            .map(|cause| unparsed(&vtmux_core::rawstr::to_bytes(cause)))
+            .collect();
+        self.view_add(p, causes.iter().map(Vec::as_slice));
+    }
+
     /// The prints among `output` (one command's, for an attached terminal
     /// client of session `s`) taken out and added to view mode in one go
     /// ([`Self::view_print`]).
@@ -218,9 +259,42 @@ impl Server {
     }
 }
 
+/// What `screen_write_vnputs` (screen-write.c:607-661) makes of `text`: the
+/// bytes the backing screen's cells get when the text is not parsed. A
+/// printable ASCII byte and a complete UTF-8 character go as they are, a
+/// newline moves to the start of the next line, and every other byte is
+/// dropped (an ESC, so `ESC [ 1 m` shows as `[1m`, a tab and `\001`, which
+/// tmux turns into a cell and a charset toggle), up to the first NUL.
+fn unparsed(text: &[u8]) -> Vec<u8> {
+    let text = text.split(|&b| b == 0).next().unwrap_or_default();
+    let mut out = Vec::with_capacity(text.len());
+    for chunk in text.utf8_chunks() {
+        for ch in chunk.valid().chars() {
+            match ch {
+                '\n' => out.extend_from_slice(b"\n\r"),
+                ' '..='~' | '\u{80}'.. => {
+                    let mut buf = [0; 4];
+                    out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Escapes are text; control characters other than a newline are gone.
+    #[test]
+    fn unparsed_text_shows_escapes_as_text() {
+        assert_eq!(unparsed(b"a\x1b[1mb\x01c\x7f"), b"a[1mbc");
+        assert_eq!(unparsed("x\nλ".as_bytes()), "x\n\rλ".as_bytes());
+        assert_eq!(unparsed(b"ab\0cd"), b"ab");
+        assert_eq!(unparsed(b"a\xffb"), b"ab");
+    }
 
     fn lines(v: &ViewMode) -> Vec<String> {
         let s = v.copy.screen(false, &|_, _| {});

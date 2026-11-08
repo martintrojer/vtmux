@@ -667,7 +667,12 @@ fn dispatch(
             // -d / -x: the session's other clients go (MSG_DETACH, or
             // MSG_DETACHKILL for -x).
             let detach = (args.flag('d') || args.flag('x')).then(|| args.flag('x'));
-            attach(server, item, session, !args.flag('E'), true, detach)
+            attach(server, item, session, !args.flag('E'), true, detach)?;
+            // cmd-attach-session.c:170-171.
+            if server.cfg_finished {
+                server.cfg_show_causes(Some(session));
+            }
+            Ok(())
         }
         "detach-client" => detach_client::exec(server, item, args),
         "suspend-client" => detach_client::suspend(server, item, args),

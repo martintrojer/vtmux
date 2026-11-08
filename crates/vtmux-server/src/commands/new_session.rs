@@ -126,7 +126,12 @@ pub fn exec(
                 server.set_client_flags(c, flags);
             }
             let detach = (args.flag('D') || args.flag('X')).then(|| args.flag('X'));
-            return super::attach(server, item, s, !args.flag('E'), true, detach);
+            super::attach(server, item, s, !args.flag('E'), true, detach)?;
+            // cmd_attach_session ends with cfg_show_causes (cmd-attach-session.c:170-171).
+            if server.cfg_finished {
+                server.cfg_show_causes(Some(s));
+            }
+            return Ok(());
         }
     }
     if let Some(n) = &session_name
@@ -230,6 +235,11 @@ pub fn exec(
     }
     // cmd-new-session.c:361-362.
     item.hook_target = Some(Some(Found::from_session(&server.model, s)));
+    // cmd-new-session.c:364-365: also for a detached session another
+    // client may be attached to.
+    if server.cfg_finished {
+        server.cfg_show_causes(Some(s));
+    }
     // Later commands in the batch see the new session as current: it
     // is the most recently active one (cmd_find_best_session).
     Ok(())
