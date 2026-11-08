@@ -654,6 +654,52 @@ fn a_server_execs_itself_and_everything_carries_on() {
     world.echo("a:w2.1", "split");
 }
 
+/// Every row a pane shows and holds in history comes through an upgrade
+/// cell for cell, with its cursor: a `cat -` pane with line1 to line3
+/// typed (each echoed twice), and one with 40 lines of history whose
+/// last row is full, its cursor pending a wrap. (A `full` restore lost
+/// the first of those `cat -` rows from the screen: `vtmux-persist`'s
+/// dead line, `persist.rs`; the upgrade draws none.)
+#[test]
+fn an_upgrade_keeps_every_row_and_the_cursor_of_each_pane() {
+    let world = World::new();
+    world.populate(&[]);
+    for word in ["line1", "line2", "line3"] {
+        world.echo("a:w1", word);
+    }
+    let full_row = "0123456789".repeat(8);
+    let script = format!(
+        "i=0; while [ $i -lt 40 ]; do i=$((i+1)); echo L$i; done; printf %s {full_row}; exec cat -"
+    );
+    world.run(&["neww", "-d", "-t", "a", "-n", "w3", "sh", "-c", &script]);
+    wait("the history and the full last row", || {
+        world
+            .run(&["capture-pane", "-p", "-t", "a:w3"])
+            .contains(&full_row)
+    });
+    let shown = |pane: &str| {
+        let rows = world.run(&["capture-pane", "-p", "-e", "-S", "-", "-t", pane]);
+        let at = world.run(&[
+            "display",
+            "-p",
+            "-t",
+            pane,
+            "#{history_size} #{cursor_x},#{cursor_y} #{cursor_flag}",
+        ]);
+        format!("{at}{rows}")
+    };
+    let before = [shown("a:w1"), shown("a:w3")];
+    assert!(
+        before[0].contains("line1\nline1\nline2\nline2\nline3\nline3\n"),
+        "{}",
+        before[0]
+    );
+    assert!(before[1].starts_with("17 80,23 "), "{}", before[1]);
+
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+    assert_eq!([shown("a:w1"), shown("a:w3")], before);
+}
+
 /// The upgrade as a user runs it (decision 22): the server was started
 /// as `bin/tmux`, a link to this build; the link is moved to a new copy,
 /// and `tmux vtmux-upgrade` with no `-b` moves the server onto the copy.

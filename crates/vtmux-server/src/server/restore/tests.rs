@@ -2,6 +2,7 @@
 //! checkpoint becomes before it is imported, and the server rebuilt from
 //! it.
 
+use vtmux_core::ids::PaneId;
 use vtmux_snapshot as snap;
 
 use super::super::persist::Mode;
@@ -237,7 +238,12 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
             .all(|p| p.exited && p.pid == 0 && p.tty.is_empty())
     );
     assert_eq!(s.panes[0].status, Some(snap::ExitStatus::default()));
+    // It dies when it is rebuilt, its dead line drawn then.
+    assert_eq!(s.panes[0].dead_time, None);
+    let since = crate::model::now_epoch();
     let mut server = rebuild(l, config, &s).unwrap();
+    let died = server.model.panes[&PaneId(0)].dead_time.unwrap();
+    assert!((since..=crate::model::now_epoch()).contains(&died));
     assert!(!server.config_loaded && !server.cfg_finished);
     assert_eq!(server.global_env.get("FROM"), Some("client"));
     let out = run(
@@ -250,14 +256,16 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
             "#{pane_id} #{pane_dead} [#{pane_dead_status}] #{pane_dead_time} #{pane_start_command} #{pane_start_path} #{socket_path}",
         ],
     );
-    let died = s.panes[0].dead_time.unwrap();
     let want = format!(
         "\n%0 1 [] {died} cat - {cwd0} {sock}\n%1 1 [3] 12345 cat - / {sock}\n--stderr--\n--exit Some(0)--\n",
         sock = socket.display()
     );
     assert!(out.ends_with(&want), "{out}");
-    let out = run(&mut server, &dir, &["capture-pane", "-p", "-t", "%0"]);
-    assert!(out.contains("Pane is dead"), "{out}");
+    // `layout` keeps no screen: a pane dead already gets its line again.
+    for p in ["%0", "%1"] {
+        let out = run(&mut server, &dir, &["capture-pane", "-p", "-t", p]);
+        assert!(out.contains("Pane is dead"), "{p}: {out}");
+    }
     // `layout` keeps no title: a new pane's, the host name.
     let out = run(
         &mut server,
@@ -267,6 +275,91 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
     assert!(
         out.contains(&format!("\n[{}]\n", server.info.host)),
         "{out}"
+    );
+    drop(server);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What `p` shows of a rebuilt server: its rows (`capture-pane -p`) and
+/// its history size.
+fn shown(server: &mut Server, dir: &std::path::Path, p: &str) -> (Vec<String>, String) {
+    let out = run(server, dir, &["capture-pane", "-p", "-t", p]);
+    let rows = out
+        .lines()
+        .skip(1)
+        .take_while(|l| *l != "--stderr--")
+        .map(str::to_owned)
+        .collect();
+    let history = run(server, dir, &["display", "-p", "-t", p, "#{history_size}"]);
+    (rows, history.lines().nth(1).unwrap_or_default().to_owned())
+}
+
+/// A `full` checkpoint rebuilt: a pane whose last row is blank shows its
+/// saved rows where they were, the dead line on that row and nothing
+/// scrolled into history; one whose last row holds output scrolls it up a
+/// row as tmux's dead line does (server-fn.c `server_destroy_pane`); one
+/// dead already shows its saved screen, its dead line on it, unchanged.
+#[test]
+fn a_rebuilt_full_checkpoint_keeps_each_saved_screen_in_place() {
+    let dir = temp_dir("rebuild-full");
+    let (l, socket) = listener(&dir, "s");
+    let mut server = Server::new(l, socket.clone(), ServerConfig::default()).unwrap();
+    for words in [
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "20",
+            "-y",
+            "4",
+            "cat",
+            "-",
+        ][..],
+        &["new-window", "-d", "-t", "a", "cat", "-"],
+        &["new-window", "-d", "-t", "a", "cat", "-"],
+        &["set", "-s", "vtmux-persist", "full"],
+    ] {
+        let out = run(&mut server, &dir, words);
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    for (p, bytes) in [
+        (0, &b"one\r\ntwo\r\n"[..]),
+        (1, b"one\r\ntwo\r\nthree\r\nfour"),
+        (2, b"saved\r\n\r\n\r\nPane is dead (old)\x1b[4;1H"),
+    ] {
+        server
+            .model
+            .panes
+            .get_mut(&PaneId(p))
+            .unwrap()
+            .term
+            .feed(bytes);
+    }
+    let mut s = server.checkpoint_snapshot(Mode::Full);
+    s.panes[2].dead_time = Some(12345);
+    drop(server);
+
+    let (l, socket) = listener(&dir, "s2");
+    let s = prepare(s, &ConfigSays::default(), &socket, &ServerConfig::default());
+    let mut server = rebuild(l, ServerConfig::default(), &s).unwrap();
+    let (rows, history) = shown(&mut server, &dir, "%0");
+    assert_eq!(rows[..3], ["one", "two", ""], "{rows:?}");
+    assert!(rows[3].starts_with("Pane is dead (, "), "{rows:?}");
+    assert_eq!(history, "0");
+    let (rows, history) = shown(&mut server, &dir, "%1");
+    assert_eq!(rows[..3], ["two", "three", "four"], "{rows:?}");
+    assert!(rows[3].starts_with("Pane is dead (, "), "{rows:?}");
+    assert_eq!(history, "1");
+    assert_eq!(
+        shown(&mut server, &dir, "%2"),
+        (
+            ["saved", "", "", "Pane is dead (old)"]
+                .map(str::to_owned)
+                .to_vec(),
+            "0".to_owned()
+        )
     );
     drop(server);
     let _ = std::fs::remove_dir_all(&dir);

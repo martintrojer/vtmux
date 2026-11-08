@@ -281,7 +281,8 @@ fn apply_drop(s: &mut snap::Snapshot, says: &ConfigSays) {
 /// user options `vtmux-persist-drop` names are gone, and every pane is
 /// dead, its process (which ran in the server before) unknown: no pid, no
 /// tty, no `pipe-pane`. A pane that was dead already keeps its status
-/// and time of death; the others died now, as far as this server knows.
+/// and time of death; the others died now, as far as this server knows,
+/// and get their time of death with their dead line in [`rebuild`].
 pub(crate) fn prepare(
     mut s: snap::Snapshot,
     says: &ConfigSays,
@@ -305,11 +306,9 @@ pub(crate) fn prepare(
     s.clients.clear();
     s.server.next_client = 0;
     apply_drop(&mut s, says);
-    let died = i64::try_from(now.as_secs()).unwrap_or(i64::MAX);
     for p in &mut s.panes {
         p.exited = true;
         p.status.get_or_insert_with(snap::ExitStatus::default);
-        p.dead_time.get_or_insert(died);
         p.pid = 0;
         p.tty.clear();
         p.pipe = None;
@@ -324,7 +323,17 @@ pub(crate) fn prepare(
 /// a starting server rather than a resumed one: the global environment is
 /// the starting client's (the checkpoint has none), the config is still
 /// to run, every pane shows its dead line, and (`layout`, which keeps no
-/// titles) is titled as a new pane is. The check in the child
+/// titles) is titled as a new pane is.
+///
+/// tmux draws a pane's dead line once, when it dies (server-fn.c
+/// `server_destroy_pane`, `PANE_STATUSDRAWN`; vtmux's `dead_time`). A
+/// pane alive in the checkpoint dies now and gets it now; one dead
+/// already shows it on the screen a `full` checkpoint carries, so it gets
+/// none again (each restart of a restored server would scroll the screen
+/// once more and stack another); with `layout`'s empty screen it is drawn
+/// again. It is drawn on the last row when that is blank, without tmux's
+/// scroll, so the saved screen shows as it was
+/// ([`Server::draw_restored_dead_line`]). The check in the child
 /// ([`check`]) builds it with a `dry_run` config only to drop it.
 pub(crate) fn rebuild(
     listener: StdListener,
@@ -346,12 +355,25 @@ pub(crate) fn rebuild(
     let host = server.info.host.clone();
     let untitled =
         s.meta.purpose == snap::Purpose::CheckpointLayout && !host.chars().any(char::is_control);
+    let shown: std::collections::HashSet<u32> = s
+        .panes
+        .iter()
+        .filter(|p| p.dead_time.is_some() && p.term.is_some())
+        .map(|p| p.id)
+        .collect();
     let panes: Vec<_> = server.model.panes.keys().copied().collect();
     for p in panes {
-        if untitled && let Some(pane) = server.model.panes.get_mut(&p) {
+        let Some(pane) = server.model.panes.get_mut(&p) else {
+            continue;
+        };
+        if untitled {
             pane.term.set_title(&host);
         }
-        server.draw_dead_line(p);
+        if shown.contains(&p.0) {
+            continue;
+        }
+        pane.dead_time.get_or_insert_with(crate::model::now_epoch);
+        server.draw_restored_dead_line(p);
     }
     Ok(server)
 }

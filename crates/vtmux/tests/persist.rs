@@ -789,6 +789,69 @@ fn attach_with_no_server_restores_and_attaches() {
     assert_eq!(w.ok(&["list-clients", "-F", "#{client_session}"]), "a\n");
 }
 
+impl World {
+    /// Type `word` into `pane` (`cat -`) and wait until the terminal echo and
+    /// `cat`'s copy both show, so the next line's echo can't come between.
+    fn echo(&self, pane: &str, word: &str) {
+        self.ok(&["send-keys", "-t", pane, word, "Enter"]);
+        wait_until("the pane echoing", || {
+            self.ok(&["capture-pane", "-p", "-t", pane])
+                .matches(word)
+                .count()
+                >= 2
+        });
+    }
+
+    /// What `pane` shows (`capture-pane -p`, every row), its history size
+    /// and cursor, and the whole of it with its history (`-S -`).
+    fn shown(&self, pane: &str) -> (String, String, String) {
+        (
+            self.ok(&["capture-pane", "-p", "-t", pane]),
+            self.ok(&["display", "-p", "-t", pane, "#{history_size}"]),
+            self.ok(&["capture-pane", "-p", "-S", "-", "-t", pane]),
+        )
+    }
+}
+
+/// A `full` restore shows a pane's saved screen as it was, every row in
+/// place, with the dead line on its blank last row; the restored server's
+/// own checkpoint comes back the same, with no second dead line. (A
+/// `cat -` pane with line1 to line3 typed came back with its first row
+/// scrolled into history, and every restart scrolled it once more and
+/// stacked another dead line.)
+#[test]
+fn a_full_restore_shows_the_saved_screen_and_one_dead_line() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    for word in ["line1", "line2", "line3"] {
+        w.echo("a", word);
+    }
+    let (saved, _, _) = w.shown("a");
+    let typed = "line1\nline1\nline2\nline2\nline3\nline3\n";
+    assert!(saved.starts_with(typed), "{saved}");
+    w.wait_saved();
+    w.kill_9();
+
+    w.ok(&["start-server"]);
+    w.repid();
+    let restored = w.shown("a");
+    let (screen, history, all) = &restored;
+    let rows: Vec<&str> = screen.lines().collect();
+    assert_eq!(rows.len(), 24, "{screen}");
+    let saved_rows: Vec<&str> = saved.lines().collect();
+    assert_eq!(&rows[..23], &saved_rows[..23], "{screen}");
+    assert!(rows[23].starts_with("Pane is dead (, "), "{screen}");
+    assert_eq!(history, "0\n");
+    assert_eq!(all, screen);
+
+    // The restored server checkpoints the dead pane on its way out; the
+    // next start shows it as it was, its dead line drawn once.
+    w.kill_server();
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.shown("a"), restored);
+}
+
 /// `respawn-pane` (and `respawn-window`) start a restored pane's saved
 /// command in its saved cwd.
 #[test]
