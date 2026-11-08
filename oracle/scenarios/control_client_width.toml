@@ -1,0 +1,18 @@
+name = "control_client_width"
+# A control client's #{client_width} is the width refresh-client -C gave
+# it (cmd-refresh-client.c cmd_refresh_client_control_client_size:
+# tty_set_size), 80 before (server-client.c:299); its #{client_height}
+# stays empty, the terminal never started (format.c
+# format_cb_client_height tests TTY_STARTED, format_cb_client_width not).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "display-message -p '[#{client_width}x#{client_height}]'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "refresh-client -C 100x30" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "display-message -p '[#{client_width}x#{client_height}] #{window_width}x#{window_height}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { run = ["list-clients", "-F", "[#{client_width}x#{client_height}]"] },
+  { control_close = { id = "c1" } },
+]

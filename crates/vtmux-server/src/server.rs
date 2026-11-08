@@ -4009,11 +4009,13 @@ impl Server {
             activity_secs: c.activity_secs,
             created_secs: c.created_secs,
             // server-client.c:299: tty.sx starts at 80; tty.c tty_resize
-            // sets it for a terminal.
+            // sets it for a terminal, cmd-refresh-client.c
+            // cmd_refresh_client_control_client_size (tty_set_size) for a
+            // control client.
             width: if started {
                 tty.map_or(80, |t| t.cols)
             } else {
-                80
+                c.control.as_ref().map_or(80, |cs| cs.size().0)
             },
             height: started.then(|| tty.map_or(24, |t| t.rows)),
             cell_pixels: c.cell_pixels,

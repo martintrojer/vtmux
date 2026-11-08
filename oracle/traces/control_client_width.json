@@ -1,0 +1,131 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "control_client_width",
+  "inputs": {
+    "name": "control_client_width",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display-message -p '[#{client_width}x#{client_height}]'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C 100x30"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display-message -p '[#{client_width}x#{client_height}] #{window_width}x#{window_height}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "list-clients",
+          "-F",
+          "[#{client_width}x#{client_height}]"
+        ]
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[100x]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "[80x]",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *",
+          "%begin <TIME> #4 1",
+          "[100x] 100x30",
+          "%end <TIME> #4 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
