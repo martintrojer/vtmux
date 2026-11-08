@@ -854,21 +854,24 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
                 self.offset = (self.current + 1).saturating_sub(self.height);
             }
             _ if k == c(b't') => {
-                // Parents and children are never both tagged.
-                if self.items[current].no_tag {
-                } else if self.items[current].tagged {
-                    self.items[current].tagged = false;
-                } else {
-                    let mut up = self.items[current].parent;
-                    while let Some(p) = up {
-                        self.items[p].tagged = false;
-                        up = self.items[p].parent;
+                // Parents and children are never both tagged. An item
+                // that takes no tag is left, and the selection stays on it
+                // (mode-tree.c:1703-1704 breaks before moving down).
+                if !self.items[current].no_tag {
+                    if self.items[current].tagged {
+                        self.items[current].tagged = false;
+                    } else {
+                        let mut up = self.items[current].parent;
+                        while let Some(p) = up {
+                            self.items[p].tagged = false;
+                            up = self.items[p].parent;
+                        }
+                        self.clear_tagged(current);
+                        self.items[current].tagged = true;
                     }
-                    self.clear_tagged(current);
-                    self.items[current].tagged = true;
-                }
-                if typed {
-                    self.down(false);
+                    if typed {
+                        self.down(false);
+                    }
                 }
             }
             _ if k == c(b'T') => {

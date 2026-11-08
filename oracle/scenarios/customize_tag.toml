@@ -1,0 +1,30 @@
+# Tagging in customize-mode (mode-tree.c mode_tree_key `t`, `C-t`): a
+# section's title takes no tag (mode_tree_no_tag), so `t` on it does
+# nothing and the selection stays; on an option `t` tags it and moves
+# down; `C-t` tags the options under the titles; `T` clears every tag.
+name = "customize_tag"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { attach = { session = "aaa" } },
+  { run = ["customize-mode", "-t", "aaa:0.0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "t" },
+  { screen = {} },
+  { keys = "\u001b+" },
+  { screen = {} },
+  { keys = "jt" },
+  { screen = {} },
+  { keys = "t" },
+  { screen = {} },
+  { keys = "\u0014" },
+  { screen = {} },
+  { keys = "gt" },
+  { screen = {} },
+  { keys = "T" },
+  { screen = {} },
+]
