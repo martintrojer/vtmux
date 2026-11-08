@@ -413,12 +413,16 @@ pub fn exec(
     if restore_zoom || (!floating && !modal) {
         server.model.pop_zoom(w, was_zoomed);
     }
-    // cmd-split-window.c:300-304: the drag that ran new-pane -M sizes it.
+    // cmd-split-window.c:300-304: the drag that ran new-pane -M sizes it,
+    // after the views followed the new active pane where spawn put it
+    // (window_set_active_pane updates them at once; the drag's resize
+    // does not).
     if new_pane
         && floating
         && args.flag('M')
         && let (Some(c), Some(ev)) = (drag_client, item.mouse.clone())
     {
+        server.flush_offsets();
         server.start_new_pane_drag(c, new, &ev);
     }
     // cmd-split-window.c:314-315.

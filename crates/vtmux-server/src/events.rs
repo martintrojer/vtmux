@@ -338,6 +338,24 @@ pub struct EventWait {
 }
 
 impl Server {
+    /// Run the `tty_update_window_offset`s queued so far now, the rest of
+    /// the queue left as it was: tmux works the views out where the change
+    /// happens (window.c:781 in `window_set_active_pane`), before what the
+    /// command does next moves the panes again.
+    pub(crate) fn flush_offsets(&mut self) {
+        let mut windows = Vec::new();
+        self.model.events.retain(|q| match q {
+            Queued::Offset(w) => {
+                windows.push(*w);
+                false
+            }
+            _ => true,
+        });
+        for w in windows {
+            self.update_window_offset(w);
+        }
+    }
+
     /// Hand every queued event to the sinks, in order.
     pub(crate) fn drain_events(&mut self) {
         loop {

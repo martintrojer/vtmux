@@ -1,0 +1,32 @@
+name = "floating_new_pane_drag_view"
+size = [40, 8]
+# C-MouseDrag1Pane runs new-pane -M. In a window larger than the client,
+# the views follow the new active pane where spawn put it
+# (window_set_active_pane, window.c:781: tty_update_window_offset at
+# once), before cmd_split_window_mouse_resize moves it under the drag
+# (cmd-split-window.c:300-304), which updates no view. The cascaded pane
+# sits near the top, so the view goes to row 0 and the next motion of the
+# drag, on the same terminal row, reaches window row 0.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["set", "-g", "default-command", "cat -"] },
+  { run = ["selectp", "-t", "%0", "-T", "t"] },
+  { run = ["set-hook", "-g", "after-new-pane", "selectp -T t"] },
+  { attach = { session = "a" } },
+  { run = ["resizew", "-t", "a", "-x", "40", "-y", "20"] },
+  { run = ["splitw", "-t", "a", "-v", "-l", "3", "cat", "-"] },
+  { run = ["selectp", "-t", "%1", "-T", "t"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "#{window_offset_x},#{window_offset_y} #{window_bigger}"] },
+  { keys = "\u001b[<16;5;1M\u001b[<48;8;1M" },
+  { settle = {} },
+  { run = ["display", "-p", "#{window_offset_x},#{window_offset_y}"] },
+  { run = ["lsp", "-F", "#{pane_id} #{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "\u001b[<48;12;1M\u001b[<16;12;1m" },
+  { settle = {} },
+  { run = ["display", "-p", "#{window_offset_x},#{window_offset_y}"] },
+  { run = ["lsp", "-F", "#{pane_id} #{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { screen = {} },
+]
