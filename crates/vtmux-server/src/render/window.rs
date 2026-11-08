@@ -723,7 +723,32 @@ impl Source<'_> {
                     .map_or(usize::MAX, |l| l - text.start);
                 for (x, c) in drawn.cells.iter().enumerate().take(last.saturating_add(1)) {
                     if c.text != KEEP {
-                        screen.cells[text.start + x] = theme.cell(c);
+                        let at = text.start + x;
+                        let cell = theme.cell(c);
+                        // On the second half of a wide character: tmux
+                        // copies the cell over it with no overwrite check
+                        // (format_draw, screen_write_fast_copy). Without
+                        // line numbers a command's redraw writes the row
+                        // as it goes, so the terminal clears the character,
+                        // in the cell's background; with them every redraw
+                        // draws the pane from the mode's screen
+                        // (window_copy_redraw_lines, tty_draw_line), which
+                        // draws the character and skips the cell.
+                        if at > 0 && screen.cells[at].width == 0 && screen.cells[at - 1].width == 2
+                        {
+                            if text.start > 0 {
+                                continue;
+                            }
+                            screen.cells[at - 1] = vtmux_vt::Cell {
+                                width: 1,
+                                style: vtmux_vt::Style {
+                                    bg: cell.style.bg,
+                                    ..vtmux_vt::Style::default()
+                                },
+                                ..vtmux_vt::Cell::default()
+                            };
+                        }
+                        screen.cells[at] = cell;
                     }
                 }
             }

@@ -1,0 +1,51 @@
+# The position indicator's first cell over the second half of a wide
+# character: tmux copies the indicator onto row 0 with no overwrite check
+# (window_copy_write_line, format_draw, screen_write_fast_copy). Without line
+# numbers a command's redraw writes the row as it goes and the terminal
+# clears the character; with them every redraw draws the pane from the
+# mode's screen (window_copy_redraw_lines, tty_draw_line), which draws the
+# character and skips the cell. The cell under it is drawn again once the
+# text moves from under it (the gutter comes and goes, the view scrolls).
+name = "copy_indicator_wide"
+size = [20, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "5", "sh", "-c", "printf 'w25 a.b  日本 x1\\nabcdefghijklm日本xy\\nabcdefghijklmn日本x\\n'; i=1; while [ $i -le 6 ]; do echo line$i; i=$((i+1)); done; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R", ";", "set", "-g", "copy-mode-position-format", "#[align=right][0/39]"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-top"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-right"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "scroll-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
