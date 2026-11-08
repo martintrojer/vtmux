@@ -1166,10 +1166,22 @@ fn kill_server_closes_the_socket_before_it_answers() {
 fn startup_config() {
     compare("startup_config", |w| {
         let conf = w.dir().join("start.conf");
-        // `new -d` with a long-lived pane: without -d, new tries to attach a
-        // tty-less client and fails, so the server may exit (exit-empty)
-        // before `ls` runs, on tmux and vtmux alike, which made this flaky.
-        std::fs::write(&conf, "new -d -s test 'sleep 30'\ndisplay hello\nnosuch\n").expect("write");
+        let bad = w.dir().join("bad.conf");
+        // `new -d` with a long-lived pane keeps the server up for `ls`:
+        // without -d, new tries to attach a tty-less client and fails. The
+        // unknown command is in a sourced file: in the config itself it
+        // fails the whole parse (cfg.c `load_cfg` runs nothing then), so no
+        // session is made and the server exits (exit-empty) as `start`
+        // leaves, and `ls` races that exit on tmux and vtmux alike.
+        std::fs::write(&bad, "nosuch\n").expect("write");
+        std::fs::write(
+            &conf,
+            format!(
+                "new -d -s test 'sleep 30'\ndisplay hello\nsource-file {}\n",
+                bad.display()
+            ),
+        )
+        .expect("write");
         let c = conf.to_str().expect("utf-8");
         vec![
             w.raw(&["-L", &w.label, "-f", c, "start"]),
