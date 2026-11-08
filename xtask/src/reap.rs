@@ -5,8 +5,9 @@
 //!
 //! `cargo xtask reap` is the other half: servers nobody's harness owns, left by
 //! ad-hoc probe scripts (`-L rv*`, `att*`, ...) that never ran `kill-server`.
-//! It kills test-labelled `tmux`/`vtmux` servers that are old and orphaned,
-//! with their pane processes (a flood loop in a pane outlives the server's
+//! It kills test-labelled `tmux`/`vtmux` servers that are old and orphaned
+//! (a server a live upgrade moved onto a binary of another name too: by its
+//! `-S <test socket> --vtmux-resume`), with their pane processes (a flood loop in a pane outlives the server's
 //! death otherwise). `check.sh` runs it first.
 //!
 //! A server leaves its socket file behind when it exits (tmux does too), so
@@ -150,15 +151,22 @@ pub fn is_test_label(l: &str) -> bool {
 
 /// Is this a `tmux`/`vtmux` command line whose socket is a test one: a global
 /// `-L` label from [`is_test_label`], an oracle run's `-S /tmp/vto-*/s`, or
-/// `-S` a test label's socket (`.../tmux-<uid>/<label>` or `vtmux-<uid>`):
-/// a server a live upgrade re-executed runs as `-S <its socket>
-/// --vtmux-resume <fd>`, whatever it was started with.
+/// `-S` a test label's socket (`.../tmux-<uid>/<label>` or `vtmux-<uid>`).
+///
+/// A server a live upgrade re-executed runs as `<binary> -S <its socket>
+/// --vtmux-resume <fd>` with `argv[0]` the binary it was upgraded onto, so
+/// whatever that is called (`vtmux-new`, a copy, `old`), a command line with
+/// `--vtmux-resume` and a test `-S` is a test server. Any other `argv0` that
+/// is not `tmux` or `vtmux` is not. An image of a binary from before the `-S`
+/// form is started as `<binary> --vtmux-resume <fd>` alone: nothing on its
+/// command line says whose it is, so it is not matched at any `argv0`.
 fn is_test_server(args: &str) -> bool {
     let mut words = args.split_whitespace();
     let Some(argv0) = words.next() else {
         return false;
     };
-    if !matches!(argv0.rsplit('/').next(), Some("tmux" | "vtmux")) {
+    let named = matches!(argv0.rsplit('/').next(), Some("tmux" | "vtmux"));
+    if !named && !words.clone().any(|w| w == "--vtmux-resume") {
         return false;
     }
     // Global flags only: stop at the command. -L -S -f -c -T take a value.
@@ -174,7 +182,7 @@ fn is_test_server(args: &str) -> bool {
             _ => None,
         };
         match value {
-            Some(('L', l)) if is_test_label(l) => return true,
+            Some(('L', l)) if named && is_test_label(l) => return true,
             Some(('S', s)) if s.starts_with("/tmp/vto-") || is_label_socket(s) => return true,
             _ => {}
         }
@@ -469,6 +477,10 @@ mod tests {
             "tmux -S /tmp/vto-a1b2c3/s --vtmux-resume 9",
             "/w/vtmux -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9 --vtmux-switched-back",
             "tmux -S /tmp/t1/tmux-1000/testA42 --vtmux-resume 9",
+            // Upgraded onto a binary of another name (argv[0] is its path).
+            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9",
+            "/h/old -S /tmp/vto-a1b2c3/s --vtmux-resume 9 --vtmux-switched-back",
+            "vtmux-new -S /tmp/t1/vtmux-1000/testA42 --vtmux-resume 9",
         ] {
             assert!(is_test_server(yes), "{yes}");
         }
@@ -483,6 +495,11 @@ mod tests {
             "tmux -S /tmp/t1/vtmux-1000/work --vtmux-resume 9",
             "tmux -S /tmp/t1/x/rv1 --vtmux-resume 9",
             "tmux --vtmux-resume 9",
+            "/x/vtmux-copy --vtmux-resume 9",
+            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/work --vtmux-resume 9",
+            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/rv1 new",
+            "/x/vtmux-copy -L rv1 --vtmux-resume 9",
+            "/x/vtmux-copy -S /run/user/1/sock --vtmux-resume 9",
             "/usr/bin/python3 /tmp/rv_1/x.py -Lrv1",
             "tmuxer -Lrv1 x",
         ] {

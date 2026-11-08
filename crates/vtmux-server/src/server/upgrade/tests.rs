@@ -574,13 +574,42 @@ fn the_start_binary_is_argv0_made_absolute() {
     };
     assert_eq!(start("tmux", Some(&path)), Some(b.join("tmux")));
     assert_eq!(
-        start("./bin/vtmux", Some(&path)),
-        Some(dir.join("./bin/vtmux"))
+        start("./bin/../bin/vtmux", Some(&path)),
+        Some(dir.join("bin/vtmux"))
     );
     assert_eq!(start("/opt/vtmux", None), Some(PathBuf::from("/opt/vtmux")));
     assert_eq!(start("tmux", Some(&a.display().to_string())), None);
     // Relative entries are from the directory.
     assert_eq!(start("tmux", Some("b")), Some(dir.join("b").join("tmux")));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The path the new image's `argv[0]` shows is clean: no `.` or `..`
+/// component, whether `-b` or the start path gave it; a symlink is kept as
+/// given (not resolved), as is the root a `..` cannot leave.
+#[test]
+fn the_binary_path_is_cleaned_lexically() {
+    let clean = |p: &str| super::clean_path(Path::new(p));
+    assert_eq!(clean("/a/./b/../c"), Path::new("/a/c"));
+    assert_eq!(clean("/a//b/"), Path::new("/a/b"));
+    assert_eq!(clean("/../../x"), Path::new("/x"));
+    assert_eq!(clean("/a/b/../../.."), Path::new("/"));
+    assert_eq!(clean("/a/link/x"), Path::new("/a/link/x"));
+    assert_eq!(clean("rel/./x"), Path::new("rel/./x"), "only absolute");
+
+    let (mut server, dir) = setup("clean");
+    let bin = passing(&dir);
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&bin, &link).unwrap();
+    for (given, want) in [
+        (dir.join("./sub/../pass"), bin.clone()),
+        // Relative: from the requester's directory.
+        (PathBuf::from("./sub/../pass"), bin.clone()),
+        (dir.join("./link"), link.clone()),
+    ] {
+        upgrade(&mut server, &dir, &given);
+        assert_eq!(execs().pop().expect("exec").binary, want, "{given:?}");
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -1046,7 +1075,7 @@ fn the_answer_waits_for_the_clients_re_attaching_and_names_the_lost() {
     assert_eq!(answered(&mut theirs), None, "f and g are on their way");
     // Meanwhile another upgrade would lose the answer: refused.
     assert_eq!(
-        new.upgrade_start(super::Requester::Handshake(f), passing(&dir)),
+        new.upgrade_start(super::Requester::Handshake(f), &passing(&dir)),
         Err("the last upgrade is still waiting for its clients to re-attach".to_owned())
     );
 

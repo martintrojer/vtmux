@@ -9,9 +9,12 @@
 //! image it lands in does not switch again. The dry run is
 //! `<binary> --vtmux-check-snapshot <fd>` ([`CHECK_FLAG`]). A binary whose
 //! dry run says it takes one ([`TAKES_SOCKET`]) is started as `<binary> -S
-//! <socket> --vtmux-resume <fd>` (`argv[0]` the binary exec'd), so `ps` (the oracle runner, `cargo xtask
-//! reap`) still tells which server it is; an image of a binary from before
-//! that parses only the words above, so it gets them alone.
+//! <socket> --vtmux-resume <fd>` (`argv[0]` the binary exec'd, cleaned
+//! lexically: no `.` or `..`; a symlink is kept as given, not resolved), so
+//! `ps` (the oracle runner, `cargo xtask reap`) tells which server it is by
+//! the `-S` socket and the resume flag, whatever the binary is called; an
+//! image of a binary from before that parses only the words above, so it
+//! gets them alone and `ps` shows nothing of whose it is.
 
 use std::collections::BTreeSet;
 use std::ffi::{CString, OsString};

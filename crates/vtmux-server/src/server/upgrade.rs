@@ -224,7 +224,7 @@ impl Server {
         let peer = self.clients.get(&id).and_then(|c| c.peer);
         let requester = Requester::Handshake(id);
         let refused = if self.acl.check(peer) == crate::acl::Access::Write {
-            self.upgrade_start(requester, binary.to_path_buf()).err()
+            self.upgrade_start(requester, binary).err()
         } else {
             Some("access denied".to_owned())
         };
@@ -242,7 +242,7 @@ impl Server {
     pub(crate) fn upgrade_start(
         &mut self,
         requester: Requester,
-        binary: PathBuf,
+        binary: &Path,
     ) -> Result<(), String> {
         if self.upgrade.pending.is_some() {
             return Err("an upgrade is already running".to_owned());
@@ -263,6 +263,7 @@ impl Server {
             ));
         }
         self.upgrade_inside_job(requester)?;
+        let binary = clean_path(binary);
         check_binary(&binary)?;
         self.upgrade.pending = Some(Pending {
             requester,
@@ -1147,6 +1148,31 @@ pub(crate) fn write_result(fd: OwnedFd, outcome: Result<String, String>) {
     let _ = vtmux_core::protocol::write_msg(&mut stream, &ServerMsg::UpgradeResult { ok, message });
 }
 
+/// An absolute `path` with no `.` and no `..` component, lexically (`/a/./b/../c` is
+/// `/a/c`; `..` at the root stays at the root): the path the new image's
+/// `argv[0]` shows. Symlinks are not resolved, so a link given as the
+/// binary keeps its own path in `argv[0]` and `comm` (while `/proc/exe` and
+/// the shim name its target), and a `..` after a link goes up from the
+/// link's own directory, not its target's.
+#[must_use]
+pub(crate) fn clean_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    if !path.is_absolute() {
+        return path.to_owned();
+    }
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Step 1's check of the binary: absolute (the server's working directory
 /// is not the requester's), a regular file, executable by this user.
 fn check_binary(binary: &Path) -> Result<(), String> {
@@ -1164,17 +1190,17 @@ fn check_binary(binary: &Path) -> Result<(), String> {
 /// What the server was started as (decision 22): `argv0` made absolute
 /// the way `execvp` found it, a path (one with a `/`) from `cwd`, a name on
 /// `path` (`PATH`, [`crate::shim::DEFAULT_PATH`] without one; an empty or
-/// relative entry from `cwd`). Symlinks stay: they are resolved when an
+/// relative entry from `cwd`), cleaned lexically ([`clean_path`]). Symlinks stay: they are resolved when an
 /// upgrade is requested, so the server execs whatever a relink pointed the
 /// name at since. `None` when the name is on no `PATH` entry.
 #[must_use]
 pub fn start_binary(argv0: &std::ffi::OsStr, path: Option<&str>, cwd: &Path) -> Option<PathBuf> {
     if argv0.as_bytes().contains(&b'/') {
-        return Some(cwd.join(argv0));
+        return Some(clean_path(&cwd.join(argv0)));
     }
     path.unwrap_or(crate::shim::DEFAULT_PATH)
         .split(':')
-        .map(|entry| cwd.join(entry).join(argv0))
+        .map(|entry| clean_path(&cwd.join(entry).join(argv0)))
         .find(|candidate| check_binary(candidate).is_ok())
 }
 

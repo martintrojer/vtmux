@@ -41,7 +41,7 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         client: item.client,
     };
     server
-        .upgrade_start(requester, binary)
+        .upgrade_start(requester, &binary)
         .map_err(EdgeError::Message)?;
     item.blocked = true;
     Ok(())

@@ -559,6 +559,41 @@ fn an_upgrade_onto_a_copy_names_the_copy_in_argv0() {
     }
 }
 
+/// A relative `-b` is from the requester's directory, and `argv[0]` shows
+/// it cleaned (no `./`, no `..`); a symlink given as `-b` keeps its own
+/// path there, as `comm` does, while the server runs its target.
+#[test]
+fn a_relative_binary_shows_as_a_clean_path_in_argv0() {
+    let world = World::new();
+    world.populate(&[]);
+    let home = std::fs::canonicalize(world.home.path()).unwrap();
+    std::fs::create_dir(home.join("sub")).unwrap();
+    let copy = home.join("sub").join("vtmux-copy");
+    std::fs::copy(BIN, &copy).unwrap();
+    set_executable(&copy);
+    let link = home.join("vtmux-link");
+    std::os::unix::fs::symlink(&copy, &link).unwrap();
+    let pid = world.pid();
+
+    for (given, shown) in [
+        ("./sub/../sub/./vtmux-copy", &copy),
+        ("sub/../vtmux-link", &link),
+    ] {
+        let out = world
+            .run_within(&["vtmux-upgrade", "-b", given], Duration::from_secs(60))
+            .expect("vtmux-upgrade answered");
+        assert_eq!(out.status.code(), Some(0), "{given}: {out:?}");
+        assert_eq!(world.pid(), pid);
+        assert_eq!(world.server_argv0(), shown.to_str().unwrap(), "{given}");
+        #[cfg(target_os = "linux")]
+        {
+            let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+            let argv0 = cmdline.split(|&b| b == 0).next().unwrap();
+            assert_eq!(argv0, shown.as_os_str().as_encoded_bytes(), "{given}");
+        }
+    }
+}
+
 /// The tentpole: the server execs itself with panes running, an attached
 /// client and a control client. Same pid, the same pane processes, every
 /// listing byte for byte; the panes, the attached client and the control
