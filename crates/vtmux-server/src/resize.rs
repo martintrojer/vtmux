@@ -362,6 +362,8 @@ impl Server {
         if self.window_policy(w) == SizePolicy::Latest {
             self.recalculate_size(w, false);
         }
+        // server-client.c:1388.
+        self.fire_client("client-active", id);
     }
 
     /// `server_client_attached_lost` (server-client.c:361-391): every

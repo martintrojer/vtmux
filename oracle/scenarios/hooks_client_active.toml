@@ -1,0 +1,29 @@
+name = "hooks_client_active"
+# server_client_update_latest (server-client.c:1371-1389): a key or a resize
+# from a client that is not already the latest client of the window it shows
+# makes it the latest and fires client-active; a second key from it fires
+# nothing. Attaching makes a client the latest without the event
+# (server_client_set_session sets w->latest directly, server-client.c:465).
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "client-active", "set -agF @log '|#{hook}:#{hook_session_name}:#{hook_window}'"] },
+  { attach = { session = "a" } },
+  { attach = { session = "a", id = "b" } },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { keys = "x" },
+  { settle = {} },
+  { keys = "y" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { keys_to = { id = "b", keys = "z" } },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { resize = [70, 20] },
+  { settle = { react = true } },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]
