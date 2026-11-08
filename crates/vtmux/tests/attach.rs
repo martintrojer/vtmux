@@ -803,6 +803,49 @@ fn send_keys_k_delivers_keys_to_the_pane() {
     }
 }
 
+/// server-client.c:1503-1504, 1699-1704: inside a bracketed paste every key
+/// goes to the pane as the bytes the terminal sent (`window_pane_paste`),
+/// not encoded again: a byte that starts no UTF-8 and an arrow in
+/// application cursor mode arrive as typed. The markers go only to a pane
+/// that asked for them, and a pane in a mode gets nothing
+/// (window.c:2055-2056): the pasted `q` leaves copy mode alone. Against
+/// tmux 3.8.
+#[test]
+fn pasted_bytes_reach_the_pane_as_sent() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let out = w.home.path().join("out");
+        let script = format!(
+            "printf '\\033[?1h'; stty raw -echo; printf R; exec cat > {}",
+            out.display()
+        );
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+        a.wait(|_| pane_line(&w) == "R");
+        let read_until = |end: &[u8]| {
+            let start = Instant::now();
+            loop {
+                let bytes = std::fs::read(&out).unwrap_or_default();
+                if bytes.ends_with(end) {
+                    break bytes;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(5),
+                    "{}: {bytes:?}",
+                    bin.display()
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        a.keys(b"\x1b[200~a\xe6b\xf0\x9f\x98\x80c\x1b[A\x1b[201~.");
+        let got = read_until(b".");
+        assert_eq!(got, b"a\xe6b\xf0\x9f\x98\x80c\x1b[A.", "{}", bin.display());
+        assert!(w.cli(&["copy-mode", "-t", "a"]).status.success());
+        a.keys(b"\x1b[200~q\x1b[201~q,");
+        let got = read_until(b",");
+        assert_eq!(got, b"a\xe6b\xf0\x9f\x98\x80c\x1b[A.,", "{}", bin.display());
+    }
+}
+
 /// A typed `M-BSpace` (CSI-u or xterm-modified, so `KEYC_IMPLIED_META`) with
 /// a named-key `backspace` option: input-keys.c:612 keeps the typed key's
 /// flags, so Meta is not an Escape before the option's key, and a keypad

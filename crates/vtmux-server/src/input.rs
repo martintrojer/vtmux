@@ -298,7 +298,20 @@ impl Decoder {
             || (self.pasting && b"\x1b[201~".starts_with(&self.bytes) && self.bytes.len() < 6);
         Some(start + if waiting { REPLY_DELAY } else { ESCAPE_TIME })
     }
+    /// The events in what has come so far, as [`Self::drain_with_bytes`]
+    /// without the bytes.
+    #[cfg(test)]
     pub fn drain(&mut self, now: Instant) -> Vec<Event> {
+        self.drain_with_bytes(now)
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect()
+    }
+    /// The events in what has come so far, each key with the bytes it came
+    /// in (`event->buf`, tty-keys.c:1047-1049), which a bracketed paste
+    /// writes to the pane as they are (`window_pane_paste`). Other events
+    /// carry no bytes.
+    pub fn drain_with_bytes(&mut self, now: Instant) -> Vec<(Event, Vec<u8>)> {
         let mut events = Vec::new();
         while !self.bytes.is_empty() {
             let expired = self.deadline().is_some_and(|t| now >= t);
@@ -351,6 +364,11 @@ impl Decoder {
             } else {
                 event
             };
+            let bytes = if matches!(event, Event::Key(_)) {
+                self.bytes[..used].to_vec()
+            } else {
+                Vec::new()
+            };
             self.bytes.drain(..used);
             self.pending = None;
             match event {
@@ -377,7 +395,7 @@ impl Decoder {
                 }
                 _ => {}
             }
-            events.push(event);
+            events.push((event, bytes));
         }
         events
     }
@@ -898,6 +916,16 @@ mod tests {
                 Event::Key(key(Base::Byte(0x85))),
                 Event::Key(key(Base::Char('_')))
             ]
+        );
+        // Each key keeps the bytes it came in (a paste writes them), and
+        // nothing else carries any.
+        d.feed(b"\xe6\xf0\x9f\x98\x80\x1b[A\x1b[200~");
+        assert_eq!(
+            d.drain_with_bytes(Instant::now())
+                .into_iter()
+                .map(|(_, b)| b)
+                .collect::<Vec<_>>(),
+            [&b"\xe6"[..], b"\xf0\x9f\x98\x80", b"\x1b[A", b""]
         );
     }
 

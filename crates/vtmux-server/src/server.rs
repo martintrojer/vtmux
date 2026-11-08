@@ -2483,12 +2483,12 @@ impl Server {
             .ok_or(EdgeError::NoCurrentClient)?;
         c.decoder.feed(bytes);
         let now = Instant::now();
-        let events = c.decoder.drain(now);
+        let events = c.decoder.drain_with_bytes(now);
         if !events.is_empty() {
             // The repeat timer fires before keys that arrive after it.
             self.expire_repeat(now);
         }
-        for event in events {
+        for (event, raw) in events {
             let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
                 break;
             };
@@ -2573,7 +2573,7 @@ impl Server {
                     // key tables get it from the client's queue, after the
                     // commands earlier keys queued, and not while a
                     // command waits on a prompt.
-                    self.handle_key0(id, crate::key_dispatch::KeyKind::Key(key), None);
+                    self.handle_key0(id, crate::key_dispatch::KeyKind::Key(key, raw), None);
                 }
             }
         }
@@ -2692,16 +2692,7 @@ impl Server {
     /// mode if it is in one, else encoded to the program, and with
     /// `synchronize-panes` to the window's other panes
     /// (`window_pane_copy_key`, each encoded for its own screen).
-    /// `pasting` is a key inside a bracketed paste, which tmux writes as
-    /// the bytes the terminal sent (`window_pane_paste`), and copies to
-    /// the other panes as they are.
-    pub(crate) fn forward_key(
-        &mut self,
-        p: PaneId,
-        c: Option<ClientId>,
-        key: &crate::keys::Key,
-        pasting: bool,
-    ) {
+    pub(crate) fn forward_key(&mut self, p: PaneId, c: Option<ClientId>, key: &crate::keys::Key) {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
@@ -2717,15 +2708,24 @@ impl Server {
         let bytes = crate::keys::encode(key, modes);
         self.write_pane(p, &bytes);
         self.copy_to_synchronized(p, |server, other| {
-            if pasting {
-                return bytes.clone();
-            }
             server
                 .model
                 .key_modes(other)
                 .map(|m| crate::keys::encode(key, m))
                 .unwrap_or_default()
         });
+    }
+
+    /// `window_pane_paste` (window.c:2053-2069): bytes of a bracketed
+    /// paste (a key or a mouse report, as the terminal sent them) to pane
+    /// `p` and, with `synchronize-panes`, to its peers as they are. A pane
+    /// in a mode gets nothing.
+    pub(crate) fn paste_to_pane(&mut self, p: PaneId, bytes: &[u8]) {
+        if self.model.panes.get(&p).is_none_or(|x| !x.modes.is_empty()) {
+            return;
+        }
+        self.write_pane(p, bytes);
+        self.copy_to_synchronized(p, |_, _| bytes.to_vec());
     }
 
     /// `window_pane_copy_key` / `window_pane_copy_paste` (window.c:2019-2050)

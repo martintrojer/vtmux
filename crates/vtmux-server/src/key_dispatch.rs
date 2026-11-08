@@ -42,7 +42,9 @@ pub struct KeyEvent {
 
 #[derive(Debug)]
 pub enum KeyKind {
-    Key(crate::keys::Key),
+    /// A key and the bytes it came in (`event->buf`): none for a key
+    /// `send-keys -K` gave.
+    Key(crate::keys::Key, Vec<u8>),
     /// `KEYC_PASTE_START` / `KEYC_PASTE_END`
     /// (`server_client_is_bracket_paste`).
     Paste(bool),
@@ -420,7 +422,7 @@ impl Server {
             return None;
         }
         let core = match &kind {
-            KeyKind::Key(k) => k.to_core(),
+            KeyKind::Key(k, _) => k.to_core(),
             KeyKind::Paste(true) => Key::PASTE_START,
             KeyKind::Paste(false) => Key::PASTE_END,
             KeyKind::Mouse { .. } => Key::MOUSE,
@@ -495,14 +497,14 @@ impl Server {
             self.destroy_pane(p);
             return true;
         }
-        if let KeyKind::Key(k) = kind
+        if let KeyKind::Key(k, _) = kind
             && pane.capture_keys
             && pane.modes.is_empty()
             && !pane.exited
             && pane.io.is_some()
         {
             let k = *k;
-            self.forward_key(p, Some(id), &k, false);
+            self.forward_key(p, Some(id), &k);
             return true;
         }
         false
@@ -551,21 +553,31 @@ impl Server {
                     });
                 }
             }
-            &KeyKind::Key(key) => {
-                let pasting = c.pasting;
+            KeyKind::Key(key, raw) => {
+                let (key, pasting) = (*key, c.pasting);
                 self.touch_client(id);
                 // server_client_update_latest (server-client.c:1708-1709)
                 // runs before the bound commands, which are queued after
                 // this step.
                 self.update_latest(id);
+                if pasting {
+                    // paste_key (server-client.c:1699-1704): the bytes as
+                    // they came, never a binding.
+                    if !self.clients[&id].flags.read_only
+                        && let Some(p) = self.client_pane(id)
+                    {
+                        self.paste_to_pane(p, raw);
+                    }
+                    return;
+                }
                 let outer = self.key_after.replace(step);
-                let taken = !pasting && self.handle_key(id, key.to_core(), None);
+                let taken = self.handle_key(id, key.to_core(), None);
                 self.key_after = outer;
                 if !taken
                     && !self.clients[&id].flags.read_only
                     && let Some(p) = self.client_pane(id)
                 {
-                    self.forward_key(p, Some(id), &key, pasting);
+                    self.forward_key(p, Some(id), &key);
                 }
             }
         }
@@ -624,13 +636,8 @@ impl Server {
         let forward = if self.model.number_option(TreeId::Session(s), "mouse") == 0 {
             true
         } else if pasting {
-            // paste_key (window_pane_paste): the report's bytes to the pane
-            // as they came, and to its synchronized panes.
-            if let Some(p) = wp
-                && self.model.panes.get(&p).is_some_and(|x| x.modes.is_empty())
-            {
-                self.write_pane(p, bytes);
-                self.copy_to_synchronized(p, |_, _| bytes.to_vec());
+            if let Some(p) = wp {
+                self.paste_to_pane(p, bytes);
             }
             false
         } else {
@@ -676,7 +683,9 @@ impl Server {
             };
             // cmd_send_keys_inject_key: a key the prompt or a message took
             // makes the next one go right after the command again.
-            after = self.handle_key0(id, KeyKind::Key(k), after).or(command);
+            after = self
+                .handle_key0(id, KeyKind::Key(k, Vec::new()), after)
+                .or(command);
         }
     }
 }
