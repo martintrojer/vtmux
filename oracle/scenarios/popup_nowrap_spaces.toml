@@ -1,0 +1,28 @@
+# Spaces a popup's job writes with autowrap off (DECAWM reset, as fzf
+# draws its --height and --tmux popups) before the popup is next drawn
+# in full. tmux writes such a cell through screen_write_cell, not the
+# collect path (screen_write_collect_add needs MODE_WRAP), and skips a
+# default space past the line's cellsize (screen-write.c:2740-2742), so
+# the terminal keeps the empty popup's first draw there: one space in
+# popup-style, then an erase in the default foreground (tty_draw_line).
+# vtmux draws them as written spaces in popup-style (D-053). Row 3 is
+# the same spaces with autowrap on, which tmux collects and writes; a
+# full redraw (refresh-client) then draws every row from the grid.
+name = "popup_nowrap_spaces"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["selectp", "-t", "a", "-T", "t"] },
+  { run = ["bind", "-n", "M-a", "display-popup", "-w", "30", "-h", "6", "-x", "1", "-y", "5", "printf '\\033[?7l\\r                            \\r\\nab                          \\r\\n\\033[?7h\\r                            \\r\\n'; printf '\\033[?7lcd\\033[1m \\033[0m'; exec cat"] },
+  { attach = { session = "a" } },
+  { keys = "\u001ba" },
+  { wait_screen = { has = ["cd"] } },
+  { settle = {} },
+  { divergence = { id = "D-053", expect = { kind = "screen", rows = [" \\e[37m\\e[40m\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\\e[39m\\e[49m", " \\e[37m\\e[40m\u2502                            \u2502\\e[39m\\e[49m", " \\e[37m\\e[40m\u2502ab                          \u2502\\e[39m\\e[49m", " \\e[37m\\e[40m\u2502                            \u2502\\e[39m\\e[49m", " \\e[37m\\e[40m\u2502cd\\e[1m \\e[0m\\e[40m                         \\e[37m\u2502\\e[39m\\e[49m", " \\e[37m\\e[40m\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\\e[39m\\e[49m", "", "", "", "", "", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"], cursor = [5, 4] } } },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

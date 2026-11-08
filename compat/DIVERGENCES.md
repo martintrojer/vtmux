@@ -468,3 +468,11 @@ product reasons" category.
 - vtmux behaviour: the cell gets a plain underline (`ESC[4m`, when the terminal has `smul`) in place of the style, with its underline colour as usual. With `Smulx`, tmux's form (`ESC[4:NM`).
 - Evidence: reference tmux 3.8 on xterm-256color shows `curly dbl dotdash` with no underline and only the plain `u` underlined (trace `attach_underline_styles`, the first screen); task low_tty_underline_fallback_civis.
 - Category: Do not copy tmux bug (the program's text loses a distinction it asked for, where a plain underline keeps the cells marked)
+
+### D-053: spaces a popup's job writes with autowrap off show before the popup's next full draw
+
+- Test / assertion: oracle `popup_nowrap_spaces`, the first `screen` (rows 1 and 2 of the popup).
+- tmux behaviour: until a popup is drawn again in full, the terminal shows its first, empty draw with the job's output written over it as it arrives (`popup_job_update_cb`). With autowrap off a character goes through `screen_write_cell`, not the collect path (`screen_write_collect_add` needs `MODE_WRAP`, screen-write.c:2633), and a space in the default style at or past the line's allocated `cellsize` is skipped, written neither to the grid nor to the terminal (screen-write.c:2740-2742). `cellsize` grows in steps (`grid_expand_line`: a quarter, a half, then the whole width), so after `ab` on a 28-column popup the spaces in columns 2-6 are written and the rest are not: the terminal keeps the first draw there, one space in `popup-style` and an erase in the default foreground. fzf draws its `--height` and `--tmux` popups this way (tmux-fzf, tmux-sessionx, extrakto).
+- vtmux behaviour: the popup's terminal cannot tell which spaces tmux would have skipped, so every space the job wrote is drawn as written, in `popup-style`'s colours. Only blank cells differ, and only in their foreground colour, so nothing visible changes; the next full draw (`refresh-client`, a resize) matches tmux.
+- Evidence: reference tmux 3.8 and vtmux on the scenario above: row 1 (28 spaces with DECAWM reset) is ` \e[39m` + 27 blanks in tmux, 28 blanks in `\e[37m` in vtmux; the same spaces with autowrap on (row 3) match. Found by audit_plugins (fzf `--height` in a `display-popup`).
+- Category: Deferred
