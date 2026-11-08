@@ -1387,8 +1387,9 @@ impl PaneTerm {
         self.note_history_read();
         let cols = usize::from(self.cols());
         let hidden = self.term.scrollback_rows().unwrap_or(0) - self.hsize;
+        let mut last = None;
         (0..self.hsize)
-            .map(|y| FrozenRow::capture(&self.term, hidden + y, cols))
+            .map(|y| FrozenRow::capture(&self.term, hidden + y, cols, &mut last))
             .collect()
     }
 
@@ -1396,8 +1397,9 @@ impl PaneTerm {
     fn freeze_visible(&self) -> Vec<FrozenRow> {
         let cols = usize::from(self.cols());
         let top = self.term.scrollback_rows().unwrap_or(0);
+        let mut last = None;
         (0..usize::from(self.rows()))
-            .map(|y| FrozenRow::capture(&self.term, top + y, cols))
+            .map(|y| FrozenRow::capture(&self.term, top + y, cols, &mut last))
             .collect()
     }
 

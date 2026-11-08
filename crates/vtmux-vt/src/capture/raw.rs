@@ -227,8 +227,9 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
     let hsize = term.history_size();
     let osc133 = term.osc133_lines();
     let mut out = format!("G {sx}x{sy} ({hsize}/{history_limit})\n");
+    let mut last = None;
     for y in 0..hsize + sy {
-        let (cells, wrapped) = read_row(term, y, hsize, sx);
+        let (cells, wrapped) = read_row(term, y, hsize, sx, &mut last);
         // `cellused`: padding and a tab's columns are cells tmux wrote.
         let used = cells
             .iter()

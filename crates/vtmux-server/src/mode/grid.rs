@@ -221,18 +221,21 @@ impl Grid {
         self.lines.truncate(from);
         #[cfg(test)]
         tests::ROWS_READ.with(|r| r.set(r.get() + (n - from)));
-        self.lines.extend((from..n).map(|y| Line {
-            row: OnceCell::from(used_cells(src.row(y))),
-            src: None,
-            time: if y < hsize {
-                src.history_time(src.history_id(y))
-            } else {
-                0
-            },
-            prompt: false,
-            output: false,
-            links: Box::default(),
-        }));
+        // Each row stepped to from the one before (`PaneTerm::rows_in`):
+        // `from` can be the top of a long history.
+        self.lines
+            .extend((from..n).zip(src.rows_in(from..n)).map(|(y, row)| Line {
+                row: OnceCell::from(used_cells(row)),
+                src: None,
+                time: if y < hsize {
+                    src.history_time(src.history_id(y))
+                } else {
+                    0
+                },
+                prompt: false,
+                output: false,
+                links: Box::default(),
+            }));
         for (y, mark) in src.line_marks() {
             if let Some(line) = lines_at(&mut self.lines, y, from) {
                 match mark {

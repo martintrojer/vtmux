@@ -10,6 +10,7 @@ use libghostty_vt::terminal::{Point, PointCoordinate};
 
 use crate::snapshot::{Cell, Color, Style, Underline};
 use crate::text::CellText;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::term::{HistoryRow, LineMark, PaneTerm};
@@ -122,12 +123,14 @@ impl Source<'_> {
         }
     }
 
-    fn line(&self, y: usize, marks: &[(usize, LineMark)]) -> Line {
+    /// Line `y`; `last` is the row the capture read before, which a
+    /// pane's next row is stepped to from (see [`row_ref_near`]).
+    fn line<'t>(&'t self, y: usize, marks: &[(usize, LineMark)], last: &mut LastRow<'t>) -> Line {
         let marked = |m: LineMark| marks.iter().any(|&(my, mm)| my == y && mm == m);
         let (cells, wrapped, time, prompt, output) = match self {
             Self::Pane(t) => {
                 let hsize = t.history_size();
-                let (cells, wrapped) = read_row(t, y, hsize, usize::from(t.cols()));
+                let (cells, wrapped) = read_row(t, y, hsize, usize::from(t.cols()), last);
                 let time = if y < hsize {
                     t.history_time(t.history_id(y))
                 } else {
@@ -215,8 +218,9 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
     // (cmd-capture-pane.c:333), and one list of the links -H has listed.
     let mut last = Gc::default();
     let mut seen: Vec<LinkKey> = Vec::new();
+    let mut at = None;
     for y in top..=bottom {
-        let line = src.line(y, &marks);
+        let line = src.line(y, &marks, &mut at);
         let mut text = Vec::new();
         if opts.hyperlinks {
             line_links(&mut text, &line.cells, &mut seen);
@@ -334,8 +338,9 @@ pub fn history_counts(term: &PaneTerm) -> HistoryCounts {
         lines: rows,
         ..HistoryCounts::default()
     };
+    let mut last = None;
     for y in 0..rows {
-        let (cells, _) = read_row(term, y, hsize, sx);
+        let (cells, _) = read_row(term, y, hsize, sx, &mut last);
         let used = cells
             .iter()
             .rposition(|c| !c.empty || c.padding())
@@ -629,11 +634,31 @@ impl PaneTerm {
         if y >= hsize + usize::from(self.rows()) {
             return Row::default();
         }
-        let (cells, wrapped) = read_row(self, y, hsize, usize::from(self.cols()));
+        let (cells, wrapped) = read_row(self, y, hsize, usize::from(self.cols()), &mut None);
         Row {
             cells: cells.iter().map(RowCell::to_cell).collect(),
             wrapped,
         }
+    }
+
+    /// Rows `range` of tmux's grid as [`PaneTerm::row`] gives them, each
+    /// stepped to from the one before (see [`row_ref_near`]): reading all
+    /// of a long history this way costs a page-list step per row, not a
+    /// walk from the oldest page.
+    pub fn rows_in(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = Row> + '_ {
+        let hsize = self.history_size();
+        let (cols, end) = (usize::from(self.cols()), hsize + usize::from(self.rows()));
+        let mut last = None;
+        range.map(move |y| {
+            if y >= end {
+                return Row::default();
+            }
+            let (cells, wrapped) = read_row(self, y, hsize, cols, &mut last);
+            Row {
+                cells: cells.iter().map(RowCell::to_cell).collect(),
+                wrapped,
+            }
+        })
     }
 }
 
@@ -657,6 +682,9 @@ pub struct ScreenCopy {
     /// `grid_line_time` of each history row.
     times: Vec<i64>,
     marks: Vec<(usize, LineMark)>,
+    /// The screen row of `term` read last, which the next read steps from
+    /// (see [`row_ref_near`]). Read only through [`ScreenCopy::row_ref`].
+    last: RefCell<LastRow<'static>>,
 }
 
 impl std::fmt::Debug for ScreenCopy {
@@ -703,11 +731,31 @@ impl ScreenCopy {
             (Some(frozen), _) if y < self.hsize => {
                 frozen.get(y).map(FrozenRow::thaw).unwrap_or_default()
             }
-            (_, Some(term)) => {
-                read_screen_cells(term, y + self.retained - self.hsize, self.cols, used_only)
-            }
+            (_, Some(_)) => match self.row_ref(y + self.retained - self.hsize) {
+                Some(row_ref) => read_cells(&row_ref, self.cols, used_only),
+                None => (Vec::new(), false),
+            },
             (_, None) => (Vec::new(), false),
         }
+    }
+
+    /// The reference to screen row `y` of the copy's terminal, stepped to
+    /// from the row read before it when that is nearer than a lookup
+    /// ([`row_ref_near`]): a search or a reflow reads the rows in order.
+    fn row_ref(&self, y: usize) -> Option<GridRef<'_>> {
+        let term = self.term.as_ref()?;
+        let last = self.last.borrow().clone();
+        let row_ref = row_ref_near(term, y, last.as_ref())?;
+        // SAFETY: a `GridRef` is a plain pointer into `term`'s page list
+        // (no drop); the lifetime is only a borrow of `term`. `term` is
+        // owned by this copy and never changed after it is taken (it is
+        // only read, through `&self`; reading a compressed page restores it
+        // in place, keeping its node), so the reference stays valid for as
+        // long as the copy lives, and it leaves `last` only through this
+        // method, shortened to a borrow of `self`.
+        let keep = unsafe { std::mem::transmute::<GridRef<'_>, GridRef<'static>>(row_ref.clone()) };
+        *self.last.borrow_mut() = Some((y, keep));
+        Some(row_ref)
     }
 
     /// Row `y` as the text a search reads (`window_copy_stringify`: a
@@ -724,8 +772,7 @@ impl ScreenCopy {
         if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
             return None;
         }
-        let term = self.term.as_ref()?;
-        let row_ref = row_ref_at(term, y + self.retained - self.hsize)?;
+        let row_ref = self.row_ref(y + self.retained - self.hsize)?;
         let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
         let mut raw = Vec::new();
         row_ref.row_cells(&mut raw).ok()?;
@@ -824,6 +871,7 @@ impl PaneTerm {
                 .map(|y| self.history_time(self.history_id(y)))
                 .collect(),
             marks: self.line_marks(),
+            last: RefCell::new(None),
         }
     }
 }
@@ -838,9 +886,15 @@ pub(crate) struct FrozenRow {
 }
 
 impl FrozenRow {
-    /// Copy screen row `y` (history included) of the active screen.
-    pub(crate) fn capture(term: &Terminal<'_, '_>, y: usize, cols: usize) -> Self {
-        let (mut cells, wrapped) = read_screen_row(term, y, cols);
+    /// Copy screen row `y` (history included) of the active screen;
+    /// `last` as for [`read_screen_row_near`].
+    pub(crate) fn capture<'t>(
+        term: &'t Terminal<'_, '_>,
+        y: usize,
+        cols: usize,
+        last: &mut LastRow<'t>,
+    ) -> Self {
+        let (mut cells, wrapped) = read_screen_row_near(term, y, cols, last);
         let len = cells.len();
         while cells.last().is_some_and(RowCell::is_default_blank) {
             cells.pop();
@@ -932,7 +986,16 @@ impl FrozenRow {
 /// While the alternate screen is up, tmux keeps showing the primary history
 /// (screen.c:700-721 saves only the visible rows), but Ghostty can only read
 /// the active screen, so history comes from the copy taken on entry.
-fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCell>, bool) {
+///
+/// `last` is the screen row read before and its reference, which this one
+/// is stepped to from when nearer ([`row_ref_near`]); it becomes this row.
+fn read_row<'t>(
+    term: &'t PaneTerm,
+    y: usize,
+    hsize: usize,
+    cols: usize,
+    last: &mut LastRow<'t>,
+) -> (Vec<RowCell>, bool) {
     if term.alternate_on() && y < hsize {
         return term.frozen_row(y).map(FrozenRow::thaw).unwrap_or_default();
     }
@@ -941,7 +1004,62 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
     }
     // Ghostty may retain more history than tmux has: skip the oldest rows.
     let retained = term.term.scrollback_rows().unwrap_or(0);
-    read_screen_row(&term.term, y + retained - hsize, cols)
+    read_screen_row_near(&term.term, y + retained - hsize, cols, last)
+}
+
+/// [`read_screen_row`], the row stepped to from `last` when nearer
+/// ([`row_ref_near`]); `last` becomes this row.
+fn read_screen_row_near<'t>(
+    term: &'t Terminal<'_, '_>,
+    y: usize,
+    cols: usize,
+    last: &mut LastRow<'t>,
+) -> (Vec<RowCell>, bool) {
+    let Some(row_ref) = row_ref_near(term, y, last.as_ref()) else {
+        return (Vec::new(), false);
+    };
+    let row = read_cells(&row_ref, cols, false);
+    *last = Some((y, row_ref));
+    row
+}
+
+/// A screen row of a terminal (history first, counted from the oldest row
+/// Ghostty keeps) and the reference to it: the row a reader resolved last.
+pub(crate) type LastRow<'t> = Option<(usize, GridRef<'t>)>;
+
+/// The reference to row `y` of a screen, as [`row_ref_at`] gives it, but
+/// stepped to from `last` (patch 0033's `ghostty_grid_ref_down` and `_up`)
+/// when that crosses no more rows than the lookup's walk would: a lookup
+/// walks the page list from the oldest page (or, for the active area, from
+/// the newest), so a reader going through a long history in order with
+/// lookups alone took time quadratic in its length. `last` must come from
+/// the same terminal, unchanged since.
+fn row_ref_near<'t>(
+    term: &'t Terminal<'_, '_>,
+    y: usize,
+    last: Option<&(usize, GridRef<'t>)>,
+) -> Option<GridRef<'t>> {
+    if let Some((from, from_ref)) = last {
+        // The rows the lookup's walk crosses: the history above a history
+        // row, the screen and the screen rows above an active row.
+        let walk = y
+            .checked_sub(term.scrollback_rows().unwrap_or(0))
+            .map_or(y, |active| active + usize::from(term.rows().unwrap_or(0)));
+        let rows = y.abs_diff(*from);
+        if rows <= walk {
+            #[cfg(test)]
+            tests::STEPS.with(|n| n.set(n.get() + 1));
+            let stepped = if y >= *from {
+                from_ref.down(rows)
+            } else {
+                from_ref.up(rows)
+            };
+            if let Ok(row_ref) = stepped {
+                return Some(row_ref);
+            }
+        }
+    }
+    row_ref_at(term, y)
 }
 
 /// The reference to row `y` of a screen (history first, `y` counted from
@@ -980,9 +1098,14 @@ fn read_screen_cells(
     cols: usize,
     used_only: bool,
 ) -> (Vec<RowCell>, bool) {
-    let Some(row_ref) = row_ref_at(term, y) else {
-        return (Vec::new(), false);
-    };
+    match row_ref_at(term, y) {
+        Some(row_ref) => read_cells(&row_ref, cols, used_only),
+        None => (Vec::new(), false),
+    }
+}
+
+/// [`read_screen_cells`] of the row `row_ref` is on.
+fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCell>, bool) {
     let (wrapped, styled, linked) = row_ref.row().map_or((false, true, true), |row| {
         (
             row.is_wrapped().unwrap_or(false),
@@ -1625,6 +1748,140 @@ mod tests {
     thread_local! {
         /// Ghostty point lookups by [`read_screen_row`] on this thread.
         pub(super) static LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Rows [`row_ref_near`] stepped to from the last instead.
+        pub(super) static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn lookups() -> usize {
+        LOOKUPS.with(std::cell::Cell::get)
+    }
+
+    /// A pane whose history spans many Ghostty pages, with a line of each
+    /// kind a row read has to get right every so often: styles, a wide
+    /// character, a cluster, a hyperlink, a tab, a coloured erase, a line
+    /// wrapped onto the next row.
+    fn long_history() -> PaneTerm {
+        use std::fmt::Write as _;
+        let mut t = PaneTerm::new(40, 5, 30_000);
+        let mut out = String::new();
+        for i in 0..20_000 {
+            let _ = match i % 7 {
+                0 => write!(out, "\x1b[1;3{}mline {i}\x1b[m", i % 8),
+                1 => write!(out, "{i} \u{4e2d}\u{6587} e\u{301}"),
+                2 => write!(out, "\x1b]8;;http://h/{i}\x1b\\link\x1b]8;;\x1b\\ {i}"),
+                3 => write!(out, "a\tb\t{i}"),
+                4 => write!(out, "{i}\x1b[44m\x1b[K\x1b[m"),
+                5 => write!(out, "{i:-<45}"),
+                _ => write!(out, "plain {i}"),
+            };
+            out.push_str("\r\n");
+        }
+        t.feed(out.as_bytes());
+        t
+    }
+
+    /// Reading a copy's rows in order, either way, is a lookup for the
+    /// first and a step for each after it: a lookup walks Ghostty's page
+    /// list from the oldest page, so a search over a long history (which
+    /// reads every row) took time quadratic in its length.
+    #[test]
+    fn a_copy_read_in_order_steps_from_row_to_row() {
+        let t = long_history();
+        let copy = t.copy_screen();
+        let n = copy.history_size() + 5;
+        assert!(n > 20_000);
+        let before = lookups();
+        for y in 0..n {
+            let _ = copy.used_row(y);
+        }
+        let mut text = String::new();
+        for y in (0..n).rev() {
+            let _ = copy.ascii_text(y, &mut text);
+        }
+        // The first row, and row 0 again at the end (a lookup of it walks
+        // nothing).
+        assert_eq!(lookups() - before, 2);
+    }
+
+    /// `PaneTerm::rows_in`, a whole-history capture, `#{history_bytes}`'s
+    /// count and `capture-pane -R` read the pane's rows with a step each
+    /// too.
+    #[test]
+    fn rows_and_capture_step_from_row_to_row() {
+        let t = long_history();
+        let n = t.history_size() + 5;
+        let before = lookups();
+        assert_eq!(t.rows_in(0..n + 2).count(), n + 2);
+        let _ = capture(
+            &t,
+            CaptureOpts {
+                start: LineRef::Start,
+                end: LineRef::End,
+                ..CaptureOpts::default()
+            },
+        );
+        let _ = history_counts(&t);
+        let _ = capture_grid(&t, 30_000);
+        assert!(lookups() - before <= 8, "{} lookups", lookups() - before);
+    }
+
+    /// The alternate screen coming up copies the primary history (tmux
+    /// goes on showing it) a step per row, and the copy reads as the rows
+    /// did: a lookup per row made `vim` or `less` take seconds to start
+    /// over a long history.
+    #[test]
+    fn alternate_screen_copies_history_a_step_per_row() {
+        let mut t = long_history();
+        let hsize = t.history_size();
+        let want: Vec<Row> = (0..hsize).map(|y| t.row(y)).collect();
+        let before = lookups();
+        t.feed(b"\x1b[?1049h");
+        assert!(t.alternate_on());
+        assert!(lookups() - before <= 4, "{} lookups", lookups() - before);
+        assert_eq!(t.history_size(), hsize);
+        assert!((0..hsize).all(|y| t.row(y) == want[y]));
+    }
+
+    /// Rows stepped to read the same as rows looked up, in any order:
+    /// row by row both ways, jumps across pages, the same row again, the
+    /// active area and back, the first and last rows, over resident and
+    /// compressed history.
+    #[test]
+    fn stepped_rows_read_as_looked_up() {
+        let mut t = long_history();
+        for compressed in [false, true] {
+            if compressed {
+                t.compress_all();
+                assert!(t.compressed_pages() > 0);
+            }
+            let n = t.history_size() + 5;
+            let want: Vec<Row> = (0..n).map(|y| t.row(y)).collect();
+            let copy = t.copy_screen();
+            let mut order: Vec<usize> = (0..n).chain((0..n).rev()).collect();
+            let mut x: usize = 12345;
+            for _ in 0..3000 {
+                x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                let y = (x >> 33) % n;
+                order.extend([y, y, y.saturating_sub(1), (y + 700).min(n - 1), n - 1, 0]);
+            }
+            for &y in &order {
+                assert_eq!(copy.row(y), want[y], "row {y}, compressed {compressed}");
+            }
+            // A fresh copy's first read is a lookup.
+            let (mut text, mut fresh) = (String::new(), String::new());
+            for &y in order.iter().step_by(97) {
+                let got = copy.ascii_text(y, &mut text);
+                let want = t.copy_screen().ascii_text(y, &mut fresh);
+                assert_eq!((got, &text), (want, &fresh), "row {y}");
+            }
+            assert_eq!(t.rows_in(0..n).collect::<Vec<_>>(), want);
+            let jumpy: Vec<Row> = order
+                .iter()
+                .take(5000)
+                .map(|&y| t.rows_in(y..y + 1).next().unwrap())
+                .collect();
+            assert!(jumpy.iter().zip(&order).all(|(r, &y)| *r == want[y]));
+        }
     }
 
     /// The column a wide character that did not fit left at the end of a
