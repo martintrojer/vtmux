@@ -166,6 +166,40 @@ fn a_crash_at_any_stage_keeps_the_previous_checkpoint() {
     }
 }
 
+/// A checkpoint that holds less than its predecessors (`full` set to
+/// `layout`) leaves nothing of them: `manifest.prev` is a copy of it and
+/// their pages are collected; a crash before `manifest` is replaced still
+/// reads the old one, every page there.
+#[test]
+fn a_replacing_checkpoint_leaves_nothing_of_the_previous_ones() {
+    let dir = temp_dir("replacing");
+    let full1 = snapshot("one", &["alpha", "beta"]);
+    let full2 = snapshot("two", &["beta", "gamma"]);
+    let layout = snapshot("layout", &[]);
+    write(&dir, &full1, &mut ok()).unwrap();
+    write(&dir, &full2, &mut ok()).unwrap();
+    let mut crash = |at: Stage| {
+        if at == Stage::PrevKept {
+            Err(io::Error::other("crash"))
+        } else {
+            Ok(())
+        }
+    };
+    let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
+    assert_eq!(w.step(None, &mut crash).unwrap_err().to_string(), "crash");
+    assert_eq!(load(&dir).unwrap(), (full2.clone(), MANIFEST));
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap(), layout);
+
+    let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
+    assert!(w.step(None, &mut ok()).unwrap());
+    assert_eq!(load_file(&dir, MANIFEST).unwrap(), layout);
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap(), layout);
+    assert!(on_disk(&dir).is_empty());
+    assert!(!dir.join(MANIFEST_TMP).exists());
+    assert!(!dir.join(MANIFEST_PREV_TMP).exists());
+    assert_eq!(mode(&dir.join(MANIFEST_PREV)), 0o600);
+}
+
 #[test]
 fn a_torn_or_missing_manifest_falls_back_to_the_previous() {
     let dir = temp_dir("torn");

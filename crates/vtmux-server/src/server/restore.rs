@@ -34,6 +34,12 @@
 //! binary reads falls back to `manifest.prev`, and once restored from it
 //! the server checkpoints as usual.
 //!
+//! The reason is also told to the client that started the server, when
+//! it ends with no session to show for it (`start-server`, `attach`: the
+//! server exits at once under `exit-empty`, and `show-messages` with it):
+//! on its stderr, with exit status 1 where its command would have
+//! succeeded ([`Server::tell_starter`]).
+//!
 //! A newer binary's checkpoint is another matter (decision 6: older
 //! refuses newer and must not destroy it): when `manifest` or
 //! `manifest.prev` is of a newer format, or requires a feature this
@@ -530,7 +536,9 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
         Found::None => return Ok(fresh),
         Found::Newer(why) => {
             fresh.persist.kept = Kept::Always;
-            fresh.add_message(left_alone(&dir, &format!("not restored: {why}")));
+            let said = left_alone(&dir, &format!("not restored: {why}"));
+            fresh.persist.refusal = Some(said.clone());
+            fresh.add_message(said);
             return Ok(fresh);
         }
         Found::Refused(why) => why,
@@ -564,10 +572,12 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
         }
     };
     fresh.persist.kept = Kept::WhileThere;
-    fresh.add_message(format!(
+    let said = format!(
         "vtmux-persist: {}: not restored: {why}; the files are kept and not written over",
         dir.display()
-    ));
+    );
+    fresh.persist.refusal = Some(said.clone());
+    fresh.add_message(said);
     Ok(fresh)
 }
 

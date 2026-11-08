@@ -1149,6 +1149,93 @@ fn a_copy_mode_page_past_the_limit_is_left_out_of_the_restore() {
             ),
         "{log}"
     );
+
+/// `vtmux-persist full` set to `layout` writes a `layout` checkpoint at
+/// once and leaves no history on disk: not in `manifest.prev`, not in
+/// `chunks/` (they held the full checkpoints until the next change).
+#[test]
+fn full_set_to_layout_leaves_no_history_on_disk() {
+    let mut w = World::start(
+        &["sh", "-c", "seq 1 300; exec cat -"],
+        &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
+    );
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    wait_until("the pane has history", || {
+        w.ok(&["display", "-p", "-t", "a", "#{history_size}"]) != "0\n"
+    });
+    // Two full checkpoints, a change between: history in `manifest.prev`.
+    w.wait_saved();
+    w.ok(&["set", "-g", "@again", "yes"]);
+    wait_until("both manifests hold history", || {
+        [persist::MANIFEST, persist::MANIFEST_PREV]
+            .iter()
+            .all(|m| persist::load_file(&w.state(), m).is_ok_and(|s| !s.pages().is_empty()))
+    });
+    assert_ne!(files(&w.state().join(persist::CHUNKS)).len(), 0);
+
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    wait_until("a layout checkpoint, and no history left", || {
+        let dir = w.state();
+        [persist::MANIFEST, persist::MANIFEST_PREV].iter().all(|m| {
+            persist::load_file(&dir, m).is_ok_and(|s| {
+                s.meta.purpose == snap::Purpose::CheckpointLayout && s.pages().is_empty()
+            })
+        }) && files(&dir.join(persist::CHUNKS)).is_empty()
+    });
+    w.kill_server();
+    assert_eq!(files(&w.state().join(persist::CHUNKS)).len(), 0);
+    w.pid = None;
+}
+
+/// A restore refused with no session to start (`start-server`, `attach`)
+/// made the server exit at once under `exit-empty`, the reason only in a
+/// `show-messages` nobody could ask, and `attach` said just `no sessions`.
+/// The client that started the server prints the reason on its stderr and
+/// exits 1; a command that makes a session says nothing of it.
+#[test]
+fn a_refused_restore_with_no_session_to_start_reaches_the_starting_client() {
+    type Spoil = fn(&[u8]) -> Vec<u8>;
+    let corrupt: Spoil = |b| {
+        let mut b = b.to_vec();
+        let last = b.len() - 1;
+        b[last] ^= 0xff;
+        b
+    };
+    let cases: [(Spoil, &str); 2] = [
+        (corrupt, "not restored: manifest: snapshot is corrupt"),
+        (newer_format, "written by a newer vtmux"),
+    ];
+    for (spoil, why) in cases {
+        let mut w = World::start(&["cat", "-"], &[]);
+        w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+        w.kill_server();
+        let path = w.state().join(persist::MANIFEST);
+        std::fs::write(&path, spoil(&std::fs::read(&path).unwrap())).unwrap();
+        let before = contents(&w.state());
+
+        let (out, err, code) = w.run(&["start-server"]);
+        assert_eq!((out.as_str(), code), ("", 1), "{why}: {err}");
+        assert!(
+            err.starts_with("vtmux-persist: ") && err.contains(why) && err.ends_with('\n'),
+            "{why}: {err:?}"
+        );
+        assert_eq!(err.lines().count(), 1, "{err:?}");
+
+        // `attach` keeps tmux's own error, then says why.
+        let (_, err, code) = w.run(&["attach"]);
+        assert_eq!(code, 1, "{err}");
+        assert!(
+            err.starts_with("no sessions\n") && err.contains(why),
+            "{why}: {err:?}"
+        );
+        assert_eq!(contents(&w.state()), before, "{why}: files are kept");
+
+        // A command that makes a session has nothing to report.
+        let (_, err, code) = w.run(&["new", "-d", "-s", "z", "cat", "-"]);
+        assert_eq!((err.as_str(), code), ("", 0));
+        w.repid();
+        assert!(w.ok(&["show-messages"]).contains(why));
+    }
 }
 
 /// The checkpoint is checked in a child process, by the dry run a live

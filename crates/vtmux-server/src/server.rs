@@ -2922,6 +2922,7 @@ impl Server {
         self.render_clients();
         self.release_hidden_screens(Instant::now());
         for (id, code) in std::mem::take(&mut self.pending_exits) {
+            let code = self.tell_starter(id, code);
             self.finish_client(id, code);
         }
         self.format_jobs_flush();

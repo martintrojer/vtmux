@@ -54,6 +54,8 @@ pub const MANIFEST: &str = "manifest";
 pub const MANIFEST_PREV: &str = "manifest.prev";
 /// The manifest being written.
 pub const MANIFEST_TMP: &str = "manifest.tmp";
+/// `manifest.prev` being written ([`Writer::replacing_prev`]).
+pub const MANIFEST_PREV_TMP: &str = "manifest.prev.tmp";
 /// The history pages, by hash.
 pub const CHUNKS: &str = "chunks";
 /// Held (`flock`) by the server writing the directory ([`Lock`]).
@@ -159,6 +161,9 @@ pub struct Writer {
     /// The chunks still to write, name and data, last first.
     todo: Vec<(String, Vec<u8>)>,
     done: Written,
+    /// `manifest.prev` becomes a copy of this manifest, not the one it
+    /// replaces ([`Writer::replacing_prev`]).
+    replace_prev: bool,
 }
 
 impl Writer {
@@ -199,7 +204,23 @@ impl Writer {
             names,
             todo,
             done,
+            replace_prev: false,
         })
+    }
+
+    /// Make `manifest.prev` a copy of this checkpoint instead of keeping
+    /// the one it replaces, so nothing of the old content stays on disk
+    /// once the chunks no manifest names are collected: for a checkpoint
+    /// that holds less than its predecessors (`vtmux-persist full` set to
+    /// `layout`: the screens and history are not to stay in
+    /// `manifest.prev` and `chunks/` until the next change). Still crash
+    /// safe: `manifest.prev` is replaced (atomically) before `manifest`
+    /// is, and a crash between them leaves `manifest`, the old checkpoint,
+    /// with every chunk it names.
+    #[must_use]
+    pub fn replacing_prev(mut self) -> Self {
+        self.replace_prev = true;
+        self
     }
 
     /// Chunks still to write.
@@ -255,12 +276,20 @@ impl Writer {
         self.done.bytes += self.manifest.len() as u64;
         at(Stage::ManifestWritten)?;
         let latest = dir.join(MANIFEST);
-        match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
-            Ok(()) => {}
-            // The first checkpoint, or a crash after the rename below's
-            // predecessor: `manifest.prev` already holds the previous one.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+        if self.replace_prev {
+            replace(
+                &dir.join(MANIFEST_PREV_TMP),
+                &dir.join(MANIFEST_PREV),
+                &self.manifest,
+            )?;
+        } else {
+            match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
+                Ok(()) => {}
+                // The first checkpoint, or a crash after the rename below's
+                // predecessor: `manifest.prev` already holds the previous one.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         at(Stage::PrevKept)?;
         fs::rename(&tmp, &latest)?;

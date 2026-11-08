@@ -370,6 +370,92 @@ fn a_periodic_checkpoint_writes_its_chunks_over_several_turns() {
     assert_eq!(server.checkpoint(), None);
 }
 
+/// Every file under `dir`, recursively.
+fn all_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        if e.file_type().unwrap().is_dir() {
+            out.extend(all_files(&e.path()));
+        } else {
+            out.push(e.path());
+        }
+    }
+    out
+}
+
+/// `vtmux-persist` set from `full` to `layout` at run time writes the
+/// `layout` checkpoint at once and leaves no screen or history on disk:
+/// `manifest.prev` was the full checkpoint (and `chunks/` its pages)
+/// until the next changed checkpoint, which may be far off.
+#[test]
+fn full_set_to_layout_writes_a_layout_checkpoint_and_prunes() {
+    let (mut server, dir) = server("ckpt-prune");
+    for _ in 0..2 {
+        let out = run(
+            &mut server,
+            &dir,
+            &["new-window", "-d", "-t", "a", "cat", "-"],
+        );
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    for id in 1..3 {
+        let pane = server.model.panes.get_mut(&PaneId(id)).unwrap();
+        for n in 0..100 {
+            pane.term
+                .feed(format!("history {id} of line {n}\r\n").as_bytes());
+        }
+        let target = format!("%{id}");
+        let out = run(&mut server, &dir, &["copy-mode", "-t", &target]);
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "full"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    let now = Instant::now();
+    // The loop sees `full`, and writes the full checkpoints.
+    server.persist_timers(now);
+    assert!(server.checkpoint().is_some());
+    let out = run(&mut server, &dir, &["rename-window", "-t", "a:0", "next"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    assert!(server.checkpoint().is_some());
+    let chunks = state.join(crate::persist::CHUNKS);
+    let full = |name| crate::persist::load_file(&state, name).unwrap();
+    assert_ne!(full(MANIFEST_PREV).pages().len(), 0);
+    assert!(std::fs::read_dir(&chunks).unwrap().count() > 0);
+
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "layout"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    // The next turn, not the next interval.
+    server.persist_timers(now);
+    for name in [MANIFEST, MANIFEST_PREV] {
+        let s = full(name);
+        assert_eq!(s.meta.purpose, snap::Purpose::CheckpointLayout, "{name}");
+        assert!(s.pages().is_empty(), "{name}");
+        assert!(s.panes.iter().all(|p| p.term.is_none()), "{name}");
+    }
+    assert_eq!(std::fs::read_dir(&chunks).unwrap().count(), 0);
+    let files = all_files(&state);
+    let names: Vec<_> = files
+        .iter()
+        .map(|f| f.file_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .all(|n| ["lock", MANIFEST, MANIFEST_PREV].contains(&n.as_str())),
+        "{names:?}"
+    );
+    for f in &files {
+        let bytes = std::fs::read(f).unwrap();
+        assert!(!bytes.windows(7).any(|w| w == b"of line"), "{f:?}");
+    }
+    // Written once: nothing changed since.
+    assert_eq!(server.checkpoint(), None);
+    server.persist_timers(now + super::interval());
+    assert_eq!(server.checkpoint(), None);
+}
+
 /// Two servers whose checkpoints would share a directory: the first to
 /// write holds its lock, the other writes nothing and says why once.
 #[test]

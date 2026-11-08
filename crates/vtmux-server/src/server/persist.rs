@@ -13,6 +13,12 @@
 //! often tools poll it, and a field added to the snapshot is noticed
 //! without anyone remembering to mark it dirty.
 //!
+//! `vtmux-persist` set from `full` to `layout` writes a `layout`
+//! checkpoint at the next loop turn whether anything changed or not, with
+//! `manifest.prev` a copy of it and the chunks no manifest names deleted
+//! ([`Server::persist_timers`], [`crate::persist::Writer::replacing_prev`]),
+//! so no screen or history stays on disk until the next change.
+//!
 //! What a checkpoint holds ([`Server::checkpoint_snapshot`], decision 17):
 //! the structure the user built, never what was typed or shown.
 //!
@@ -125,6 +131,12 @@ pub struct Persist {
     /// The shutdown checkpoint is written: nothing after it may replace it
     /// with the emptied server.
     exited: bool,
+    /// `vtmux-persist` was `full` and no `layout` checkpoint has replaced
+    /// what it may have written ([`Server::persist_timers`]).
+    full_may_be_on_disk: bool,
+    /// Why the checkpoint was not restored at start, until the starting
+    /// client is told ([`Server::tell_starter`]).
+    pub(super) refusal: Option<String>,
     /// The checkpoint directory, found once ([`Server::persist_dir`]).
     pub(crate) dir: Option<PathBuf>,
     /// The lock held on a checkpoint directory.
@@ -146,6 +158,8 @@ impl Default for Persist {
             due: None,
             last: None,
             exited: false,
+            full_may_be_on_disk: false,
+            refusal: None,
             dir: None,
             lock: None,
             kept: Kept::No,
@@ -178,11 +192,20 @@ impl Server {
     /// The periodic checkpoint: armed while `vtmux-persist` is on, started
     /// when due if anything changed, and written a step per turn.
     pub(crate) fn persist_timers(&mut self, now: Instant) {
-        if self.persist.exited || self.persist_mode().is_none() {
+        let mode = self.persist_mode();
+        if mode == Some(Mode::Full) {
+            self.persist.full_may_be_on_disk = true;
+        }
+        if self.persist.exited || mode.is_none() {
             self.persist.due = None;
             self.persist.writing = None;
             self.persist.lock = None;
             return;
+        }
+        // `full` set to `layout`: the screens and history of the full
+        // checkpoints must not stay on disk until something changes.
+        if mode == Some(Mode::Layout) && std::mem::take(&mut self.persist.full_may_be_on_disk) {
+            self.checkpoint_layout_now();
         }
         self.persist_step();
         let due = *self.persist.due.get_or_insert(now + interval());
@@ -213,6 +236,29 @@ impl Server {
         }
     }
 
+    /// A restore refused at start ([`super::restore::start`]) while the
+    /// server has no session by the time its starting client's command
+    /// ends: `start-server` or `attach` with nothing to start, where the
+    /// server exits at once (`exit-empty`) and takes the reason in
+    /// `show-messages` with it. The client gets the reason on its stderr,
+    /// once, and exits 1 where its command had succeeded (tmux has no
+    /// restore to refuse; this is vtmux's own). Returns the exit status
+    /// to send client `id`, `code` if it is not told.
+    pub(crate) fn tell_starter(&mut self, id: super::ClientId, code: i32) -> i32 {
+        // The starter is the first client (`Server::adopt_starter`).
+        if id != super::ClientId(0) || !self.model.sessions.is_empty() {
+            return code;
+        }
+        let Some(why) = self.persist.refusal.take() else {
+            return code;
+        };
+        self.send(
+            id,
+            &vtmux_core::protocol::ServerMsg::Stderr(format!("{why}\n").into_bytes()),
+        );
+        code.max(1)
+    }
+
     /// The checkpoint of a clean shutdown, before the panes are hung up;
     /// once, and all at once.
     pub(crate) fn checkpoint_exit(&mut self) {
@@ -236,8 +282,26 @@ impl Server {
     /// wrote count as on disk). A failure goes to the message log
     /// (`show-messages`); the next one tries again.
     pub(crate) fn checkpoint_to(&mut self, dir: &Path, mode: Mode) -> Option<Written> {
+        self.checkpoint_run(dir, mode, false)
+    }
+
+    /// The `layout` checkpoint at once when `vtmux-persist` goes from
+    /// `full` to `layout`, changed or not, with `manifest.prev` a copy of
+    /// it and the chunks no manifest names deleted
+    /// ([`Writer::replacing_prev`]): the full checkpoints' screens and
+    /// history would otherwise stay in `manifest.prev` and `chunks/` until
+    /// the next change, a minute or an hour away.
+    fn checkpoint_layout_now(&mut self) {
+        if let Some((dir, mode)) = self.checkpoint_target() {
+            self.checkpoint_run(&dir, mode, true);
+        }
+    }
+
+    /// [`Server::checkpoint_to`]; `prune`: written whether changed or not,
+    /// and not keeping the previous checkpoint ([`Writer::replacing_prev`]).
+    fn checkpoint_run(&mut self, dir: &Path, mode: Mode, prune: bool) -> Option<Written> {
         self.persist.writing = None;
-        let (mut w, print) = self.checkpoint_writer(dir, mode)?;
+        let (mut w, print) = self.checkpoint_writer(dir, mode, prune)?;
         match w.step(None, &mut |_| Ok(())) {
             Ok(_) => {
                 self.persist.last = Some(print);
@@ -254,7 +318,7 @@ impl Server {
     fn checkpoint_begin(&mut self) {
         self.persist.writing = self
             .checkpoint_target()
-            .and_then(|(dir, mode)| self.checkpoint_writer(&dir, mode));
+            .and_then(|(dir, mode)| self.checkpoint_writer(&dir, mode, false));
     }
 
     /// The directory and mode a checkpoint goes to, while `vtmux-persist`
@@ -297,18 +361,24 @@ impl Server {
     }
 
     /// A writer for a checkpoint of `mode` into `dir`, if one is wanted:
-    /// this server holding the directory's lock, and the server changed.
-    fn checkpoint_writer(&mut self, dir: &Path, mode: Mode) -> Option<(Writer, Vec<u8>)> {
+    /// this server holding the directory's lock, and the server changed
+    /// (or `prune`: see [`Server::checkpoint_run`]).
+    fn checkpoint_writer(
+        &mut self,
+        dir: &Path,
+        mode: Mode,
+        prune: bool,
+    ) -> Option<(Writer, Vec<u8>)> {
         if !self.persist_lock(dir) {
             return None;
         }
         let s = self.checkpoint_snapshot(mode);
         let print = fingerprint(&s);
-        if self.persist.last.as_ref() == Some(&print) {
+        if !prune && self.persist.last.as_ref() == Some(&print) {
             return None;
         }
         match Writer::new(dir, &s) {
-            Ok(w) => Some((w, print)),
+            Ok(w) => Some((if prune { w.replacing_prev() } else { w }, print)),
             Err(e) => {
                 self.persist_error(&e);
                 None
