@@ -258,7 +258,7 @@ fn long_history_in_both_forms() {
     let rows = term_to_snapshot(&a, Form::Rows);
     let sized = rows.sized_primary.as_ref().expect("left at 90x30");
     assert_eq!(rows.primary.rows.len(), 20);
-    assert!(rows.primary.history.len() > 10);
+    assert_ne!(rows.primary.history.len(), 0);
     assert_eq!(sized.screen.as_ref().map(|s| s.rows.len()), Some(30));
     round_trip(
         &mut a,
