@@ -698,6 +698,12 @@ impl PaneTerm {
                 continue;
             }
             if let Some(e) = event {
+                // The modes tmux knows of an SM or RM: Ghostty drops what
+                // it has of the sequence and gets them, then the final.
+                if let Some(start) = self.scan.rewrite.take() {
+                    self.term.vt_write(b"\x18");
+                    self.term.vt_write(&start);
+                }
                 match self.scan.sync.take() {
                     Some(true) => self.start_sync(),
                     // input.c:1981: screen_write_end_sync; the clients
@@ -810,7 +816,7 @@ impl PaneTerm {
                 if self.scan.take_resync() {
                     self.sync_charset();
                 }
-                if e == ScanEvent::Reset || std::mem::take(&mut self.scan.cluster_mode) {
+                if e == ScanEvent::Reset {
                     keep_clustering(&mut self.term);
                 }
                 // After the bytes before them, whose replies Ghostty gave.
@@ -2040,6 +2046,14 @@ impl PaneTerm {
         self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false)
     }
 
+    /// tmux's `MODE_CRLF`, which only the server sets (an empty pane,
+    /// spawn.c:462): a line feed also returns the carriage (input.c
+    /// `input_c0_dispatch`). Ghostty's LNM, which a program's SM 20 does
+    /// not reach.
+    pub fn set_crlf(&mut self, on: bool) {
+        let _ = self.term.set_mode(Mode::LINEFEED, on);
+    }
+
     /// The screen modes tmux's `s->mode` holds that its formats read
     /// (`#{wrap_flag}`, `#{pane_private_modes}`, ...; format.c:1482-1491,
     /// 1837-1992, 2131-2206, 3441-3450).
@@ -2588,9 +2602,9 @@ struct AltModeScanner {
     /// What a character the decoder finished turns into, for
     /// [`PaneTerm::feed`] to write.
     utf8_out: Option<Vec<u8>>,
-    /// A private mode sequence named `?2027`, which tmux does not have;
-    /// [`PaneTerm::feed`] turns Ghostty's grapheme clustering back on.
-    cluster_mode: bool,
+    /// The start of the SM or RM just ended as Ghostty must see it, with
+    /// only the modes tmux knows ([`ScanEvent::Rewrite`]).
+    rewrite: Option<Vec<u8>>,
     /// tmux's `INPUT_LAST`: the last thing parsed was a printed character,
     /// which REP repeats. Any control, escape or control sequence tmux
     /// dispatches, and the start of a string, clears it (input.c
@@ -2971,6 +2985,9 @@ enum ScanEvent {
     /// The sequence just ended asks something back
     /// ([`AltModeScanner::answers`]).
     Answer,
+    /// An SM or RM with modes tmux does not know: Ghostty gets CAN and
+    /// [`AltModeScanner::rewrite`] before the final byte.
+    Rewrite,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3370,24 +3387,19 @@ impl AltModeScanner {
         };
     }
 
-    /// Moves and edits Ghostty has and tmux's CSI table does not (input.c
-    /// `input_csi_table`): CHT, HPR, VPR, HPB (`j`), VPB (`k`) and
-    /// DECIC/DECDC (`'}`, `'~`). tmux ignores them; Ghostty would move the
-    /// cursor or the cells. And the EDs tmux ignores (ED 22 scrolls in
-    /// Ghostty), or does with history (ED 0, ED 2).
+    /// What Ghostty has and tmux's CSI table does not (input.c
+    /// `input_csi_table`), such as CHT, HPR, VPR, DECIC, DECSTR or XTSAVE:
+    /// tmux ignores them; Ghostty would move the cursor or the cells, or
+    /// change a mode. And the EDs tmux ignores (ED 22 scrolls in Ghostty),
+    /// or does with history (ED 0, ED 2).
     fn csi_tmux_lacks(&self, b: u8) -> Option<ScanEvent> {
-        if self.private || self.gt || self.csi_ignored {
-            return None;
-        }
-        let lacks = match self.intermediate {
-            None => matches!(b, b'I' | b'a' | b'e' | b'j' | b'k'),
-            Some(b'\'') => matches!(b, b'}' | b'~'),
-            _ => false,
-        };
-        if lacks {
+        // input_csi_dispatch: nothing for a sequence that went to
+        // csi_ignore, whose parameters input_split rejects, or that
+        // input_csi_table does not have (DECSTR, DECSCA, XTSAVE, DA3, ...).
+        if self.csi_ignored || !self.csi_in_tmux_table(b) || parse_params(&self.params).is_none() {
             return Some(ScanEvent::Drop);
         }
-        if b != b'J' || self.intermediate.is_some() {
+        if self.private || self.gt || b != b'J' || self.intermediate.is_some() {
             return None;
         }
         // `input_get(ictx, 0, 0, 0)` (input.c:1739-1765).
@@ -3440,10 +3452,6 @@ impl AltModeScanner {
             return self.resync.then_some(ScanEvent::Resync);
         }
         let op = match (self.private, self.intermediate, b) {
-            (false, Some(b'"'), b'q') | (false, Some(b'!'), b'p') => {
-                self.resync = true;
-                return Some(ScanEvent::Resync);
-            }
             // DECSCUSR: the table entry is exactly `CSI Ps SP q`.
             (false, Some(b' '), b'q') => {
                 if self.interm_count == 1
@@ -3465,7 +3473,7 @@ impl AltModeScanner {
             }
             // Private SM/RM: the blink mode (12) and the mouse modes touch
             // our state, in parameter order.
-            (true, None, b'h' | b'l') if !self.csi_ignored => {
+            (true, None, b'h' | b'l') => {
                 if let Some(params) = parse_params(&self.params) {
                     let mut c = self.cursor.get();
                     let mut m = self.mouse.get();
@@ -3474,8 +3482,6 @@ impl AltModeScanner {
                             Param::Num(12) => c.set_blinking(b == b'h'),
                             Param::Num(2026) => self.sync = Some(b == b'h'),
                             Param::Num(3) => self.deccolm = true,
-                            // Not a tmux mode: Ghostty's clustering stays on.
-                            Param::Num(2027) => self.cluster_mode = true,
                             Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(b == b'h')),
                             Param::Num(n) => m.apply(n, b == b'h'),
                             _ => {}
@@ -3506,6 +3512,13 @@ impl AltModeScanner {
             self.charset_op(op);
             return Some(ScanEvent::Resync);
         }
+        if !self.gt
+            && self.intermediate.is_none()
+            && matches!(b, b'h' | b'l')
+            && !self.keep_tmux_modes()
+        {
+            return Some(ScanEvent::Drop);
+        }
         if !self.private && b == b'J' && matches!(self.params.as_slice(), b"3" | b"3;0") {
             return Some(ScanEvent::ClearHistory);
         }
@@ -3531,10 +3544,48 @@ impl AltModeScanner {
         if self.deccolm {
             return Some(ScanEvent::Deccolm);
         }
-        if self.cluster_mode {
-            return Some(ScanEvent::Resync);
+        if self.rewrite.is_some() {
+            return Some(ScanEvent::Rewrite);
         }
         self.resync.then_some(ScanEvent::Resync)
+    }
+
+    /// The modes of an SM or RM that tmux knows (input.c
+    /// `input_csi_dispatch_sm`, `_sm_private`, `_rm`, `_rm_private`);
+    /// others, such as LNM, reverse wrap, DECLRMM, 1048 or Ghostty's
+    /// clustering (2027, which stays on), do nothing there. False when it
+    /// has none tmux knows; else, if some are not, [`Self::rewrite`] has
+    /// the sequence's start as Ghostty sees it instead.
+    fn keep_tmux_modes(&mut self) -> bool {
+        const PRIVATE: [u64; 18] = [
+            1, 3, 6, 7, 12, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1047, 1049, 2004, 2026,
+            2031,
+        ];
+        let Some(params) = parse_params(&self.params) else {
+            return false;
+        };
+        let known = |p: &Param| match p {
+            Param::Num(n) if self.private => PRIVATE.contains(n),
+            Param::Num(n) => *n == 4,
+            _ => false,
+        };
+        if params.iter().all(known) {
+            return true;
+        }
+        let kept: Vec<String> = params
+            .iter()
+            .filter(|p| known(p))
+            .map(|p| match p {
+                Param::Num(n) => n.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        let q = if self.private { "?" } else { "" };
+        if kept.is_empty() {
+            return false;
+        }
+        self.rewrite = Some(format!("\x1b[{q}{}", kept.join(";")).into_bytes());
+        true
     }
 }
 
@@ -4323,6 +4374,48 @@ mod tests {
         );
     }
 
+    /// A CSI tmux's `input_csi_table` lacks, or with a mode tmux's SM and
+    /// RM do not know, changes nothing (input.c `input_csi_dispatch`,
+    /// `input_csi_dispatch_sm`, `_sm_private`, `_rm`, `_rm_private`):
+    /// LNM, reverse wrap, DECLRMM (so `CSI s` saves the cursor), mode
+    /// 1048, XTSAVE and XTRESTORE, DECSTR, DA3. Known modes of a mixed
+    /// list still apply.
+    #[test]
+    fn csi_tmux_lacks_does_nothing() {
+        let after = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            (captured(&t), t.cursor())
+        };
+        assert_eq!(after(b"\x1b[20ha\x0bb"), ("a\n b".to_owned(), (2, 1)));
+        assert_eq!(after(b"ab\r\n\x1b[?45h\x08x"), ("ab\nx".to_owned(), (1, 1)));
+        assert_eq!(
+            after(b"\x1b[?69habc\x1b[sdef\x1b[ux"),
+            ("abcxef".to_owned(), (4, 0))
+        );
+        assert_eq!(
+            after(b"abc\x1b[?1048hdef\x1b[?1048lx"),
+            ("abcdefx".to_owned(), (7, 0))
+        );
+        assert_eq!(
+            after(b"ab\r\x1b[20;4hX\x0bY"),
+            ("Xab\n Y".to_owned(), (2, 1))
+        );
+        let modes = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            (t.screen_modes(), t.take_replies())
+        };
+        let (m, _) = modes(b"\x1b[?7s\x1b[?7l\x1b[?7r");
+        assert!(!m.wrap);
+        let (m, _) = modes(b"\x1b[?25l\x1b[4h\x1b[2;3r\x1b[!p");
+        assert_eq!(
+            (m.cursor_visible, m.insert, m.scroll_region),
+            (false, true, (1, 2))
+        );
+        assert_eq!(modes(b"\x1b[=c\x1b[>1u\x1b[?u").1, Vec::<u8>::new());
+    }
+
     /// Reference: 20x5 after `l0\nl1\nl2`, cursor at 4,2 (row 2 col 4):
     /// ED 2 scrolls the three rows into history and leaves the cursor; ED 0
     /// at home does the same; ED 0 elsewhere, ED 22 and a pane without
@@ -4804,6 +4897,7 @@ mod tests {
                     | ScanEvent::Deccolm
                     | ScanEvent::TitleStack
                     | ScanEvent::Answer
+                    | ScanEvent::Rewrite
                     | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()

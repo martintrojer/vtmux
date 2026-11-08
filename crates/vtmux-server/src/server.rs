@@ -436,8 +436,11 @@ pub struct PaneSpawn<'a> {
 }
 
 /// An empty pane's screen modes (spawn.c:460-462): no cursor, and a line
-/// feed also returns the carriage (`MODE_CRLF`, Ghostty's LNM).
-pub(crate) const EMPTY_PANE_MODES: &[u8] = b"\x1b[?25l\x1b[20h";
+/// feed also returns the carriage (`MODE_CRLF`).
+pub(crate) fn empty_pane_modes(term: &mut vtmux_vt::PaneTerm) {
+    term.feed(b"\x1b[?25l");
+    term.set_crlf(true);
+}
 
 /// The cause a [`Server::spawn_pane`] failure gives: `fork failed:` and
 /// C's `strerror` text (spawn.c:480), without Rust's ` (os error N)`.
@@ -4709,7 +4712,7 @@ impl Server {
             term.take_events();
         }
         if ps.empty {
-            term.feed(EMPTY_PANE_MODES);
+            empty_pane_modes(&mut term);
         }
         let (io, pid, tty) = match spawned {
             Some(spawned) => {
@@ -4948,9 +4951,10 @@ impl Server {
         // NULL, 0): no cursor restored, but its resize back to the pane's
         // size moves the homed one (a taller pane pulls history back above
         // it), and nothing homes it again; then saved_cx and saved_cy go
-        // (screen.c:122-125).
+        // (screen.c:122-125). MODE_CRLF stays (screen.c:117): a pane once
+        // empty keeps it.
         pane.term.feed(
-            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[20l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2031l\x1b[?5W",
+            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2031l\x1b[?5W",
         );
         let _ = pane.term.take_replies();
         // The mode bits the terminal does not hold: blinking and the very
@@ -4961,7 +4965,7 @@ impl Server {
         pane.term.set_extended_keys(extended_keys);
         pane.term.reset_key_mode();
         if ps.empty {
-            pane.term.feed(EMPTY_PANE_MODES);
+            empty_pane_modes(&mut pane.term);
         }
         pane.compress.observe(&pane.term, Instant::now());
         // spawn.c:349, 587: the old status and the dead pane's line go

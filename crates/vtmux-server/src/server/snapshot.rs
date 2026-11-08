@@ -63,7 +63,7 @@ use vtmux_core::options::{self, ArrayKey, OptionValue, OptionsStore, StoreParts,
 use vtmux_snapshot as snap;
 use vtmux_vt::PaneTerm;
 
-use super::{CLIENT_BASE, Client, ClientId, EMPTY_PANE_MODES, PANE_BASE, Server, ServerConfig};
+use super::{CLIENT_BASE, Client, ClientId, PANE_BASE, Server, ServerConfig, empty_pane_modes};
 use crate::environ::Environ;
 use crate::format_ctx::ServerInfo;
 use crate::model::{Pane, Session, Window, Zoom};
@@ -499,7 +499,7 @@ pub(crate) fn restore_term(
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
     if p.empty {
-        term.feed(EMPTY_PANE_MODES);
+        empty_pane_modes(&mut term);
     }
     term.set_title(&p.title);
     term.take_events();

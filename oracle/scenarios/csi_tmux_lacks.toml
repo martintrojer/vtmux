@@ -1,0 +1,13 @@
+name = "csi_tmux_lacks"
+# A CSI input_csi_table does not have, and a mode tmux's SM and RM do not know,
+# change nothing (input.c input_csi_dispatch, input_csi_dispatch_sm,
+# _sm_private, _rm, _rm_private): LNM (a VT stays a line feed), reverse wrap,
+# DECLRMM (CSI s still saves the cursor), mode 1048, XTSAVE/XTRESTORE, DECSTR
+# (the cursor stays hidden, insert mode and the region stay); the modes tmux
+# knows in a mixed list still apply. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf '\\033[20ha\\013b\\015\\012\\033[?45h\\010x\\015\\012\\033[?69habc\\033[sdef\\033[ux\\015\\012abc\\033[?1048hdef\\033[?1048lx\\015\\012ab\\015\\033[20;4hX\\013Y\\033[4l\\015\\012\\033[?7s\\033[?7l\\033[?7r\\033[?25l\\033[4h\\033[2;7r\\033[!p'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y} #{cursor_flag} #{insert_flag} #{wrap_flag} #{scroll_region_upper} #{scroll_region_lower}"] },
+]

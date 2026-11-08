@@ -1,0 +1,89 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "csi_tmux_lacks",
+  "inputs": {
+    "name": "csi_tmux_lacks",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "printf '\\033[20ha\\013b\\015\\012\\033[?45h\\010x\\015\\012\\033[?69habc\\033[sdef\\033[ux\\015\\012abc\\033[?1048hdef\\033[?1048lx\\015\\012ab\\015\\033[20;4hX\\013Y\\033[4l\\015\\012\\033[?7s\\033[?7l\\033[?7r\\033[?25l\\033[4h\\033[2;7r\\033[!p'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:",
+          "#{cursor_x},#{cursor_y} #{cursor_flag} #{insert_flag} #{wrap_flag} #{scroll_region_upper} #{scroll_region_lower}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\n b\nx\nabcxef\nabcdefx\nXab\n Y\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,0 0 1 0 1 6\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
