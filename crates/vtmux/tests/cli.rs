@@ -293,11 +293,16 @@ impl World {
         );
     }
 
-    /// Poll until the server is gone (`ls` fails).
+    /// Poll until the server is gone: `ls` fails to connect. A server
+    /// that is exiting still accepts and at once closes a connection
+    /// (server.c `server_accept` while `server_exit`), which the client
+    /// reports as `server exited unexpectedly`; a command run then would
+    /// meet the same fate, so that is not gone yet.
     fn wait_gone(&self) {
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
-            if self.run(&["ls"]).code != 0 {
+            let ls = self.run(&["ls"]);
+            if ls.code != 0 && !ls.stderr.contains("server exited unexpectedly") {
                 return;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -7609,6 +7614,9 @@ fn display_message_all() {
         out.push(w.run(&["send", "-t", ":v.0", "-X", "begin-selection"]));
         out.push(all(w, &["display", "-a", "-t", ":v.0"]));
         out.push(w.run(&["kill-server"]));
+        // The old server may still be exiting, and would close the next
+        // connection (`server exited unexpectedly`, CI run 42519373309).
+        w.wait_gone();
         out.push(w.run(&["start-server", ";", "set", "-g", "exit-empty", "off"]));
         out.push(all(w, &["display", "-a"]));
         out.push(w.run(&["kill-server"]));
