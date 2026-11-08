@@ -1207,6 +1207,48 @@ fn a_dry_run_whose_child_holds_its_stderr_answers_when_it_exits() {
     world.echo("a:w1", "answered");
 }
 
+/// An editor (`e` in choose-buffer) open across an upgrade is closed by it
+/// (live-upgrade spec, *Open questions*), and its 0600 `/tmp/tmux.XXXXXXXX`
+/// file goes with it: the exec runs no destructor, so the old image
+/// removes it (spawn.c `spawn_editor_free` removes it when an editor ends).
+#[test]
+fn an_editor_open_across_an_upgrade_leaves_no_temp_file() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let world = World::new();
+    world.populate(&[]);
+    // The editor says which file it was given, then waits.
+    let editor = world.home.path().join("ed");
+    let given = world.home.path().join("given");
+    std::fs::write(
+        &editor,
+        format!(
+            "#!/bin/sh\nprintf %s \"$1\" >{0}.tmp && mv {0}.tmp {0}\nexec sleep 60\n",
+            given.display()
+        ),
+    )
+    .unwrap();
+    set_executable(&editor);
+    world.run(&["set", "-g", "editor", editor.to_str().unwrap()]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.run(&["choose-buffer", "-t", "a:w1"]);
+    wait("choose-buffer", || {
+        world.run(&["display", "-p", "-t", "a:w1", "#{pane_mode}"]) == "buffer-mode\n"
+    });
+    attached.keys("e");
+    wait("the editor to be given its file", || given.exists());
+    let file = PathBuf::from(std::fs::read_to_string(&given).unwrap());
+    assert!(file.to_str().unwrap().starts_with("/tmp/tmux."), "{file:?}");
+    let meta = std::fs::metadata(&file).expect("the editor's file exists while it runs");
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+
+    assert!(!file.exists(), "{file:?} outlived the upgrade");
+    // The server serves on.
+    assert_eq!(world.run(&["has", "-t", "a"]), "");
+}
+
 /// The process whose pid is in `file` has gone (it may linger a moment as
 /// a zombie until whoever inherited it reaps it).
 fn assert_gone(file: &Path) {
