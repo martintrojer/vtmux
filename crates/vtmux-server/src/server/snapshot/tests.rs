@@ -1828,3 +1828,43 @@ fn a_pane_terminal_that_does_not_fit_is_refused() {
     drop(old);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Copy mode over a history longer than a snapshot page holds
+/// (`snap::row::MAX_PAGE_ROWS`, as `history-limit` lets a pane keep) goes in
+/// pages a reader accepts, so the upgrade's dry run does not refuse the
+/// snapshot as malformed and the frozen grid comes back whole.
+#[test]
+fn copy_mode_over_a_long_history_goes_in_pages() {
+    let dir = temp_dir("longcopy");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-g", "history-limit", "100000"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let p = vtmux_core::ids::PaneId(0);
+    let lines = snap::row::MAX_PAGE_ROWS as usize + 1000;
+    let mut bytes = Vec::new();
+    for i in 0..lines {
+        bytes.extend_from_slice(format!("line {i}\r\n").as_bytes());
+    }
+    a.model.panes.get_mut(&p).unwrap().term.feed(&bytes);
+    ok(&mut a, &dir, &["copy-mode", "-t", "%0"]);
+    let history = |s: &Server| -> Vec<u32> {
+        let now = Instant::now();
+        match s.model.panes[&p].modes.first() {
+            Some(crate::mode::Mode::Copy(c)) => {
+                c.export(now).history.iter().map(|pg| pg.rows).collect()
+            }
+            _ => panic!("not in copy mode"),
+        }
+    };
+    let pages = history(&a);
+    assert!(pages.len() > 1, "{pages:?}");
+    assert!(
+        pages.iter().all(|&n| n <= snap::row::MAX_PAGE_ROWS),
+        "{pages:?}"
+    );
+    let b = rebuild(&a, &dir, "b");
+    let rows = |pages: Vec<u32>| pages.iter().map(|&n| u64::from(n)).sum::<u64>();
+    assert_eq!(rows(history(&b)), rows(pages));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}

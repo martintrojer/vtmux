@@ -3298,11 +3298,19 @@ impl CopyMode {
         let (rows, hsize, hscrolled, gsx, gsy) = self.backing.export();
         let mut rows = rows;
         let screen = rows.split_off(hsize.min(rows.len()));
-        let history = if rows.is_empty() {
-            Vec::new()
-        } else {
-            vec![vtmux_snapshot::HistoryPage::from_rows(&rows, false)]
-        };
+        // In pages a reader accepts: `history-limit` lets a pane keep more
+        // rows than one page holds.
+        let mut history = Vec::new();
+        let mut page = vtmux_snapshot::PageBuilder::new();
+        for row in &rows {
+            if page.rows() > 0 && !page.fits(row) {
+                history.push(std::mem::take(&mut page).finish(false));
+            }
+            page.push(row);
+        }
+        if page.rows() > 0 {
+            history.push(page.finish(false));
+        }
         let u = |x: usize| u32::try_from(x).unwrap_or(u32::MAX);
         vtmux_snapshot::CopyMode {
             history,
