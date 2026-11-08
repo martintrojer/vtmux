@@ -19,6 +19,7 @@ pub mod window;
 use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;
 use vtmux_core::term_features::{Cap, OpenError, Term};
+use vtmux_core::width;
 use vtmux_vt::{Color, Snapshot, Style, Underline};
 
 /// What the compositor needs of a client's terminal, from its
@@ -499,6 +500,7 @@ impl Compositor {
         self.frame_tagged(screen, tags, caps)
     }
     /// [`Self::frame`] of a screen with row tags ([`Self::buffer`]).
+    #[expect(clippy::too_many_lines, reason = "one pass over the screen's cells")]
     pub fn frame_tagged(&mut self, screen: Snapshot, tags: Vec<u64>, caps: Caps) -> Vec<u8> {
         let same_size = self
             .last
@@ -532,11 +534,20 @@ impl Compositor {
                 continue;
             }
             let mut x = 0;
+            // The cell after a lone regional indicator, written whatever
+            // the last frame showed there.
+            let mut after_regional = None;
             while x < screen.cols {
                 let cell = screen.cell(x, y).expect("screen cell");
-                let changed = !same_size
-                    || is_forced(x, y)
-                    || self.last.as_ref().and_then(|s| s.cell(x, y)) != Some(cell);
+                let changed_at = |x: u16| {
+                    !same_size
+                        || is_forced(x, y)
+                        || after_regional == Some(x)
+                        || self.last.as_ref().and_then(|s| s.cell(x, y)) != screen.cell(x, y)
+                };
+                let regional = lone_regional(cell);
+                let changed =
+                    changed_at(x) || (regional && x + 1 < screen.cols && changed_at(x + 1));
                 if !changed || cell.width == 0 {
                     x += 1;
                     continue;
@@ -544,6 +555,14 @@ impl Compositor {
                 // tty_cell: a terminal without `am` would scroll.
                 if caps.no_am && y + 1 == screen.rows && x + 1 == screen.cols {
                     break;
+                }
+                if regional {
+                    let (next, force) =
+                        write_regional(&mut out, &mut style, &screen, (x, y), at, caps);
+                    after_regional = force.then_some(next);
+                    x = next;
+                    at = None;
+                    continue;
                 }
                 if at != Some((x, y)) {
                     let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
@@ -598,11 +617,7 @@ impl Compositor {
                     break;
                 }
                 set_style(&mut out, &mut style, cell.style, caps);
-                out.push_str(if cell.text.is_empty() {
-                    " "
-                } else {
-                    &cell.text
-                });
+                out.push_str(&outer_text(cell));
                 x += u16::from(cell.width.max(1));
                 at = (x < screen.cols && !joined_wide(cell)).then_some((x, y));
             }
@@ -629,10 +644,112 @@ impl Compositor {
 fn joined_wide(cell: &vtmux_vt::Cell) -> bool {
     let mut chars = cell.text.chars();
     cell.width == 2
-        && chars
-            .next()
-            .is_some_and(|c| vtmux_core::width::char_width(c) == 1)
+        && chars.next().is_some_and(|c| width::char_width(c) == 1)
         && chars.next().is_some()
+}
+
+/// A one-column cell of a regional indicator alone (tmux's width,
+/// `utf8_default_width_cache`), which a terminal may count two columns
+/// wide (Ghostty does).
+fn lone_regional(cell: &vtmux_vt::Cell) -> bool {
+    let mut chars = cell.text.chars();
+    cell.width == 1 && chars.next().is_some_and(is_regional) && !chars.any(joins_wide)
+}
+
+fn is_regional(c: char) -> bool {
+    ('\u{1f1e6}'..='\u{1f1ff}').contains(&c)
+}
+
+/// A character that, after another in a cell, may make a terminal draw
+/// the cell two columns wide: U+FE0F, a ZWJ (and what it joins), or one
+/// with a width of its own (a regional indicator, a skin-tone modifier).
+fn joins_wide(c: char) -> bool {
+    c == '\u{fe0f}' || c == '\u{200d}' || width::char_width(c) != 0
+}
+
+/// Write the lone regional indicator at `x`, `y` ([`lone_regional`]) so
+/// that it moves nothing else whether the terminal draws it one column
+/// wide or two. tmux writes it as any other cell, so on a terminal that
+/// draws it two wide everything after it on the row is drawn a column
+/// right, the row's last character wraps (scrolling the screen on the
+/// bottom row) and a border beside it is covered (D-044). Here the cursor
+/// is moved after it, and the cell after it is written too: before it when
+/// that is a blank that looks the same in its style (only the background
+/// shows), which the indicator then covers on such a terminal (a program
+/// that counts it two wide leaves that blank, as vim does), else after it,
+/// which wipes out the indicator there. In the last column, where such a
+/// terminal would wrap it onto the next line, it is a space. Returns the
+/// next column to look at and whether it must be written.
+fn write_regional(
+    out: &mut String,
+    style: &mut Style,
+    screen: &Snapshot,
+    (x, y): (u16, u16),
+    at: Option<(u16, u16)>,
+    caps: Caps,
+) -> (u16, bool) {
+    let cell = screen.cell(x, y).expect("screen cell");
+    // A blank looks the same in the indicator's style when only its
+    // background shows.
+    let plain =
+        |s: &Style| !s.inverse && !s.strikethrough && !s.overline && s.underline == Underline::None;
+    let next = screen.cell(x + 1, y).filter(|n| {
+        n.width == 1
+            && (n.text.is_empty() || n.text == " ")
+            && (n.style == cell.style
+                || (plain(&n.style) && plain(&cell.style) && n.style.bg == cell.style.bg))
+    });
+    if let Some(next) = next {
+        let _ = write!(out, "\x1b[{};{}H", y + 1, x + 2);
+        set_style(out, style, next.style, caps);
+        out.push(' ');
+    }
+    if next.is_some() || at != Some((x, y)) {
+        let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+    }
+    set_style(out, style, cell.style, caps);
+    if x + 1 == screen.cols {
+        out.push(' ');
+        return (x + 1, false);
+    }
+    out.push_str(&cell.text);
+    if next.is_some() {
+        (x + 2, false)
+    } else {
+        (x + 1, true)
+    }
+}
+
+/// What a cell is written as. A one-column cell holding characters a
+/// terminal may join into a two-column cluster is written without them,
+/// a flag as a space (D-044): U+FE0F, a second regional indicator or a
+/// skin-tone modifier, which `screen_write_combine` makes two columns
+/// (`force_wide`) but which the grid keeps one in the pane's last column,
+/// and an emoji after a ZWJ, which tmux joins to any cell. A terminal that
+/// counts the cluster two columns wide (Ghostty) would wrap it onto the
+/// next line, scrolling the screen at the bottom, or cover the border
+/// beside it. tmux does not send them in the last column either: its cell
+/// is two columns, which do not fit, so `screen_write_combine` does not
+/// redraw it (the narrow base stays on the terminal) and `tty_draw_line`
+/// draws it as empty (`tty_draw_line_get_empty`, tty-draw.c). Zero-width
+/// marks (combining accents, the border's bidi isolate) stay.
+fn outer_text(cell: &vtmux_vt::Cell) -> std::borrow::Cow<'_, str> {
+    let text: &str = &cell.text;
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return " ".into();
+    };
+    if cell.width != 1 || !chars.clone().any(joins_wide) {
+        return text.into();
+    }
+    let mut out = String::with_capacity(text.len());
+    out.push(if is_regional(first) || width::char_width(first) != 1 {
+        ' '
+    } else {
+        first
+    });
+    out.extend(chars.filter(|&c| !joins_wide(c)));
+    out.into()
 }
 
 /// End the frame's drawing (`\x1b[0m`) and move the cursor. A column
@@ -648,11 +765,12 @@ fn place_cursor(out: &mut String, style: &mut Style, screen: &Snapshot, caps: Ca
             if let Some((cx, cell)) = last {
                 let _ = write!(out, "\x1b[{};{}H", y + 1, cx + 1);
                 set_style(out, style, cell.style, caps);
-                out.push_str(if cell.text.is_empty() {
-                    " "
+                // A lone regional indicator there went out as a space.
+                if lone_regional(cell) {
+                    out.push(' ');
                 } else {
-                    &cell.text
-                });
+                    out.push_str(&outer_text(cell));
+                }
             }
             out.push_str("\x1b[0m");
         }
@@ -845,6 +963,75 @@ mod tests {
         pane.feed(b"\x1b[3Gabc def");
         let frame = String::from_utf8(c.frame(vtmux_vt::snapshot(&pane), caps)).unwrap();
         assert!(frame.contains("\x1b[1;3Habc def"), "{frame:?}");
+    }
+
+    /// A one-column cell that a joined character would have made two
+    /// columns wide had it fitted (U+FE0F after a narrow character, a
+    /// regional indicator pair: the pane's last column) goes out as what
+    /// draws one column wide on any terminal: the narrow base without the
+    /// joiners, a space for a flag. Sent whole, a terminal that draws it
+    /// two wide (Ghostty) wraps it onto the next line, scrolling at the
+    /// bottom, or covers the border beside it.
+    #[test]
+    fn a_cell_that_did_not_fit_wide_goes_out_narrow() {
+        let caps = test_caps();
+        let mut screen = erased(4);
+        screen.cells[1].text = "\u{2764}\u{fe0f}\u{2069}".into();
+        screen.cells[2].text = "e\u{301}".into();
+        screen.cells[3].text = "\u{1f1ef}\u{1f1f5}".into();
+        screen.cursor = Some((4, 0));
+        let frame = String::from_utf8(Compositor::default().frame(screen, caps)).unwrap();
+        assert!(!frame.contains('\u{fe0f}'), "{frame:?}");
+        assert!(!frame.contains('\u{1f1ef}'), "{frame:?}");
+        assert!(!frame.contains('\u{1f1f5}'), "{frame:?}");
+        assert!(frame.contains("\u{2764}\u{2069}e\u{301} "), "{frame:?}");
+        // The pending wrap is put back by writing the last cell again.
+        assert!(
+            frame.ends_with("\x1b[1;4H \x1b[0m\x1b[?25h\x1b[?2026l"),
+            "{frame:?}"
+        );
+    }
+
+    /// A lone regional indicator is one column in the grid (tmux's table)
+    /// and two on some terminals (Ghostty): the cursor is moved after it,
+    /// the blank after it is written first so the indicator covers it
+    /// there, other text after it is written after it (and so wins), and
+    /// in the last column it is a space, which no terminal wraps.
+    #[test]
+    fn a_lone_regional_indicator_moves_nothing_after_it() {
+        let caps = test_caps();
+        let mut screen = erased(8);
+        for (x, t) in [
+            (0, "a"),
+            (1, "\u{1f1ef}"),
+            (3, "\u{1f1f5}"),
+            (4, "b"),
+            (5, "c"),
+            (7, "\u{1f1ef}"),
+        ] {
+            screen.cells[x].text = t.into();
+        }
+        // A foreground colour does not show on the blank it covers.
+        screen.cells[1].style.fg = Color::Palette(1);
+        screen.cursor = Some((0, 0));
+        let mut c = Compositor::default();
+        let frame = String::from_utf8(c.frame(screen.clone(), caps)).unwrap();
+        assert!(
+            frame.contains(
+                "a\x1b[1;3H \x1b[1;2H\x1b[0m\x1b[31m\u{1f1ef}\x1b[1;4H\x1b[0m\u{1f1f5}\x1b[1;5Hbc"
+            ),
+            "{frame:?}"
+        );
+        assert!(frame.contains("bc  \x1b[0m"), "{frame:?}");
+        assert_eq!(frame.matches('\u{1f1ef}').count(), 1, "{frame:?}");
+        // Only the cell after an indicator changed: the two go out again.
+        screen.cells[4].text = "B".into();
+        screen.cells[2].text = "x".into();
+        let frame = String::from_utf8(c.frame(screen, caps)).unwrap();
+        assert!(
+            frame.contains("\x1b[1;2H\x1b[0m\x1b[31m\u{1f1ef}\x1b[1;3H\x1b[0mx\u{1f1f5}\x1b[1;5HB"),
+            "{frame:?}"
+        );
     }
 
     /// `screen_write_flush_dirty`: forced cells are written even where the

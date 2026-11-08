@@ -1,0 +1,68 @@
+name = "vs16_last_column"
+size = [30, 10]
+# Cells a terminal may draw wider than tmux's grid counts them (D-044).
+# U+FE0F, or a second regional indicator, joins a cell in a pane's last
+# column: tmux makes the cell two columns, its padding past the pane's
+# edge (screen_write_combine, screen-write.c); vtmux's grid keeps it one
+# column. A lone regional indicator is one column in both
+# (utf8_default_width_cache). The observer, with Ghostty's clustering and
+# widths as the owner's terminal, draws all of these two wide: sent as
+# they are, one in the last column wraps onto the next line (scrolling the
+# screen in the bottom-right cell) or covers the border, and one
+# elsewhere moves the rest of its row a column right. vtmux writes a joined
+# cell as its narrow base (a flag as a space), and a lone indicator with
+# the cursor moved after it, the blank after it written first, or as a
+# space in the last column (render.rs outer_text, write_regional). tmux
+# leaves on the terminal what it sent before a join at the window's right
+# edge (the cell does not fit, window_visible_ranges, so it is not
+# redrawn); its redraws draw the cell empty (tty_draw_line_get_empty,
+# tty-draw.c). Next to a border tmux redraws the joined cell two wide over
+# it and puts its cursor back on the cell (screen_write_set_cursor clamps
+# it), so the next character overwrites it. Full width first, `top` above
+# what a scroll would push off, then a split: the left pane's last column
+# is 18, the border 19. The program prints each input line's text as
+# escapes (`printf "$l"`) and leaves the cursor off the pending wrap.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "10", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "top\\r\\nabcdefghijklmnopqrstuvwxyz012\\342\\235\\244\\357\\270\\217z\\r\\nabcdefghijklmnopqrstuvwxyz012\\360\\237\\207\\257\\360\\237\\207\\265z\\r\\nabcdefghijklmnopqrstuvwxyz012\\360\\237\\207\\257z\\r\\nab\\360\\237\\207\\257 cd\\360\\237\\207\\257ef\\033[10;1Habcdefghijklmnopqrstuvwxyz012\\342\\235\\244\\357\\270\\217\\033[9;1H\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["top", "abcdefghijklmnopqrstuvwxyz012❤", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "ab🇯cd ef", "", "abcdefghijklmnopqrstuvwxyz012❤"], cursor = [0, 8] } } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "\\033[10;1Habcdefghijklmnopqrstuvwxyz012\\360\\237\\207\\257\\360\\237\\207\\265\\033[9;1H\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["top", "abcdefghijklmnopqrstuvwxyz012❤", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "ab🇯cd ef", "", "abcdefghijklmnopqrstuvwxyz012"], cursor = [0, 8] } } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "\\033[10;1Habcdefghijklmnopqrstuvwxyz012\\360\\237\\207\\257\\033[9;1H\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["top", "abcdefghijklmnopqrstuvwxyz012❤", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "ab🇯cd ef", "", "abcdefghijklmnopqrstuvwxyz012"], cursor = [0, 8] } } },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["top", "abcdefghijklmnopqrstuvwxyz012❤", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "abcdefghijklmnopqrstuvwxyz012", "z", "ab🇯cd ef", "", "abcdefghijklmnopqrstuvwxyz012"], cursor = [0, 8] } } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "\\033[H\\033[2J\\033[3J\r" } },
+  { wait_for = "fed" },
+  { run = ["splitw", "-d", "-h", "-l", "10", "-t", "%0", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { feed = { pane = "%1", bytes = "right\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\r" } },
+  { wait_for = "fed" },
+  { feed = { pane = "%0", bytes = "abcdefghijklmnopqr\\342\\235\\244\\357\\270\\217\\r\\nabcdefghijklmnopqr\\360\\237\\207\\257\\360\\237\\207\\265\\r\\nabcdefghijklmnopq\\342\\235\\244\\357\\270\\217z\\r\\nabcdefghijklmnopqr\\342\\235\\244\\357\\270\\217z\\r\\nabcdefghijklmnopqr\\360\\237\\207\\257\\r\\nab\\360\\237\\207\\257 cd\\360\\237\\207\\257ef\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["abcdefghijklmnopqr❤\\e[32m│\\e[39mright", "abcdefghijklmnopqr \\e[32m│\\e[39mright", "abcdefghijklmnopq❤️\\e[32m│\\e[39mright", "z                  \\e[32m│\\e[39mright", "abcdefghijklmnopqr❤\\e[32m│\\e[39mright", "z                  \\e[32m│\\e[39mright", "abcdefghijklmnopqr \\e[37m│\\e[39mright", "ab🇯cd ef          \\e[37m│\\e[39mright", "                   \\e[37m│\\e[39m", "                   \\e[37m│\\e[39m"], cursor = [9, 7] } } },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["abcdefghijklmnopqr❤\\e[32m│\\e[39mright", "abcdefghijklmnopqr \\e[32m│\\e[39mright", "abcdefghijklmnopq❤️\\e[32m│\\e[39mright", "z                  \\e[32m│\\e[39mright", "abcdefghijklmnopqr❤\\e[32m│\\e[39mright", "z                  \\e[32m│\\e[39mright", "abcdefghijklmnopqr \\e[37m│\\e[39mright", "ab🇯cd ef          \\e[37m│\\e[39mright", "                   \\e[37m│\\e[39m", "                   \\e[37m│\\e[39m"], cursor = [9, 7] } } },
+  { screen = {} },
+  { divergence = { id = "D-044", expect = { kind = "cli", stdout = "abcdefghijklmnopqr❤️\nabcdefghijklmnopqr🇯🇵\nabcdefghijklmnopq❤️\nz\nabcdefghijklmnopqr❤️\nz\nabcdefghijklmnopqr🇯\nab🇯 cd🇯ef\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capturep", "-p", "-t", "%0"] },
+]

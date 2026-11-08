@@ -12,7 +12,9 @@ size = [20, 9]
 # input line's text as escapes (`printf "$l"`). The observer counts some of
 # these characters as other widths (as a terminal may), so the screen shows
 # where each puts the next cell: after a cell U+FE0F made wide, both move the
-# cursor (tmux's TTY_CTX_CELL_INVALIDATE, tty.c tty_cmd_cell). The screen is
+# cursor (tmux's TTY_CTX_CELL_INVALIDATE, tty.c tty_cmd_cell); vtmux also
+# after a lone regional indicator, and writes the one-column `x` a ZWJ and
+# an emoji joined as `x` alone, so nothing after them moves (D-044). The screen is
 # taken with the cursor at the start of a line, and before the redraw the
 # option changes bring: where tmux's idea of the terminal's cursor drifts
 # (tty_cursor skips a move to where it thinks it is), vtmux moves it.
@@ -40,6 +42,7 @@ steps = [
   { feed = { pane = "%0", bytes = "\\r\\n\r" } },
   { wait_for = "fed" },
   { settle = { react = true } },
+  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["x y", "🇬🇧 y", "x y一z", "☝y⌚︎z", "xy🏻👋z.", "", "", "", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m           \\e[30mx"], cursor = [0, 5] } } },
   { screen = {} },
   { run = ["set", "-s", "variation-selector-always-wide", "off"] },
   { feed = { pane = "%0", bytes = "\\r\\nx\\357\\270\\217y\r" } },
