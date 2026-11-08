@@ -1,0 +1,35 @@
+name = "hooks_switch_client_focus"
+# server_client_set_session (server-client.c:449-467) marks the client
+# focused whatever its terminal last reported, then looks at the focus of
+# the window it left and of the one it now shows: a client that reported
+# focus out and then switches session gives the new session's active pane
+# pane-focus-in, and that pane loses it again when the client detaches.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-focus-in", "set -agF @log '|#{hook}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "pane-focus-out", "set -agF @log '|#{hook}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "client-focus-out", "set -agF @log '|#{hook}:#{hook_session_name}'"] },
+  { run = ["set-hook", "-g", "client-session-changed", "set -agF @log '|#{hook}:#{hook_session_name}'"] },
+  { run = ["set-hook", "-g", "client-detached", "set -agF @log '|#{hook}'"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u001b[O" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u0002)" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsc", "-F", "#{client_session}:#{?#{m:*focused*,#{client_flags}},focused,unfocused}"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["detach-client", "-s", "b"] },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

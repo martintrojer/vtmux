@@ -358,7 +358,13 @@ impl Server {
             return;
         };
         let old = c.attached;
-        if c.control.is_some() {
+        // server_client_set_session (server-client.c:460): a client given a
+        // session counts as focused again, whatever its terminal last
+        // reported.
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.focused = true;
+        }
+        if self.clients[&id].control.is_some() {
             self.control_attach(id, s);
             // server-client.c:466: the window the client now sees is
             // fitted to it (a control client with a size of its own).
