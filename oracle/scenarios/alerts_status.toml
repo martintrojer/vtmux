@@ -4,14 +4,22 @@ steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "6", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0", "-T", "t"] },
   { run = ["neww", "-d", "-n", "x", "sh", "-c", "while read x; do printf x; done"] },
-  { run = ["neww", "-d", "-n", "y", "sh", "-c", "while read x; do printf '\\007'; done"] },
+  # Pane y does not echo, so the bell is all it ever prints: its activity
+  # and bell flags come in one redraw, which the settle after its Enter waits
+  # for (README, *Races under load*). With echo on, the echo alone flags
+  # activity, and a busy host can print the bell after that redraw settles.
+  { run = ["neww", "-d", "-n", "y", "sh", "-c", "stty -echo; tmux wait-for -S y; while read x; do printf '\\007'; done"] },
+  { wait_for = "y" },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "monitor-activity", "on"] },
   { run = ["set", "-g", "window-status-activity-style", "fg=red"] },
   { run = ["set", "-g", "window-status-bell-style", "fg=blue"] },
   { attach = { session = "a" } },
+  { settle = {} },
   { run = ["send-keys", "-t", "a:1", "Enter"] },
+  { settle = { react = true } },
   { run = ["send-keys", "-t", "a:2", "Enter"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
   { run = ["select-window", "-t", "a:1"] },

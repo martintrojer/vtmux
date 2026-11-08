@@ -153,6 +153,9 @@
         ]
       },
       {
+        "settle": {}
+      },
+      {
         "run": [
           "send-keys",
           "-t",
@@ -361,7 +364,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -370,7 +373,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 22,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -388,7 +391,7 @@
       }
     },
     {
-      "step": 22,
+      "step": 23,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -397,7 +400,7 @@
       }
     },
     {
-      "step": 24,
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -415,7 +418,7 @@
       }
     },
     {
-      "step": 26,
+      "step": 27,
       "observation": {
         "kind": "screen",
         "rows": [

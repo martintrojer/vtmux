@@ -53,8 +53,11 @@
           "y",
           "sh",
           "-c",
-          "while read x; do printf '\\007'; done"
+          "stty -echo; tmux wait-for -S y; while read x; do printf '\\007'; done"
         ]
+      },
+      {
+        "wait_for": "y"
       },
       {
         "run": [
@@ -94,6 +97,9 @@
         }
       },
       {
+        "settle": {}
+      },
+      {
         "run": [
           "send-keys",
           "-t",
@@ -102,12 +108,22 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "run": [
           "send-keys",
           "-t",
           "a:2",
           "Enter"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -249,16 +265,7 @@
       }
     },
     {
-      "step": 9,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 10,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -269,26 +276,8 @@
     {
       "step": 11,
       "observation": {
-        "kind": "screen",
-        "rows": [
-          "",
-          "",
-          "",
-          "",
-          "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m \\e[31m1:x#\\e[30m \\e[34m2:y#!\\e[39m                                        \\e[30mR"
-        ],
-        "cursor": [
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "step": 12,
-      "observation": {
         "kind": "cli",
-        "stdout": "0*\n1##\n2##!\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -308,15 +297,15 @@
         "kind": "screen",
         "rows": [
           "",
-          "x",
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] 0:w- \\e[4m1:x*\\e[0m\\e[30m\\e[42m \\e[34m2:y#!\\e[39m                                        \\e[30mR"
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m \\e[31m1:x#\\e[30m \\e[34m2:y#!\\e[39m                                        \\e[30mR"
         ],
         "cursor": [
-          1,
-          1
+          0,
+          0
         ]
       }
     },
@@ -324,7 +313,7 @@
       "step": 16,
       "observation": {
         "kind": "cli",
-        "stdout": "0-\n1*\n2##!\n",
+        "stdout": "0*\n1##\n2##!\n",
         "stderr": "",
         "exit": 0
       }
@@ -339,7 +328,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 19,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -357,7 +346,16 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0-\n1*\n2##!\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -366,7 +364,34 @@
       }
     },
     {
-      "step": 21,
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "x",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] 0:w- \\e[4m1:x*\\e[0m\\e[30m\\e[42m \\e[34m2:y#!\\e[39m                                        \\e[30mR"
+        ],
+        "cursor": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -379,12 +404,12 @@
         ],
         "cursor": [
           0,
-          2
+          0
         ]
       }
     },
     {
-      "step": 22,
+      "step": 26,
       "observation": {
         "kind": "cli",
         "stdout": "0\n1-\n2*\n",

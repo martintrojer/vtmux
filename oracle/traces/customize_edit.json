@@ -107,6 +107,9 @@
         "wait_for": "opened"
       },
       {
+        "settle": {}
+      },
+      {
         "run": [
           "wait-for",
           "-S",
@@ -191,6 +194,9 @@
       },
       {
         "wait_for": "opened"
+      },
+      {
+        "settle": {}
       },
       {
         "run": [
@@ -374,7 +380,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -383,7 +389,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 19,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -419,7 +425,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "old-new\n",
@@ -428,7 +434,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 21,
       "observation": {
         "kind": "cli",
         "stdout": "1\n",
@@ -437,7 +443,7 @@
       }
     },
     {
-      "step": 23,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "0\n",
@@ -446,7 +452,7 @@
       }
     },
     {
-      "step": 24,
+      "step": 25,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -455,7 +461,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 32,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -491,15 +497,6 @@
       }
     },
     {
-      "step": 33,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 34,
       "observation": {
         "kind": "cli",
@@ -510,6 +507,15 @@
     },
     {
       "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -545,7 +551,7 @@
       }
     },
     {
-      "step": 37,
+      "step": 39,
       "observation": {
         "kind": "cli",
         "stdout": "bind-key  -T prefix User2 display-message old-new\n",
@@ -554,7 +560,7 @@
       }
     },
     {
-      "step": 40,
+      "step": 42,
       "observation": {
         "kind": "screen",
         "rows": [

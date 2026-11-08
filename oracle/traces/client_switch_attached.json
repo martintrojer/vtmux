@@ -85,6 +85,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -103,6 +108,11 @@
           "-t",
           "a"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -218,7 +228,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -236,7 +246,7 @@
       }
     },
     {
-      "step": 9,
+      "step": 10,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -245,7 +255,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -254,7 +264,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -272,24 +282,6 @@
       }
     },
     {
-      "step": 12,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "not a control client\n",
-        "exit": 1
-      }
-    },
-    {
-      "step": 13,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "not a control client\n",
-        "exit": 1
-      }
-    },
-    {
       "step": 14,
       "observation": {
         "kind": "cli",
@@ -303,12 +295,21 @@
       "observation": {
         "kind": "cli",
         "stdout": "",
-        "stderr": "",
-        "exit": 0
+        "stderr": "not a control client\n",
+        "exit": 1
       }
     },
     {
       "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not a control client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -317,7 +318,16 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
       "observation": {
         "kind": "screen",
         "rows": [

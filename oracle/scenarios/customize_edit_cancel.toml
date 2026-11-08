@@ -1,4 +1,4 @@
-# customize-mode `e` when the edit goes nowhere (window-customize.c window_customize_key, window_customize_edit_close_cb, spawn.c spawn_editor_finish): an editor that exits non-zero changes nothing; an option unset while its editor runs is not set again; keys typed while the editor runs go to the editor, not the mode; `send-keys q` to the mode's pane while it runs leaves the mode, and what that editor writes afterwards goes nowhere; a flag option is not edited (no editor starts). Each editor signals `opened`, waits for `go` and exits at once after writing. tmux leaves the waiting box on the screen after an editor that failed until the next key redraws the mode (window_customize_edit_close_cb draws nothing then); vtmux redraws at once, so the screen is taken after a key. The editor runs in a modal floating pane (oracle editor_modal_pane pins it): no screen is taken while one runs.
+# customize-mode `e` when the edit goes nowhere (window-customize.c window_customize_key, window_customize_edit_close_cb, spawn.c spawn_editor_finish): an editor that exits non-zero changes nothing; an option unset while its editor runs is not set again; keys typed while the editor runs go to the editor, not the mode; `send-keys q` to the mode's pane while it runs leaves the mode, and what that editor writes afterwards goes nowhere; a flag option is not edited (no editor starts). Each editor signals `opened`, waits for `go` and exits at once after writing. tmux leaves the waiting box on the screen after an editor that failed until the next key redraws the mode (window_customize_edit_close_cb draws nothing then); vtmux redraws at once, so the screen is taken after a key. The editor runs in a modal floating pane (oracle editor_modal_pane pins it): no screen is taken while one runs. What `e` and the steps after it provoke settles before `go`, so the `settle { react }` after `go` waits for the redraw the editor's exit brings (the README's *Races under load*: a busy host can take longer than the quiet time to finish the editor).
 name = "customize_edit_cancel"
 size = [80, 24]
 steps = [
@@ -15,6 +15,7 @@ steps = [
   { keys = "j" },
   { keys = "e" },
   { wait_for = "opened" },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true, quiet_ms = 500 } },
   { run = ["show", "-gv", "@cm"] },
@@ -25,6 +26,7 @@ steps = [
   { keys = "e" },
   { wait_for = "opened" },
   { run = ["set", "-gu", "@cm"] },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true, quiet_ms = 500 } },
   { run = ["show", "-gv", "@cm"] },
@@ -41,6 +43,7 @@ steps = [
   { wait_for = "opened" },
   { run = ["send-keys", "-t", "a:0.0", "q"] },
   { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true, quiet_ms = 500 } },
   { run = ["show", "-gv", "@cm"] },

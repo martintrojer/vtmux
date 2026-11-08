@@ -7,6 +7,11 @@ steps = [
   { run = ["bind", "-N", "rep", "-r", "R", "display", "-p", "rep"] },
   { run = ["bind", "-T", "mine", "z", "display", "-p", "mine-z"] },
   { run = ["set", "-g", "prefix2", "C-a"] },
+  # C-b R below starts a repeat that R z still has to find running, two
+  # control round trips (and, under --upgrade-every, an upgrade) later: the
+  # default 500 ms (server-client.c server_client_repeat_time) is a race on
+  # a busy host, and nothing here waits for a repeat to run out.
+  { run = ["set", "-g", "repeat-time", "60000"] },
   { run = ["lsk", "-T", "mine"] },
   { run = ["lsk", "-N", "R"] },
   { control = { argv = ["attach", "-t", "a"], id = "c1" } },

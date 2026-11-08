@@ -148,6 +148,12 @@
         ]
       },
       {
+        "run": [
+          "run-shell",
+          "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"
+        ]
+      },
+      {
         "attach": {
           "session": "aaa"
         }
@@ -339,6 +345,12 @@
           "%6",
           "-T",
           "t6"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"
         ]
       },
       {
@@ -547,7 +559,16 @@
       }
     },
     {
-      "step": 14,
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -575,7 +596,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 16,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -584,7 +605,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -612,7 +633,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 21,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -621,7 +642,7 @@
       }
     },
     {
-      "step": 22,
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -649,7 +670,7 @@
       }
     },
     {
-      "step": 25,
+      "step": 26,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -658,7 +679,7 @@
       }
     },
     {
-      "step": 27,
+      "step": 28,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -686,7 +707,7 @@
       }
     },
     {
-      "step": 30,
+      "step": 31,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -695,7 +716,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 33,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -723,7 +744,7 @@
       }
     },
     {
-      "step": 35,
+      "step": 36,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -732,7 +753,7 @@
       }
     },
     {
-      "step": 37,
+      "step": 38,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -760,7 +781,7 @@
       }
     },
     {
-      "step": 40,
+      "step": 41,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -769,7 +790,7 @@
       }
     },
     {
-      "step": 42,
+      "step": 43,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -797,21 +818,12 @@
       }
     },
     {
-      "step": 45,
+      "step": 46,
       "observation": {
         "kind": "cli",
         "stdout": "",
         "stderr": "invalid sort order\n",
         "exit": 1
-      }
-    },
-    {
-      "step": 46,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
       }
     },
     {
@@ -833,7 +845,25 @@
       }
     },
     {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
       "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
       "observation": {
         "kind": "cli",
         "stdout": "1\n",
@@ -842,7 +872,7 @@
       }
     },
     {
-      "step": 51,
+      "step": 53,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -870,7 +900,7 @@
       }
     },
     {
-      "step": 54,
+      "step": 56,
       "observation": {
         "kind": "cli",
         "stdout": "0\n",
@@ -879,7 +909,7 @@
       }
     },
     {
-      "step": 55,
+      "step": 57,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -888,7 +918,7 @@
       }
     },
     {
-      "step": 57,
+      "step": 59,
       "observation": {
         "kind": "cli",
         "stdout": "tree-mode\n",
@@ -897,7 +927,7 @@
       }
     },
     {
-      "step": 58,
+      "step": 60,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -906,7 +936,7 @@
       }
     },
     {
-      "step": 60,
+      "step": 62,
       "observation": {
         "kind": "cli",
         "stdout": "%0\n",
@@ -915,7 +945,7 @@
       }
     },
     {
-      "step": 61,
+      "step": 63,
       "observation": {
         "kind": "screen",
         "rows": [

@@ -144,6 +144,11 @@
         "screen": {}
       },
       {
+        "settle": {
+          "quiet_ms": 500
+        }
+      },
+      {
         "keys": "\u001b[<2;7;20M"
       },
       {
@@ -266,6 +271,11 @@
       },
       {
         "screen": {}
+      },
+      {
+        "settle": {
+          "quiet_ms": 500
+        }
       },
       {
         "keys": "\u001b[<10;30;10M"
@@ -490,7 +500,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 21,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -522,7 +532,7 @@
       }
     },
     {
-      "step": 22,
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -554,7 +564,7 @@
       }
     },
     {
-      "step": 23,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "0:two 1\n1:one 0\n2:three 0\n",
@@ -563,7 +573,7 @@
       }
     },
     {
-      "step": 25,
+      "step": 26,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -595,7 +605,7 @@
       }
     },
     {
-      "step": 29,
+      "step": 30,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -627,7 +637,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 32,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -659,7 +669,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 33,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -668,7 +678,7 @@
       }
     },
     {
-      "step": 35,
+      "step": 36,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -700,7 +710,7 @@
       }
     },
     {
-      "step": 37,
+      "step": 38,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -732,7 +742,7 @@
       }
     },
     {
-      "step": 39,
+      "step": 40,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -764,7 +774,7 @@
       }
     },
     {
-      "step": 40,
+      "step": 41,
       "observation": {
         "kind": "cli",
         "stdout": "b\n",
@@ -773,7 +783,7 @@
       }
     },
     {
-      "step": 41,
+      "step": 42,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -782,7 +792,7 @@
       }
     },
     {
-      "step": 43,
+      "step": 44,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -791,7 +801,7 @@
       }
     },
     {
-      "step": 46,
+      "step": 47,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -823,7 +833,7 @@
       }
     },
     {
-      "step": 48,
+      "step": 49,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -855,7 +865,7 @@
       }
     },
     {
-      "step": 52,
+      "step": 54,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -887,7 +897,7 @@
       }
     },
     {
-      "step": 55,
+      "step": 57,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -896,7 +906,7 @@
       }
     },
     {
-      "step": 57,
+      "step": 59,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -928,7 +938,7 @@
       }
     },
     {
-      "step": 58,
+      "step": 60,
       "observation": {
         "kind": "cli",
         "stdout": "0 copy-mode\n1 \n",
@@ -937,7 +947,7 @@
       }
     },
     {
-      "step": 60,
+      "step": 62,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -969,7 +979,7 @@
       }
     },
     {
-      "step": 62,
+      "step": 64,
       "observation": {
         "kind": "screen",
         "rows": [

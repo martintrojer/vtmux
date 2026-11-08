@@ -94,6 +94,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -111,6 +116,11 @@
           "-X",
           "page-up"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -242,7 +252,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -278,15 +288,6 @@
       }
     },
     {
-      "step": 13,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 14,
       "observation": {
         "kind": "cli",
@@ -297,6 +298,15 @@
     },
     {
       "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -332,7 +342,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 19,
       "observation": {
         "kind": "screen",
         "rows": [

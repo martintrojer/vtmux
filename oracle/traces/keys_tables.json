@@ -86,6 +86,14 @@
       },
       {
         "run": [
+          "set",
+          "-g",
+          "repeat-time",
+          "60000"
+        ]
+      },
+      {
+        "run": [
           "lsk",
           "-T",
           "mine"
@@ -406,7 +414,7 @@
       "step": 7,
       "observation": {
         "kind": "cli",
-        "stdout": "bind-key  -T mine z display-message -p mine-z\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -415,13 +423,22 @@
       "step": 8,
       "observation": {
         "kind": "cli",
+        "stdout": "bind-key  -T mine z display-message -p mine-z\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
         "stdout": "C-b R rep\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 42,
+      "step": 43,
       "observation": {
         "kind": "control",
         "lines": [
@@ -492,7 +509,7 @@
       }
     },
     {
-      "step": 43,
+      "step": 44,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -501,7 +518,7 @@
       }
     },
     {
-      "step": 44,
+      "step": 45,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -510,7 +527,7 @@
       }
     },
     {
-      "step": 45,
+      "step": 46,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -519,7 +536,7 @@
       }
     },
     {
-      "step": 46,
+      "step": 47,
       "observation": {
         "kind": "cli",
         "stdout": "",

@@ -51,9 +51,16 @@ steps = [
   { run = ["set-hook", "-gu", "window-layout-changed"] },
   { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat", "-"] },
   { control = { argv = ["attach", "-t", "b"], id = "c1" } },
+  # The wait's guard ends as it starts waiting (cmd-queue.c cmdq_fire_command
+  # writes %end after exec returns CMD_RETURN_WAIT, cmd-wait-for.c
+  # cmd_wait_for_event): wait for that %end, so the rename comes once the
+  # sink is there, then for the payload's last line. A rename sent with the
+  # line still on its way to the server fires no sink, and the wait never
+  # ends.
   { control_send = { id = "c1", line = "wait-for -v -E window-renamed" } },
-  { run = ["renamew", "-t", "a:0", "yy"] },
   { control_wait = { id = "c1", until = "%end" } },
+  { run = ["renamew", "-t", "a:0", "yy"] },
+  { control_wait = { id = "c1", until = "window=" } },
   { control_send = { id = "c1", line = "selectl -t b:0 even-vertical" } },
   { control_wait = { id = "c1", until = "%end" } },
   { control_send = { id = "c1", line = "splitw -t b:0 cat -" } },

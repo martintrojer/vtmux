@@ -12,10 +12,14 @@ steps = [
   { run = ["wait-for", "-S", "go"] },
   { wait_for = "done" },
   { screen = {} },
+  # Leaving and entering copy mode redraw the pane after the command
+  # returns: wait for that output (README, *Races under load*).
   { run = ["send-keys", "-t", "%0", "-X", "cancel"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["copy-mode", "-t", "%0"] },
   { run = ["send-keys", "-t", "%0", "-X", "page-up"] },
+  { settle = { react = true } },
   { screen = {} },
   { keys = "q" },
   { screen = {} },

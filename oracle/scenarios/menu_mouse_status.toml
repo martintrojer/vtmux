@@ -33,7 +33,12 @@ steps = [
   { screen = {} },
   { keys = "\u001b[<2;7;20m" },
   { screen = {} },
-  # Again, drag up to "Swap Right" and release.
+  # Again, drag up to "Swap Right" and release. A press within 300 ms of
+  # the last one at the same place is a second click (server-client.c
+  # server_client_check_mouse, KEYC_CLICK_TIMEOUT), which opens no menu:
+  # let the click timer run out first (500 ms, as for the resize timer in
+  # the README), or a busy host that delays the timer makes it one.
+  { settle = { quiet_ms = 500 } },
   { keys = "\u001b[<2;7;20M" },
   { settle = {} },
   { keys = "\u001b[<34;9;9M" },
@@ -73,6 +78,7 @@ steps = [
   { screen = {} },
   { keys = "\u001b[<10;30;10m" },
   { screen = {} },
+  { settle = { quiet_ms = 500 } },
   { keys = "\u001b[<10;30;10M" },
   { settle = {} },
   { keys = "\u001b[<42;25;9M" },

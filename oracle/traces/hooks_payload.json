@@ -366,6 +366,12 @@
         }
       },
       {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
         "run": [
           "renamew",
           "-t",
@@ -376,7 +382,7 @@
       {
         "control_wait": {
           "id": "c1",
-          "until": "%end"
+          "until": "window="
         }
       },
       {
@@ -807,7 +813,7 @@
       }
     },
     {
-      "step": 44,
+      "step": 45,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -816,7 +822,7 @@
       }
     },
     {
-      "step": 52,
+      "step": 53,
       "observation": {
         "kind": "control",
         "lines": [
@@ -848,7 +854,7 @@
       }
     },
     {
-      "step": 53,
+      "step": 54,
       "observation": {
         "kind": "cli",
         "stdout": "",

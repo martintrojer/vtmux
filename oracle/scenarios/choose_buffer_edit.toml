@@ -1,4 +1,4 @@
-# choose-buffer `e` (window-buffer.c window_buffer_start_edit, window_buffer_edit_close_cb; spawn.c spawn_editor): the current buffer goes to `editor file`; once the editor exits 0 the file is the buffer's new data, less a newline the editor added to a buffer that did not end in one (a buffer that did keeps its own). The editor here signals `opened`, waits for `go`, then appends `-new` to the file. q sent to the pane while the editor runs ends the mode, and the edit is then dropped (spawn_cancel_editor). The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after.
+# choose-buffer `e` (window-buffer.c window_buffer_start_edit, window_buffer_edit_close_cb; spawn.c spawn_editor): the current buffer goes to `editor file`; once the editor exits 0 the file is the buffer's new data, less a newline the editor added to a buffer that did not end in one (a buffer that did keeps its own). The editor here signals `opened`, waits for `go`, then appends `-new` to the file. q sent to the pane while the editor runs ends the mode, and the edit is then dropped (spawn_cancel_editor). The editor runs in a modal floating pane (oracle editor_modal_pane pins it); screens are of the mode before and after. The mode's redraw after `e` settles before `go`, so the `settle { react }` after `go` waits for the redraw the editor's exit brings (the README's *Races under load*: a busy host can take longer than the quiet time to finish the editor).
 name = "choose_buffer_edit"
 size = [80, 24]
 steps = [
@@ -17,6 +17,7 @@ steps = [
   { keys = "j" },
   { keys = "e" },
   { wait_for = "opened" },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true } },
   { screen = {} },
@@ -24,6 +25,7 @@ steps = [
   { keys = "k" },
   { keys = "e" },
   { wait_for = "opened" },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true } },
   { screen = {} },
@@ -34,6 +36,7 @@ steps = [
   { run = ["send-keys", "-t", "a:0.0", "j"] },
   { run = ["send-keys", "-t", "a:0.0", "q"] },
   { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
+  { settle = {} },
   { run = ["wait-for", "-S", "go"] },
   { settle = { react = true } },
   { run = ["show-buffer", "-b", "nl"] },

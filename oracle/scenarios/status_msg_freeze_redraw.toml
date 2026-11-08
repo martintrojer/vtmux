@@ -23,6 +23,11 @@ steps = [
   { run = ["set", "-g", "status", "on"] },
   { run = ["display-message", "-d", "6000", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a.0", "again", "Enter"] },
+  # The client takes the message's frame before pane 2's screen switch: a
+  # PANE_REDRAW while the client still has output to write becomes a window
+  # redraw (server-client.c server_client_check_redraw), which draws the
+  # frozen pane 0 too. The switch is then the only output to wait for.
+  { settle = {} },
   { run = ["send-keys", "-t", "a.2", "Enter"] },
   { settle = { react = true } },
   { screen = {} },

@@ -8,10 +8,14 @@ steps = [
   { run = ["set", "-g", "status-right", "R"] },
   { attach = { session = "a" } },
   { screen = {} },
+  # A switch redraws the client after the command returns: wait for that
+  # output (README, *Races under load*).
   { run = ["switch-client", "-t", "b"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["switch-client", "-c", "no-such-client", "-t", "a"] },
   { run = ["switch-client", "-F", "-t", "a"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["refresh-client", "-A", "%0:on"] },
   { run = ["refresh-client", "-C", "80x24"] },

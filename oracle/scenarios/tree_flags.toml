@@ -15,6 +15,10 @@ steps = [
   { run = ["select-pane", "-t", "%3", "-T", "t3"] },
   { run = ["select-pane", "-t", "%4", "-T", "t4"] },
   { run = ["select-pane", "-t", "%5", "-T", "t5"] },
+  # The tree's pane lines show #{pane_current_command}, which is sh until
+  # `exec cat` has run: wait for every pane to be cat (a busy host can take
+  # longer than the steps before a screen).
+  { run = ["run-shell", "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"] },
   { attach = { session = "aaa" } },
   { screen = {} },
   { run = ["choose-tree", "-t", "aaa:0.0", "-Ns"] },
@@ -52,6 +56,7 @@ steps = [
   # Pin the new pane's title: it starts as the host name, which the tree
   # hides only when it equals #{host_short} (no dots in the name).
   { run = ["select-pane", "-t", "%6", "-T", "t6"] },
+  { run = ["run-shell", "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"] },
   { run = ["choose-tree", "-t", "aaa:0.0", "-NZ"] },
   { settle = { react = true } },
   { run = ["display", "-p", "#{window_zoomed_flag}"] },
