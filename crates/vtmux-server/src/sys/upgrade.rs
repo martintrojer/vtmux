@@ -9,7 +9,7 @@
 //! image it lands in does not switch again. The dry run is
 //! `<binary> --vtmux-check-snapshot <fd>` ([`CHECK_FLAG`]). A binary whose
 //! dry run says it takes one ([`TAKES_SOCKET`]) is started as `<binary> -S
-//! <socket> --vtmux-resume <fd>`, so `ps` (the oracle runner, `cargo xtask
+//! <socket> --vtmux-resume <fd>` (`argv[0]` the binary exec'd), so `ps` (the oracle runner, `cargo xtask
 //! reap`) still tells which server it is; an image of a binary from before
 //! that parses only the words above, so it gets them alone.
 
@@ -620,10 +620,11 @@ fn resume_argv(
 }
 
 /// Replace this process with `binary` (decision 2: same pid, so the
-/// panes stay its children): `execve(binary, [argv0, "--vtmux-resume",
+/// panes stay its children): `execve(binary, [binary, "--vtmux-resume",
 /// <snapshot>], environ)` with `snapshot` and every descriptor of `keep`
-/// left open across it (close-on-exec cleared). `argv0` is this process's
-/// own, so `ps` still names it as before, and `socket`, given for a binary
+/// left open across it (close-on-exec cleared). `argv0` is `binary`, as
+/// given (the path the server resolved for the exec), so `ps` names the
+/// image that runs, not the one before it, and `socket`, given for a binary
 /// whose dry run said it takes it, goes before the flag as `-S <socket>`,
 /// so `ps` still tells which server it is. The signals the server handles
 /// are blocked across it (`signal::block_handled`): the new image unblocks
@@ -663,7 +664,7 @@ pub fn switch_back(
 ) -> io::Error {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let e = match exe {
-        Some(fd) => exec_resume(Target::Fd(fd), snapshot, keep, Some(why), socket),
+        Some(fd) => exec_resume(Target::Fd(fd, path), snapshot, keep, Some(why), socket),
         None => io::Error::other("no image to switch back to"),
     };
     // No `fexecve` here, so no executable is kept open (`own_exe`).
@@ -689,9 +690,10 @@ pub fn switch_back(
 /// What [`exec_resume`] runs.
 enum Target<'a> {
     Path(&'a Path),
-    /// An open executable (`fexecve`, which macOS lacks).
+    /// An open executable (`fexecve`, which macOS lacks), and the path it
+    /// was started as, when known (for `argv[0]`).
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    Fd(BorrowedFd<'a>),
+    Fd(BorrowedFd<'a>, Option<&'a Path>),
 }
 
 /// This image's executable, open for a switch back to it from the image
@@ -758,11 +760,16 @@ fn exec_resume(
     back: Option<&str>,
     socket: Option<&Path>,
 ) -> io::Error {
-    let argv0 = std::env::args_os().next().unwrap_or_else(|| match target {
+    // `ps`, `pkill -f` and plugins read argv[0] as the program the
+    // process runs, so it is the path exec'd, not this image's own.
+    let argv0 = match target {
         Target::Path(p) => p.as_os_str().to_owned(),
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        Target::Fd(_) => "vtmux".into(),
-    });
+        Target::Fd(_, Some(p)) => p.as_os_str().to_owned(),
+        // The image's path is not known: keep this process's own.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        Target::Fd(_, None) => std::env::args_os().next().unwrap_or_else(|| "vtmux".into()),
+    };
     let argv = match resume_argv(&argv0, snapshot.as_raw_fd(), back.is_some(), socket) {
         Ok(argv) => argv,
         Err(e) => return e,
@@ -773,7 +780,7 @@ fn exec_resume(
             Err(e) => return io::Error::other(e),
         },
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        Target::Fd(_) => None,
+        Target::Fd(..) => None,
     };
     let env = environ(back);
     let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
@@ -806,7 +813,7 @@ fn exec_resume(
         #[cfg(any(target_os = "linux", target_os = "android"))]
         // SAFETY: as above; `fd` is an open descriptor borrowed for the
         // call.
-        (None, Target::Fd(fd)) => unsafe {
+        (None, Target::Fd(fd, _)) => unsafe {
             libc::fexecve(fd.as_raw_fd(), ptrs.as_ptr(), envp.as_ptr());
         },
         _ => {

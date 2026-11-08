@@ -288,6 +288,16 @@ impl World {
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     }
 
+    /// The server's `argv[0]`, from `ps` (portable to macOS): the first
+    /// word of its command line (the test paths hold no spaces).
+    fn server_argv0(&self) -> String {
+        self.server_args()
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     /// Type a line into `pane` and wait for `cat` to echo it back.
     fn echo(&self, pane: &str, word: &str) {
         self.run(&["send-keys", "-t", pane, word, "Enter"]);
@@ -518,6 +528,34 @@ fn failed(answer: Option<ServerMsg>) -> String {
     match answer {
         Some(ServerMsg::UpgradeResult { ok: false, message }) => message,
         other => panic!("not a failure: {other:?}"),
+    }
+}
+
+/// `ps`, `pkill -f` and plugins read `argv[0]` as the program the server
+/// runs: after an upgrade onto a copy at another path it names the copy,
+/// not the binary the server was started from (and `/proc/<pid>/cmdline`
+/// says the same on Linux).
+#[test]
+fn an_upgrade_onto_a_copy_names_the_copy_in_argv0() {
+    let world = World::new();
+    world.populate(&[]);
+    let copy = world.home.path().join("vtmux-copy");
+    std::fs::copy(BIN, &copy).unwrap();
+    set_executable(&copy);
+    let copy = std::fs::canonicalize(&copy).unwrap();
+    let pid = world.pid();
+    assert_eq!(world.server_argv0(), BIN);
+
+    assert_eq!(world.upgrade(&copy), Some(upgraded()), "the server execed");
+
+    assert_eq!(world.pid(), pid);
+    assert!(world.server_args().contains("--vtmux-resume"));
+    assert_eq!(world.server_argv0(), copy.to_str().unwrap());
+    #[cfg(target_os = "linux")]
+    {
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+        let argv0 = cmdline.split(|&b| b == 0).next().unwrap();
+        assert_eq!(argv0, copy.as_os_str().as_encoded_bytes());
     }
 }
 
