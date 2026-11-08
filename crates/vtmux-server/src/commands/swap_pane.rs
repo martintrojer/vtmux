@@ -129,7 +129,12 @@ fn swap(
 
     // window_pane_resize of each pane, in the swap and before the active
     // pane changes (cmd-swap-pane.c:158-164, 171): a pane in panes mode
-    // that changes size draws the window with the old active pane.
+    // that changes size draws the window with the old active pane. The
+    // source pane first, then the target, whatever their order in the
+    // window: in one window, the panes but the target, then the target.
+    if same {
+        m.fix_panes_except(dst_w, Some(dst_wp));
+    }
     m.fix_panes(dst_w);
     if !same {
         m.fix_panes(src_w);

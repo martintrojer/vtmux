@@ -1,0 +1,20 @@
+name = "hooks_swap_pane_resized"
+# swap-pane resizes the source pane to the target's size, then the target to
+# the source's (window_pane_resize twice, cmd-swap-pane.c:158-162), so
+# pane-resized fires for the source first whichever pane comes first in the
+# window.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0", "-l", "5", "cat", "-"] },
+  { run = ["set-hook", "-g", "pane-resized", "set -gaF @log '|#{hook_pane}:#{hook_height}'"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["swapp", "-s", "a:0.0", "-t", "a:0.1"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["swapp", "-s", "a:0.1", "-t", "a:0.0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["swapp", "-d", "-D", "-t", "a:0.0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]
