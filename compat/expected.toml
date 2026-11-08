@@ -510,9 +510,7 @@ status = "pass"
 status = "pass"
 
 [tests."terminal-feature-utf8.sh"]
-status = "xfail"
-reason = "`-T utf8` sets client_utf8 (attach utf8_terminal_feature_sets_client_utf8); under the harness the script's `env -i` drops the private TMUX_TMPDIR, so the nested client never reaches the inner server (reference tmux fails the same way); run plainly it then fails on `#{I/f:utf8}`: the `I` format modifier (client feature/capability/environment lookup) is not implemented"
-flaky = true
+status = "pass"
 
 [tests."theme-report.sh"]
 status = "pass"

@@ -13,8 +13,10 @@ taken with `git archive <commit> regress | tar -x -C compat/tmux-3.8/`.
   Expected outcomes live in `compat/expected.toml`.
 - Environment per test is tmux's Makefile one: `env -i PATH=/usr/bin:/bin
   LC_CTYPE=C.UTF-8 TERM=screen SHELL=/bin/sh TEST_TMUX=<binary> sh -x <test>`,
-  120 s timeout. `TMUX_TMPDIR` is not set (`terminal-feature-utf8.sh` re-runs a
-  nested client under its own `env -i`); isolation is the tests' own `-L` labels.
+  300 s timeout, plus a private short `TMUX_TMPDIR` per script (not tmux's
+  Makefile; a test that re-runs a client under its own `env -i` must pass it on:
+  `terminal-feature-utf8.sh`, see *Test races*); servers are told apart by the
+  tests' own `-L` labels.
 
 ## Reference tmux 3.8 on this host
 
@@ -76,3 +78,15 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   loops); with `sleep 0.5` before `seq` it fails every run on both vtmux and
   the reference. The patch polls `capturep` (max 10 s) for seq's `40` before
   `copy-mode`; with the delay it then passes on both.
+- `terminal-feature-utf8.sh`
+  (`0006-terminal-feature-utf8-keeps-the-socket-dir.patch`): the script runs the
+  nested client as `env -i PATH=… $TEST_TMUX -T utf8 … attach-session`, which
+  drops the harness's private `TMUX_TMPDIR`, so the client looks for the inner
+  server in `/tmp/{tmux,vtmux}-<uid>/` and never finds it (`utf8 terminal
+  feature did not set client_utf8`; the reference fails the same way, and
+  its socket would also outlive the test). The patch passes `TMUX_TMPDIR` on to
+  the client (`${TMUX_TMPDIR:+TMUX_TMPDIR=$TMUX_TMPDIR}`, a no-op without
+  one) and waits up to 60 s, not 5 s, for the client to attach, which a
+  loaded machine can take longer than. Unpatched 0/1 on vtmux; patched it
+  passes on both. It was `xfail` and `flaky` before; the `#{I/f:utf8}` lookup
+  it also checks is implemented (`vtmux-core` `format/eval.rs`, `ClientInfo`).

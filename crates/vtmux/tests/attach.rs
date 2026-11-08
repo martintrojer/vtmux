@@ -6331,7 +6331,7 @@ fn utf8_terminal_feature_sets_client_utf8() {
             args.extend(["attach", "-t", "s"]);
             let mut a = w.attach_env(&args, 40, 10, &[("LC_ALL", "C")]);
             a.wait(|a| a.text().contains("\x1b[?1049h"));
-            let out = w.cli(&["lsc", "-F", "u8=#{client_utf8}"]);
+            let out = w.cli(&["lsc", "-F", "u8=#{client_utf8} f=#{I/f:utf8}"]);
             seen.push(String::from_utf8_lossy(&out.stdout).into_owned());
             w.cli(&["detach-client", "-s", "s"]);
             a.exited(0);
@@ -6339,7 +6339,7 @@ fn utf8_terminal_feature_sets_client_utf8() {
         w.cli(&["kill-server"]);
         outputs.push(seen);
     }
-    assert_eq!(outputs[0], ["u8=1\n", "u8=0\n"]);
+    assert_eq!(outputs[0], ["u8=1 f=1\n", "u8=0 f=0\n"]);
     assert_eq!(outputs[0], outputs[1], "left vtmux, right tmux 3.8");
 }
 

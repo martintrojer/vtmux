@@ -15,7 +15,7 @@
 //! script (pass, fail or timeout) `reap_servers` kills each leftover server of
 //! the binary under test whose label carries that script's pid. Scripts that
 //! set their own `TMUX_TMPDIR`, or run a nested client under `env -i`
-//! (`terminal-feature-utf8.sh`), are covered by the label match, not the dir.
+//! (`new-session-environment.sh`), are covered by the label match, not the dir.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
@@ -398,7 +398,7 @@ fn label_is_of(label: &str, script_pid: u32) -> bool {
 /// Kill every server (and attached client) the script `script_pid` left
 /// behind, then remove the dead socket files of its labels from the real
 /// socket directories: a script that runs a client under `env -i`
-/// (`new-session-environment.sh`, `terminal-feature-utf8.sh`) loses the
+/// (`new-session-environment.sh`) loses the
 /// private `TMUX_TMPDIR`, so that server's socket lands in
 /// `/tmp/{tmux,vtmux}-<uid>/` and outlives the server.
 fn reap_servers(tmux: &Path, script_pid: u32) {
