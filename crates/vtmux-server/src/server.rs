@@ -160,6 +160,8 @@ pub(crate) struct Client {
     pub(crate) pasting: bool,
     /// Mouse drag, click and outer-mode state (`c->tty.mouse_*`).
     pub(crate) mouse: crate::mouse::ClientMouse,
+    /// The terminal's cursor style and colour as last written.
+    pub(crate) cursor: crate::outer_cursor::OuterCursor,
     pub(crate) decoder: crate::input::Decoder,
     pub(crate) caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
@@ -282,6 +284,7 @@ impl Client {
             written: 0,
             pasting: false,
             mouse: crate::mouse::ClientMouse::default(),
+            cursor: crate::outer_cursor::OuterCursor::default(),
             decoder: crate::input::Decoder::default(),
             caps: None,
             term: None,
@@ -2314,6 +2317,7 @@ impl Server {
         client.compositor.invalidate();
         // tty_resize -> tty_invalidate: the terminal modes are written again.
         client.mouse.invalidate();
+        client.cursor.invalidate();
         // server-client.c:2729: server_redraw_client.
         client.status.request_full_redraw();
         self.recalculate_sizes();
@@ -2564,6 +2568,7 @@ impl Server {
         c.compositor.invalidate();
         // tty_start_tty -> tty_invalidate: the modes are written again.
         c.mouse.invalidate();
+        c.cursor.restart();
         let term = c.term.clone();
         // tty_start_tty: the startup modes without the terminal queries,
         // which tty_send_requests sends only once.
@@ -2604,7 +2609,7 @@ impl Server {
         if let Some(c) = self.clients.get(&id).filter(|c| !c.suspended)
             && let Some(term) = c.term.as_deref()
         {
-            let bytes = crate::render::teardown(term, self.clear_on_attach());
+            let bytes = crate::render::teardown(term, self.clear_on_attach(), &c.cursor);
             self.send(id, &ServerMsg::Frame(bytes));
         }
     }
@@ -3126,7 +3131,7 @@ impl Server {
                 let client = self.clients.get_mut(&id).expect("client");
                 client.compositor.recycle(screen, tags);
                 let mut frame = Vec::new();
-                self.add_outer_mouse_modes(id, &mut frame);
+                self.add_outer_modes(id, &mut frame);
                 if !frame.is_empty() {
                     self.send(id, &ServerMsg::Frame(frame));
                 }
@@ -3143,7 +3148,7 @@ impl Server {
                 .expect("client")
                 .compositor
                 .frame_tagged(screen, tags, caps);
-            self.add_outer_mouse_modes(id, &mut frame);
+            self.add_outer_modes(id, &mut frame);
             if redrawing {
                 frame.splice(0..0, self.client_title_and_path(id, s));
             }
@@ -3484,11 +3489,13 @@ impl Server {
         (self.job_handle(Some(id)).status(force), border)
     }
 
-    /// `server_client_reset_state`: the terminal's mouse modes follow `mouse`
-    /// and the panes (`tty_update_mode`), written after the drawing and
-    /// inside the frame's synchronized update when there is one.
-    fn add_outer_mouse_modes(&mut self, id: ClientId, frame: &mut Vec<u8>) {
-        let modes = self.outer_mouse_bytes(id);
+    /// `server_client_reset_state`: the terminal's cursor style and colour
+    /// follow the screen the client looks at, its mouse modes `mouse` and
+    /// the panes (`tty_update_mode`), written after the drawing and inside
+    /// the frame's synchronized update when there is one.
+    fn add_outer_modes(&mut self, id: ClientId, frame: &mut Vec<u8>) {
+        let mut modes = self.outer_cursor_bytes(id);
+        modes.extend(self.outer_mouse_bytes(id));
         if modes.is_empty() {
             return;
         }

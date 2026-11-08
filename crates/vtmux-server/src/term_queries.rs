@@ -334,7 +334,13 @@ impl Server {
 
     /// `cursor-colour` for the pane (`screen_set_default_cursor`).
     fn cursor_colour(&self, p: PaneId) -> Option<Rgb> {
-        let text = option_text(&self.model, TreeId::Pane(p), "cursor-colour");
+        self.colour_option(TreeId::Pane(p), "cursor-colour")
+    }
+
+    /// A colour option as `style_apply` reads it into a cell's foreground,
+    /// forced to RGB (`colour_force_rgb`): `None` for none or the default.
+    pub(crate) fn colour_option(&self, tree: TreeId, name: &str) -> Option<Rgb> {
+        let text = option_text(&self.model, tree, name);
         let mut sy = Style::new(&CellStyle::default());
         // style_apply on a colour option: `style_parse_colour`.
         sy.parse(&CellStyle::default(), &format!("fg={text}"))

@@ -2785,8 +2785,9 @@ impl MouseModes {
 }
 
 /// The cursor shape a program set with DECSCUSR (`s->cstyle`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CursorShape {
+    #[default]
     Default,
     Block,
     Underline,

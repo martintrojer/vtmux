@@ -28,6 +28,7 @@ pub mod model;
 pub mod mouse;
 pub mod names;
 pub mod open_prompt;
+pub mod outer_cursor;
 pub mod pane_io;
 pub mod paste;
 pub mod persist;

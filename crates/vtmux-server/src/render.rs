@@ -182,17 +182,19 @@ pub fn lock_screen(term: &Term) -> Vec<u8> {
 
 /// `tty_stop_tty` (tty.c:470-520). `clear` is `clear-on-attach`: on, the
 /// screen is cleared and `rmcup` leaves the alternate screen; off, there is
-/// none to leave and the clear comes last. `csr` and `sgr0` are xterm's
+/// none to leave and the clear comes last. A cursor style or colour the
+/// terminal was given goes back to its default first. `csr` and `sgr0` are xterm's
 /// forms; the focus reports and extended keys go off as `Dsfcs` and
 /// `Dseks` say.
 #[must_use]
-pub fn teardown(term: &Term, clear: bool) -> Vec<u8> {
+pub fn teardown(term: &Term, clear: bool, cursor: &crate::outer_cursor::OuterCursor) -> Vec<u8> {
     let s = |name| term.string(name).unwrap_or_default();
     let mut out = String::from("\x1b[r\x1b[0m");
     out.push_str(s("rmkx"));
     if clear {
         out.push_str(s("clear"));
     }
+    out.push_str(&cursor.teardown(term));
     out.push_str(s("cnorm"));
     if term.has(Cap::Kmous) {
         out.push_str("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l");
@@ -365,6 +367,11 @@ impl Compositor {
         self.spare = self.last.take();
         self.forced.clear();
         self.spare_tags = std::mem::take(&mut self.last_tags);
+    }
+    /// The last frame sent left the cursor shown.
+    #[must_use]
+    pub fn cursor_shown(&self) -> bool {
+        self.last.as_ref().is_some_and(|l| l.cursor_visible)
     }
     /// The last frame sent is still what the terminal shows, at this size.
     #[must_use]

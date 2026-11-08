@@ -5163,6 +5163,68 @@ fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
     assert_eq!(seen[1][2], "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h");
 }
 
+/// The terminal's cursor as an observer of the client's output sees it:
+/// shape, blinking and colour.
+fn outer_cursor(a: &Attached) -> (vtmux_vt::CursorShape, bool, Option<(u8, u8, u8)>) {
+    let t = a.screen();
+    let m = t.screen_modes();
+    (m.cursor_shape, m.cursor_blinking, t.cursor_colour())
+}
+
+/// `tty_update_cursor` and `tty_force_cursor_colour` (tty.c:767-879) via
+/// `server_client_reset_state`: the client's terminal gets the cursor the
+/// screen it looks at asks for. On xterm-256color (whose `cstyle` and
+/// `ccolour` features `terminal-features` gives): the pane's DECSCUSR as
+/// `Ss`, its OSC 12 as `Cs`; DECSCUSR 0 is `Se` (xterm's steady block);
+/// with no style of its own the pane takes `cursor-style`; copy mode's
+/// screen takes the global options (`Cr`, no colour); leaving it gives
+/// the pane's back; detaching resets both (`tty_stop_tty`).
+#[test]
+fn cursor_style_and_colour_reach_the_terminal() {
+    use vtmux_vt::CursorShape::{Bar, Block, Default, Underline};
+    let red = Some((255, 0, 0));
+    for bin in bins() {
+        let what = bin.display().to_string();
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            r"printf A; read x; printf '\033[5 qB'; read x; printf '\033]12;red\007C'; read x; printf '\033[0 qD'; exec cat",
+        ]);
+        a.wait(|a| pane_text(a).starts_with('A'));
+        let expect = |a: &Attached, want: (vtmux_vt::CursorShape, bool, Option<(u8, u8, u8)>)| {
+            a.wait_labelled(&what, Duration::from_secs(5), |a| outer_cursor(a) == want);
+        };
+        expect(&a, (Default, false, None));
+        let steps: [(&[&str], _); 6] = [
+            (&["send", "-t", "a", "Enter"], (Bar, true, None)),
+            (&["send", "-t", "a", "Enter"], (Bar, true, red)),
+            (&["send", "-t", "a", "Enter"], (Block, false, red)),
+            (
+                &["set", "-g", "cursor-style", "underline"],
+                (Underline, false, red),
+            ),
+            (&["copy-mode", "-t", "a"], (Underline, false, None)),
+            (
+                &["send", "-t", "a", "-X", "cancel"],
+                (Underline, false, red),
+            ),
+        ];
+        for (step, want) in steps {
+            assert!(w.cli(step).status.success(), "{step:?}");
+            expect(&a, want);
+        }
+        assert!(w.cli(&["detach-client"]).status.success());
+        a.exited(0);
+        expect(&a, (Block, false, None));
+    }
+}
+
 /// `server_client_reset_state` with a window menu (server-client.c:
 /// 2201-2203, menu.c:633-634): the menu's screen gives the modes, all
 /// motion when it takes the mouse (opened by a mouse event or with -M),
