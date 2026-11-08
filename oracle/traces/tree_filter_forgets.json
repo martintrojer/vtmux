@@ -1,0 +1,736 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "tree_filter_forgets",
+  "inputs": {
+    "name": "tree_filter_forgets",
+    "size": [
+      60,
+      20
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "escape-time",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:1",
+          "-n",
+          "w1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:2",
+          "-n",
+          "w2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "bbb",
+          "-n",
+          "x0",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "bbb:3",
+          "-n",
+          "x3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ccc",
+          "-n",
+          "y0",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%3",
+          "-T",
+          "t3"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%4",
+          "-T",
+          "t4"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%5",
+          "-T",
+          "t5"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%6",
+          "-T",
+          "t6"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%7",
+          "-T",
+          "t7"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "alpha",
+          "apple"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "beta",
+          "banana pie"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "gamma",
+          "cherry\nline2"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "delta",
+          "d"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "t"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "f"
+      },
+      {
+        "keys": "#{==:#{window_name},w1}\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "f"
+      },
+      {
+        "keys": "#{pane_active}\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "c"
+      },
+      {
+        "keys": "jjjjjjjt"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "f"
+      },
+      {
+        "keys": "#{!=:#{session_name},bbb}\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "c"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 3 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[36m0*\\e[37m: \\e[36mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2)   │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3)   ├─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)   │   ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)   │   ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6)   │   └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(7)   └─→ \\e[31m-\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(8)       └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(9)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-b) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) ─────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 3 windows (attached)\\e[39m",
+          "\\e[37m(1) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[30m\\e[43m(2)     ├─→ 0: cat*: \"t1\"\\e[39m",
+          "\\e[37m\\e[49m(3)     ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 3 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   ├─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[30m\\e[43m(4)   │   ├─→ 0: cat*: \"t1\"\\e[39m",
+          "\\e[37m\\e[49m(5)   │   ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6)   │   └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(7)   └─→ \\e[31m-\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(8)       └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(9)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-b) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) (filter: active) ────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   ├─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)   │   ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)   │   ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6)   │   └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(7)   └─→ \\e[31m-\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(8)       └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(9)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-b) │   └─→ \\e[36m0*\\e[37m: \\e[36mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(M-c) └─→ - 3: x3: \"t6\"\\e[39m",
+          "\\e[37m\\e[40m┌ 3 (sort: index) (view: preview) ─────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m \\e[31m0:t6\\e[39m \\e[37m│\\e[39m\\e[49m                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m└──────┘\\e[39m\\e[49m                         \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 3 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   ├─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)   │   ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)   │   ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6)   │   └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(7)   └─→ \\e[31m-\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(8)       └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(9)   \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-a) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t7\"\\e[39m",
+          "\\e[30m\\e[43m(M-b)     └─→ 0: cat*: \"t7\"\\e[39m",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) (filter: active) ────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)   │   ├─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6)   │   └─→ \\e[39m2\\e[37m: \\e[39mcat\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(7)   └─→ \\e[31m-\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(8)       └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(9)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-b) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m3\\e[37m: \\e[39mx3\\e[37m: \"t6\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t6\"\\e[39m",
+          "\\e[37m(M-e) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-f) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t7\"\\e[39m",
+          "\\e[30m\\e[43m(M-g)     └─→ 0: cat*: \"t7\"\\e[39m",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) ─────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                          \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    }
+  ]
+}

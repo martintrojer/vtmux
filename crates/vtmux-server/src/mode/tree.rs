@@ -428,11 +428,16 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         mut key: impl FnMut(&D, usize) -> Option<Key>,
     ) {
         let mut tag = self.current_item().map(|i| i.tag);
-        let saved: Vec<_> = self
-            .items
-            .iter()
-            .map(|i| (i.tag, i.tagged, i.expanded))
-            .collect();
+        // The last build's tree (`mtd->children`): an item the build
+        // removed (`mode_tree_remove`, a filter's miss) is not saved, so it
+        // comes back untagged and as its mode adds it.
+        let mut saved = Vec::new();
+        let mut todo: Vec<usize> = self.roots.iter().rev().copied().collect();
+        while let Some(id) = todo.pop() {
+            let i = &self.items[id];
+            saved.push((i.tag, i.tagged, i.expanded));
+            todo.extend(i.children.iter().rev());
+        }
         let mut b = Build {
             items: Vec::new(),
             roots: Vec::new(),

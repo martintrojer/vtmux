@@ -1,0 +1,52 @@
+# A filter's miss forgets the item (mode-tree.c mode_tree_build: only the
+# last build's tree is saved, and window-tree.c removes a window or session
+# no pane of which matches, mode_tree_remove): a tagged window, and a
+# tagged pane of a session the filter drops, come back untagged once the
+# filter lets them in again.
+name = "tree_filter_forgets"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "aaa:2", "-n", "w2", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "cat", "-"] },
+  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "bbb:3", "-n", "x3", "cat", "-"] },
+  { run = ["new", "-d", "-s", "ccc", "-n", "y0", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t2"] },
+  { run = ["select-pane", "-t", "%3", "-T", "t3"] },
+  { run = ["select-pane", "-t", "%4", "-T", "t4"] },
+  { run = ["select-pane", "-t", "%5", "-T", "t5"] },
+  { run = ["select-pane", "-t", "%6", "-T", "t6"] },
+  { run = ["select-pane", "-t", "%7", "-T", "t7"] },
+  { run = ["set-buffer", "-b", "alpha", "apple"] },
+  { run = ["set-buffer", "-b", "beta", "banana pie"] },
+  { run = ["set-buffer", "-b", "gamma", "cherry\nline2"] },
+  { run = ["set-buffer", "-b", "delta", "d"] },
+  { run = ["run-shell", "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"] },
+  { attach = { session = "aaa" } },
+  { run = ["choose-tree", "-t", "aaa:0.0"] },
+  { settle = { react = true } },
+  { keys = "t" },
+  { screen = {} },
+  { keys = "f" },
+  { keys = "#{==:#{window_name},w1}\r" },
+  { screen = {} },
+  { keys = "f" },
+  { keys = "#{pane_active}\r" },
+  { screen = {} },
+  { keys = "c" },
+  { keys = "jjjjjjjt" },
+  { screen = {} },
+  { keys = "f" },
+  { keys = "#{!=:#{session_name},bbb}\r" },
+  { screen = {} },
+  { keys = "c" },
+  { screen = {} },
+]
