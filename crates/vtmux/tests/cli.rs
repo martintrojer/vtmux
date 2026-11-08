@@ -7445,7 +7445,7 @@ fn set_hook_monitor_fires_on_change() {
 /// entries in its order, then the tree's (the command, copy mode's) by
 /// name (format.c `format_each`). The values that change from run to run
 /// are masked; the variables vtmux has yet to model are left out of both
-/// (compat/DIVERGENCES.md D-014, D-044).
+/// (compat/DIVERGENCES.md D-014, D-046).
 #[test]
 fn display_message_all() {
     const VOLATILE: &[&str] = &[
