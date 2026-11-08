@@ -167,6 +167,21 @@ fn a_clients_terminal_title_round_trips() {
     assert!(golden.clients.iter().all(|c| c.terminal_title.is_none()));
 }
 
+/// A client's panned view, added within v1, round-trips; the golden
+/// stream has none.
+#[test]
+fn a_clients_pan_round_trips() {
+    let mut s = sample();
+    s.clients[0].pan = Some(ClientPan {
+        window: 1,
+        ox: 20,
+        oy: 6,
+    });
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| c.pan.is_none()));
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();

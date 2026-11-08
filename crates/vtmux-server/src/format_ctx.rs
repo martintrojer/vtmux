@@ -105,6 +105,8 @@ pub struct ClientView {
     pub term: Option<Rc<vtmux_core::term_features::Term>>,
     /// `c->environ`: what the client sent.
     pub environ: Rc<[(String, String)]>,
+    /// The part of its current window the client shows (`tty->oox` ...).
+    pub view: crate::view::View,
 }
 
 impl ClientView {
@@ -255,6 +257,11 @@ impl<'a> Ctx<'a> {
             "client_theme" => c.theme?.name().to_owned(),
             "client_session" => self.model.sessions.get(&c.session?)?.name.clone(),
             "client_last_session" => self.model.sessions.get(&c.last_session?)?.name.clone(),
+            // format_cb_window_bigger, format_cb_window_offset_x/_y
+            // (format.c:3142-3363): the client's view of its window.
+            "window_bigger" => flag(c.view.bigger),
+            "window_offset_x" => c.view.bigger.then(|| c.view.ox.to_string())?,
+            "window_offset_y" => c.view.bigger.then(|| c.view.oy.to_string())?,
             "client_width" => c.width.to_string(),
             "client_height" => c.height?.to_string(),
             "client_cell_width" | "client_cell_height" => {

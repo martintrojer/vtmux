@@ -120,6 +120,10 @@ pub fn exec(
     clippy::many_single_char_names,
     reason = "cmd-display-menu.c's w/h/sx/sy"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one variable per popup_* format, as cmd-display-menu.c"
+)]
 fn position(
     server: &Server,
     item: &Item,
@@ -135,8 +139,8 @@ fn position(
     let max_x = (wsx - w).max(0);
     let max_y = (wsy - h).max(0);
     let lines = i64::from(server.status_line_size(client));
-    // tty_window_offset: the window is never panned here, so no offset;
-    // the visible rows are the window's, or the client's below the status.
+    // tty_window_offset: the view's offset, and its rows (sy).
+    let (ox, oy) = (i64::from(client.view.ox), i64::from(client.view.oy));
     let rows = server.tty_size(tc).map_or(wsy, |(_, r)| i64::from(r));
     let sy = wsy.min(rows - lines);
     let mut vars: Vec<(&'static str, i64)> = Vec::new();
@@ -149,7 +153,7 @@ fn position(
             Some(at) if y >= i64::from(at) => sy - 1,
             _ => y,
         };
-        let (mx, my) = (x, my.max(0));
+        let (mx, my) = (x + ox, my.max(0) + oy);
         vars.push(("popup_mouse_x", mx));
         vars.push(("popup_mouse_y", my));
         vars.push(("popup_mouse_centre_x", (mx - w / 2).max(0)));
@@ -184,7 +188,7 @@ fn position(
         if let Some(start) = hit {
             vars.push((
                 "popup_window_status_line_x",
-                i64::try_from(start).unwrap_or(0),
+                i64::try_from(start).unwrap_or(0) + ox,
             ));
             vars.push(("popup_window_status_line_y", line_y));
         }

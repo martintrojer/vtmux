@@ -1031,6 +1031,8 @@ mod tests {
         let view = WindowView {
             sx: 20,
             sy: 4,
+            ox: 0,
+            oy: 0,
             panes: (0..2u32)
                 .map(|i| ScenePane {
                     id: PaneId(i),

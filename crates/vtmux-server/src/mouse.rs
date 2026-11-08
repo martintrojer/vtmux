@@ -120,6 +120,10 @@ pub struct MouseEvent {
     /// `m->statusat` (`None` for no status line) and `m->statuslines`.
     pub status_at: Option<u32>,
     pub status_lines: u32,
+    /// `m->ox`, `m->oy`: the client's view of its window when the event
+    /// was in it ([`crate::view::View`]); 0 elsewhere.
+    pub ox: u32,
+    pub oy: u32,
     pub target: MouseTarget,
     /// The status line's `range=` under the event, when it is on the
     /// status line (`status_get_range`, for `mouse_status_range`).
@@ -143,22 +147,29 @@ impl MouseEvent {
     }
 
     /// The window position of client position `(x, y)` as the drag
-    /// callbacks take it (cmd-resize-pane.c:376-385): below a top status
-    /// line, or clamped above a bottom one.
+    /// callbacks take it (cmd-resize-pane.c:376-385): the view's offset
+    /// added, then below a top status line, or clamped above a bottom one
+    /// (the offset dropped there, as tmux does).
     #[must_use]
     pub fn window_position(&self, (x, y): (u32, u32)) -> (i64, i64) {
-        let y = match self.status_at {
-            Some(0) if y >= self.status_lines => y - self.status_lines,
+        let (x, y) = (
+            i64::from(x) + i64::from(self.ox),
+            i64::from(y) + i64::from(self.oy),
+        );
+        let lines = i64::from(self.status_lines);
+        let y = match self.status_at.map(i64::from) {
+            Some(0) if y >= lines => y - lines,
             Some(at) if at > 0 && y >= at => at - 1,
             _ => y,
         };
-        (i64::from(x), i64::from(y))
+        (x, y)
     }
 
     fn at_position(&self, model: &Model, p: PaneId, (x, y): (u32, u32)) -> Option<(u32, u32)> {
         let pane = model.panes.get(&p)?;
-        let x = i64::from(x);
-        let mut y = i64::from(y);
+        // cmd_mouse_at: the view's offset, then the top status lines.
+        let x = i64::from(x) + i64::from(self.ox);
+        let mut y = i64::from(y) + i64::from(self.oy);
         if self.status_at == Some(0) && y >= i64::from(self.status_lines) {
             y -= i64::from(self.status_lines);
         }
@@ -576,6 +587,8 @@ impl Server {
             input: report,
             status_at,
             status_lines,
+            ox: 0,
+            oy: 0,
             target: MouseTarget {
                 session: Some(session),
                 ..MouseTarget::default()
@@ -651,11 +664,16 @@ impl Server {
             } else {
                 y
             };
-            let win = &self.model.windows[&window];
-            if px > win.sx() || py > win.sy() {
+            // server-client.c:1049-1057: within the client's view of the
+            // window, then in window coordinates.
+            let view = self.clients.get(&id).map(|c| c.view).unwrap_or_default();
+            (ev.ox, ev.oy) = (view.ox, view.oy);
+            if px > view.sx || py > view.sy {
                 *hover_out = Some((kind, None));
                 return Located::Nothing;
             }
+            (px, py) = (px + view.ox, py + view.oy);
+            let win = &self.model.windows[&window];
             let (wx, wy) = (i64::from(px), i64::from(py));
             hover = Some((wx, wy));
             // server-client.c:1058-1085: outside a modal pane only a drag
@@ -822,7 +840,6 @@ impl Server {
         if b & MASK_SHIFT != 0 {
             key = key.shift();
         }
-        // ox/oy are 0: vtmux does not pan a window larger than the client.
         if let Some(action) = dragging {
             ev.key = Key::DRAGGING;
             return Located::Dragging(action, ev);
@@ -1365,7 +1382,7 @@ impl Server {
     /// and the slider's and bar's heights. tmux reads the slider as last
     /// drawn (`wp->sb_slider_h`): with no bar shown, 0 here. `None` with no
     /// client (`window_copy_cmd_scroll_to_mouse` and `copy-mode -S` need
-    /// one). vtmux pans no window, so `tty_oy` is 0.
+    /// one). The row is in window coordinates (`my + tty_oy`).
     pub(crate) fn slider_input(
         &self,
         id: Option<ClientId>,
@@ -1381,6 +1398,7 @@ impl Server {
         } else {
             0
         };
+        let my = my + i64::from(c.view.oy);
         Some((my - i64::from(pane.rect.yoff), mpos, slider_h, pane.rect.sy))
     }
 

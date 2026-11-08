@@ -1,0 +1,59 @@
+name = "window_view_follows_cursor"
+size = [40, 12]
+steps = [
+  # A 100x30 window (window-size manual) on a 40x12 client: the view
+  # follows the cursor of the active pane's screen as drawn (tty.c
+  # tty_window_offset1), the program's or its mode's; the default
+  # status-right's offset part on the status line.
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "100", "-y", "30", "cat", "-"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "status-right", "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}],-}"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["bind", "a", "display-popup", "-x", "P", "-y", "P", "-w", "10", "-h", "3", "tmux wait-for -S up; exec cat"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # Column 50: centred on it.
+  { feed = { pane = "%0", bytes = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx" } },
+  { settle = {} },
+  { screen = {} },
+  # display-popup -x P -y P: the pane's left edge is left of the view
+  # (cmd-display-menu.c, `%u` of a negative), so the popup goes right.
+  { keys = "\u0002a" },
+  { wait_for = "up" },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  # Row 18: the view's last row is the cursor's.
+  { feed = { pane = "%0", bytes = "\r\r\r\r\r\r\r\r\r" } },
+  { settle = {} },
+  { screen = {} },
+  # Copy mode's cursor.
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-top"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "25", "cursor-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # A window menu in window coordinates, partly in the view.
+  { run = ["display-menu", "-T", "m", "-x", "0", "-y", "20", "one", "o", "", "two", "t", ""] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { settle = {} },
+  # Tree mode has no cursor (the top left), its search prompt one on the
+  # last row.
+  { run = ["choose-tree", "-t", "a"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "C-s"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "Escape"] },
+  { run = ["send-keys", "-t", "a", "q"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

@@ -151,6 +151,10 @@ fn command(server: &Server, s: vtmux_core::ids::SessionId, args: &Args) -> Comma
     clippy::many_single_char_names,
     reason = "cmd-display-menu.c's w/h/sx/sy"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one variable per popup_* format, as cmd-display-menu.c"
+)]
 fn position(
     server: &Server,
     tc: ClientId,
@@ -217,16 +221,19 @@ fn position(
     vars.push(("popup_centre_x", ((sx - 1) / 2 - w / 2).max(0)));
     let n = (sy - 1) / 2 + h / 2;
     vars.push(("popup_centre_y", if n >= sy { sy - h } else { n }));
-    // The target pane, in the client's view (tty_window_offset: the
-    // window is never larger than the client here, so no offset).
+    // The target pane in the client's view (tty_window_offset); bottom
+    // and left are printed `%u`, so a pane left of the view wraps.
     if let Some(pane) = found.pane.and_then(|p| server.model.panes.get(&p)) {
         let top = if at_top { lines } else { 0 };
-        let (xoff, yoff) = (i64::from(pane.rect.xoff), i64::from(pane.rect.yoff));
+        let (ox, oy) = (i64::from(client.view.ox), i64::from(client.view.oy));
+        let unsigned = |v: i64| if v < 0 { v + (1 << 32) } else { v };
+        let xoff = i64::from(pane.rect.xoff) - ox;
+        let yoff = i64::from(pane.rect.yoff) - oy;
         let (psx, psy) = (i64::from(pane.rect.sx), i64::from(pane.rect.sy));
         let n = top + yoff + h;
         vars.push(("popup_pane_top", if n >= sy { sy - h } else { n }));
-        vars.push(("popup_pane_bottom", top + yoff + psy));
-        vars.push(("popup_pane_left", xoff));
+        vars.push(("popup_pane_bottom", unsigned(top + yoff + psy)));
+        vars.push(("popup_pane_left", unsigned(xoff)));
         vars.push(("popup_pane_right", (xoff + psx - w).max(0)));
     }
     let mut ctx = server.format_ctx(found, Some(tc));

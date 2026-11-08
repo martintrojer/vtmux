@@ -201,6 +201,10 @@ impl ScenePane {
 pub struct WindowView {
     pub sx: u32,
     pub sy: u32,
+    /// The window cell at the scene's top left: the client's view
+    /// ([`crate::view::View`]; `redraw_get_window_offset`).
+    pub ox: u32,
+    pub oy: u32,
     /// Bottom of the z-order first: later panes are marked over earlier.
     pub panes: Vec<ScenePane>,
     pub indicators: Indicators,
@@ -307,6 +311,9 @@ pub struct Scene {
     pub cells: Vec<SceneCell>,
     wsx: i32,
     wsy: i32,
+    /// The window cell at the scene's top left.
+    ox: i32,
+    oy: i32,
     /// Some cell is a pane status line's: without one, [`Self::status_line`]
     /// need not scan the scene (it runs per pane, every frame).
     has_status: bool,
@@ -339,14 +346,16 @@ impl Scene {
         scene
     }
 
-    /// `redraw_build_cells` for a `cols` x `rows` area at the window origin.
+    /// `redraw_build_cells` for a `cols` x `rows` area showing the window
+    /// from cell (`win.ox`, `win.oy`).
     #[must_use]
     pub fn build(win: &WindowView, cols: u16, rows: u16) -> Self {
         let mut cells = Vec::with_capacity(usize::from(cols) * usize::from(rows));
         for y in 0..rows {
             for x in 0..cols {
                 // redraw_reset_cell
-                cells.push(if u32::from(x) < win.sx && u32::from(y) < win.sy {
+                let (wx, wy) = (win.ox + u32::from(x), win.oy + u32::from(y));
+                cells.push(if wx < win.sx && wy < win.sy {
                     SceneCell::Empty
                 } else {
                     SceneCell::Outside
@@ -359,6 +368,8 @@ impl Scene {
             cells,
             wsx: int(win.sx),
             wsy: int(win.sy),
+            ox: int(win.ox),
+            oy: int(win.oy),
             has_status: false,
             row_panes: Vec::new(),
             fills: (false, false),
@@ -423,8 +434,12 @@ impl Scene {
         if wx < 0 || wy < 0 || wx > self.wsx || wy > self.wsy {
             return None;
         }
-        let x = u16::try_from(wx).ok().filter(|x| *x < self.cols)?;
-        let y = u16::try_from(wy).ok().filter(|y| *y < self.rows)?;
+        let x = u16::try_from(wx - self.ox)
+            .ok()
+            .filter(|x| *x < self.cols)?;
+        let y = u16::try_from(wy - self.oy)
+            .ok()
+            .filter(|y| *y < self.rows)?;
         Some(usize::from(y) * usize::from(self.cols) + usize::from(x))
     }
 
@@ -638,7 +653,7 @@ impl Scene {
             let SceneCell::Border(b) = cell else {
                 continue;
             };
-            let (wx, wy) = (int_usize(i % cols), int_usize(i / cols));
+            let (wx, wy) = (self.ox + int_usize(i % cols), self.oy + int_usize(i / cols));
             match dir {
                 Dir::LeftRight if b.left.is_some() && b.right.is_some() => {
                     b.style = if wy <= half_y { b.left } else { b.right };
@@ -725,6 +740,8 @@ mod tests {
         let win = WindowView {
             sx: 9,
             sy: 5,
+            ox: 0,
+            oy: 0,
             panes: vec![
                 pane(0, 4, 5, 0, 0),
                 pane(1, 4, 2, 5, 0),
@@ -754,6 +771,45 @@ mod tests {
         assert_eq!(b.style_pane(Some(PaneId(2))), Some(PaneId(2)));
     }
 
+    /// `redraw_window_to_scene` with a view offset: the scene is the
+    /// window from (`ox`, `oy`), with the window's right and bottom edge
+    /// borders and the cells past them outside; pane cells keep their pane
+    /// coordinates, and the divider's colour halves are by window row.
+    #[test]
+    fn a_scene_shows_the_window_from_its_offset() {
+        let win = WindowView {
+            sx: 9,
+            sy: 5,
+            ox: 3,
+            oy: 2,
+            panes: vec![pane(0, 4, 5, 0, 0), pane(1, 4, 5, 5, 0)],
+            indicators: Indicators::Colour,
+            two_pane: Some(Dir::LeftRight),
+        };
+        let scene = Scene::build(&win, 8, 4);
+        assert_eq!(
+            text(&scene, None),
+            ["0│1111│#", "0│1111│#", "0│1111│#", "─┴────┘#"]
+        );
+        assert_eq!(
+            scene.get(0, 0),
+            &SceneCell::Pane {
+                pane: PaneId(0),
+                px: 3,
+                py: 2,
+            }
+        );
+        let owner = |y| match scene.get(1, y) {
+            SceneCell::Border(b) => b.style_pane(None),
+            _ => None,
+        };
+        // Window rows 2, 3, 4 against half 5 / 2 = 2.
+        assert_eq!(
+            [owner(0), owner(1), owner(2)],
+            [Some(PaneId(0)), Some(PaneId(1)), Some(PaneId(1))]
+        );
+    }
+
     /// `redraw_mark_two_pane_colours`: the divider's top half takes the
     /// left pane's style, the bottom half the right pane's (`wy <= sy/2`).
     #[test]
@@ -761,6 +817,8 @@ mod tests {
         let win = WindowView {
             sx: 5,
             sy: 4,
+            ox: 0,
+            oy: 0,
             panes: vec![pane(0, 2, 4, 0, 0), pane(1, 2, 4, 3, 0)],
             indicators: Indicators::Colour,
             two_pane: Some(Dir::LeftRight),
@@ -792,6 +850,8 @@ mod tests {
         let win = WindowView {
             sx: 9,
             sy: 4,
+            ox: 0,
+            oy: 0,
             panes: vec![a, b],
             indicators: Indicators::Off,
             two_pane: Some(Dir::LeftRight),

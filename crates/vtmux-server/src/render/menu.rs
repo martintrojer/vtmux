@@ -105,9 +105,10 @@ pub fn rows(menu: &Menu, styles: &MenuStyles) -> Vec<Vec<styled::Cell>> {
     out
 }
 
-/// Draw `menu` over `window`, the scene of a window of `wsx` x `wsy`: each row as
-/// `tty_draw_line` writes it (no defaults, so runs of plain spaces are
-/// cleared), clipped as `redraw_window_to_scene` clips.
+/// Draw `menu` over `window`, the scene of a window of `wsx` x `wsy` seen
+/// from window cell (`ox`, `oy`): each row as `tty_draw_line` writes it
+/// (no defaults, so runs of plain spaces are cleared), clipped as
+/// `redraw_window_to_scene` clips.
 pub fn draw(
     menu: &Menu,
     styles: &MenuStyles,
@@ -115,29 +116,39 @@ pub fn draw(
     clear: Clear,
     window: &mut Snapshot,
     (wsx, wsy): (u32, u32),
+    (ox, oy): (u32, u32),
 ) {
     let cols = usize::from(window.cols);
+    let index = |n: u32| usize::try_from(n).unwrap_or(usize::MAX);
+    // Menu columns left of the view, and the scene column of the first
+    // drawn one.
+    let skip = index(ox.saturating_sub(menu.px));
+    let x0 = index(menu.px.saturating_sub(ox));
+    // The last menu column inside the window (inclusive, as tmux compares).
+    let last = index(wsx.saturating_sub(menu.px));
     for (py, row) in (0u32..).zip(rows(menu, styles)) {
         let wy = menu.py + py;
         if wy > wsy {
             break;
         }
-        let Some(y) = usize::try_from(wy)
-            .ok()
-            .filter(|y| *y < usize::from(window.rows))
-        else {
-            break;
+        let Some(y) = wy.checked_sub(oy) else {
+            continue;
         };
-        // The visible part of the row: window columns up to the window's
-        // width (inclusive, as tmux compares), inside the scene.
-        let x0 = usize::try_from(menu.px).unwrap_or(usize::MAX);
-        let last = usize::try_from(wsx.saturating_sub(menu.px)).unwrap_or(usize::MAX);
-        let n = row.len().min(last + 1).min(cols.saturating_sub(x0));
+        let y = index(y);
+        if y >= usize::from(window.rows) {
+            break;
+        }
+        let end = row.len().min(last.saturating_add(1));
+        if skip >= end {
+            continue;
+        }
+        let n = (end - skip).min(cols.saturating_sub(x0));
         if n == 0 {
             continue;
         }
-        let mut cells: Vec<Cell> = row[..n].iter().map(|c| theme.cell(c)).collect();
-        let bgs: Vec<Colour> = row[..n].iter().map(|c| c.style.bg).collect();
+        let drawn = &row[skip..skip + n];
+        let mut cells: Vec<Cell> = drawn.iter().map(|c| theme.cell(c)).collect();
+        let bgs: Vec<Colour> = drawn.iter().map(|c| c.style.bg).collect();
         draw_line_by(&mut cells, &bgs, Colour::Default, clear, false);
         let at = y * cols + x0;
         window.cells[at..at + n].clone_from_slice(&cells);

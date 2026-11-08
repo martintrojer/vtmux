@@ -161,7 +161,7 @@ pub(crate) struct Client {
     /// Mouse drag, click and outer-mode state (`c->tty.mouse_*`).
     pub(crate) mouse: crate::mouse::ClientMouse,
     pub(crate) decoder: crate::input::Decoder,
-    caps: Option<crate::render::Caps>,
+    pub(crate) caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
     /// capabilities after `terminal-features` and `terminal-overrides`.
     pub(crate) term: Option<std::rc::Rc<vtmux_core::term_features::Term>>,
@@ -208,6 +208,12 @@ pub(crate) struct Client {
     /// Between connections across a live upgrade (`upgrade.rs`,
     /// decision 21): drawn nothing until it re-attaches.
     pub(crate) reattach: Option<upgrade::Reattach>,
+    /// The part of its current window the client shows (`tty->oox` ...,
+    /// [`crate::view`]).
+    pub(crate) view: crate::view::View,
+    /// `c->pan_window`, `pan_ox`, `pan_oy`: a view panned by
+    /// `refresh-client`.
+    pub(crate) pan: Option<crate::view::Pan>,
 }
 
 impl Client {
@@ -277,6 +283,8 @@ impl Client {
             window_cache: crate::render::WindowCache::default(),
             passthrough: Vec::new(),
             reattach: None,
+            view: crate::view::View::default(),
+            pan: None,
         }
     }
 }
@@ -2008,6 +2016,8 @@ impl Server {
         }
         self.update_focus(self.model.current_of(s).map(|(_, w, _)| w));
         self.session_attached_alerts(s);
+        // server_client_set_session (server-client.c:473).
+        self.update_view(id);
         // server_client_set_session: status_timer_start,
         // client-session-changed, then server_redraw_client.
         self.status_timer_start(id);
@@ -2831,6 +2841,7 @@ impl Server {
         // The rows each pane wrote under synchronized output that ended,
         // drawn whole for every client ([`Self::force_sync_flush`]).
         let mut flushed: BTreeMap<PaneId, Vec<bool>> = BTreeMap::new();
+        self.update_views(attached.iter().map(|&(id, _)| id));
         for (id, s) in attached {
             if self.render_skips(id, s) {
                 continue;
@@ -3336,7 +3347,10 @@ impl Server {
     ) -> bool {
         let source = self.render_source();
         let cache = self.clients.get(&id).map(|c| &c.window_cache);
-        let Some((scene, mut draw)) = source.window(s, screen.cols, rows, caps, Some(jobs), cache)
+        let view = self.clients.get(&id).map(|c| c.view).unwrap_or_default();
+        let origin = (view.ox, view.oy);
+        let Some((scene, mut draw)) =
+            source.window(s, screen.cols, rows, origin, caps, Some(jobs), cache)
         else {
             // Nothing to draw: the rows are blank, as from a fresh buffer.
             crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
@@ -3364,7 +3378,8 @@ impl Server {
                 rows,
             )
         });
-        let cursor = crate::render::window::cursor_of(&draw, &self.model, screen.cols, rows);
+        let cursor =
+            crate::render::window::cursor_of(&draw, &self.model, (screen.cols, rows), origin);
         if repeat
             && composed == Some(false)
             && cache
@@ -3416,8 +3431,8 @@ impl Server {
                 }
             }
         }
-        self.draw_pane_prompts(s, &source, &theme, caps, &mut window);
-        self.draw_menu(s, &source, &theme, caps, &mut window);
+        self.draw_pane_prompts(s, &source, &theme, caps, &mut window, origin);
+        self.draw_menu(s, &source, &theme, caps, &mut window, origin);
         let at = usize::from(y) * cols;
         // A swap, not a copy: the window buffer is blanked before its next
         // use anyway.
@@ -3501,6 +3516,7 @@ impl Server {
         theme: &crate::render::compose::Theme,
         caps: crate::render::Caps,
         window: &mut vtmux_vt::Snapshot,
+        (ox, oy): (u32, u32),
     ) {
         let Some((_, w, _)) = self.model.current_of(s) else {
             return;
@@ -3519,11 +3535,15 @@ impl Server {
             caps.clear(),
             window,
             (win.sx(), win.sy()),
+            (ox, oy),
         );
+        // server_client_reset_state (server-client.c:2224-2233): in the
+        // view, else hidden where it was.
         let (cx, cy) = menu.cursor();
-        window.cursor = u16::try_from(cx)
-            .ok()
-            .zip(u16::try_from(cy).ok())
+        window.cursor = cx
+            .checked_sub(ox)
+            .zip(cy.checked_sub(oy))
+            .and_then(|(x, y)| u16::try_from(x).ok().zip(u16::try_from(y).ok()))
             .filter(|&(x, y)| x < window.cols && y < window.rows);
         window.cursor_visible = false;
     }
@@ -3540,6 +3560,7 @@ impl Server {
         theme: &crate::render::compose::Theme,
         caps: crate::render::Caps,
         window: &mut vtmux_vt::Snapshot,
+        (ox, oy): (u32, u32),
     ) {
         let Some((_, w, active)) = self.model.current_of(s) else {
             return;
@@ -3561,12 +3582,21 @@ impl Server {
             if !win.is_visible(p) || sx == 0 || sy == 0 {
                 continue;
             }
-            let wy = pane.rect.yoff + if top { 0 } else { int(sy) - 1 };
-            let xoff = pane.rect.xoff;
+            // In view coordinates (redraw_draw_pane_prompt): a prompt
+            // row outside the view is not drawn, and the active pane's
+            // cursor is hidden (server_client_prompt_cursor).
+            let wy = pane.rect.yoff + if top { 0 } else { int(sy) - 1 } - int(oy);
+            let xoff = pane.rect.xoff - int(ox);
             let (Ok(wy), Ok(width)) = (usize::try_from(wy), usize::try_from(sx)) else {
+                if p == active {
+                    window.cursor_visible = false;
+                }
                 continue;
             };
             if wy >= usize::from(window.rows) {
+                if p == active {
+                    window.cursor_visible = false;
+                }
                 continue;
             }
             let (row, cx) = crate::render::status::pane_prompt_row(source, tree, prompt, width);
@@ -3575,6 +3605,9 @@ impl Server {
             let skip = usize::try_from(-xoff).unwrap_or(0);
             let px = usize::try_from(xoff).unwrap_or(0);
             if px >= cols || skip >= width {
+                if p == active {
+                    window.cursor_visible = false;
+                }
                 continue;
             }
             let n = (width - skip).min(cols - px);
@@ -3886,6 +3919,7 @@ impl Server {
                 .filter(|_| !c.dead && !c.closing && !c.suspended)
                 .map(std::rc::Rc::clone),
             environ: std::rc::Rc::clone(&c.environ),
+            view: c.view,
         }
     }
 

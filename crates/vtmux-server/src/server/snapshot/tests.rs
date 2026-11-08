@@ -1089,6 +1089,28 @@ fn a_clients_terminal_title_is_kept() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A client's view panned by `refresh-client` (`c->pan_window`) comes
+/// back with the client.
+#[test]
+fn a_clients_pan_is_kept() {
+    let dir = temp_dir("pan");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let plain = a.to_snapshot(snap::Meta::default());
+    assert!(plain.clients.iter().all(|c| c.pan.is_none()));
+    let pan = crate::view::Pan {
+        window: vtmux_core::ids::WindowId(0),
+        ox: 3,
+        oy: 4,
+    };
+    a.clients.get_mut(&client).unwrap().pan = Some(pan);
+    let b = rebuild(&a, &dir, "b");
+    assert_eq!(b.clients[&client].pan, Some(pan));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A downgrade to the build before works with an ordinary attached client
 /// (decision 6 refuses a newer format, not a feature a fix adds): nothing
 /// such a client produces, its terminal's answered queries and a title set

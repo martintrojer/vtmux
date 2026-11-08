@@ -1,0 +1,50 @@
+name = "window_pan"
+size = [40, 12]
+steps = [
+  # A 60x20 window (window-size manual) on a 40x12 client: 40x11 under the
+  # status line. Two panes, the right one active with its cursor on its
+  # last row (tty.c tty_window_offset1 follows it), the default
+  # status-right's offset part on the status line.
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "20", "sh", "-c", "i=0; while [ $i -lt 20 ]; do printf 'A%02d abcdefghijklmnopqrstuvwxyz\\n' $i; i=$((i+1)); done; exec cat"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "status-right", "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}],-}"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "i=0; while [ $i -lt 19 ]; do printf 'B%02d 0123456789ABCDEFGHIJKLMNOPQRS\\n' $i; i=$((i+1)); done; tmux wait-for -S ready; exec cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { wait_for = "ready" },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # cmd-refresh-client.c: a pan starts from the view shown.
+  { run = ["refresh-client", "-U", "3"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["refresh-client", "-R", "100"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["refresh-client", "-L", "5"] },
+  { settle = { react = true } },
+  { run = ["refresh-client", "-D"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # A click at screen column 12 is window column 27 (server-client.c
+  # server_client_check_mouse adds the offset): the left pane.
+  { keys = "\u001b[<0;13;4M\u001b[<0;13;4m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_index}"] },
+  { run = ["display", "-p", "#{window_bigger}:#{window_offset_x}:#{window_offset_y}"] },
+  { run = ["refresh-client", "-c"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["refresh-client", "-D", "0"] },
+  { run = ["refresh-client", "-D", "x"] },
+  # The client grows past the window: no offset, and the pan is gone.
+  { run = ["refresh-client", "-U", "100"] },
+  { settle = { react = true } },
+  { resize = [61, 22] },
+  { settle = { react = true } },
+  { screen = {} },
+  { resize = [40, 12] },
+  { settle = { react = true } },
+  { screen = {} },
+]

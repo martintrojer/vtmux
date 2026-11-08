@@ -809,6 +809,20 @@ record! {
         /// a pane's passthrough). A reader may drop it (not required,
         /// [`crate::TERMINAL_TITLE_FEATURE`]).
         45 => opt terminal_title: Option<String>,
+        /// The view panned by `refresh-client` (`c->pan_window`), while
+        /// it holds. Like [`Self::terminal_title`], only how the window
+        /// is shown: not required.
+        46 => opt pan: Option<ClientPan>,
+    }
+}
+
+record! {
+    /// A client's panned view: from column `ox`, row `oy` of window
+    /// `window`.
+    pub struct ClientPan {
+        1 => one window: u32,
+        2 => one ox: u32,
+        3 => one oy: u32,
     }
 }
 
@@ -1471,6 +1485,8 @@ pub(crate) mod tests {
             queries: None,
             // Added within v1 too (a_clients_terminal_title_round_trips).
             terminal_title: None,
+            // Added within v1 too (a_clients_pan_round_trips).
+            pan: None,
         }
     }
 

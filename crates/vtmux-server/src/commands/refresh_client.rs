@@ -2,10 +2,10 @@
 //! redraws, `-f`/`-F` client flags, `-A` pane output state, `-C` control
 //! client sizes and `-l` the clipboard query.
 //!
-//! `-B` control subscriptions are [`crate::control_subs`]. `-c` (stop
-//! panning) only redraws: vtmux never pans. Not here yet: `-D -L -R -U`
-//! (panning a window larger than the terminal: the compositor has no view
-//! offset) and `-r` (colour reports for panes; accepted and ignored).
+//! `-B` control subscriptions are [`crate::control_subs`]; `-c`, `-D`,
+//! `-L`, `-R` and `-U` pan a window larger than the terminal
+//! ([`crate::view`]). Not here yet: `-r` (colour reports for panes;
+//! accepted and ignored).
 
 use vtmux_core::cmd::{Args, CmdError, strtonum};
 use vtmux_core::error::EdgeError;
@@ -14,6 +14,7 @@ use vtmux_core::ids::{PaneId, WindowId};
 use super::Item;
 use crate::resize::{WINDOW_MAXIMUM, WINDOW_MINIMUM};
 use crate::server::{ClientId, Server};
+use crate::view::PanBy;
 
 pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), CmdError> {
     // CMD_CLIENT_TFLAG: the `-t` client, found before anything else.
@@ -21,21 +22,31 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
 
     if ['c', 'L', 'R', 'U', 'D'].iter().any(|&f| args.flag(f)) {
         // The adjustment is checked first (cmd-refresh-client.c:159-169).
-        if let Some(adjust) = args.positional(0) {
-            strtonum(adjust, 1, i64::from(i32::MAX)).map_err(|cause| EdgeError::BadNumber {
-                what: "adjustment",
-                cause,
-            })?;
+        let adjust = match args.positional(0) {
+            None => 1,
+            Some(adjust) => {
+                strtonum(adjust, 1, i64::from(i32::MAX)).map_err(|cause| EdgeError::BadNumber {
+                    what: "adjustment",
+                    cause,
+                })?
+            }
+        };
+        let adjust = u32::try_from(adjust).unwrap_or(u32::MAX);
+        // -c goes back to following the cursor (`tc->pan_window = NULL`);
+        // otherwise the first of -L, -R, -U, -D pans. Then
+        // tty_update_client_offset and server_redraw_client.
+        let by = [
+            ('L', PanBy::Left as fn(u32) -> PanBy),
+            ('R', PanBy::Right),
+            ('U', PanBy::Up),
+            ('D', PanBy::Down),
+        ]
+        .into_iter()
+        .find(|&(f, _)| args.flag(f));
+        match by {
+            Some((_, by)) if !args.flag('c') => server.pan_view(tc, by(adjust)),
+            _ => server.stop_pan(tc),
         }
-        if !args.flag('c') {
-            let flag = ['L', 'R', 'U', 'D']
-                .into_iter()
-                .find(|&f| args.flag(f))
-                .unwrap_or('L');
-            return Err(EdgeError::NotImplemented(format!("refresh-client -{flag}")).into());
-        }
-        // -c: back to following the cursor (`tc->pan_window = NULL`),
-        // which is all vtmux does, then server_redraw_client.
         server.redraw_client(tc);
         return Ok(());
     }

@@ -45,6 +45,7 @@ pub mod snapshot_term;
 pub mod sys;
 pub mod target;
 pub mod term_queries;
+pub mod view;
 pub mod wait;
 
 pub use server::{ClientId, Server, ServerConfig, run_server};

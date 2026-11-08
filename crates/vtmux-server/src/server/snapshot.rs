@@ -1322,6 +1322,11 @@ impl Server {
             suspended: c.suspended,
             title: c.title.clone(),
             terminal_title: c.terminal_title.clone(),
+            pan: c.pan.map(|p| snap::ClientPan {
+                window: p.window.0,
+                ox: p.ox,
+                oy: p.oy,
+            }),
             control: c.control.as_ref().map(|cs| {
                 let mut out = control_out(cs, &self.control_streams, level, now);
                 out.level = level;
@@ -1873,6 +1878,11 @@ impl Server {
         c.suspended = x.suspended;
         c.title.clone_from(&x.title);
         c.terminal_title.clone_from(&x.terminal_title);
+        c.pan = x.pan.as_ref().map(|p| crate::view::Pan {
+            window: WindowId(p.window),
+            ox: p.ox,
+            oy: p.oy,
+        });
         let mut palette = crate::term_queries::Reported::default().palette;
         for e in &x.palette {
             if let Some(slot) = palette.get_mut(e.index as usize) {

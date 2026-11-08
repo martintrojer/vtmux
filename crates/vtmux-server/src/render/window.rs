@@ -240,15 +240,41 @@ impl Source<'_> {
         theme
     }
 
+    /// The cursor of `pane`'s screen as drawn (`wp->screen`: its mode's,
+    /// else the program's) in session `s`, when that screen shows it
+    /// (`MODE_CURSOR`). A plain pane's is where the program left it, as
+    /// `#{cursor_x}` reports it, whether or not its output is held.
+    pub(crate) fn screen_cursor(
+        &self,
+        pane: &crate::model::Pane,
+        s: SessionId,
+        caps: Caps,
+    ) -> Option<(u16, u16)> {
+        if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
+            let shown = pane.term.screen().snapshot().cursor_visible;
+            return shown.then(|| pane.term.cursor());
+        }
+        let found = Found {
+            pane: Some(pane.id),
+            ..Found::from_session(self.model, s)
+        };
+        let ctx = self.ctx(found, caps);
+        let (screen, _, _) = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
+        screen.cursor.filter(|_| screen.cursor_visible)
+    }
+
     /// The scene and drawing data for session `s`'s current window on a
-    /// `cols` x `rows` area.
+    /// `cols` x `rows` area, seen from window cell `origin` (the client's
+    /// [`crate::view::View`]).
     #[must_use]
     #[allow(clippy::too_many_lines)] // one pass over the window's panes
+    #[expect(clippy::too_many_arguments, reason = "the window's drawing inputs")]
     pub fn window(
         &self,
         s: SessionId,
         cols: u16,
         rows: u16,
+        origin: (u32, u32),
         caps: Caps,
         jobs: Option<&JobHandle>,
         cache: Option<&super::WindowCache>,
@@ -335,6 +361,8 @@ impl Source<'_> {
         let view = WindowView {
             sx: window.sx(),
             sy: window.sy(),
+            ox: origin.0,
+            oy: origin.1,
             panes,
             indicators: Indicators::from_choice(
                 self.model.number_option(wtree, "pane-border-indicators"),
@@ -778,13 +806,19 @@ fn two_pane(model: &Model, w: WindowId) -> Option<Dir> {
 
 /// Copy the active pane's cursor onto the screen.
 pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
-    (screen.cursor, screen.cursor_visible) = cursor_of(draw, model, screen.cols, rows);
+    (screen.cursor, screen.cursor_visible) = cursor_of(draw, model, (screen.cols, rows), (0, 0));
 }
 
-/// Where [`cursor`] puts the cursor on a `cols` x `rows` window, and
-/// whether it shows.
+/// Where [`cursor`] puts the cursor on a `cols` x `rows` area showing the
+/// window from cell `origin` ([`crate::view::View`]), and whether it
+/// shows.
 #[must_use]
-pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u16, u16)>, bool) {
+pub fn cursor_of(
+    draw: &Draw,
+    model: &Model,
+    (cols, rows): (u16, u16),
+    origin: (u32, u32),
+) -> (Option<(u16, u16)>, bool) {
     let Some(p) = draw.active else {
         return (None, false);
     };
@@ -794,11 +828,11 @@ pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u
     let Some((cx, cy)) = d.content.cursor else {
         return (None, false);
     };
-    let x = pane.rect.xoff + i32::from(cx);
-    let y = pane.rect.yoff + i32::from(cy);
+    let x = i64::from(pane.rect.xoff) + i64::from(cx) - i64::from(origin.0);
+    let y = i64::from(pane.rect.yoff) + i64::from(cy) - i64::from(origin.1);
     // server_client_reset_state (server-client.c:2243-2276): a cursor off
-    // the window (a floating pane moved past its left or top edge) is
-    // hidden at 0,0.
+    // the view (a floating pane moved past the window's left or top edge,
+    // or the window panned past it) is hidden at 0,0.
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
         return (Some((0, 0)), false);
     };
@@ -808,7 +842,8 @@ pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u
     if x < cols && y < rows {
         (Some((x, y)), d.content.cursor_visible)
     } else {
-        (None, false)
+        // Past the view's right or bottom edge: hidden at 0,0 too.
+        (Some((0, 0)), false)
     }
 }
 
