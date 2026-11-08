@@ -1,0 +1,24 @@
+# D-014: a terminal that gives no pixel size is asked for it (CSI 18 t and
+# CSI 14 t, tty.c tty_resize); its CSI 4 ; height ; width t reply sets the
+# client's cell size (tty-keys.c tty_keys_winsz). A resize without pixels
+# clears it and asks again. The typed `x` and `y` are echoed by the pane
+# only after the reply ahead of them is taken, so the settle waits for it.
+name = "client_cell_pixels"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { keys = "\u001b[8;24;80t\u001b[4;480;800tx" },
+  { settle = {} },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { resize = [70, 24] },
+  { settle = { react = true } },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { keys = "\u001b[4;480;800ty" },
+  { settle = {} },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { screen = {} },
+]

@@ -374,6 +374,10 @@ impl Server {
         if let Some(rules) = rules {
             p.rules = rules;
         }
+        // popup.c:551: any -b is a tty_resize.
+        if lines.is_some() {
+            self.tty_resize_again(c);
+        }
         self.redraw_client(c);
     }
 

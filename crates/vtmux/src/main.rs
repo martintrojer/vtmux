@@ -117,6 +117,18 @@ fn tty_info(features: &[String]) -> Option<TtyInfo> {
     })
 }
 
+/// The terminal's size in pixels (`ws_xpixel`, `ws_ypixel`), 0 when it
+/// doesn't say or there is no terminal: tmux reads it at identify (tty.c
+/// `tty_resize`).
+fn tty_pixels() -> (u32, u32) {
+    let stdin = io::stdin();
+    if !rustix::termios::isatty(&stdin) {
+        return (0, 0);
+    }
+    rustix::termios::tcgetwinsize(&stdin)
+        .map_or((0, 0), |w| (u32::from(w.ws_xpixel), u32::from(w.ws_ypixel)))
+}
+
 /// The environment as UTF-8 pairs; others are skipped.
 fn client_env() -> Vec<(String, String)> {
     std::env::vars_os()
@@ -345,6 +357,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         ext: HelloExt {
             follows_upgrade: cli.control == ControlMode::None,
             reattach: None,
+            pixels: tty_pixels(),
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
@@ -412,6 +425,7 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
         ext: HelloExt {
             follows_upgrade: true,
             reattach: Some(token.to_owned()),
+            pixels: tty_pixels(),
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {

@@ -55,8 +55,10 @@
 //!   after `ext` are still an error. The fields so far ([`HelloExt`]), all
 //!   of protocol 9: `upgrade` u8 (bit 0: the client follows an
 //!   [`ServerMsg::UpgradeNotice`]; the other bits 0), then `reattach`
-//!   option of string (the notice's token). A `Hello` whose fields are all
-//!   unset has an empty `ext`, as before them.
+//!   option of string (the notice's token); then, from the build that
+//!   sends the terminal size queries, `pixels`: the terminal's `ws_xpixel`
+//!   and `ws_ypixel`, u32 each, written only when not both 0. A `Hello`
+//!   whose fields are all unset has an empty `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
 //!   path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own, with the
@@ -203,6 +205,10 @@ pub struct HelloExt {
     /// client's record (decision 21). The rest of the `Hello` is the new
     /// process's, which keeps its pid and terminal.
     pub reattach: Option<String>,
+    /// The terminal's size in pixels (`ws_xpixel`, `ws_ypixel`), 0 when
+    /// it doesn't say, as tmux reads it with `TIOCGWINSZ` (tty.c
+    /// `tty_resize`).
+    pub pixels: (u32, u32),
 }
 
 impl HelloExt {
@@ -211,6 +217,7 @@ impl HelloExt {
             0
         } else {
             1 + option_len(self.reattach.as_ref(), |t| 4 + t.len())
+                + if self.pixels == (0, 0) { 0 } else { 8 }
         }
     }
 
@@ -222,6 +229,10 @@ impl HelloExt {
         put_option(out, self.reattach.as_ref(), |o, t| {
             put_bytes(o, t.as_bytes());
         });
+        if self.pixels != (0, 0) {
+            put_u32(out, self.pixels.0);
+            put_u32(out, self.pixels.1);
+        }
     }
 
     /// The fields this build knows from `ext`; what follows them is a
@@ -241,9 +252,15 @@ impl HelloExt {
         if reattach.as_deref().is_some_and(|t| !is_upgrade_token(t)) {
             return Err(ProtocolError::Malformed("bad upgrade token"));
         }
+        let pixels = if r.buf.is_empty() {
+            (0, 0)
+        } else {
+            (r.u32()?, r.u32()?)
+        };
         Ok(Self {
             follows_upgrade,
             reattach,
+            pixels,
         })
     }
 }
@@ -303,9 +320,13 @@ pub enum ClientMsg {
     Hello(Hello),
     /// Terminal input bytes from an attached client.
     Input(Vec<u8>),
+    /// The terminal's new size, and its size in pixels (`ws_xpixel`,
+    /// `ws_ypixel`; 0 when it doesn't say).
     Resize {
         cols: u32,
         rows: u32,
+        xpixel: u32,
+        ypixel: u32,
     },
     /// Bytes from the client's stdin (command stdin, control mode).
     Stdin(Vec<u8>),
@@ -812,7 +833,8 @@ impl Message for ClientMsg {
         1 + match self {
             Self::Hello(h) => h.len(),
             Self::Input(b) | Self::Stdin(b) | Self::ReadData(b) => 4 + b.len(),
-            Self::Resize { .. } | Self::FrameAck { .. } => 8,
+            Self::Resize { .. } => 16,
+            Self::FrameAck { .. } => 8,
             Self::FileDone { .. } => 4,
             Self::StdinEof | Self::Detach | Self::Wakeup | Self::Unlock => 0,
             Self::UpgradeRequest { binary } => 4 + binary.as_os_str().len(),
@@ -829,10 +851,17 @@ impl Message for ClientMsg {
                 out.push(1);
                 put_bytes(out, b);
             }
-            Self::Resize { cols, rows } => {
+            Self::Resize {
+                cols,
+                rows,
+                xpixel,
+                ypixel,
+            } => {
                 out.push(2);
                 put_u32(out, *cols);
                 put_u32(out, *rows);
+                put_u32(out, *xpixel);
+                put_u32(out, *ypixel);
             }
             Self::Stdin(b) => {
                 out.push(3);
@@ -868,6 +897,8 @@ impl Message for ClientMsg {
             2 => Self::Resize {
                 cols: r.u32()?,
                 rows: r.u32()?,
+                xpixel: r.u32()?,
+                ypixel: r.u32()?,
             },
             3 => Self::Stdin(r.bytes()?),
             4 => Self::StdinEof,
@@ -1064,6 +1095,8 @@ mod tests {
             ClientMsg::Resize {
                 cols: 200,
                 rows: 50,
+                xpixel: 1600,
+                ypixel: 1000,
             },
             ClientMsg::Stdin(b"display -p hi\n".to_vec()),
             ClientMsg::StdinEof,
@@ -1596,7 +1629,12 @@ mod tests {
         let ClientMsg::Hello(mut want) = frozen_client_goldens()[0].0.clone() else {
             unreachable!()
         };
-        let frame = hello_golden_with(9, 0, b"\x00\x00later fields", b"");
+        let frame = hello_golden_with(
+            9,
+            0,
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00later fields",
+            b"",
+        );
         assert_eq!(
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want.clone()), frame.len())
@@ -1609,8 +1647,10 @@ mod tests {
         want.ext = HelloExt {
             follows_upgrade: true,
             reattach: Some("a1B2c3D4e5F6g7H8".into()),
+            pixels: (800, 480),
         };
         let mut ext = b"\x03\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
+        ext.extend_from_slice(b"\x20\x03\x00\x00\xe0\x01\x00\x00");
         ext.extend_from_slice(b"later");
         let frame = hello_golden_with(9, 0, &ext, b"");
         assert_eq!(
@@ -1644,6 +1684,7 @@ mod tests {
                 HelloExt {
                     follows_upgrade: true,
                     reattach: None,
+                    pixels: (0, 0),
                 },
                 b"\x01\x00",
             ),
@@ -1651,8 +1692,17 @@ mod tests {
                 HelloExt {
                     follows_upgrade: true,
                     reattach: Some("0123456789abcdef".into()),
+                    pixels: (0, 0),
                 },
                 b"\x01\x01\x10\x00\x00\x000123456789abcdef",
+            ),
+            (
+                HelloExt {
+                    follows_upgrade: false,
+                    reattach: None,
+                    pixels: (800, 480),
+                },
+                b"\x00\x00\x20\x03\x00\x00\xe0\x01\x00\x00",
             ),
         ] {
             let m = with(ext);

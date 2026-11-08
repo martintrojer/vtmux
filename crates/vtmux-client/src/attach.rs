@@ -569,7 +569,17 @@ fn size() -> io::Result<(u32, u32)> {
     Ok((u32::from(ws.ws_col), u32::from(ws.ws_row)))
 }
 
+/// `MSG_RESIZE`: the server reads the size itself (tty.c `tty_resize`),
+/// pixels included; vtmux's server has no terminal, so the client sends it.
 fn send_size(stream: &mut UnixStream) -> io::Result<()> {
-    let (cols, rows) = size()?;
-    send(stream, &ClientMsg::Resize { cols, rows })
+    let ws = rustix::termios::tcgetwinsize(io::stdin())?;
+    send(
+        stream,
+        &ClientMsg::Resize {
+            cols: u32::from(ws.ws_col),
+            rows: u32::from(ws.ws_row),
+            xpixel: u32::from(ws.ws_xpixel),
+            ypixel: u32::from(ws.ws_ypixel),
+        },
+    )
 }

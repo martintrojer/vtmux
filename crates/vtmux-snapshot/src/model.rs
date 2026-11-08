@@ -762,6 +762,8 @@ record! {
         16 => one activity: u64,
         17 => one activity_secs: i64,
         18 => one size: (u32, u32),
+        /// A cell's width and height in pixels (`tty->xpixel`,
+        /// `tty->ypixel`), 0 while unknown.
         19 => one pixel_size: (u32, u32),
         /// Flags by the names `#{client_flags}` and `refresh-client -f`
         /// use (`read-only`, `ignore-size`, `active-pane`, ...).
@@ -862,6 +864,9 @@ record! {
         6 => opt colours_in_ms: Option<u64>,
         7 => one fg: bool,
         8 => one bg: bool,
+        /// `TTY_WINSIZEQUERY`: the size queries are out. Added within v1
+        /// (`a_clients_terminal_queries_round_trip`).
+        9 => one winsize: bool,
     }
 }
 

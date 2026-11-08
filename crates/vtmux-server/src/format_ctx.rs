@@ -74,6 +74,8 @@ pub struct ClientView {
     /// (`TTY_STARTED`: a terminal client, not control mode).
     pub width: u32,
     pub height: Option<u32>,
+    /// `c->tty.xpixel`/`ypixel`: a cell's size in pixels, 0 if unknown.
+    pub cell_pixels: (u32, u32),
     /// `c->term_name` (`unknown` when the client sent none).
     pub term_name: String,
     /// `c->ttyname`; `None` without a tty.
@@ -246,7 +248,7 @@ impl<'a> Ctx<'a> {
 
     /// The client variables (format.c `format_cb_client_*`, 1540-1830).
     /// `client_termfeatures` is the terminal-features work's; vtmux has
-    /// no pixel sizes (0, as tmux without them), discard count or theme yet.
+    /// no discard count or theme yet.
     fn client_value(&self, name: &str) -> Option<String> {
         let c = self.client.as_ref()?;
         let flag = |b: bool| u8::from(b).to_string();
@@ -264,9 +266,14 @@ impl<'a> Ctx<'a> {
             "window_offset_y" => c.view.bigger.then(|| c.view.oy.to_string())?,
             "client_width" => c.width.to_string(),
             "client_height" => c.height?.to_string(),
-            "client_cell_width" | "client_cell_height" => {
+            // format_cb_client_cell_width/_height: once the terminal started.
+            "client_cell_width" => {
                 c.height?;
-                "0".to_owned()
+                c.cell_pixels.0.to_string()
+            }
+            "client_cell_height" => {
+                c.height?;
+                c.cell_pixels.1.to_string()
             }
             "client_termname" => c.term_name.clone(),
             "client_termtype" => c.termtype.clone(),

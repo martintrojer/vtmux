@@ -136,13 +136,13 @@ product reasons" category.
 - Also (review_bytes_args_2, reviewer-54, `/tmp/r54/n.sh`): names. tmux's `utf8_isvalid` decodes through `mbtowc`, so a window, session or buffer name containing `\364\220\200\200` (F4 90..F4 BF leads, U+110000..U+13FFFF) is accepted; vtmux rejects it as `invalid window/buffer/session name`. And surrogates: glibc decodes `\355\240\200` (U+D800, ED A0..ED BF leads) as one character for `regexec`/`fnmatch`, so `#{s/./Z/:@p}` on `a<ED A0 80>b` gives `ZZZ` in tmux and `Z<ED A0 80>Z` in vtmux; `m/r` and captures differ the same way.
 - Category: Deferred (only byte sequences that are not valid UTF-8 but that glibc decodes anyway; every valid UTF-8 sequence, including U+10FF80..U+10FFFF and U+FFFD, matches the reference, and so does every byte glibc rejects).
 
-### D-014: the partial-key delay doesn't wait on the terminal size query
+### D-014: window pixel sizes don't follow the clients' cell sizes
 
-- Test / assertion: none; reviewer-55's `/tmp/rev55/esc.py` (review_prompt_core_2).
-- tmux behaviour: when the outer terminal reports no pixel size (`ws_xpixel == 0`), `tty_resize` (tty.c:144-150) sends `ESC[18t ESC[14t` and sets `TTY_WINSIZEQUERY`; until a `4;h;w` reply arrives, `tty_keys_next` (tty-keys.c:1002-1008) keeps the 500 ms partial-key delay, so a lone ESC waits 500 ms indefinitely on terminals that never answer.
-- vtmux behaviour: vtmux doesn't send the size query, so after the first 5 s a lone ESC is taken after about 10 ms, as tmux does once the query is answered or when pixel sizes are known.
-- Evidence: with `ws_xpixel=0`, tmux redraws 501 ms after a lone ESC at t=3/8/17/27/42 s; vtmux 503 ms at t=3 s, then 12 ms from t=7.6 s. With pixel sizes set, both are about 10 ms after 5 s.
-- Category: Deferred (pixel-size queries come with image passthrough work; the visible effect is Escape responsiveness, in vtmux's favour).
+- Test / assertion: none. The client side matches tmux and is pinned by oracle `client_cell_pixels` and attach.rs `cell_pixel_size_from_the_terminal_or_its_reply`: a terminal that gives no pixel size (`ws_xpixel` or `ws_ypixel` under one per cell) is sent `ESC[18t ESC[14t` by `tty_resize` (tty.c:144-150, on every resize and popup `-b`, popup.c:551) and `TTY_WINSIZEQUERY` holds the 500 ms partial-key delay until its `ESC[4;h;wt` reply (tty-keys.c:1002-1008, `tty_keys_winsz`), indefinitely on a terminal that never answers; `#{client_cell_width}` and `#{client_cell_height}` come from the terminal's size or that reply.
+- tmux behaviour: a window's cell size in pixels (`w->xpixel`, `w->ypixel`; `#{window_cell_width}`, `#{window_cell_height}`) is the largest of the clients that size it, taken only when the window is resized (`clients_calculate_size`, resize.c:212-215; `default_window_size`, resize.c:300-301), 16x32 (`DEFAULT_XPIXEL`, `DEFAULT_YPIXEL`, window.c:575-578) when none gives one. A pane's terminal gets it times its size as `ws_xpixel`/`ws_ypixel` (spawn.c:451-452, `window_pane_send_resize`), and XTWINOPS `CSI 14/15/16 t` in a pane answer with it (input.c:2163-2180).
+- vtmux behaviour: `#{window_cell_width}` and `#{window_cell_height}` are empty, panes get `ws_xpixel = ws_ypixel = 0`, and XTWINOPS replies always use 16x32.
+- Evidence: `new -d -s a cat -; display -p -t a '[#{window_cell_width}x#{window_cell_height}]'`: tmux `[16x32]`, vtmux `[x]`.
+- Category: Deferred (comes with image passthrough work: it spans the window resize path, pane PTY sizes, the vt crate's XTWINOPS hook and the snapshot's window records).
 
 ### D-015: the cell after a pane prompt's input keeps message-style at some widths
 

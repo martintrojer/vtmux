@@ -31,6 +31,10 @@ pub enum Event {
     DeviceAttributes(Vec<u32>),
     DeviceAttributes2(u32),
     ExtendedDeviceAttributes(String),
+    /// The reply to the pixel size query (`CSI 4 ; height ; width t`,
+    /// `tty_keys_winsz`) while it is awaited: the text area's width and
+    /// height in pixels.
+    PixelSize(u32, u32),
     /// A mouse report (`KEYC_MOUSE` with its `struct mouse_event`), and the
     /// bytes it came in (`event->buf`, written to a pane while pasting).
     Mouse(MouseInput, Vec<u8>),
@@ -196,9 +200,12 @@ pub struct Queries {
     pub colours_until: Option<Instant>,
     pub fg: bool,
     pub bg: bool,
+    /// `TTY_WINSIZEQUERY`: the size queries are out.
+    pub winsize: bool,
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools, reason = "tmux's TTY_* flags")]
 pub struct Decoder {
     bytes: Vec<u8>,
     pending: Option<Instant>,
@@ -219,6 +226,10 @@ pub struct Decoder {
     /// instant (the start timer clears them), and which are answered.
     colours_until: Option<Instant>,
     colours_answered: (bool, bool),
+    /// `TTY_WINSIZEQUERY`: the size queries (`CSI 18 t`, `CSI 14 t`) went
+    /// to the terminal and its pixel size is not in yet. No timer gives up
+    /// on it (tty.c `tty_resize`, tty-keys.c `tty_keys_winsz`).
+    winsize_query: bool,
     /// A pane's request went to the terminal and is not answered yet
     /// (`!TAILQ_EMPTY(&c->input_requests)`); the server keeps it current.
     pub requests_out: bool,
@@ -239,6 +250,15 @@ impl Decoder {
         self.colours_until = Some(now + QUERY_TIMEOUT);
         self.colours_answered = (false, false);
     }
+    /// The size queries went to the terminal (tty.c `tty_resize`).
+    pub fn winsize_sent(&mut self) {
+        self.winsize_query = true;
+    }
+    /// Whether the size queries are out (`TTY_WINSIZEQUERY`).
+    #[must_use]
+    pub fn winsize_query(&self) -> bool {
+        self.winsize_query
+    }
     /// Where the queries stand.
     #[must_use]
     pub fn queries(&self) -> Queries {
@@ -251,6 +271,7 @@ impl Decoder {
             colours_until: self.colours_until,
             fg: self.colours_answered.0,
             bg: self.colours_answered.1,
+            winsize: self.winsize_query,
         }
     }
     /// The queries stand as `q` says (a client carried across an upgrade).
@@ -267,6 +288,7 @@ impl Decoder {
         .fold(0, |bits, (_, bit)| bits | bit);
         self.colours_until = q.colours_until;
         self.colours_answered = (q.fg, q.bg);
+        self.winsize_query = q.winsize;
     }
     /// When the start timer fires, while queries are unanswered.
     #[must_use]
@@ -296,6 +318,9 @@ impl Decoder {
         let waiting = self.queries_until.is_some_and(|until| start < until)
             || self.colours_until.is_some_and(|until| start < until)
             || self.requests_out
+            // tty-keys.c:1002-1008: TTY_WINSIZEQUERY, for as long as the
+            // terminal leaves it unanswered.
+            || self.winsize_query
             || (self.pasting && b"\x1b[201~".starts_with(&self.bytes) && self.bytes.len() < 6);
         Some(start + if waiting { REPLY_DELAY } else { ESCAPE_TIME })
     }
@@ -353,6 +378,13 @@ impl Decoder {
                 Event::ExtendedDeviceAttributes(_) => QUERY_XDA,
                 _ => 0,
             };
+            // tty_keys_winsz (tty-keys.c:686-688): a size report nobody
+            // asked for is no reply. vtmux swallows it all the same, as
+            // it does every unknown terminal report.
+            let event = match event {
+                Event::PixelSize(..) if !self.winsize_query => Event::Ignore,
+                other => other,
+            };
             // A reply to a query already answered (or given up on) is no
             // reply: each tty_keys_* parser returns -1 once its TTY_HAVE*
             // flag is set, no key matches, so Escape and the byte after it
@@ -386,6 +418,8 @@ impl Decoder {
                     }
                 }
                 Event::Paste(start) => self.pasting = start,
+                // tty-keys.c:733: the pixel size ends the query.
+                Event::PixelSize(..) => self.winsize_query = false,
                 Event::Colour(fg, _) => {
                     if fg {
                         self.colours_answered.0 = true;
@@ -587,6 +621,9 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
                         _ => {}
                     }
                 }
+                if final_byte == b't' {
+                    return Some((window_size(body), end + 1));
+                }
                 if final_byte == b'y' && body.starts_with("?2026;") {
                     return Some((
                         Event::Sync(matches!(body.as_bytes().get(6), Some(b'1' | b'2' | b'3'))),
@@ -620,6 +657,27 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
     };
     Some((event, n + 1))
 }
+/// `tty_keys_winsz` (tty-keys.c:676-737): `4 ; height ; width` is the
+/// text area in pixels. `8 ; rows ; columns` is taken too, but where tmux
+/// sets the terminal's size from it (`tty_set_size`, without fitting any
+/// window to it), vtmux keeps the size the client's terminal gave; the two
+/// agree. Anything else is no event.
+fn window_size(body: &str) -> Event {
+    // sscanf's `4;%u;%u`: the two numbers, whatever follows them.
+    let mut fields = body.split(';');
+    let (Some("4"), Some(h), Some(w)) = (fields.next(), fields.next(), fields.next()) else {
+        return Event::Ignore;
+    };
+    let number = |n: &str| {
+        (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| n.parse().unwrap_or(u32::MAX))
+    };
+    match (number(w), number(h)) {
+        (Some(w), Some(h)) => Event::PixelSize(w, h),
+        _ => Event::Ignore,
+    }
+}
+
 /// `tty_keys_device_attributes` and `tty_keys_device_attributes2`
 /// (tty-keys.c:1467-1670): the parameters of `CSI ? ... c` or `CSI > ...
 /// c`, each `strtoul`'d (0 if not all digits), at most 32.
@@ -1177,6 +1235,52 @@ mod tests {
         d.feed(b"\x1b[200~ab\x1b[20");
         assert_eq!(d.drain(now).len(), 3);
         assert_eq!(d.deadline(), Some(now + ms(500)));
+    }
+
+    /// D-014: while the size queries are out (`TTY_WINSIZEQUERY`, tty.c
+    /// `tty_resize`), a lone Escape waits 500 ms (tty-keys.c:1002-1008),
+    /// with no timer giving up on them; the pixel size reply ends it
+    /// (tty-keys.c `tty_keys_winsz`), the cell size reply does not.
+    #[test]
+    fn escape_waits_on_the_size_query_until_the_pixel_reply() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        // No startup query out: escape-time, but for the size query.
+        let mut d = Decoder::default();
+        d.winsize_sent();
+        let later = now + ms(60_000);
+        d.feed(b"\x1b");
+        assert_eq!(d.drain(later), Vec::new());
+        assert_eq!(d.deadline(), Some(later + ms(500)));
+        assert_eq!(d.drain(later + ms(499)), Vec::new());
+        assert_eq!(
+            d.drain(later + ms(500)),
+            vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+        // The reply split: it waits as a partial key, then is taken.
+        d.feed(b"\x1b[8;24;80t\x1b[4;4");
+        assert_eq!(d.drain(later), vec![Event::Ignore]);
+        assert!(d.winsize_query(), "the cell size reply leaves it out");
+        assert_eq!(d.deadline(), Some(later + ms(500)));
+        d.feed(b"80;800t\x1b");
+        assert_eq!(d.drain(later), vec![Event::PixelSize(800, 480)]);
+        assert!(!d.winsize_query());
+        assert_eq!(d.deadline(), Some(later + ms(10)));
+        assert!(!d.queries().winsize);
+        // Unasked for, a size reply is nothing (vtmux swallows it).
+        d.feed(b"[4;480;800t");
+        assert_eq!(d.drain(later), vec![Event::Ignore]);
+        // Not `4 ; number ; number`: nothing.
+        d.winsize_sent();
+        for bad in [&b"\x1b[4;480t"[..], b"\x1b[4;;800t", b"\x1b[5;480;800t"] {
+            d.feed(bad);
+            assert_eq!(d.drain(later), vec![Event::Ignore], "{bad:?}");
+            assert!(d.winsize_query());
+        }
+        // A live upgrade carries it.
+        let mut e = Decoder::default();
+        e.set_queries(d.queries());
+        assert!(e.winsize_query());
     }
 
     #[test]

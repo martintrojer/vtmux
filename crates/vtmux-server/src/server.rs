@@ -193,6 +193,9 @@ pub(crate) struct Client {
     pub(crate) clipboard_query: Option<Instant>,
     /// What its terminal reported: colours and theme.
     pub(crate) reported: crate::term_queries::Reported,
+    /// `tty->xpixel`, `tty->ypixel`: a cell's width and height in pixels,
+    /// 0 while unknown (`#{client_cell_width}`, `#{client_cell_height}`).
+    pub(crate) cell_pixels: (u32, u32),
     /// `c->title`: the last title written to the terminal, so an
     /// unchanged one is not written again.
     title: Option<String>,
@@ -268,6 +271,7 @@ impl Client {
             flags: crate::client_flags::ClientFlags::default(),
             clipboard_query: None,
             reported: crate::term_queries::Reported::default(),
+            cell_pixels: (0, 0),
             title: None,
             terminal_title: None,
             term_replies: Vec::new(),
@@ -1647,7 +1651,18 @@ impl Server {
                     self.fail_client(id, &e);
                 }
             }
-            ClientMsg::Resize { cols, rows } => self.resize_client(id, cols, rows),
+            ClientMsg::Resize {
+                cols,
+                rows,
+                xpixel,
+                ypixel,
+            } => {
+                // server-client.c:2716-2722: tty_resize, then the rest.
+                if !self.is_control(id) {
+                    self.tty_resize(id, cols, rows, (xpixel, ypixel));
+                }
+                self.resize_client(id, cols, rows);
+            }
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id, false),
@@ -1790,6 +1805,13 @@ impl Server {
         let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
             c.environ = hello.env.clone().into();
+            // server_client_dispatch_identify -> tty_resize (server-client.c:
+            // 3035): the pixel size from the terminal; no query yet, the
+            // terminal is not open (`tty->out == NULL`).
+            if let Some(tty) = &hello.tty {
+                c.cell_pixels =
+                    crate::term_queries::cell_pixels(tty.cols, tty.rows, hello.ext.pixels);
+            }
             c.hello = Some(hello);
         }
         // server-client.c:3042-3043.
@@ -2520,6 +2542,7 @@ impl Server {
                     self.handle_mouse_input(id, m, bytes, false);
                 }
                 crate::input::Event::Clipboard(..)
+                | crate::input::Event::PixelSize(..)
                 | crate::input::Event::Colour(..)
                 | crate::input::Event::Palette(..)
                 | crate::input::Event::Theme(_) => self.client_report(id, event),
@@ -3918,6 +3941,7 @@ impl Server {
                 80
             },
             height: started.then(|| tty.map_or(24, |t| t.rows)),
+            cell_pixels: c.cell_pixels,
             term_name,
             tty: tty.map(|t| t.name.clone()).filter(|n| !n.is_empty()),
             control: c.control.is_some(),

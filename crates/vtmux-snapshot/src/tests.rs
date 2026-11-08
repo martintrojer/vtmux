@@ -145,6 +145,7 @@ fn a_clients_terminal_queries_round_trip() {
         colours_in_ms: None,
         fg: true,
         bg: false,
+        winsize: true,
     });
     assert_eq!(decode(&encode(&s)).unwrap(), s);
     s.meta.requires = vec![TERM_QUERIES_FEATURE.into()];

@@ -1980,7 +1980,7 @@ impl Raw {
             flags: protocol::ClientFlags::default(),
             ext: protocol::HelloExt {
                 follows_upgrade: follows,
-                reattach: None,
+                ..Default::default()
             },
         };
         protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).unwrap();

@@ -22,6 +22,8 @@ struct World {
     sockets: tempfile::TempDir,
     /// `TERM` for the client.
     term: &'static str,
+    /// The client terminal's size in pixels (`ws_xpixel`, `ws_ypixel`).
+    pixels: (u16, u16),
 }
 impl World {
     fn new(bin: PathBuf) -> Self {
@@ -42,6 +44,7 @@ impl World {
                 .tempdir_in("/tmp")
                 .unwrap(),
             term: "xterm-256color",
+            pixels: (0, 0),
         }
     }
     fn args(&self) -> Vec<String> {
@@ -99,8 +102,8 @@ impl World {
             .openpty(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: self.pixels.0,
+                pixel_height: self.pixels.1,
             })
             .unwrap();
         cmd.env_clear();
@@ -179,12 +182,16 @@ struct Attached {
 impl Attached {
     /// The terminal changes size; the kernel sends the client SIGWINCH.
     fn resize(&mut self, cols: u16, rows: u16) {
+        self.resize_pixels(cols, rows, (0, 0));
+    }
+    /// `resize` with the terminal's size in pixels.
+    fn resize_pixels(&mut self, cols: u16, rows: u16, (x, y): (u16, u16)) {
         self.master
             .resize(PtySize {
                 rows,
                 cols,
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: x,
+                pixel_height: y,
             })
             .unwrap();
         self.size = (cols, rows);
@@ -1546,6 +1553,79 @@ fn list_clients_default_template_and_client_variables() {
 }
 
 const CAT: [&str; 3] = ["sh", "-c", "stty raw -echo; exec cat -v"];
+
+/// D-014: a client's cell size in pixels (tty.c `tty_resize`): from the
+/// terminal's size when it gives pixels; else `CSI 18 t` and `CSI 14 t` go
+/// to the terminal, and its `CSI 4 ; height ; width t` reply sets it
+/// (tty-keys.c `tty_keys_winsz`). A resize without pixels clears it and
+/// asks again; one with pixels asks nothing.
+#[test]
+fn cell_pixel_size_from_the_terminal_or_its_reply() {
+    const QUERY: &str = "\x1b[18t\x1b[14t";
+    let cell = |w: &World| {
+        String::from_utf8_lossy(
+            &w.cli(&["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"])
+                .stdout,
+        )
+        .trim()
+        .to_owned()
+    };
+    let wait_cell = |w: &World, a: &Attached, want: &str| {
+        a.wait(|_| cell(w) == want);
+    };
+    for bin in bins() {
+        let mut w = World::new(bin.clone());
+        w.pixels = (400, 200);
+        let a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        wait_cell(&w, &a, "10x20");
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|a| a.text().contains(QUERY));
+        assert_eq!(cell(&w), "0x0", "{}", w.bin.display());
+        a.keys(b"\x1b[8;10;40t\x1b[4;200;400t");
+        wait_cell(&w, &a, "10x20");
+        a.resize(50, 10);
+        a.wait(|a| a.text().matches(QUERY).count() == 2);
+        wait_cell(&w, &a, "0x0");
+        a.keys(b"\x1b[4;300;500t");
+        wait_cell(&w, &a, "10x30");
+        a.resize_pixels(40, 10, (320, 160));
+        wait_cell(&w, &a, "8x16");
+        // Fewer pixels than columns: no cell width, asked again.
+        a.resize_pixels(80, 10, (40, 160));
+        wait_cell(&w, &a, "0x16");
+        a.keys(b"\x1b[4;160;400t");
+        wait_cell(&w, &a, "5x16");
+        // popup_modify's -b is a tty_resize (popup.c:551): the terminal's
+        // own pixels again, and so the queries.
+        let name = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
+            .trim()
+            .to_owned();
+        // Opening one waits for it to close (cmd-display-menu.c:703).
+        let mut opened = Command::new(&w.bin)
+            .args(w.args())
+            .args(["display-popup", "-c", &name, "-w", "20", "-h", "5"])
+            .args(["sh", "-c", "printf POPUP; exec cat -"])
+            .env_clear()
+            .envs(w.env())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        a.wait(|a| a.text().contains("POPUP"));
+        let out = w.cli(&["display-popup", "-c", &name, "-b", "rounded"]);
+        assert!(out.status.success(), "{out:?}");
+        wait_cell(&w, &a, "0x16");
+        // Everything sent so far is in once the popup's echo is.
+        a.keys(b"END");
+        a.wait(|a| a.text().contains("END"));
+        assert_eq!(a.text().matches(QUERY).count(), 4, "{}", w.bin.display());
+        let out = w.cli(&["display-popup", "-C", "-c", &name]);
+        assert!(out.status.success(), "{out:?}");
+        opened.wait().unwrap();
+    }
+}
 
 fn kt(w: &World) -> String {
     String::from_utf8_lossy(

@@ -1312,7 +1312,7 @@ impl Server {
             activity: c.activity,
             activity_secs: c.activity_secs,
             size: tty.map_or((0, 0), |t| (t.cols, t.rows)),
-            pixel_size: (0, 0),
+            pixel_size: c.cell_pixels,
             flags: flags_out(&c.flags),
             key_table: c.keys.table.clone(),
             repeating: c.keys.repeating,
@@ -1389,6 +1389,7 @@ impl Server {
                     colours_in_ms: q.colours_until.map(|t| until(now, t)),
                     fg: q.fg,
                     bg: q.bg,
+                    winsize: q.winsize,
                 })
             },
         }
@@ -1872,12 +1873,13 @@ impl Server {
             // Only a client that follows upgrades was given a token.
             ext: vtmux_core::protocol::HelloExt {
                 follows_upgrade: x.token != 0,
-                reattach: None,
+                ..Default::default()
             },
         };
         c.environ = hello.env.clone().into();
         c.attached = x.session.map(SessionId);
         c.activity_secs = x.activity_secs;
+        c.cell_pixels = x.pixel_size;
         c.created_secs = x.created;
         c.focused = x.focused;
         c.keys.table.clone_from(&x.key_table);
@@ -1975,6 +1977,7 @@ impl Server {
                 colours_until: q.colours_in_ms.map(|ms| after(now, ms)),
                 fg: q.fg,
                 bg: q.bg,
+                winsize: q.winsize,
             });
         }
         c.hello = Some(hello);

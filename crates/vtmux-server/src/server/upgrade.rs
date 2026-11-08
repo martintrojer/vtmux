@@ -952,11 +952,12 @@ impl Server {
             h.ext = HelloExt {
                 follows_upgrade: hello.ext.follows_upgrade,
                 reattach: None,
+                pixels: hello.ext.pixels,
             };
             if let (Some(was), Some(now)) = (h.tty.as_ref(), hello.tty.as_ref())
                 && (was.cols, was.rows) != (now.cols, now.rows)
             {
-                size = Some((now.cols, now.rows));
+                size = Some((now.cols, now.rows, hello.ext.pixels));
             }
         }
         // A new decoder for the new connection's bytes; the queries stand
@@ -999,7 +1000,8 @@ impl Server {
             self.send(old, &ServerMsg::Frame(bytes));
         }
         // A resize while it was re-executing.
-        if let Some((cols, rows)) = size {
+        if let Some((cols, rows, pixels)) = size {
+            self.tty_resize(old, cols, rows, pixels);
             self.resize_client(old, cols, rows);
         }
         // Extended keys and focus reports asked for again, then the redraw.

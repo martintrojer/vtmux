@@ -602,8 +602,59 @@ impl Server {
             Event::Colour(fg, colour) => self.client_colour(id, fg, colour),
             Event::Palette(index, colour) => self.client_palette(id, index, colour),
             Event::Theme(theme) => self.client_theme(id, theme),
+            Event::PixelSize(width, height) => self.client_pixel_size(id, width, height),
             _ => {}
         }
+    }
+
+    /// `tty_resize` (tty.c:124-160) for client `id`, whose terminal is now
+    /// `cols` x `rows` and `pixels` in size: its cell size in pixels, and,
+    /// when it doesn't give one, the size queries `CSI 18 t` and `CSI 14 t`
+    /// (`TTY_WINSIZEQUERY`), once its terminal is open and unless they are
+    /// out already. Every terminal vtmux opens is `TERM_VT100LIKE`. The
+    /// pixels are kept in the client's hello, where tmux would read them
+    /// with `TIOCGWINSZ` again ([`Server::tty_resize_again`]).
+    pub(crate) fn tty_resize(&mut self, id: ClientId, cols: u32, rows: u32, pixels: (u32, u32)) {
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        if let Some(h) = c.hello.as_mut() {
+            h.ext.pixels = pixels;
+        }
+        c.cell_pixels = cell_pixels(cols, rows, pixels);
+        let (x, y) = c.cell_pixels;
+        if (x == 0 || y == 0) && c.term.is_some() && !c.decoder.winsize_query() {
+            c.decoder.winsize_sent();
+            self.send(id, &ServerMsg::Frame(b"\x1b[18t\x1b[14t".to_vec()));
+        }
+    }
+
+    /// [`Server::tty_resize`] with the size client `id`'s terminal last
+    /// gave, as tmux's other `tty_resize` callers read it again
+    /// (`popup_modify`, popup.c:551).
+    pub(crate) fn tty_resize_again(&mut self, id: ClientId) {
+        let Some(h) = self.clients.get(&id).and_then(|c| c.hello.as_ref()) else {
+            return;
+        };
+        let Some(tty) = &h.tty else {
+            return;
+        };
+        let (cols, rows, pixels) = (tty.cols, tty.rows, h.ext.pixels);
+        self.tty_resize(id, cols, rows, pixels);
+    }
+
+    /// The terminal's reply to `CSI 14 t` (tty-keys.c:724-735): the text
+    /// area's pixel size over the terminal's size in cells.
+    fn client_pixel_size(&mut self, id: ClientId, width: u32, height: u32) {
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let (cols, rows) = c
+            .hello
+            .as_ref()
+            .and_then(|h| h.tty.as_ref())
+            .map_or((80, 24), |t| (t.cols, t.rows));
+        c.cell_pixels = cell_pixels(cols, rows, (width, height));
     }
 
     /// An OSC 4 reply from client `id`'s terminal (`tty_keys_palette`):
@@ -761,6 +812,14 @@ pub fn colour_queries() -> Vec<u8> {
         out.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
     }
     out
+}
+
+/// `tty_resize`'s cell size (tty.c:130-142): the terminal's pixel size
+/// over its size in cells, 0 for a dimension of no cells.
+#[must_use]
+pub fn cell_pixels(cols: u32, rows: u32, (xpixel, ypixel): (u32, u32)) -> (u32, u32) {
+    let per = |px: u32, n: u32| px.checked_div(n).unwrap_or(0);
+    (per(xpixel, cols), per(ypixel, rows))
 }
 
 /// How many palette entries [`colour_queries`] asks for.
