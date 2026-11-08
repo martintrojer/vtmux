@@ -15,7 +15,7 @@ use libghostty_vt::screen::{Screen, TrackedGridRef};
 use libghostty_vt::terminal::{
     CompressionMode, CompressionResult, ConformanceLevel, DeviceAttributes, DeviceType, Mode,
     Point, PointCoordinate, PointSpace, PrimaryDeviceAttributes, SecondaryDeviceAttributes,
-    SizeReportSize, TertiaryDeviceAttributes,
+    TertiaryDeviceAttributes,
 };
 use libghostty_vt::{Terminal, TerminalOptions};
 
@@ -490,19 +490,7 @@ impl PaneTerm {
             })
             .and_then(|t| t.on_bell(move |_| belled.borrow_mut().push(TermEvent::Bells(1))))
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
-            .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")))
-            // XTWINOPS 14/16/18 t (input.c:2160-2183) with tmux's default
-            // cell size.
-            .and_then(|t| {
-                t.on_size(|term| {
-                    Some(SizeReportSize {
-                        rows: term.rows().ok()?,
-                        columns: term.cols().ok()?,
-                        cell_width: CELL_WIDTH_PX,
-                        cell_height: CELL_HEIGHT_PX,
-                    })
-                })
-            });
+            .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")));
         registered.expect("libghostty effect registration");
 
         // tmux implements neither Kitty graphics nor the Glyph Protocol, so
@@ -855,8 +843,15 @@ impl PaneTerm {
             }
         }
         if e == ScanEvent::TitleStack {
-            for push in std::mem::take(&mut self.scan.title_ops) {
-                self.title_stack_op(push);
+            for op in std::mem::take(&mut self.scan.title_ops) {
+                match op {
+                    WinOp::Push => self.title_stack_op(true),
+                    WinOp::Pop => self.title_stack_op(false),
+                    WinOp::Report(n) => {
+                        let reply = self.size_report(n);
+                        push_bytes(&mut self.replies.borrow_mut(), &reply);
+                    }
+                }
             }
         }
     }
@@ -2011,6 +2006,22 @@ impl PaneTerm {
     /// the title on a stack of at most ten (`screen_push_title`); a pop
     /// restores the newest, if any (`screen_pop_title`), and reports the
     /// title either way.
+    /// tmux's reply to XTWINOPS report `n` (input.c:2160-2186), with
+    /// tmux's default cell size in pixels (D-014).
+    fn size_report(&self, n: u64) -> Vec<u8> {
+        let (x, y) = (u32::from(self.cols()), u32::from(self.rows()));
+        let (xp, yp) = (CELL_WIDTH_PX, CELL_HEIGHT_PX);
+        match n {
+            14 => format!("\x1b[4;{};{}t", y * yp, x * xp),
+            15 => format!("\x1b[5;{};{}t", y * yp, x * xp),
+            16 => format!("\x1b[6;{yp};{xp}t"),
+            18 => format!("\x1b[8;{y};{x}t"),
+            19 => format!("\x1b[9;{y};{x}t"),
+            _ => String::new(),
+        }
+        .into_bytes()
+    }
+
     fn title_stack_op(&mut self, push: bool) {
         let title = self.title();
         let mut titles = self.titles.borrow_mut();
@@ -2625,9 +2636,9 @@ struct AltModeScanner {
     /// The private mode sequence just ended set (`true`) or reset
     /// synchronized output (`?2026`); [`PaneTerm::feed`] takes it.
     sync: Option<bool>,
-    /// The title stack operations of the XTWINOPS that just ended, in
-    /// order: `true` a push, `false` a pop.
-    title_ops: Vec<bool>,
+    /// The title stack operations and size reports of the XTWINOPS that
+    /// just ended, in order.
+    title_ops: Vec<WinOp>,
     /// tmux's UTF-8 decoder state (`utf8started`, `utf8data`).
     utf8: Utf8,
     /// What a character the decoder finished turns into, for
@@ -3117,11 +3128,22 @@ impl Titles {
     }
 }
 
-/// The title stack operations in an XTWINOPS (`input_csi_dispatch_winops`,
-/// input.c:2124-2220): `true` for each `22;0` or `22;2` (push), `false`
-/// for each `23;0` or `23;2` (pop), walking the parameters as tmux does.
-/// A missing or string parameter where a number is read stops the walk.
-fn winops_title_ops(raw: &[u8]) -> Vec<bool> {
+/// What an XTWINOPS does that tmux handles itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WinOp {
+    /// `22;0` or `22;2`: push the title.
+    Push,
+    /// `23;0` or `23;2`: pop it.
+    Pop,
+    /// 14, 15, 16, 18 or 19: a size report (input.c:2160-2186).
+    Report(u64),
+}
+
+/// The title stack operations and size reports in an XTWINOPS
+/// (`input_csi_dispatch_winops`, input.c:2124-2220), walking the
+/// parameters as tmux does: tmux answers every report in it, in order. A
+/// missing or string parameter where a number is read stops the walk.
+fn winops(raw: &[u8]) -> Vec<WinOp> {
     let mut ops = Vec::new();
     let Some(params) = parse_params(raw) else {
         return ops;
@@ -3154,10 +3176,11 @@ fn winops_title_ops(raw: &[u8]) -> Vec<bool> {
                 m += 1;
                 match get(m) {
                     None => return ops,
-                    Some(0 | 2) => ops.push(n == 22),
+                    Some(0 | 2) => ops.push(if n == 22 { WinOp::Push } else { WinOp::Pop }),
                     Some(_) => {}
                 }
             }
+            14 | 15 | 16 | 18 | 19 => ops.push(WinOp::Report(n)),
             _ => {}
         }
         m += 1;
@@ -3193,7 +3216,7 @@ enum ScanEvent {
     Osc133,
     /// `ESC P`: a DCS starts (on the `P`).
     DcsStart,
-    /// `CSI 22 t` or `CSI 23 t`: `AltModeScanner::title_ops` has them.
+    /// An XTWINOPS tmux handles: `AltModeScanner::title_ops` has what.
     TitleStack,
     /// `ESC k`: a screen-style window name starts (on the `k`).
     RenameStart,
@@ -3545,6 +3568,22 @@ impl AltModeScanner {
         false
     }
 
+    /// DA, DA2 and XTVERSION answer only parameter 0 (`input_get(ictx, 0,
+    /// 0, 0)`, missing counts as 0; input.c:1582-1608, 1885-1890); Ghostty
+    /// answers any.
+    fn query_tmux_ignores(&self, b: u8) -> bool {
+        (b == b'c' || (b == b'q' && self.gt))
+            && !self.private
+            && self.intermediate.is_none()
+            && !self.query_param_zero()
+    }
+
+    fn query_param_zero(&self) -> bool {
+        !self.csi_ignored
+            && parse_params(&self.params)
+                .is_some_and(|p| matches!(p.first(), None | Some(Param::Missing | Param::Num(0))))
+    }
+
     /// Whether tmux's `input_csi_table` has the CSI ending in `b`, as
     /// `input_table_compare` matches it: the final byte and the collected
     /// prefix and intermediate bytes. One tmux ignores (`csi_ignored`)
@@ -3673,6 +3712,9 @@ impl AltModeScanner {
         if let Some(e) = self.csi_tmux_lacks(b) {
             return Some(e);
         }
+        if self.query_tmux_ignores(b) {
+            return Some(ScanEvent::Drop);
+        }
         if self.gt {
             if self.intermediate.is_none() && !self.csi_ignored && matches!(b, b'm' | b'n') {
                 self.key_mode_request(b == b'm');
@@ -3712,7 +3754,7 @@ impl AltModeScanner {
                 return Some(ScanEvent::Drop);
             }
             (false, None, b't') if !self.other && !self.csi_ignored => {
-                self.title_ops = winops_title_ops(&self.params);
+                self.title_ops = winops(&self.params);
                 if !self.title_ops.is_empty() {
                     return Some(ScanEvent::TitleStack);
                 }
@@ -4087,8 +4129,9 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// - DECRQM -> tmux's mode table (input.c:1638-1722)
 /// - DECRQSS: answered by [`PaneTerm::answer_decrqss`] from the DCS parser
 ///   (Ghostty's own SGR/DECSTBM/DECSLRM replies are dropped here)
-/// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890), size reports
-///   14/16/18 t (input.c:2160-2183): produced by the registered effects
+/// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890): produced by the
+///   registered effect; the size reports (14, 15, 16, 18, 19 t) are
+///   [`PaneTerm::size_report`]s, Ghostty's dropped
 ///
 /// Dropped, tmux does not answer: DA3, DECXCPR `CSI ? 6 n` and DSR ?998
 /// (tmux's private DSR knows only 996, input.c:1631-1637), mode 2033/2048
@@ -4118,11 +4161,6 @@ fn tmux_reply(
             b'R' if !body.starts_with(b"?") => {
                 let (x, y) = tmux_cursor(term);
                 Some(format!("\x1b[{};{}R", y + 1, x + 1).into_bytes())
-            }
-            b't' if matches!(body.first(), Some(b'4' | b'6' | b'8'))
-                && body.get(1) == Some(&b';') =>
-            {
-                Some(data.to_vec())
             }
             _ => None,
         };
@@ -4447,6 +4485,34 @@ mod tests {
         assert_eq!(replies_to(20, 5, b"\x1b[>c"), b"\x1b[>84;0;0c");
         assert_eq!(replies_to(20, 5, b"\x1b[5n"), b"\x1b[0n");
         assert_eq!(replies_to(20, 5, b"\x1b[>q"), b"\x1bP>|tmux 3.8\x1b\\");
+        assert_eq!(
+            replies_to(20, 5, b"\x1b[0c\x1b[>0c\x1b[>0q"),
+            b"\x1b[?1;2c\x1b[>84;0;0c\x1bP>|tmux 3.8\x1b\\"
+        );
+    }
+
+    /// input.c:1582-1608, 1885-1890: DA, DA2 and XTVERSION answer only
+    /// parameter 0, and DECID (`ESC Z`) is not in tmux's ESC table.
+    /// Reference tmux 3.8: none of these is answered.
+    #[test]
+    fn identity_queries_with_other_parameters_are_not_answered() {
+        for q in [
+            &b"\x1b[1c"[..],
+            b"\x1b[>1c",
+            b"\x1b[>1q",
+            b"\x1b[1;0c",
+            b"\x1b[:c",
+            b"\x1bZ",
+        ] {
+            let mut t = PaneTerm::new(20, 5, 100);
+            t.feed(q);
+            t.feed(b"\x1b[5n");
+            assert_eq!(t.take_replies(), b"\x1b[0n", "{q:?}");
+        }
+        // The sequence is consumed: nothing of it prints.
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"a\x1bZb\x1b[1cc");
+        assert_eq!(t.cursor(), (3, 0));
     }
 
     #[test]
@@ -4510,6 +4576,18 @@ mod tests {
         assert_eq!(replies_to(20, 5, b"\x1b[18t"), b"\x1b[8;5;20t");
         assert_eq!(replies_to(20, 5, b"\x1b[14t"), b"\x1b[4;160;320t");
         assert_eq!(replies_to(20, 5, b"\x1b[16t"), b"\x1b[6;32;16t");
+        // input.c:2166-2186: 15 and 19 too, and every report in one
+        // sequence, in order (reference tmux 3.8 answers `CSI 19 t` with
+        // `CSI 9 ; rows ; cols t`).
+        assert_eq!(replies_to(20, 5, b"\x1b[15t"), b"\x1b[5;160;320t");
+        assert_eq!(replies_to(20, 5, b"\x1b[19t"), b"\x1b[9;5;20t");
+        assert_eq!(
+            replies_to(20, 5, b"\x1b[18;1;16t"),
+            b"\x1b[8;5;20t\x1b[6;32;16t"
+        );
+        // A report's position read as another's argument is not one.
+        assert_eq!(replies_to(20, 5, b"\x1b[9;18t\x1b[3;1;18t"), b"");
+        assert_eq!(replies_to(20, 5, b"\x1b[3;1t\x1b[18t"), b"\x1b[8;5;20t");
     }
 
     #[test]

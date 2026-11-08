@@ -1,0 +1,13 @@
+name = "reply_identity_params"
+size = [60, 12]
+# The pane program sends identity and size queries from a raw tty, reads each
+# reply with dd and prints it through `cat -v` on its own line. DA, DA2 and
+# XTVERSION are answered only for parameter 0 and DECID (ESC Z) not at all
+# (input.c:1582-1608, 1885-1890; each is followed by DSR 5 so a line always
+# has a reply); XTWINOPS answers 15 and 19 as well as 14, 16 and 18, every
+# report in one sequence (input.c:2124-2186).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "60", "-y", "12", "sh", "-c", "stty raw -echo min 1 time 20; q() { printf \"$1\"; dd bs=1 count=$2 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033[1c\\033[5n' 4; q '\\033[>1c\\033[5n' 4; q '\\033[>1q\\033[5n' 4; q '\\033Z\\033[5n' 4; q '\\033[0c' 7; q '\\033[19t' 10; q '\\033[15t' 12; q '\\033[18;19t' 20; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+]
