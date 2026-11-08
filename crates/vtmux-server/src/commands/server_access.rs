@@ -19,7 +19,7 @@ pub fn exec(
     server: &mut Server,
     item: &mut Item,
     args: &Args,
-    found: Found,
+    _found: Found,
 ) -> Result<(), CmdError> {
     if args.flag('l') {
         list(server, item);
@@ -28,7 +28,16 @@ pub fn exec(
     let Some(arg) = args.positional_text(0) else {
         return Err(error("missing user or group argument".into()));
     };
-    let arg = super::expand(server, found, &arg);
+    // format_single(item, arg, c, NULL, NULL, NULL): the target client and
+    // its session (format_defaults, format.c:7015-7020), never `-t`'s.
+    let tc = server.target_client(item.client, item.origin);
+    let at = tc
+        .and_then(|c| server.client_session(c))
+        .map(|s| Found::from_session(&server.model, s))
+        .unwrap_or_default();
+    let mut ctx = server.format_ctx(at, tc);
+    ctx.kind = crate::format_ctx::Kind::Unknown;
+    let arg = vtmux_core::format::expand_str(&arg, &ctx);
     let (kind, subject, name) = if args.flag('g') {
         let g = user::group_named(&arg);
         (

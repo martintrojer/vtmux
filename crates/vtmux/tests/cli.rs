@@ -1099,6 +1099,41 @@ fn shell_command_flag() {
     });
 }
 
+/// `server-access` (cmd-server-access.c:60-152): the list (`-l`, the
+/// owner always there), adding, read-only and writable, removing, and each
+/// error. The name is a format expanded for the target client alone
+/// (`format_single(item, arg, c, NULL, NULL, NULL)`): with no client,
+/// `#{session_name}` is empty, whatever session the command would target.
+#[test]
+fn server_access_list() {
+    compare("server_access_list", |w| {
+        steps(
+            w,
+            &[
+                &["new", "-d", "-s", "a", "cat", "-"],
+                &["server-access", "-l"],
+                &["server-access"],
+                &["server-access", "-a", "nosuchuserzz"],
+                &["server-access", "-g", "-a", "nosuchgrpzz"],
+                &["server-access", "-a", "root"],
+                &["server-access", "-a", "daemon"],
+                &["server-access", "-a", "daemon"],
+                &["server-access", "-r", "daemon"],
+                &["server-access", "-l"],
+                &["server-access", "-w", "daemon"],
+                &["server-access", "-a", "-d", "daemon"],
+                &["server-access", "-r", "-w", "daemon"],
+                &["server-access", "-d", "daemon"],
+                &["server-access", "-d", "daemon"],
+                &["server-access", "-g", "-r", "daemon"],
+                &["server-access", "-a", "-r", "nobody"],
+                &["server-access", "-l"],
+                &["server-access", "-a", "#{session_name}"],
+            ],
+        )
+    });
+}
+
 /// Under its own name (D20, D21): `vtmux-UID` socket directory, `vtmux`
 /// in getopt messages and usage, and `-V` printing the D25 version.
 #[test]
