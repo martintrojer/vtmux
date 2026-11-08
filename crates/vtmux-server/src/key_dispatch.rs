@@ -435,9 +435,13 @@ impl Server {
         };
         // server-client.c:1792-1802: the overlay takes every key at once
         // (the queue may be waiting on the popup's command). A popup takes
-        // every mouse event too (popup_key_cb; dragging and forwarding
-        // into it are not here yet).
-        if !read_only && self.popup_key(id, core) {
+        // every mouse event too, raw: it drags the popup or goes to its job
+        // (popup_key_cb).
+        let mouse = match &kind {
+            KeyKind::Mouse { input, .. } => Some(*input),
+            _ => None,
+        };
+        if !read_only && self.popup_key(id, core, mouse.as_ref()) {
             return None;
         }
         // server-client.c:1805: a key closes a dead pane kept by

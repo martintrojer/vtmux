@@ -616,8 +616,9 @@ impl Server {
     /// the re-attach can't show as it was (spec, *Clients*): a status
     /// message (the screen frozen under it is redrawn as it is now, and its
     /// timer runs on through the upgrade), a key the client's input holds
-    /// for `escape-time` (its decoder starts again), a mouse drag or a
-    /// click waiting for a second one (its mouse state starts again), and
+    /// for `escape-time` (its decoder starts again), a mouse drag (of a
+    /// popup too, or a button held over one) or a click waiting for a
+    /// second one (its mouse state starts again), and
     /// a locked or suspended client (it can't re-execute until it is
     /// back).
     fn upgrade_shows(&self) -> Vec<String> {
@@ -661,6 +662,15 @@ impl Server {
             // a second one.
             if c.mouse.dragging() {
                 out.push(format!("a mouse drag on {}", self.client_name(id)));
+            }
+            // A popup's drag, or a button held over a popup: its drag
+            // starts from the report before (popup_key_cb's `m->lb`),
+            // which the re-attach's input starts again without.
+            if c.popup
+                .as_ref()
+                .is_some_and(|p| p.dragging() || c.decoder.mouse_held())
+            {
+                out.push(format!("a popup drag on {}", self.client_name(id)));
             }
             if c.mouse.deadline().is_some() {
                 out.push(format!("a click held on {}", self.client_name(id)));

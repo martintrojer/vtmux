@@ -18,6 +18,7 @@ use vtmux_core::style::{CellStyle, Style};
 use vtmux_vt::PaneTerm;
 
 use crate::cmdq::StepId;
+use crate::input::{MOUSE_MASK_BUTTONS, MouseInput};
 use crate::jobs::JobStatus;
 use crate::pane_io::{PaneIo, ReadResult};
 use crate::render::popup::BoxLines;
@@ -38,6 +39,13 @@ pub struct CloseRules {
     pub on_exit_zero: bool,
     /// `-k`: on any key once the job has exited.
     pub any_key: bool,
+}
+
+/// What a mouse drag does to a popup (`pd->dragging`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Drag {
+    Move,
+    Size,
 }
 
 /// What a popup runs.
@@ -90,6 +98,10 @@ pub struct Popup {
     /// A full redraw has drawn the popup since it opened (see
     /// `PopupDraw::redrawn`).
     pub redrawn: bool,
+    /// A mouse drag moving or sizing the popup, with the pointer's offset
+    /// from its corner (`pd->dragging`, `pd->dx`, `pd->dy`). Not kept over
+    /// a live upgrade: a drag in progress ends there.
+    drag: Option<(Drag, u32, u32)>,
     /// The PTY until the job closes it.
     io: Option<PaneIo>,
     /// The job's process until it is reaped.
@@ -181,6 +193,7 @@ impl Popup {
             border_style: r.border_style.clone(),
             term,
             redrawn: false,
+            drag: None,
             io,
             pid: (r.pid != 0).then_some(r.pid),
             running: !r.exited,
@@ -188,6 +201,12 @@ impl Popup {
             step: None,
             caller: r.caller.map(|c| ClientId(c as usize)),
         }
+    }
+
+    /// A mouse drag is moving or sizing the popup.
+    #[must_use]
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
     }
 
     /// The job's terminal size: inside the box, or the whole popup with no
@@ -315,6 +334,7 @@ impl Server {
             border_style: open.border_style,
             term,
             redrawn: false,
+            drag: None,
             io: Some(io),
             pid: Some(spawned.pid.as_raw_nonzero().get()),
             running: true,
@@ -544,9 +564,22 @@ impl Server {
         }
     }
 
-    /// `popup_key_cb` (popup.c:430-460) for a key from client `c`: `true`
-    /// when the popup took it (it always does while up).
-    pub(crate) fn popup_key(&mut self, c: ClientId, key: Key) -> bool {
+    /// `popup_key_cb` (popup.c:383-460) for a key from client `c`, with
+    /// its report if it is a mouse event: `true` when the popup took it (it
+    /// always does while up).
+    pub(crate) fn popup_key(&mut self, c: ClientId, key: Key, mouse: Option<&MouseInput>) -> bool {
+        let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_ref()) else {
+            return false;
+        };
+        if let Some(m) = mouse {
+            if p.drag.is_some() {
+                self.popup_drag(c, m);
+                return true;
+            }
+            if self.popup_mouse_grab(c, m) {
+                return true;
+            }
+        }
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
             return false;
         };
@@ -559,6 +592,25 @@ impl Server {
             return true;
         }
         if p.running
+            && let Some(m) = mouse
+        {
+            // Inside, as checked: the report at the job's own position,
+            // in the encoding it asked for (input_key_get_mouse).
+            let off = u32::from(p.lines != BoxLines::None);
+            let (x, y) = (
+                m.x.saturating_sub(u32::from(p.px) + off),
+                m.y.saturating_sub(u32::from(p.py) + off),
+            );
+            if let Some(bytes) = crate::mouse::encode_mouse(p.term.mouse_modes(), m, x, y)
+                && let Some(io) = p.io.as_mut()
+            {
+                io.write(&bytes);
+                self.popup_reregister(c);
+            }
+            return true;
+        }
+        if p.running
+            && !key.is_mouse()
             && let Some(k) = crate::keys::Key::from_core(key)
             && let Some(io) = p.io.as_mut()
         {
@@ -568,6 +620,105 @@ impl Server {
             self.popup_reregister(c);
         }
         true
+    }
+
+    /// `popup_key_cb`'s mouse checks before the keys (popup.c:392-430):
+    /// `true` when the event is used up. One outside the popup is; on the
+    /// left or top border a plain right button press is; a drag that starts
+    /// on the border, or with Meta anywhere, starts moving the popup (the
+    /// left button) or sizing it (the right), from the press before it.
+    fn popup_mouse_grab(&mut self, c: ClientId, m: &MouseInput) -> bool {
+        const MODIFIERS: u32 = 4 | 8 | 16;
+        const META: u32 = 8;
+        const DRAG: u32 = 32;
+        let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
+            return true;
+        };
+        let (px, py) = (u32::from(p.px), u32::from(p.py));
+        let (sx, sy) = (u32::from(p.sx), u32::from(p.sy));
+        if m.x < px || m.x + 1 > px + sx || m.y < py || m.y + 1 > py + sy {
+            return true;
+        }
+        let border = p.lines != BoxLines::None
+            && (m.x == px || m.x + 1 == px + sx || m.y == py || m.y + 1 == py + sy);
+        let left_or_top = border && (m.x == px || (m.x + 1 != px + sx && m.y == py));
+        let button = |b: u32| b & MOUSE_MASK_BUTTONS;
+        if m.b & MODIFIERS == 0 && button(m.b) == 2 && left_or_top {
+            return true;
+        }
+        if m.b & MODIFIERS == META || (border && m.lb & DRAG == 0) {
+            if m.b & DRAG != 0 {
+                let what = match button(m.lb) {
+                    0 => Some(Drag::Move),
+                    2 => Some(Drag::Size),
+                    _ => None,
+                };
+                if let Some(what) = what {
+                    p.drag = Some((what, m.lx.wrapping_sub(px), m.ly.wrapping_sub(py)));
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    /// `popup_handle_drag` (popup.c:324-380): the pointer moved with a
+    /// drag on; anything but a drag ends it. Moving keeps the popup inside
+    /// the terminal; sizing keeps at least a 1x1 inside (3x3 with a
+    /// border), and the job's terminal follows. The new rectangle is the
+    /// preferred one from then on.
+    fn popup_drag(&mut self, c: ClientId, m: &MouseInput) {
+        const DRAG: u32 = 32;
+        let Some((cols, rows)) = self.tty_size(c) else {
+            return;
+        };
+        let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
+            return;
+        };
+        let Some((what, dx, dy)) = p.drag else { return };
+        if m.b & DRAG == 0 {
+            p.drag = None;
+            return;
+        }
+        let n = |v: u32| u16::try_from(v).unwrap_or(u16::MAX);
+        match what {
+            Drag::Move => {
+                let place = |at: u32, d: u32, size: u16, room: u16| {
+                    if at < d {
+                        0
+                    } else if at - d + u32::from(size) > u32::from(room) {
+                        room.saturating_sub(size)
+                    } else {
+                        n(at - d)
+                    }
+                };
+                p.px = place(m.x, dx, p.sx, cols);
+                p.py = place(m.y, dy, p.sy, rows);
+                p.drag = Some((
+                    what,
+                    m.x.wrapping_sub(u32::from(p.px)),
+                    m.y.wrapping_sub(u32::from(p.py)),
+                ));
+                p.preferred.0 = p.px;
+                p.preferred.1 = p.py;
+            }
+            Drag::Size => {
+                let least = if p.lines == BoxLines::None { 1 } else { 3 };
+                if m.x < u32::from(p.px) + least || m.y < u32::from(p.py) + least {
+                    return;
+                }
+                p.sx = n(m.x - u32::from(p.px));
+                p.sy = n(m.y - u32::from(p.py));
+                p.preferred.2 = p.sx;
+                p.preferred.3 = p.sy;
+                let (jx, jy) = p.inner();
+                p.term.resize(jx.max(1), jy.max(1));
+                if let Some(io) = &p.io {
+                    let _ = io.resize(jx.max(1), jy.max(1));
+                }
+            }
+        }
+        self.redraw_client(c);
     }
 
     /// The client's terminal size.

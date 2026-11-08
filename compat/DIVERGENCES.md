@@ -404,3 +404,11 @@ product reasons" category.
 - vtmux behaviour: the cell is Ghostty's spacer head, which no copy, search or capture counts as written, so the copy has no space, whatever the resizes. The search already reads it as tmux's blank.
 - Evidence: reference tmux 3.8, 12x6 pane, `printf 'abcdefghijk日z\n'`, `copy-mode`, `history-top`, `select-line`, `copy-selection`: tmux `abcdefghijk 日z`, vtmux `abcdefghijk日z`. After `resize-window -x 30` and back to 12, tmux `abcdefghijk日z` too; after 12 to 13, tmux `abcdefghijk日 z`. `capture-pane -pJ` gives `abcdefghijk日z` in both.
 - Category: Deferred (matching it needs tmux's `cellsize` for every row, through every reflow).
+
+### D-050: a popup narrowed by a client resize or a drag reflows its lines
+
+- Test / assertion: none (oracle `popup_mouse` grows its borderless popup instead of narrowing it, `popup_resize` writes each line after the resize).
+- tmux behaviour: `popup_resize_cb` and `popup_handle_drag` (popup.c) resize the popup's screen with `screen_resize(&pd->s, sx, sy, 0)`: no reflow, so a narrowed line loses the cells past the new width and a wrapped line stays split.
+- vtmux behaviour: the popup's terminal is a `PaneTerm`, and libghostty-vt reflows its primary screen on every resize, so the cut cells move to the next row.
+- Evidence: reference tmux 3.8, a `-B -w 20` popup whose job printed `E[<0;2;2ME[<32;3;3ME` and `[<0;3;3m` (one wrapped line), narrowed to 17 with a Meta right-button drag: tmux shows `E[<0;2;2ME[<32;3;` and `[<0;3;3m`, vtmux `E[<0;2;2ME[<32;3;` and `3ME[<0;3;3m`. Found by audit_modes_menus.
+- Category: Deferred (needs a resize without reflow in vtmux-vt).

@@ -2678,7 +2678,7 @@ impl Server {
                         vtmux_core::keys::Key::FOCUS_OUT
                     };
                     let taken = self.clients.get_mut(&id).is_none_or(|c| c.status.key())
-                        || self.popup_key(id, key)
+                        || self.popup_key(id, key, None)
                         || self.menu_key(id, key, None)
                         || self.prompts_key(id, key);
                     if !taken {

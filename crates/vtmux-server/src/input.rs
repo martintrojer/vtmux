@@ -315,6 +315,13 @@ impl Decoder {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
     }
+    /// The last mouse report held a button down (no release, no wheel):
+    /// the next report's `lb` says so (a popup starts its drag from it).
+    #[must_use]
+    pub fn mouse_held(&self) -> bool {
+        let b = self.mouse_last.2;
+        b & MOUSE_MASK_BUTTONS != 3 && !mouse_wheel(b) && self.mouse_last != (0, 0, 0)
+    }
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         let start = self.pending?;
