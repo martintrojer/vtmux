@@ -454,12 +454,21 @@ fn status_redraws(server: &mut Server, call: &CommandCall, source: Found, found:
     let status = |f: Found| f.session.map(Redraw::SessionStatus);
     let window = |f: Found| f.window.map(Redraw::Window);
     match call.entry.name {
-        // cmd-new-window.c:168-170: a detached new window only redraws the
-        // status (found is the session's current window, not the new one).
-        "new-window" if detached => ask(status(found)),
-        // cmd-new-window.c:122,168; cmd-kill-session.c:70 (-C).
-        // select-window and friends ask themselves.
-        "new-window" | "kill-session" => ask(session(found)),
+        // cmd-new-window.c:168-170: every session of the group, a detached
+        // new window only the status (found is the session's current
+        // window, not the new one).
+        "new-window" => {
+            if let Some(s) = found.session {
+                if detached {
+                    server.model.status_group(s);
+                } else {
+                    server.model.redraw_group(s);
+                }
+            }
+        }
+        // cmd-kill-session.c:70 (-C). select-window and friends ask
+        // themselves.
+        "kill-session" => ask(session(found)),
         // cmd-split-window.c:293-298.
         "split-window" | "new-pane" => {
             ask(window(found));
@@ -478,6 +487,9 @@ fn status_redraws(server: &mut Server, call: &CommandCall, source: Found, found:
         "break-pane" => {
             ask(session(source));
             ask(session(found));
+            for s in [source.session, found.session].into_iter().flatten() {
+                server.model.status_group(s);
+            }
         }
         // cmd-join-pane.c:520-529.
         "join-pane" | "move-pane" => {
