@@ -64,6 +64,11 @@ pub(super) struct Nfa {
     /// Every path from `init` crosses `^` before it consumes or ends: a
     /// match can only start at the text's start (no `REG_NEWLINE`).
     anchored: bool,
+    /// For a pattern that cannot match the empty string: which bytes can
+    /// begin a unit that starts a match. Where no match is under way the
+    /// search skips to the next such byte, so a line without one costs a
+    /// scan, not a simulation.
+    first: Option<Box<[bool; 256]>>,
 }
 
 // ---- compilation -------------------------------------------------------
@@ -84,6 +89,46 @@ fn anchored(nodes: &[Node], init: usize) -> bool {
         }
     }
     true
+}
+
+/// The bytes a match can begin with ([`Nfa::first`]); `None` when the
+/// pattern can match without consuming anything. An assertion is passed
+/// as if it held, so the set is a superset. A NUL starts a byte that is
+/// not UTF-8 (`rawstr`) and a character past ASCII is not looked into: both
+/// are always candidates, and a continuation byte never starts a unit.
+fn first_bytes(
+    nodes: &[Node],
+    brackets: &[Bracket],
+    init: usize,
+    ignore_case: bool,
+) -> Option<Box<[bool; 256]>> {
+    let mut seen = vec![false; nodes.len()];
+    let mut stack = vec![init];
+    let mut table = Box::new([false; 256]);
+    table[0] = true;
+    table[0xC0..].fill(true);
+    while let Some(n) = stack.pop() {
+        if std::mem::replace(&mut seen[n], true) {
+            continue;
+        }
+        match nodes[n].kind {
+            Kind::End => return None,
+            Kind::Literal(_) | Kind::Any | Kind::Bracket(_) => {
+                for b in 1..0x80u8 {
+                    let u = Unit::Char(char::from(b));
+                    let hit = match nodes[n].kind {
+                        Kind::Literal(l) => unit_equal(l, u, ignore_case),
+                        Kind::Any => true,
+                        Kind::Bracket(i) => brackets[i].matches(char::from(b), ignore_case),
+                        _ => false,
+                    };
+                    table[usize::from(b)] |= hit;
+                }
+            }
+            _ => stack.extend(nodes[n].edests.iter().copied()),
+        }
+    }
+    Some(table)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -269,6 +314,7 @@ fn single(expr: &Expr) -> &Expr {
 }
 
 impl Nfa {
+    #[allow(clippy::too_many_lines)]
     pub(super) fn compile(expr: &Expr, groups: usize, ignore_case: bool) -> Result<Self, Error> {
         let mut b = Builder {
             tree: Vec::new(),
@@ -367,6 +413,7 @@ impl Nfa {
         let init = idx(root);
         Ok(Self {
             anchored: anchored(&nodes, init),
+            first: first_bytes(&nodes, &b.brackets, init, ignore_case),
             init,
             nodes,
             rev,
@@ -419,6 +466,36 @@ impl Nfa {
 
     /// Leftmost start, then longest end: one pass, earliest start wins per node.
     pub(super) fn span(&self, text: &str, not_bol: bool) -> Option<(usize, usize)> {
+        self.span_skipping(text, not_bol, true)
+    }
+
+    /// [`Nfa::span`], with the skip to the first byte that can begin a
+    /// match optional so a test can compare the two.
+    pub(super) fn span_skipping(
+        &self,
+        text: &str,
+        not_bol: bool,
+        skipping: bool,
+    ) -> Option<(usize, usize)> {
+        // Nothing can match before the first byte that can begin one.
+        let skip = match &self.first {
+            Some(first) if skipping && !self.anchored => Some(first.as_ref()),
+            _ => None,
+        };
+        if let Some(first) = skip
+            && !text.bytes().any(|b| first[usize::from(b)])
+        {
+            return None;
+        }
+        // An anchored pattern can only start at the text's start.
+        if let (Some(first), true, true) = (&self.first, skipping, self.anchored)
+            && !text
+                .as_bytes()
+                .first()
+                .is_some_and(|&b| first[usize::from(b)])
+        {
+            return None;
+        }
         let mut mark = vec![usize::MAX; self.nodes.len()];
         let mut seeds: Vec<(usize, usize)> = Vec::new();
         let mut cur: Vec<(usize, usize)> = Vec::new();
@@ -426,6 +503,16 @@ impl Nfa {
         let mut best: Option<(usize, usize)> = None;
         let mut pos = 0;
         loop {
+            if let Some(first) = skip
+                && seeds.is_empty()
+                && best.is_none()
+            {
+                // The check above found one at or after the start; after
+                // that the scan may run off the end: no match.
+                pos += text.as_bytes()[pos..]
+                    .iter()
+                    .position(|&b| first[usize::from(b)])?;
+            }
             cur.clear();
             let fresh =
                 (best.is_none() && (pos == 0 || !self.anchored)).then_some((self.init, pos));

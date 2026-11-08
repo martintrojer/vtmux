@@ -214,3 +214,90 @@ fn regex_anchored_patterns_start_only_at_zero() {
     assert_eq!(span("^b", &long, false), None);
     assert_eq!(span("^a*b", &long, false), Some(0..100_001));
 }
+
+/// The skip to the first byte a match can begin with changes no answer: the
+/// same span with and without it, over patterns that can and cannot match
+/// the empty string, anchors and word assertions, case, non-ASCII text and a
+/// byte that is not UTF-8.
+#[test]
+fn skipping_to_a_first_byte_changes_no_span() {
+    let patterns = [
+        "a",
+        "été",
+        "é",
+        "\u{4e2d}",
+        "f[a-z]+r",
+        "[0-9]+",
+        "x+y",
+        "^5",
+        "5$",
+        "\\<fi",
+        "\\bfiller",
+        "\\Bil",
+        "(a|b)c",
+        "a*",
+        "a?b",
+        "x*|y",
+        "(^|,)b",
+        "[^a-z]+",
+        ".",
+        ".+z",
+        "[[:digit:]]{2}",
+        "[\u{e9}a]x",
+        "K",
+        "s+",
+        "\u{212a}",
+        "a{0}b",
+    ];
+    let texts = [
+        "",
+        "123 some filler text here   ",
+        "abcabc, bcd",
+        "un \u{e9}t\u{e9} chaud",
+        "\u{c9}T\u{c9} 5",
+        "\u{4e2d}\u{6587} 55",
+        "xxy zzz",
+        "kK\u{212a}sS\u{17f}",
+        "a\0b",
+        "ab\u{10ff01}cd",
+        "   ",
+    ];
+    let bytes = crate::rawstr::from_bytes(b"ab\xffcd 5");
+    for pattern in patterns {
+        for ignore_case in [false, true] {
+            let re = Regex::new(pattern, ignore_case).unwrap();
+            let Some(nfa) = &re.nfa else { continue };
+            for text in texts.iter().copied().chain(std::iter::once(bytes.as_str())) {
+                for not_bol in [false, true] {
+                    assert_eq!(
+                        nfa.span_skipping(text, not_bol, true),
+                        nfa.span_skipping(text, not_bol, false),
+                        "{pattern:?} {text:?} i={ignore_case} not_bol={not_bol}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// `span_with` gives capture 0 of `find_with` for every pattern, with
+/// groups or not.
+#[test]
+fn span_with_is_capture_zero() {
+    for pattern in [
+        "a+", "(a|b)+c", "^a", "(^a|b)+", "x*", "(a*)\\1b", "été", "[0-9]+",
+    ] {
+        for text in ["", "aab", "abab", "baabc", "123", "un été", "aab"] {
+            let re = Regex::new(pattern, false).unwrap();
+            for not_bol in [false, true] {
+                let whole = re.find_with(text, not_bol).unwrap();
+                let span = re.span_with(text, not_bol).unwrap();
+                assert_eq!(
+                    span,
+                    whole.and_then(|m| m.captures[0].clone()),
+                    "{pattern:?} {text:?} not_bol={not_bol}"
+                );
+            }
+        }
+    }
+}

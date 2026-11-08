@@ -1,0 +1,46 @@
+# Copy mode search for text with characters past ASCII over a long ASCII
+# history (task low_history_bytes_width_search_nonascii; D-034): the count
+# of all history, the match under the cursor and where the search jumped.
+# Most lines are plain ASCII, which vtmux counts and passes from their text
+# without reading cells (a pattern with an accented or wide character, or a
+# tab, cannot match one); the few others are read as cells. A character past
+# ASCII also makes the search case-sensitive (window_copy_is_lowercase
+# compares a signed char), so `é+` and `É+` count different lines. The history is
+# kept short enough that neither server nears the 200 ms the count may take
+# (WINDOW_COPY_SEARCH_ALL_TIMEOUT), so the counts do not depend on timing.
+name = "copy_search_nonascii_history"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "i=0; while [ $i -lt 600 ]; do echo \"line $i some filler text here\"; i=$((i+1)); done; printf 'un \u00e9t\u00e9 chaud\\n'; i=0; while [ $i -lt 300 ]; do echo \"more $i plain\"; i=$((i+1)); done; printf '\u00e9t\u00e9 \u00c9T\u00c9\\ncaf\u00e9 \u00e9\\n\u4e2d\u6587 wide \u4e2d\\ntab\\there\\n'; i=0; while [ $i -lt 20 ]; do echo \"tail $i\"; i=$((i+1)); done; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["display", "-p", "-t", "a", "#{history_size}"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "été"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-again"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-again"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "é"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward-text", "é"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward", "中"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "中文 wide"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "ÉTÉ"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "é+"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "É+"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward", "café ."] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "tab\there"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward-text", "zz\u00e9"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+]

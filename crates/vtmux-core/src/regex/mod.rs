@@ -141,24 +141,49 @@ impl Regex {
         self.find_with(text, false)
     }
 
+    /// The literal a pattern is made of, when matching it needs no state
+    /// exploration, even over multi-megabyte text.
+    fn flat_literal(&self) -> Option<String> {
+        if self.ignore_case {
+            return None;
+        }
+        let Expr::Seq(parts) = &self.expr else {
+            return None;
+        };
+        parts.iter().try_fold(String::new(), |mut s, p| {
+            let Expr::Literal(u) = p else { return None };
+            crate::rawstr::push_unit(&mut s, *u);
+            Some(s)
+        })
+    }
+
+    /// Where the match is, as [`Regex::find_with`] gives capture 0, without
+    /// working out the other captures when there are none to report (a
+    /// pattern with groups can fail in that walk, as glibc's does, so it
+    /// takes the whole path).
+    pub fn span_with(&self, text: &str, not_bol: bool) -> Result<Option<Range<usize>>, Error> {
+        let text = crate::rawstr::c_str(text);
+        if let Some(literal) = self.flat_literal() {
+            return Ok(text
+                .find(&literal)
+                .map(|start| start..start + literal.len()));
+        }
+        if let (Some(nfa), 0) = (&self.nfa, self.groups) {
+            return Ok(nfa.span(text, not_bol).map(|(start, end)| start..end));
+        }
+        Ok(self
+            .find_with(text, not_bol)?
+            .and_then(|m| m.captures[0].clone()))
+    }
+
     /// `regexec` with `REG_NOTBOL` when `not_bol`: the text does not start a
     /// line, so `^` does not match at its start.
     pub fn find_with(&self, text: &str, not_bol: bool) -> Result<Option<Match>, Error> {
         let text = crate::rawstr::c_str(text);
-        // Flat literal patterns need no state exploration, even for multi-megabyte text.
-        if !self.ignore_case
-            && let Expr::Seq(parts) = &self.expr
-        {
-            let literal: Option<String> = parts.iter().try_fold(String::new(), |mut s, p| {
-                let Expr::Literal(u) = p else { return None };
-                crate::rawstr::push_unit(&mut s, *u);
-                Some(s)
-            });
-            if let Some(literal) = literal {
-                return Ok(text.find(&literal).map(|start| Match {
-                    captures: vec![Some(start..start + literal.len())],
-                }));
-            }
+        if let Some(literal) = self.flat_literal() {
+            return Ok(text.find(&literal).map(|start| Match {
+                captures: vec![Some(start..start + literal.len())],
+            }));
         }
         if let Some(nfa) = &self.nfa {
             return Ok(nfa.span(text, not_bol).and_then(|(start, end)| {

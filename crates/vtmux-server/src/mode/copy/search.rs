@@ -94,7 +94,7 @@ impl Pattern {
         Self {
             cells,
             text,
-            cis: !s.bytes().any(|b| b.is_ascii_uppercase()),
+            cis: is_lowercase(s),
         }
     }
 
@@ -107,6 +107,24 @@ impl Pattern {
             .map(|(t, w)| (*w == 1 && t.len() == 1 && t != "\t").then(|| t.as_bytes()[0]))
             .collect::<Option<_>>()?;
         (!bytes.is_empty()).then_some(bytes)
+    }
+
+    /// Whether a line of narrow ASCII characters and blanks cannot hold
+    /// this pattern as plain text: some cell is a tab, a padding cell or
+    /// a character past ASCII, which no such line has a cell to match
+    /// (`window_copy_search_compare`).
+    fn never_in_ascii(&self) -> bool {
+        !self.cells.is_empty() && self.ascii_bytes().is_none()
+    }
+
+    /// How a plain search reads an ASCII line's text (nothing for a regular
+    /// expression, which reads it whole): the pattern's bytes if it is
+    /// ASCII, and whether no such line can hold it ([`Self::never_in_ascii`]).
+    fn plain_in_ascii(&self, regex: bool) -> (Option<Vec<u8>>, bool) {
+        if regex {
+            return (None, false);
+        }
+        (self.ascii_bytes(), self.never_in_ascii())
     }
 
     /// `regcomp(REG_EXTENDED)`, `REG_ICASE` when matching ignoring case.
@@ -126,6 +144,24 @@ fn cell_data(cell: Option<&Cell>) -> (&str, u8) {
         Some(c) if c.text.is_empty() => (" ", 1),
         Some(c) => (&c.text, c.width),
     }
+}
+
+/// `window_copy_is_lowercase` (window-copy.c:4509-4518): `*ptr !=
+/// tolower((u_char)*ptr)` compares a `char`, which is signed on x86-64 and
+/// on macOS, with an unsigned value, so a byte past ASCII is never equal to
+/// itself and a search string with a character past ASCII is matched with
+/// case (`é+` does not match `É`).
+fn is_lowercase(s: &str) -> bool {
+    s.bytes().all(|b| b.is_ascii() && !b.is_ascii_uppercase())
+}
+
+/// Tests turn the paths that read a line's text, not its cells, off to
+/// compare them with the cell path.
+fn text_paths_off() -> bool {
+    #[cfg(test)]
+    return tests::NO_ASCII_COUNT.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    false
 }
 
 /// tmux's `"^$*+()?[].\\"`: a search with none of these is plain text.
@@ -409,8 +445,35 @@ impl Grid {
     ) -> Option<(usize, usize)> {
         let sx = self.sx();
         let mut found = None;
+        // Most of a long history is plain ASCII lines, and reading one as
+        // cells costs many times what looking at its text does: a line of
+        // that kind the pattern cannot match is passed unread. For a plain
+        // pattern no ASCII line can hold that is every one of them; for a
+        // regular expression it is a line its text has no match in (the
+        // whole line, so not the first one searched from the middle going
+        // down: the text starting at the cursor can match what the whole
+        // does not, as for `\<`).
+        let skip_text = !text_paths_off();
+        let mut text = String::new();
+        let mut skipped = |y: usize, whole: bool| {
+            let skip = skip_text
+                && self.ascii_text(y, &mut text) == Some(false)
+                && match re {
+                    None => pat.never_in_ascii(),
+                    Some(re) => whole && matches!(re.span_with(&text, false), Ok(None)),
+                };
+            #[cfg(test)]
+            if skip {
+                tests::ASCII_SKIPPED.with(|n| n.set(n.get() + 1));
+            }
+            skip
+        };
         if down {
             for i in fy..=endline {
+                if skipped(i, fx == 0) {
+                    fx = 0;
+                    continue;
+                }
                 found = match re {
                     Some(re) => self.search_lr_regex(re, i, fx, sx).map(|(px, _)| (px, i)),
                     None => self.search_lr(pat, i, fx, sx).map(|px| (px, i)),
@@ -423,6 +486,11 @@ impl Grid {
         } else {
             let mut i = fy + 1;
             while endline < i {
+                if skipped(i - 1, true) {
+                    fx = sx - 1;
+                    i -= 1;
+                    continue;
+                }
                 found = match re {
                     Some(re) => self
                         .search_rl_regex(re, i - 1, 0, fx + 1)
@@ -719,19 +787,21 @@ impl CopyMode {
         // Lines out of view are only counted, and most are plain ASCII:
         // those are counted from their text alone ([`Self::count_ascii`]).
         let (shown_from, shown_to) = self.visible_lines();
-        let plain = if re.is_some() {
-            None
-        } else {
-            pat.ascii_bytes()
-        };
+        let (plain, never) = pat.plain_in_ascii(re.is_some());
         let mut text = String::new();
         loop {
             self.search.marks = Some(vec![0; sx * sy]);
             self.search.generation = 1;
             for py in start..end {
                 if !(shown_from..shown_to).contains(&py)
-                    && let Some(n) =
-                        self.count_ascii(re.as_ref(), plain.as_deref(), pat.cis, py, &mut text)
+                    && let Some(n) = self.count_ascii(
+                        re.as_ref(),
+                        plain.as_deref(),
+                        never,
+                        pat.cis,
+                        py,
+                        &mut text,
+                    )
                 {
                     nfound += n;
                     let now = Instant::now();
@@ -820,15 +890,15 @@ impl CopyMode {
         &self,
         re: Option<&Regex>,
         plain: Option<&[u8]>,
+        never: bool,
         cis: bool,
         py: usize,
         text: &mut String,
     ) -> Option<usize> {
-        #[cfg(test)]
-        if tests::NO_ASCII_COUNT.with(std::cell::Cell::get) {
+        if text_paths_off() {
             return None;
         }
-        if re.is_none() && plain.is_none() {
+        if re.is_none() && plain.is_none() && !never {
             return None;
         }
         if self.backing.ascii_text(py, text)? {
@@ -836,14 +906,14 @@ impl CopyMode {
         }
         #[cfg(test)]
         tests::ASCII_COUNTED.with(|n| n.set(n.get() + 1));
+        if never {
+            return Some(0);
+        }
         let (mut n, mut px) = (0, 0);
         while px < text.len() {
             let end = if let Some(re) = re {
-                let Ok(Some(m)) = re.find_with(&text[px..], px != 0) else {
-                    break;
-                };
-                match &m.captures[0] {
-                    Some(range) if !range.is_empty() => px + range.end,
+                match re.span_with(&text[px..], px != 0) {
+                    Ok(Some(range)) if !range.is_empty() => px + range.end,
                     _ => break,
                 }
             } else {
@@ -960,6 +1030,8 @@ mod tests {
         pub(super) static NO_ASCII_COUNT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// Lines counted from their text ([`Grid::count_ascii`]).
         pub(super) static ASCII_COUNTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Lines the jump passed from their text ([`Grid::search_from`]).
+        pub(super) static ASCII_SKIPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     /// `repeat` blocks of one line of each kind on a 40x6 pane: plain and
@@ -992,7 +1064,7 @@ mod tests {
         command: &str,
         pattern: &str,
         slow: bool,
-    ) -> (Option<(i64, bool)>, usize) {
+    ) -> (Option<(i64, bool)>, usize, (usize, usize)) {
         let env = Env {
             vi: false,
             line_numbers: 0,
@@ -1009,7 +1081,11 @@ mod tests {
             .unwrap();
         let info = m.search_info().2;
         NO_ASCII_COUNT.with(|f| f.set(false));
-        (info, ASCII_COUNTED.with(std::cell::Cell::get) - before)
+        (
+            info,
+            ASCII_COUNTED.with(std::cell::Cell::get) - before,
+            m.cursor(),
+        )
     }
 
     /// Counting a line out of view from its text gives the count the cells
@@ -1027,6 +1103,22 @@ mod tests {
             ("search-backward-text", " "),
             ("search-backward-text", "filler text"),
             ("search-backward-text", "\u{e9}"),
+            // Patterns no ASCII line can hold (a character past ASCII, a
+            // wide one, a tab): counted as none, from the text.
+            ("search-backward-text", "caf\u{e9}"),
+            ("search-backward-text", "\u{e9}t"),
+            ("search-backward-text", "\u{4e2d}"),
+            ("search-backward-text", "\u{4e2d}\u{6587} wide"),
+            ("search-backward-text", "\t"),
+            ("search-backward-text", "tab\there"),
+            ("search-forward-text", "\u{e9} au"),
+            ("search-forward", "\u{e9}+"),
+            ("search-forward", "\\<fill"),
+            ("search-forward", "^[a-z]+ "),
+            ("search-forward", "x*"),
+            ("search-forward", "z+$"),
+            ("search-backward", "e. au"),
+            ("search-forward", "\u{4e2d}"),
             ("search-backward", "^plain"),
             ("search-backward", "^."),
             ("search-backward", "^[a-z]+ "),
@@ -1039,16 +1131,83 @@ mod tests {
             ("search-backward", "[0-9]+ "),
             ("search-backward", "\\bsome\\b"),
         ] {
-            let (want, none) = count(&t, command, pattern, true);
+            let (want, none, want_at) = count(&t, command, pattern, true);
             assert_eq!(none, 0);
-            let (got, n) = count(&t, command, pattern, false);
+            let (got, n, got_at) = count(&t, command, pattern, false);
             assert_eq!(got, want, "{command} {pattern}");
+            assert_eq!(got_at, want_at, "{command} {pattern}: where it jumped");
             assert!(want.is_some_and(|(c, more)| c >= 0 && !more), "{want:?}");
             taken = taken.max(n);
         }
         // Every plain and coloured line out of view was counted from its
         // text (the pane shows the last six).
         assert!(taken >= fast_lines * 12 - 6, "{taken}");
+    }
+
+    /// A plain pattern with a character past ASCII (task
+    /// `low_history_bytes_width_search_nonascii`: over 100000 ASCII lines it
+    /// counted nothing after the 200 ms, where tmux counts in 0.12 s): the
+    /// ASCII lines are counted none from their text and passed by the jump
+    /// without being read, and the lines it can match are still found.
+    #[test]
+    fn a_pattern_past_ascii_skips_ascii_lines_unread() {
+        let (t, fast_lines) = mixed(12);
+        for pattern in ["\u{e9}", "\u{4e2d}", "caf\u{e9} au", "\t"] {
+            let (want, _, _) = count(&t, "search-backward-text", pattern, true);
+            let (got, n, _) = count(&t, "search-backward-text", pattern, false);
+            assert_eq!(got, want, "{pattern:?}");
+            assert!(n >= fast_lines * 12 - 6, "{pattern:?}: {n} lines from text");
+        }
+        let mut t = PaneTerm::new(40, 4, 1000);
+        for i in 0..500 {
+            let line = if i == 123 {
+                "un \u{e9}t\u{e9}".to_owned()
+            } else {
+                format!("line {i} plain")
+            };
+            t.feed(format!("{line}\r\n").as_bytes());
+        }
+        let g = Grid::clone_of(&t, 40, 4, false).0;
+        let last = g.last();
+        let pat = Pattern::new("\u{e9}t");
+        assert!(pat.never_in_ascii());
+        let skipped = || ASCII_SKIPPED.with(std::cell::Cell::get);
+        let start = skipped();
+        assert_eq!(
+            g.search_from(&pat, None, (0, last), 0, false, false),
+            Some((3, 123))
+        );
+        // Lines 124..=last were passed on the way up from the last.
+        assert_eq!(skipped() - start, last - 123);
+        let before = skipped();
+        assert_eq!(
+            g.search_from(&pat, None, (0, 0), last, false, true),
+            Some((3, 123))
+        );
+        assert_eq!(skipped() - before, 123);
+        // A regular expression the ASCII lines have no match in: the same.
+        let re = Regex::new("\u{e9}t.", true).unwrap();
+        let before = skipped();
+        assert_eq!(
+            g.search_from(&pat, Some(&re), (0, last), 0, false, false),
+            Some((3, 123))
+        );
+        assert_eq!(skipped() - before, last - 123);
+        let before = skipped();
+        assert_eq!(
+            g.search_from(&pat, Some(&re), (0, 0), last, false, true),
+            Some((3, 123))
+        );
+        assert_eq!(skipped() - before, 123);
+        let pat = Pattern::new("nowhere\u{e9}");
+        let before = skipped();
+        assert_eq!(g.search_from(&pat, None, (0, 0), last, false, true), None);
+        assert_eq!(
+            skipped() - before,
+            last,
+            "all but the last, which is in view"
+        );
+        assert_eq!(g.kept_lines(), 0);
     }
 
     fn grid(text: &str, cols: u16) -> Grid {
@@ -1067,6 +1226,9 @@ mod tests {
         assert_eq!(g.search_rl(&pat, 2, 0, 6), Some(4));
         assert!(Pattern::new("abc").cis && !Pattern::new("Abc").cis);
         assert_eq!(g.search_lr(&Pattern::new("Abc"), 2, 0, 6), None);
+        // A character past ASCII makes the search case-sensitive, as
+        // `window_copy_is_lowercase` does on a signed `char`.
+        assert!(!Pattern::new("\u{e9}").cis && !Pattern::new("a\u{e9}").cis);
     }
 
     /// A search over all of history reads every line but keeps none
