@@ -167,7 +167,8 @@ impl Server {
     /// `clients_calculate_size` (resize.c:131-276): `given` always counts.
     /// Under `latest` with more than one client on the window only the
     /// window's latest client counts; under `manual` the window's own
-    /// manual size is the answer.
+    /// manual size stands for theirs. Either way a size a control client
+    /// gave the window caps it.
     fn clients_calculate_size(
         &self,
         policy: SizePolicy,
@@ -176,32 +177,13 @@ impl Server {
         w: Option<WindowId>,
     ) -> Option<(u32, u32)> {
         let window = w.and_then(|w| self.model.windows.get(&w));
-        if policy == SizePolicy::Manual {
-            return window.map(|w| w.manual_size);
-        }
-        let only = match (policy, w, window) {
-            (SizePolicy::Latest, Some(w), Some(window)) if self.clients_with_window(w) > 1 => {
-                Some(window.latest)
-            }
-            _ => None,
+        let size = if policy == SizePolicy::Manual {
+            // resize.c:164-166: `goto skip`, past the clients but not
+            // past the per-window sizes below.
+            Some(window?.manual_size)
+        } else {
+            self.clients_size(policy, given, among, w, window)
         };
-        let mut size: Option<(u32, u32)> = None;
-        for (&id, c) in &self.clients {
-            if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
-                continue;
-            }
-            if only.is_some_and(|latest| latest != Some(id)) {
-                continue;
-            }
-            let Some((cx, cy)) = self.client_size(c, w) else {
-                continue;
-            };
-            size = Some(match (size, policy) {
-                (None, _) => (cx, cy),
-                (Some((sx, sy)), SizePolicy::Largest) => (sx.max(cx), sy.max(cy)),
-                (Some((sx, sy)), _) => (sx.min(cx), sy.min(cy)),
-            });
-        }
         // resize.c:225-252: no size is larger than a per-window size a
         // control client gave this window.
         let (Some(w), Some(mut size)) = (w, size) else {
@@ -225,6 +207,42 @@ impl Server {
             }
         }
         Some(size)
+    }
+
+    /// resize.c:169-218: the size the clients measure, `None` when none
+    /// counts.
+    fn clients_size(
+        &self,
+        policy: SizePolicy,
+        given: Option<ClientId>,
+        among: &Among,
+        w: Option<WindowId>,
+        window: Option<&crate::model::Window>,
+    ) -> Option<(u32, u32)> {
+        let only = match (policy, w, window) {
+            (SizePolicy::Latest, Some(w), Some(window)) if self.clients_with_window(w) > 1 => {
+                Some(window.latest)
+            }
+            _ => None,
+        };
+        let mut size: Option<(u32, u32)> = None;
+        for (&id, c) in &self.clients {
+            if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
+                continue;
+            }
+            if only.is_some_and(|latest| latest != Some(id)) {
+                continue;
+            }
+            let Some((cx, cy)) = self.client_size(c, w) else {
+                continue;
+            };
+            size = Some(match (size, policy) {
+                (None, _) => (cx, cy),
+                (Some((sx, sy)), SizePolicy::Largest) => (sx.max(cx), sy.max(cy)),
+                (Some((sx, sy)), _) => (sx.min(cx), sy.min(cy)),
+            });
+        }
+        size
     }
 
     /// `default_window_size` (resize.c:291-343): the size for a new window

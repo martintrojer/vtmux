@@ -1392,3 +1392,38 @@ fn layout_change_reports_the_layout_when_it_fired() {
         (layouts, code)
     });
 }
+
+/// resize.c `clients_calculate_size`: under `window-size manual` the
+/// window's manual size skips the clients but not the sizes control clients
+/// gave the window (`refresh-client -C @N:XxY`), which still cap it.
+#[test]
+fn manual_window_size_gives_way_to_a_control_window_size() {
+    compare(
+        "manual_window_size_gives_way_to_a_control_window_size",
+        |w| {
+            w.run(&[
+                "new", "-d", "-s", "c", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+            ]);
+            let mut c = w.control(&["attach", "-t", "c"]);
+            c.wait("%session-changed", |t| t.contains("%session-changed"));
+            let size = "display -p 's=#{window_width}x#{window_height}'";
+            let out = script(
+                w,
+                &mut c,
+                &[
+                    "set -g window-size manual",
+                    size,
+                    "refresh-client -C @0:50x10",
+                    size,
+                    "set -g window-size latest",
+                    "set -g window-size manual",
+                    size,
+                    "refresh-client -C @0:",
+                    size,
+                ],
+            );
+            let (_, _, code) = c.close();
+            (out, code)
+        },
+    );
+}
