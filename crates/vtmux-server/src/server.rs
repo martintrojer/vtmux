@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixListener as StdListener;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use mio::net::{UnixListener, UnixStream};
@@ -542,6 +543,9 @@ pub struct Server {
     listener: Option<UnixListener>,
     signals: Signals,
     pub(crate) clients: BTreeMap<ClientId, Client>,
+    /// Tests: every client draws alone ([`crate::render::share`] off).
+    #[cfg(test)]
+    pub(crate) sharing: crate::render::share::Sharing,
     next_client: usize,
     /// The last command number handed out (cmd-queue.c `cmdq_next`'s
     /// static `number`): every fired command takes one.
@@ -835,6 +839,8 @@ impl Server {
             listener: Some(listener),
             signals,
             clients: BTreeMap::new(),
+            #[cfg(test)]
+            sharing: crate::render::share::Sharing::On,
             next_client: 0,
             cmd_number: 0,
             config,
@@ -3092,117 +3098,180 @@ impl Server {
         // The rows each pane wrote under synchronized output that ended,
         // drawn whole for every client ([`Self::force_sync_flush`]).
         let mut flushed: BTreeMap<PaneId, Vec<bool>> = BTreeMap::new();
+        // What the clients before this one drew, for those after it.
+        let mut turn = crate::render::share::Turn::default();
         self.update_moved_offsets();
         for (id, s) in attached {
-            if self.render_skips(id, s) {
-                continue;
+            #[cfg(test)]
+            if self.sharing == crate::render::share::Sharing::Off {
+                turn = crate::render::share::Turn::default();
             }
-            let client = &self.clients[&id];
-            let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
-                continue;
-            };
-            let Some(mut caps) = client.caps else {
-                continue;
-            };
-            caps.overlay = client.popup.is_some();
-            caps.attrs.italics_as_standout = self.italics_as_standout();
-            let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
-            let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
-            let queued = client.unacked.bytes;
-            let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
+            let before = self.clients.len();
+            self.render_client(id, s, &mut flushed, &mut turn);
+            if self.clients.len() != before {
+                // A client went, and the model may have changed with it.
+                turn.forget_draws();
+            }
+        }
+    }
+
+    /// Client `id`'s frame of this turn ([`Self::render_clients`]).
+    fn render_client(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        flushed: &mut BTreeMap<PaneId, Vec<bool>>,
+        turn: &mut crate::render::share::Turn,
+    ) {
+        if self.render_skips(id, s) {
+            return;
+        }
+        let client = &self.clients[&id];
+        let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
+            return;
+        };
+        let Some(mut caps) = client.caps else {
+            return;
+        };
+        caps.overlay = client.popup.is_some();
+        caps.attrs.italics_as_standout = self.italics_as_standout();
+        let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
+        let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
+        let queued = client.unacked.bytes;
+        let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
+        let client = self.clients.get_mut(&id).expect("client");
+        if !client.compositor.ready(queued, cols, rows) {
+            // tty_add drops what comes while the client is blocked.
+            client.passthrough.clear();
+            return;
+        }
+        if self.defer_frame(id, s, queued) {
+            // tty_cmd_rawstring writes the payloads to `tty->out` as they
+            // come, whether a redraw is deferred or not; they count
+            // towards the block threshold like any output, so a client
+            // that stops reading blocks and the rest is dropped
+            // (tty_add) instead of piling up here.
+            self.send_passthrough(id, caps);
+            return;
+        }
+        if self.redraw_stops_sync(id, s) {
+            // The drawings so far showed the panes still held.
+            turn.forget_draws();
+        }
+        for (&p, pane) in &mut self.model.panes {
+            if let Some(rows) = pane.term.take_sync_flush() {
+                flushed.insert(p, rows);
+            }
+        }
+        // screen-redraw.c redraw_set_context: the scene sits below a
+        // top status (REDRAW_STATUS_TOP) and above a bottom one.
+        let area = rows.saturating_sub(lines);
+        let top = self.model.status_top(TreeId::Session(s));
+        let scene_y = if top { lines } else { 0 };
+        // TTY_FREEZE (status.c:385-386, tty.c:1646): under a message
+        // pane output is not written, so the terminal keeps the pane
+        // content it shows until a full redraw (server_redraw_client)
+        // or the message clears. Borders and pane status lines still
+        // draw (CLIENT_REDRAWBORDERS is not frozen).
+        let redrawing = self.redraw_pending(id, s);
+        let (jobs, window_jobs) = self.redraw_jobs(id, redrawing);
+        let client = self.clients.get_mut(&id).expect("client");
+        let frozen = client.status.hold_window();
+        let held = frozen
+            .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
+            .flatten()
+            .map(<[vtmux_vt::Cell]>::to_vec);
+        // The popup's rectangle is frozen the same way: its job's
+        // output is not written under a prompt (tty.c:1646), so the
+        // terminal keeps what it shows until a full redraw.
+        let held_popup = frozen
+            .then(|| client.compositor.shown_rows(cols, rows, 0, rows))
+            .flatten()
+            .map(<[vtmux_vt::Cell]>::to_vec);
+        let repeat = !redrawing
+            && !frozen
+            && self.repeats_plain_frame(id, s, caps, (cols, rows), (scene_y, area));
+        let (mut screen, mut tags, plain) =
+            self.frame_buffer(id, s, caps, (cols, rows), (scene_y, area), frozen);
+        let drawn = self.draw_window(
+            id,
+            s,
+            caps,
+            (&mut screen, &mut tags, plain),
+            (scene_y, area),
+            held.as_deref(),
+            &window_jobs,
+            repeat,
+            turn,
+        );
+        if !drawn {
             let client = self.clients.get_mut(&id).expect("client");
-            if !client.compositor.ready(queued, cols, rows) {
-                // tty_add drops what comes while the client is blocked.
-                client.passthrough.clear();
-                continue;
-            }
-            if self.defer_frame(id, s, queued) {
-                // tty_cmd_rawstring writes the payloads to `tty->out` as they
-                // come, whether a redraw is deferred or not; they count
-                // towards the block threshold like any output, so a client
-                // that stops reading blocks and the rest is dropped
-                // (tty_add) instead of piling up here.
-                self.send_passthrough(id, caps);
-                continue;
-            }
-            self.redraw_stops_sync(id, s);
-            for (&p, pane) in &mut self.model.panes {
-                if let Some(rows) = pane.term.take_sync_flush() {
-                    flushed.insert(p, rows);
-                }
-            }
-            // screen-redraw.c redraw_set_context: the scene sits below a
-            // top status (REDRAW_STATUS_TOP) and above a bottom one.
-            let area = rows.saturating_sub(lines);
-            let top = self.model.status_top(TreeId::Session(s));
-            let scene_y = if top { lines } else { 0 };
-            // TTY_FREEZE (status.c:385-386, tty.c:1646): under a message
-            // pane output is not written, so the terminal keeps the pane
-            // content it shows until a full redraw (server_redraw_client)
-            // or the message clears. Borders and pane status lines still
-            // draw (CLIENT_REDRAWBORDERS is not frozen).
-            let redrawing = self.redraw_pending(id, s);
-            let (jobs, window_jobs) = self.redraw_jobs(id, redrawing);
-            let client = self.clients.get_mut(&id).expect("client");
-            let frozen = client.status.hold_window();
-            let held = frozen
-                .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
-                .flatten()
-                .map(<[vtmux_vt::Cell]>::to_vec);
-            // The popup's rectangle is frozen the same way: its job's
-            // output is not written under a prompt (tty.c:1646), so the
-            // terminal keeps what it shows until a full redraw.
-            let held_popup = frozen
-                .then(|| client.compositor.shown_rows(cols, rows, 0, rows))
-                .flatten()
-                .map(<[vtmux_vt::Cell]>::to_vec);
-            let repeat = !redrawing
-                && !frozen
-                && self.repeats_plain_frame(id, s, caps, (cols, rows), (scene_y, area));
-            let (mut screen, mut tags, plain) =
-                self.frame_buffer(id, s, caps, (cols, rows), (scene_y, area), frozen);
-            let drawn = self.draw_window(
-                id,
-                s,
-                caps,
-                (&mut screen, &mut tags, plain),
-                scene_y,
-                area,
-                held.as_deref(),
-                &window_jobs,
-                repeat,
-            );
-            if !drawn {
-                let client = self.clients.get_mut(&id).expect("client");
-                client.compositor.recycle(screen, tags);
-                let mut frame = Vec::new();
-                self.add_outer_modes(id, &mut frame);
-                if !frame.is_empty() {
-                    self.send(id, &ServerMsg::Frame(frame));
-                }
-                self.send_passthrough(id, caps);
-                continue;
-            }
-            self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
-            // screen-redraw.c:1813: the overlay over everything else.
-            self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
-            self.force_sync_flush(id, s, &flushed, scene_y, area);
-            let mut frame = self
-                .clients
-                .get_mut(&id)
-                .expect("client")
-                .compositor
-                .frame_tagged(screen, tags, caps);
+            client.compositor.recycle(screen, tags);
+            let mut frame = Vec::new();
             self.add_outer_modes(id, &mut frame);
-            if redrawing {
-                let ahead = self.redraw_head(id, s);
-                frame.splice(0..0, ahead);
-            }
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
             }
             self.send_passthrough(id, caps);
+            return;
         }
+        self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
+        // screen-redraw.c:1813: the overlay over everything else.
+        self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
+        self.force_sync_flush(id, s, flushed, scene_y, area);
+        let mut frame = self.frame_shared(id, screen, tags, caps, turn);
+        self.add_outer_modes(id, &mut frame);
+        if redrawing {
+            let ahead = self.redraw_head(id, s);
+            frame.splice(0..0, ahead);
+        }
+        if !frame.is_empty() {
+            self.send(id, &ServerMsg::Frame(frame));
+        }
+        self.send_passthrough(id, caps);
+    }
+
+    /// Client `id`'s compositor's frame of `screen`: the bytes a client
+    /// before it wrote this turn when its terminal showed the same and its
+    /// new screen is the same ([`crate::render::Compositor::writes_as`]),
+    /// else its own, offered to the clients after it.
+    fn frame_shared(
+        &mut self,
+        id: ClientId,
+        screen: vtmux_vt::Snapshot,
+        tags: Vec<u64>,
+        caps: crate::render::Caps,
+        turn: &mut crate::render::share::Turn,
+    ) -> Vec<u8> {
+        let size = (screen.cols, screen.rows);
+        let compositor = &self.clients[&id].compositor;
+        let same = turn.frames(caps, size).find(|f| {
+            self.clients.get(&ClientId(f.leader)).is_some_and(|l| {
+                compositor.writes_as(&l.compositor, &f.forced, &f.frame, &screen, &tags)
+            })
+        });
+        if let Some(crate::render::share::SharedFrame { frame, .. }) = same {
+            // Debug builds check that the frame is the client's own.
+            #[cfg(debug_assertions)]
+            let own = compositor
+                .clone()
+                .frame_tagged(screen.clone(), tags.clone(), caps);
+            let client = self.clients.get_mut(&id).expect("client");
+            #[cfg(test)]
+            {
+                let (d, f) = client.window_cache.shared.get();
+                client.window_cache.shared.set((d, f + 1));
+            }
+            let frame = client.compositor.take_frame(screen, tags, frame);
+            #[cfg(debug_assertions)]
+            assert_eq!(frame, own, "a shared frame is the client's own");
+            return frame;
+        }
+        let compositor = &mut self.clients.get_mut(&id).expect("client").compositor;
+        let forced = compositor.forced().to_vec();
+        let frame = compositor.frame_tagged(screen, tags, caps);
+        turn.publish_frame(id.0, caps, size, forced, &frame);
+        frame
     }
 
     /// Drop the screen view ([`vtmux_vt::PaneTerm::release_screen`]) of
@@ -3342,16 +3411,17 @@ impl Server {
     /// drawn whole ends its synchronized output (`screen_write_stop_sync`)
     /// — every visible pane of the window under a window redraw
     /// (`CLIENT_REDRAWWINDOW`), else each pane with `PANE_REDRAW`.
-    fn redraw_stops_sync(&mut self, id: ClientId, s: SessionId) {
+    /// Whether a pane's synchronized output ended.
+    fn redraw_stops_sync(&mut self, id: ClientId, s: SessionId) -> bool {
         let Some((_, w, _)) = self.model.current_of(s) else {
-            return;
+            return false;
         };
         let all = self
             .clients
             .get(&id)
             .is_some_and(|c| c.status.redraw_window_pending());
         let Some(window) = self.model.windows.get(&w) else {
-            return;
+            return false;
         };
         let panes: Vec<PaneId> = window
             .panes
@@ -3360,11 +3430,13 @@ impl Server {
             .copied()
             .filter(|&p| window.is_visible(p) && (all || self.model.redraw_panes.contains(&p)))
             .collect();
+        let mut stopped = false;
         for p in panes {
             if let Some(pane) = self.model.panes.get_mut(&p) {
-                pane.term.stop_sync();
+                stopped |= pane.term.stop_sync();
             }
         }
+        stopped
     }
 
     /// `screen_write_flush_dirty` (screen-write.c:1267-1290): when a
@@ -3645,67 +3717,107 @@ impl Server {
         s: SessionId,
         caps: crate::render::Caps,
         (screen, tags, plain): (&mut vtmux_vt::Snapshot, &mut [u64], bool),
-        y: u16,
-        rows: u16,
+        (y, rows): (u16, u16),
         held: Option<&[vtmux_vt::Cell]>,
         jobs: &crate::format_jobs::JobHandle,
         repeat: bool,
+        turn: &mut crate::render::share::Turn,
     ) -> bool {
         let source = self.render_source();
-        let cache = self.clients.get(&id).map(|c| &c.window_cache);
-        let view = self.clients.get(&id).map(|c| c.view).unwrap_or_default();
+        let client = &self.clients[&id];
+        let cache = &client.window_cache;
+        let view = client.view;
         let origin = (view.ox, view.oy);
-        let Some((scene, mut draw)) =
-            source.window(s, screen.cols, rows, origin, caps, Some(jobs), cache)
-        else {
-            // Nothing to draw: the rows are blank, as from a fresh buffer.
-            crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
-            return true;
-        };
         let theme = source.theme(caps);
-        if let Some(c) = self.clients.get(&id) {
-            let (fg, bg) = c.reported.dim_defaults();
-            for dim in draw.panes.values_mut().filter_map(|d| d.dim.as_mut()) {
-                (dim.fg, dim.bg) = (fg, bg);
+        let key = crate::render::share::ShareKey {
+            session: s,
+            size: (screen.cols, rows),
+            origin,
+            caps,
+            colours: client.reported.blend_colours(),
+            dim: client.reported.dim_defaults(),
+        };
+        let shared = if let Some(d) = turn
+            .draw(&key)
+            .filter(|d| self.follows_draw(id, &key, d, jobs))
+        {
+            if !Rc::ptr_eq(&cache.composition.borrow(), &d.composition) {
+                *cache.composition.borrow_mut() = Rc::clone(&d.composition);
+                cache.seen.set(None);
             }
-            source.blend(s, &mut draw, &c.reported.blend_colours(), caps, &theme);
-        }
-        if let Some(c) = cache {
-            *c.border_ranges.borrow_mut() = draw
-                .panes
-                .iter()
-                .filter(|(_, d)| !d.status_ranges.is_empty())
-                .map(|(p, d)| (*p, d.status_ranges.clone()))
-                .collect();
-        }
-        let composed = cache.map(|c| {
+            #[cfg(test)]
+            {
+                let (d, f) = cache.shared.get();
+                cache.shared.set((d + 1, f));
+            }
+            d
+        } else {
+            // This client draws into its composition, which no other
+            // client of this turn may have drawn into.
+            if !turn.claim(&cache.composition.borrow()) {
+                *cache.composition.borrow_mut() = Rc::default();
+                cache.seen.set(None);
+                turn.claim(&cache.composition.borrow());
+            }
+            let Some((scene, mut draw)) =
+                source.window(s, screen.cols, rows, origin, caps, Some(jobs), Some(cache))
+            else {
+                // Nothing to draw: the rows are blank, as from a fresh buffer.
+                crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
+                return true;
+            };
+            for dim in draw.panes.values_mut().filter_map(|d| d.dim.as_mut()) {
+                (dim.fg, dim.bg) = key.dim;
+            }
+            source.blend(s, &mut draw, &key.colours, caps, &theme);
+            let composition = Rc::clone(&cache.composition.borrow());
             crate::render::compose::compose_cached(
-                &mut c.compose.borrow_mut(),
+                &mut composition.compose.borrow_mut(),
                 &scene,
                 &draw,
                 &theme,
                 screen.cols,
                 rows,
-            )
-        });
-        let cursor = crate::render::window::cursor_of(&draw, &self.model, screen.cols, view, y);
-        if repeat
-            && composed == Some(false)
-            && cache
-                .and_then(|c| c.plain.get())
-                .is_some_and(|p| p.cursor == cursor)
-        {
-            #[cfg(test)]
-            if let Some(c) = cache {
-                c.skipped.set(c.skipped.get() + 1);
+            );
+            let d = Rc::new(crate::render::share::SharedDraw {
+                borders: cache.borders.share(&draw),
+                composition,
+                scene,
+                draw,
+                #[cfg(debug_assertions)]
+                at: crate::model::now_epoch(),
+            });
+            // A drawing that read the client's own jobs or animation
+            // clock is its own.
+            if !jobs.used() {
+                turn.publish(key, Rc::clone(&d));
             }
+            d
+        };
+        let (scene, draw) = (&shared.scene, &shared.draw);
+        *cache.border_ranges.borrow_mut() = draw
+            .panes
+            .iter()
+            .filter(|(_, d)| !d.status_ranges.is_empty())
+            .map(|(p, d)| (*p, d.status_ranges.clone()))
+            .collect();
+        let composition = &shared.composition;
+        let generation = composition.compose.borrow().generation();
+        let composed = cache.seen.replace(Some(generation)) != Some(generation);
+        let cursor = crate::render::window::cursor_of(draw, &self.model, screen.cols, view, y);
+        if repeat && !composed && cache.plain.get().is_some_and(|p| p.cursor == cursor) {
+            #[cfg(test)]
+            cache.skipped.set(cache.skipped.get() + 1);
             return false;
         }
-        if let Some(c) = cache.filter(|_| plain) {
-            c.compose.borrow().copy_rows(screen, y, rows, tags);
-            if let Some(mut p) = c.plain.get() {
+        if plain {
+            composition
+                .compose
+                .borrow()
+                .copy_rows(screen, y, rows, tags);
+            if let Some(mut p) = cache.plain.get() {
                 p.cursor = cursor;
-                c.plain.set(Some(p));
+                cache.plain.set(Some(p));
             }
             (screen.cursor, screen.cursor_visible) = cursor;
             return true;
@@ -3714,15 +3826,12 @@ impl Server {
             *tag = 0;
         }
         let cols = usize::from(screen.cols);
-        let kept = cache.and_then(|c| c.buffer.borrow_mut().take());
+        let kept = cache.buffer.borrow_mut().take();
         let mut window = crate::render::blank(kept, screen.cols, rows);
         window.wrapped.clone_from(&screen.wrapped);
         window.cursor = screen.cursor;
         window.cursor_visible = screen.cursor_visible;
-        match cache {
-            Some(c) => c.compose.borrow().copy_to(&mut window),
-            None => crate::render::compose::compose(&scene, &draw, &theme, &mut window),
-        }
+        composition.compose.borrow().copy_to(&mut window);
         // The window's own rows: a pane prompt or the window menu may
         // place the cursor there instead.
         let local = (
@@ -3730,11 +3839,9 @@ impl Server {
             cursor.1,
         );
         (window.cursor, window.cursor_visible) = local;
-        if let Some(c) = cache
-            && let Some(mut plain) = c.plain.get()
-        {
+        if let Some(mut plain) = cache.plain.get() {
             plain.cursor = cursor;
-            c.plain.set(Some(plain));
+            cache.plain.set(Some(plain));
         }
         if let Some(held) = held {
             for (i, (cell, shown)) in window.cells.iter_mut().zip(held).enumerate() {
@@ -3760,9 +3867,56 @@ impl Server {
                 window.cursor_visible,
             )
         };
-        if let Some(c) = cache {
-            *c.buffer.borrow_mut() = Some(window);
+        *cache.buffer.borrow_mut() = Some(window);
+        true
+    }
+
+    /// Whether client `id` would draw what `shared` is, with job handle
+    /// `jobs`: its border styles follow it ([`window::BorderStyles::follow`];
+    /// the rest of a drawing depends on the [`crate::render::share::ShareKey`]
+    /// alone). Debug builds draw it anyway and check.
+    fn follows_draw(
+        &self,
+        id: ClientId,
+        key: &crate::render::share::ShareKey,
+        shared: &crate::render::share::SharedDraw,
+        jobs: &crate::format_jobs::JobHandle,
+    ) -> bool {
+        let client = &self.clients[&id];
+        let cache = &client.window_cache;
+        #[cfg(debug_assertions)]
+        let own = crate::render::WindowCache {
+            borders: cache.borders.clone(),
+            ..Default::default()
+        };
+        if !cache.borders.follow(&shared.borders) {
+            return false;
         }
+        #[cfg(debug_assertions)]
+        {
+            let source = self.render_source();
+            let ((cols, rows), caps) = (key.size, key.caps);
+            let jobs = jobs.clone().peek();
+            let (scene, mut draw) = source
+                .window(
+                    key.session,
+                    cols,
+                    rows,
+                    key.origin,
+                    caps,
+                    Some(&jobs),
+                    Some(&own),
+                )
+                .expect("a drawing");
+            let theme = source.theme(caps);
+            source.blend(key.session, &mut draw, &key.colours, caps, &theme);
+            if crate::model::now_epoch() == shared.at {
+                assert_eq!(*scene, *shared.scene, "a shared scene is the client's own");
+                assert_eq!(draw, shared.draw, "a shared drawing is the client's own");
+            }
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = (key, jobs);
         true
     }
 
@@ -6416,6 +6570,17 @@ mod tests {
         s: vtmux_core::ids::SessionId,
         dir: &std::path::Path,
     ) -> (super::ClientId, mio::net::UnixStream) {
+        attach_as(server, s, dir, "xterm-256color", (40, 10))
+    }
+
+    /// [`attach_test_client`] of terminal `term`, `cols` x `rows`.
+    fn attach_as(
+        server: &mut super::Server,
+        s: vtmux_core::ids::SessionId,
+        dir: &std::path::Path,
+        term: &str,
+        (cols, rows): (u32, u32),
+    ) -> (super::ClientId, mio::net::UnixStream) {
         use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
         let (ours, peer) = mio::net::UnixStream::pair().unwrap();
         let id = super::ClientId(server.next_client);
@@ -6430,9 +6595,9 @@ mod tests {
             env: vec![("COLORTERM".into(), "truecolor".into())],
             tty: Some(TtyInfo {
                 name: "/dev/null".into(),
-                term: "xterm-256color".into(),
-                cols: 40,
-                rows: 10,
+                term: term.into(),
+                cols,
+                rows,
                 features: Vec::new(),
             }),
             flags: ClientFlags::default(),
@@ -6441,6 +6606,241 @@ mod tests {
         server.clients.insert(id, client);
         server.attach_client(id, s).unwrap();
         (id, peer)
+    }
+
+    /// A server for [`shared_frames_are_each_clients_own`] in its own
+    /// directory, its one pane running `cat -`.
+    fn share_server(
+        name: &str,
+    ) -> (
+        super::Server,
+        super::PaneId,
+        super::SessionId,
+        std::path::PathBuf,
+    ) {
+        let dir = std::env::temp_dir().join(format!("vtmux-sh-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("s");
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let mut server =
+            super::Server::new(listener, socket, super::ServerConfig::default()).unwrap();
+        let s = server
+            .create_session(super::NewSession {
+                name: Some("a".into()),
+                window_name: Some("w".into()),
+                argv: vec!["cat".into(), "-".into()],
+                cwd: dir.clone(),
+                cols: 40,
+                rows: 9,
+                client_env: Vec::new(),
+                extra_env: Vec::new(),
+                update_env: false,
+                default_size: None,
+                group: None,
+            })
+            .unwrap();
+        let p = server.model.current_of(s).unwrap().2;
+        (server, p, s, dir)
+    }
+
+    /// Clients that show one window alike take one client's drawing and
+    /// frame (`render::share`), and each is still sent exactly the bytes
+    /// it is sent with every client drawing alone: the same script runs on
+    /// two servers, sharing on and off, with five clients (three alike, one
+    /// of another terminal, one of another size), one of them behind (its
+    /// frames deferred), one with a message up, one with its terminal's
+    /// colours for a pane blend, through splits, pane status lines, a
+    /// border style format, synchronized output and copy mode.
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "one script, run twice")]
+    fn shared_frames_are_each_clients_own() {
+        let mut sent: Vec<Vec<Vec<u8>>> = Vec::new();
+        let mut shared = Vec::new();
+        for unshared in [true, false] {
+            let name = if unshared { "off" } else { "on" };
+            let (mut server, p, s, dir) = share_server(name);
+            if unshared {
+                server.sharing = crate::render::share::Sharing::Off;
+            }
+            let run = |server: &mut super::Server, words: &[&str]| {
+                let argv: Vec<Vec<u8>> = words.iter().map(|w| w.as_bytes().to_vec()).collect();
+                let calls = vtmux_core::cmd::parse_argv_bytes(&argv).unwrap();
+                let item = crate::commands::Item::new(None, dir.clone());
+                let end = crate::cmdq::End::Quiet;
+                server.cmdq_append(None, crate::cmdq::NewBatch::new(item, calls, end));
+                server.cmdq_process();
+            };
+            run(
+                &mut server,
+                &["set", "-g", "status-right", "#{?client_prefix,P,R}"],
+            );
+            run(&mut server, &["set", "-g", "window-size", "manual"]);
+            run(&mut server, &["select-pane", "-T", "t"]);
+            let sizes = [(40, 10), (40, 10), (40, 10), (40, 10), (30, 8), (40, 10)];
+            let xterm = "xterm-256color";
+            let terms = [xterm, xterm, xterm, "screen", xterm, xterm];
+            let mut clients: Vec<_> = sizes
+                .iter()
+                .zip(terms)
+                .map(|(&size, term)| attach_as(&mut server, s, &dir, term, size))
+                .collect();
+            let ids: Vec<_> = clients.iter().map(|(id, _)| *id).collect();
+            let mut out = vec![Vec::new(); clients.len()];
+            let mut turn = |server: &mut super::Server, behind: &[usize]| {
+                server.render_clients();
+                for (i, (id, peer)) in clients.iter_mut().enumerate() {
+                    if !behind.contains(&i) {
+                        out[i].push(frames(server, *id, peer));
+                    }
+                }
+            };
+            let feed = |server: &mut super::Server, p: super::PaneId, bytes: &[u8]| {
+                server.model.panes.get_mut(&p).unwrap().term.feed(bytes);
+            };
+            for _ in 0..3 {
+                turn(&mut server, &[]);
+            }
+            feed(&mut server, p, b"hello\r\nworld");
+            turn(&mut server, &[]);
+            run(&mut server, &["split-window", "-h", "-t", "a", "cat", "-"]);
+            run(&mut server, &["select-pane", "-T", "t"]);
+            let (_, w, _) = server.model.current_of(s).unwrap();
+            let q = *server.model.windows[&w]
+                .panes
+                .panes
+                .iter()
+                .find(|&&x| x != p)
+                .unwrap();
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"\x1b[31mred\x1b[m");
+            feed(&mut server, q, b"in q");
+            // Client 1 is behind: it gets no frame until it catches up.
+            turn(&mut server, &[1]);
+            feed(&mut server, q, b"\r\nmore");
+            turn(&mut server, &[1]);
+            turn(&mut server, &[]);
+            run(&mut server, &["set", "-g", "pane-border-status", "top"]);
+            run(
+                &mut server,
+                &[
+                    "set",
+                    "-g",
+                    "pane-border-format",
+                    " #{pane_index}:#{pane_active} ",
+                ],
+            );
+            run(
+                &mut server,
+                &[
+                    "set",
+                    "-g",
+                    "pane-active-border-style",
+                    "#{?pane_active,fg=red,fg=blue}",
+                ],
+            );
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"x");
+            turn(&mut server, &[]);
+            // A message on client 2 alone, then pane output under it: one
+            // that freezes the panes, and before it one that does not
+            // (`display-message -C`), which comes with pane output.
+            let flags = crate::render::status::MessageFlags {
+                no_freeze: true,
+                ..Default::default()
+            };
+            server.status_message(ids[2], "unfrozen".into(), Some(0), flags);
+            feed(&mut server, p, b"v");
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"u");
+            turn(&mut server, &[]);
+            server.status_message_set(ids[2], "a message".into());
+            turn(&mut server, &[]);
+            feed(&mut server, q, b"y");
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"w");
+            turn(&mut server, &[]);
+            // Its end redraws client 2 whole, which ends a pane's
+            // synchronized output: the clients after it draw the pane's
+            // screen, the ones before it the held one.
+            feed(&mut server, q, b"\x1b[?2026h\x1b[1;1Hheld in q");
+            turn(&mut server, &[]);
+            server
+                .clients
+                .get_mut(&ids[2])
+                .unwrap()
+                .status
+                .clear_message();
+            turn(&mut server, &[]);
+            run(
+                &mut server,
+                &[
+                    "set",
+                    "-g",
+                    "vtmux-pane-inactive-blend",
+                    "fg=bg/50,bg=#400000/50",
+                ],
+            );
+            server
+                .on_client_input(ids[0], b"\x1b]10;#ffffff\x07\x1b]11;#000000\x07")
+                .unwrap();
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"\x1b[?2026h\x1b[2;1Hheld");
+            turn(&mut server, &[]);
+            feed(&mut server, q, b"z");
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"\x1b[?2026l");
+            turn(&mut server, &[]);
+            run(&mut server, &["select-pane", "-t", "{left}"]);
+            turn(&mut server, &[]);
+            run(&mut server, &["copy-mode", "-t", "{right}"]);
+            turn(&mut server, &[]);
+            run(
+                &mut server,
+                &["send-keys", "-X", "-t", "{right}", "cursor-up"],
+            );
+            turn(&mut server, &[]);
+            run(&mut server, &["kill-pane", "-t", "{right}"]);
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"\r\nlast");
+            turn(&mut server, &[]);
+            // Client 2's status line alone changes, with pane output.
+            server.on_client_input(ids[2], b"\x02").unwrap();
+            feed(&mut server, p, b"!");
+            turn(&mut server, &[]);
+            feed(&mut server, p, b"?");
+            turn(&mut server, &[]);
+            turn(&mut server, &[]);
+            shared.push(
+                ids.iter()
+                    .map(|id| server.clients[id].window_cache.shared.get())
+                    .collect::<Vec<_>>(),
+            );
+            sent.push(out.into_iter().flatten().collect());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+        assert_eq!(sent[0].len(), sent[1].len());
+        for (i, (alone, with)) in sent[0].iter().zip(&sent[1]).enumerate() {
+            assert_eq!(
+                String::from_utf8_lossy(alone),
+                String::from_utf8_lossy(with),
+                "frame {i}"
+            );
+        }
+        assert!(
+            shared[0].iter().all(|&n| n == (0, 0)),
+            "nothing shared when off: {:?}",
+            shared[0]
+        );
+        // Clients 1 and 2 (3 and 4 are another terminal and size; 0 is
+        // the first) took drawings and frames.
+        assert!(
+            shared[1][1].0 > 0 && shared[1][1].1 > 0 && shared[1][2].0 > 0 && shared[1][2].1 > 0,
+            "{:?}",
+            shared[1]
+        );
+        assert_eq!(shared[1][4], (0, 0), "another size draws alone");
+        assert!(shared[1][5].0 > 0, "{:?}", shared[1]);
     }
 
     /// The plain-frame skip (a turn where no composed row or the cursor

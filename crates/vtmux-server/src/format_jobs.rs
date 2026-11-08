@@ -291,6 +291,9 @@ fn readline(buf: &mut Vec<u8>) -> Option<Vec<u8>> {
 #[derive(Clone, Debug)]
 pub struct JobHandle {
     state: Rc<RefCell<FormatJobs>>,
+    /// An expansion with this handle (or a clone of it) asked for a job's
+    /// text or an animation's clock: what it drew was this client's own.
+    used: Rc<std::cell::Cell<bool>>,
     pub client: Option<ClientId>,
     pub tag: u32,
     pub flags: u8,
@@ -300,6 +303,7 @@ impl JobHandle {
     pub(crate) fn new(state: &Rc<RefCell<FormatJobs>>, client: Option<ClientId>) -> Self {
         Self {
             state: Rc::clone(state),
+            used: Rc::default(),
             client,
             tag: 0,
             flags: 0,
@@ -333,6 +337,14 @@ impl JobHandle {
         self
     }
 
+    /// Whether an expansion with this handle or a clone of it read a job's
+    /// text ([`Self::get`]) or an animation's clock ([`Self::cycle_clock`]),
+    /// both kept per client.
+    #[must_use]
+    pub(crate) fn used(&self) -> bool {
+        self.used.get()
+    }
+
     /// `format_cycle`'s clock (`es->start_time`, monotonic milliseconds) for a
     /// status format, `None` for any other; an animation with more than one
     /// frame arms the client's cycle timer (format.c:5987-6005).
@@ -340,6 +352,7 @@ impl JobHandle {
         // get_timer (tmux.c:289) is CLOCK_MONOTONIC; only the frame period
         // shows, so any monotonic origin will do.
         static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        self.used.set(true);
         if self.flags & STATUS == 0 {
             return None;
         }
@@ -352,6 +365,7 @@ impl JobHandle {
 
     /// The text for `#(raw)` whose command expanded to `expanded`.
     pub(crate) fn get(&self, raw: &str, expanded: &str) -> String {
+        self.used.set(true);
         self.state.borrow_mut().get(
             self.client,
             self.tag,

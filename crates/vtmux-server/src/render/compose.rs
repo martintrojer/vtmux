@@ -130,7 +130,7 @@ fn acs(c: char) -> char {
 }
 
 /// How one visible pane draws.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PaneDraw {
     /// Shared with the pane's [`vtmux_vt::ScreenView`] when it shows its
     /// own grid, so a frame does not copy it.
@@ -218,7 +218,7 @@ impl BarDraw {
 }
 
 /// Everything [`compose`] needs besides the scene.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Draw {
     pub panes: BTreeMap<PaneId, PaneDraw>,
     pub active: Option<PaneId>,
@@ -333,6 +333,9 @@ pub fn compose_cached(
         row.version = ROW_VERSION.fetch_add(1, Ordering::Relaxed);
         changed = true;
     }
+    if changed {
+        cache.generation += 1;
+    }
     changed
 }
 
@@ -344,15 +347,25 @@ static ROW_VERSION: AtomicU64 = AtomicU64::new(1);
 /// [`CachedRow::version`] reaches it. Tag 0 is a row anything else drew.
 pub const BLANK_ROW: u64 = u64::MAX;
 
-/// What [`compose_cached`] composed last, per client.
+/// What [`compose_cached`] composed last, for the clients that share it
+/// ([`super::share::Composition`]).
 #[derive(Debug, Default)]
 pub struct ComposeCache {
     scene: Option<Rc<Scene>>,
     key: Option<DrawKey>,
     rows: Vec<CachedRow>,
+    /// How many [`compose_cached`] calls composed a row again: a client
+    /// that last drew at another generation has rows to draw.
+    generation: u64,
 }
 
 impl ComposeCache {
+    /// Counts the [`compose_cached`] calls that composed something.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Draw what [`compose_cached`] composed into the top rows of `screen`.
     pub fn copy_to(&self, screen: &mut Snapshot) {
         let cols = usize::from(screen.cols).max(1);

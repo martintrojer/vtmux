@@ -121,8 +121,20 @@ impl<'a> Clients<'a> {
 /// it again on the changes tmux redraws the borders for (an option, the
 /// active or marked pane, a mode, the layout), whether or not vtmux asks
 /// for a redraw there.
-#[derive(Debug, Default)]
-pub struct BorderStyles(std::cell::RefCell<BTreeMap<PaneId, (BorderKey, CellStyle)>>);
+#[derive(Clone, Debug, Default)]
+pub struct BorderStyles {
+    kept: std::cell::RefCell<BTreeMap<PaneId, (BorderKey, CellStyle)>>,
+    /// The panes whose style the last [`Source::window`] expanded rather
+    /// than took from `kept`.
+    fresh: std::cell::RefCell<Vec<PaneId>>,
+}
+
+/// The border styles one client's drawing used, for another client to
+/// take the same drawing ([`BorderStyles::follow`]): per pane, the
+/// [`BorderKey`], the style, and whether it was expanded for this
+/// drawing.
+#[derive(Debug)]
+pub struct BorderShare(Vec<(PaneId, BorderKey, CellStyle, bool)>);
 
 /// What a kept border style was expanded under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,9 +160,53 @@ impl BorderStyles {
     /// (screen-redraw.c:1726-1731): the styles of window `w`'s panes are
     /// expanded again. Panes that are gone go too.
     pub fn forget(&self, model: &Model, w: WindowId) {
-        self.0
+        self.kept
             .borrow_mut()
             .retain(|p, _| model.panes.get(p).is_some_and(|pane| pane.window != w));
+    }
+
+    /// The styles the last [`Source::window`] with these styles drew
+    /// `draw`'s panes with.
+    #[must_use]
+    pub fn share(&self, draw: &Draw) -> BorderShare {
+        let kept = self.kept.borrow();
+        let fresh = self.fresh.borrow();
+        BorderShare(
+            draw.panes
+                .keys()
+                .filter_map(|p| {
+                    let (key, style) = kept.get(p)?;
+                    Some((*p, *key, style.clone(), fresh.contains(p)))
+                })
+                .collect(),
+        )
+    }
+
+    /// Whether [`Source::window`] with these styles would draw every pane
+    /// of `share` in the style it has there, in the same turn (the model
+    /// unchanged): a style kept under the same key must be the same, and
+    /// one these styles would expand again must have been expanded for
+    /// `share` too (an expansion depends only on the model and the
+    /// session, not the client). If so, these styles become what that
+    /// drawing would have left.
+    #[must_use]
+    pub fn follow(&self, share: &BorderShare) -> bool {
+        let mut kept = self.kept.borrow_mut();
+        let same = share
+            .0
+            .iter()
+            .all(|(p, key, style, fresh)| match kept.get(p) {
+                Some((k, s)) if k == key => s == style,
+                _ => *fresh,
+            });
+        if same {
+            for (p, key, style, _) in &share.0 {
+                if kept.get(p).is_none_or(|(k, _)| k != key) {
+                    kept.insert(*p, (*key, style.clone()));
+                }
+            }
+        }
+        same
     }
 }
 
@@ -341,6 +397,9 @@ impl Source<'_> {
         let wtree = TreeId::Window(w);
         let marked_pane = self.model.marked().and_then(|m| m.pane);
         let generation = self.model.options.generation();
+        if let Some(c) = cache {
+            c.borders.fresh.borrow_mut().clear();
+        }
         let mut panes = Vec::new();
         let mut draws = BTreeMap::new();
         for &p in window.panes.z_order.iter().rev() {
@@ -429,7 +488,7 @@ impl Source<'_> {
         };
         let order: Vec<PaneId> = view.panes.iter().map(|p| p.id).collect();
         let scene = match cache {
-            Some(cache) => Scene::cached(&cache.scene, view, cols, rows),
+            Some(cache) => Scene::cached(&cache.composition.borrow().scene, view, cols, rows),
             None => Rc::new(Scene::build(&view, cols, rows)),
         };
         for p in order {
@@ -516,7 +575,7 @@ impl Source<'_> {
         key: BorderKey,
         ctx: &Ctx<'_>,
     ) -> CellStyle {
-        if let Some((k, style)) = kept.and_then(|b| b.0.borrow().get(&p).cloned())
+        if let Some((k, style)) = kept.and_then(|b| b.kept.borrow().get(&p).cloned())
             && k == key
         {
             return style;
@@ -528,7 +587,8 @@ impl Source<'_> {
         };
         let style = self.style(TreeId::Pane(p), option, ctx);
         if let Some(b) = kept {
-            b.0.borrow_mut().insert(p, (key, style.clone()));
+            b.kept.borrow_mut().insert(p, (key, style.clone()));
+            b.fresh.borrow_mut().push(p);
         }
         style
     }

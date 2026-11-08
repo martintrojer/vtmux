@@ -14,6 +14,7 @@ pub mod palette;
 pub mod panes;
 pub mod popup;
 pub mod scene;
+pub mod share;
 pub mod status;
 pub mod tree;
 pub mod window;
@@ -315,10 +316,14 @@ pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis
 /// What a client's last window drawing can lend the next one.
 #[derive(Debug, Default)]
 pub struct WindowCache {
-    pub scene: scene::SceneCache,
+    /// The scene and composed rows, shared with the clients that drew the
+    /// same window alike ([`share`]).
+    pub composition: std::cell::RefCell<std::rc::Rc<share::Composition>>,
+    /// The [`compose::ComposeCache::generation`] this client last drew,
+    /// `None` when it has not drawn from `composition` yet.
+    pub seen: std::cell::Cell<Option<u64>>,
     /// Each pane's border style as this client last expanded it.
     pub borders: window::BorderStyles,
-    pub compose: std::cell::RefCell<compose::ComposeCache>,
     /// The window's drawing buffer, kept for the next frame.
     pub buffer: std::cell::RefCell<Option<Snapshot>>,
     /// What the last frame was drawn from, when it was a plain one (see
@@ -333,6 +338,9 @@ pub struct WindowCache {
     /// to tell the skip from the compositor's own empty diff.
     #[cfg(test)]
     pub skipped: std::cell::Cell<u32>,
+    /// Drawings and frames this client took from another ([`share`]).
+    #[cfg(test)]
+    pub shared: std::cell::Cell<(u32, u32)>,
 }
 
 /// The inputs of a frame with nothing over the window but the status
@@ -392,7 +400,7 @@ pub fn clear_cells(cells: &mut [vtmux_vt::Cell]) {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Compositor {
     last: Option<Snapshot>,
     /// Per row of `last`, the composed row it was copied from

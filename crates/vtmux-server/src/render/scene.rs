@@ -304,7 +304,7 @@ pub enum SceneCell {
 #[derive(Debug, Default)]
 pub struct SceneCache(RefCell<Option<(WindowView, Rc<Scene>)>>);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scene {
     pub cols: u16,
     pub rows: u16,
