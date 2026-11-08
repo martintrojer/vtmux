@@ -7708,6 +7708,10 @@ fn format_time_unparseable_tz_name() {
             // (the real clock would otherwise expand them).
             runs.push(w.run(&["display", "-p", "[#{t/f/%%Z|%%z|%%H:@ts}]"]));
             runs.push(w.run(&["kill-server"]));
+            // tmux's server may still be exiting, and would close the
+            // next value's `new` ("server exited unexpectedly",
+            // server.c `server_accept` while `server_exit`).
+            w.wait_gone();
         }
         runs
     });
