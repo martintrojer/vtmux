@@ -1,5 +1,12 @@
 name: setup
-description: Zig, Rust, the reference tmux 3.8 build and its cache (shared by the ci.yml jobs)
+description: Zig, Rust, the reference tmux 3.8 build and its cache (shared by the ci.yml and release.yml jobs)
+inputs:
+  reference-tmux:
+    description: Build the reference tmux 3.8 (the gate needs it; a release build does not)
+    default: "true"
+  rust-cache:
+    description: Restore and save target/ (a release build starts clean)
+    default: "true"
 runs:
   using: composite
   steps:
@@ -11,7 +18,9 @@ runs:
         toolchain: 1.99.1
         components: rustfmt, clippy
     - uses: Swatinem/rust-cache@v2
+      if: inputs.rust-cache == 'true'
     - name: Reference tmux 3.8 build dependencies
+      if: inputs.reference-tmux == 'true'
       shell: bash
       run: |
         if [ "$RUNNER_OS" = Linux ]; then
@@ -21,6 +30,7 @@ runs:
           brew install libevent ncurses pkg-config utf8proc jemalloc
         fi
     - name: Reference tmux 3.8 cache
+      if: inputs.reference-tmux == 'true'
       uses: actions/cache@v4
       with:
         path: ~/.cache/vtmux/tmux-3.8
@@ -28,4 +38,5 @@ runs:
         # and a build revision (2: macOS links Homebrew's ncurses 6, not the system's 5.4).
         key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e-2
     - run: cargo xtask ref-tmux
+      if: inputs.reference-tmux == 'true'
       shell: bash

@@ -1,0 +1,103 @@
+name: release
+# A tag `v<version>` builds the release tarballs and attaches them to a draft
+# GitHub release; publishing the draft is the owner's call.
+#
+# To cut one (D25: the version is the tmux release it is tested against):
+# set `version` in Cargo.toml (3.8.0-beta.1 displays as 3.8-beta1), add its
+# `## 3.8-beta1` section to CHANGELOG.md, try `scripts/release-tarball.sh
+# x86_64-linux v3.8-beta1` locally, then push the tag `v3.8-beta1`. The build
+# fails when the tag is not `v` + what `vtmux -V` prints.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # 22.04: the oldest glibc GitHub builds on (2.35), so the binary runs
+          # on more distributions than one built on ubuntu-latest.
+          - target: x86_64-linux
+            runner: ubuntu-22.04
+          - target: aarch64-linux
+            runner: ubuntu-22.04-arm
+          # Zig 0.17 (the ghostty pin's) targets macOS 15+, as ci.yml's macOS job.
+          - target: aarch64-macos
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          reference-tmux: "false"
+          rust-cache: "false"
+      # libghostty-vt-sys's build script clones the pinned ghostty commit, applies
+      # the vendored patches and builds it with Zig (ReleaseFast, baseline CPU).
+      - name: Build and package
+        id: package
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          tarball=$(bash scripts/release-tarball.sh "$TARGET" "$TAG" | tail -1)
+          echo "tarball=$tarball" >>"$GITHUB_OUTPUT"
+          {
+            echo "### $TARGET"
+            echo '```'
+            cat "$tarball.sha256"
+            ls -l "$tarball"
+            if [ "$RUNNER_OS" = Linux ]; then
+              echo "needs glibc $(objdump -T target/release/vtmux | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+            fi
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtmux-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.tarball }}
+            ${{ steps.package.outputs.tarball }}.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          cd dist
+          cat ./*.sha256 >SHA256SUMS
+          sha256sum -c SHA256SUMS
+          # The release notes are the tag's CHANGELOG.md section.
+          awk -v h="## $version" '$0 == h || index($0, h " ") == 1 { on = 1; next } on && /^## / { exit } on' \
+            ../CHANGELOG.md >notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          prerelease=()
+          case "$version" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$TAG" --draft "${prerelease[@]}" --verify-tag \
+            --title "vtmux $version" --notes-file notes.md \
+            ./*.tar.gz SHA256SUMS
