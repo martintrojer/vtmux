@@ -1312,6 +1312,62 @@ fn spawn_failures_say_fork_failed() {
     });
 }
 
+/// A respawn whose fork fails keeps the pane, its old process hung up, with
+/// the new command and no process: not dead, no pid, and the old process's
+/// exit matches no pane (spawn.c:478-488 sets the pid to -1). So the
+/// session and server stay, and a later respawn without `-k` runs.
+#[cfg(target_os = "linux")]
+#[test]
+fn failed_respawn_keeps_the_pane() {
+    if !forks_can_be_limited("failed_respawn_keeps_the_pane") {
+        return;
+    }
+    let panes = [
+        "lsp",
+        "-a",
+        "-F",
+        "#{pane_id} dead=#{pane_dead} pid=#{pane_pid}",
+    ];
+    compare("failed_respawn_keeps_the_pane", |w| {
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["splitw", "-d", "-t", "a", "cat", "-"]),
+        ];
+        let old: Vec<_> = w
+            .run(&["lsp", "-a", "-F", "#{pane_pid}"])
+            .stdout
+            .lines()
+            .filter_map(common::parse_pid)
+            .collect();
+        limit_server_forks(w, Some(1));
+        runs.extend([
+            w.run(&["respawnp", "-k", "-t", "a:0.0", "cat", "-"]),
+            w.run(&["respawnw", "-k", "-t", "a:0", "cat", "-"]),
+        ]);
+        // The hung-up processes reaped: their exits have been handled.
+        let start = Instant::now();
+        while old
+            .iter()
+            .any(|&p| rustix::process::test_kill_process(p).is_ok())
+        {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "old pane processes never reaped ({})",
+                w.bin.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        limit_server_forks(w, None);
+        runs.extend([
+            w.run(&panes),
+            w.run(&["respawnp", "-t", "a:0.0", "cat", "-"]),
+        ]);
+        w.wait_all_running("cat");
+        runs.push(w.run(&["lsp", "-a", "-F", "#{pane_id} dead=#{pane_dead}"]));
+        runs
+    });
+}
+
 /// A multi-word command is run as `execvp` does (spawn.c:552), so an
 /// executable without a shebang runs through `/bin/sh` (ENOEXEC fallback),
 /// given by path and found through the pane's `PATH`.

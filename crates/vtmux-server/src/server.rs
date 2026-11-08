@@ -4844,10 +4844,10 @@ impl Server {
         if !self.model.panes.contains_key(&p) {
             return Ok(());
         }
-        let fresh = self.spawn_pane(ps)?;
+        let fresh = self.spawn_pane(ps);
         let extended_keys = self.model.extended_keys();
         let Some(pane) = self.model.panes.get_mut(&p) else {
-            return Ok(());
+            return fresh.map(|_| ());
         };
         // screen_reinit and a fresh input parser: alternate screen off,
         // scroll region, cursor home, visible lines cleared, modes back to
@@ -4878,6 +4878,28 @@ impl Server {
             pane.term.feed(EMPTY_PANE_MODES);
         }
         pane.compress.observe(&pane.term, Instant::now());
+        // spawn.c:349, 587: the old status and the dead pane's line go
+        // with the old process.
+        pane.exited = false;
+        pane.status = None;
+        pane.dead_time = None;
+        pane.changed = true;
+        let fresh = match fresh {
+            Ok(fresh) => fresh,
+            Err(e) => {
+                // spawn.c:478-488: a failed fork leaves the pane in place
+                // with its new command and directory and no process (pid
+                // -1): the old process's exit matches no pane, so the pane
+                // stays, not dead, until a respawn or kill-pane.
+                pane.pid = 0;
+                pane.empty = false;
+                if !ps.argv.is_empty() {
+                    pane.argv.clone_from(&ps.argv);
+                }
+                pane.cwd.clone_from(&ps.cwd);
+                return Err(e);
+            }
+        };
         pane.io = fresh.io;
         pane.empty = fresh.empty;
         // spawn.c:459-463: an empty respawn forks nothing and keeps the old
@@ -4890,12 +4912,6 @@ impl Server {
         pane.argv = fresh.argv;
         pane.shell = fresh.shell;
         pane.cwd = fresh.cwd;
-        // spawn.c:349, 587: the old status and the dead pane's line go
-        // with the old process.
-        pane.exited = false;
-        pane.status = None;
-        pane.dead_time = None;
-        pane.changed = true;
         Ok(())
     }
 
