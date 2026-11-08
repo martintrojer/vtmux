@@ -33,25 +33,6 @@ pub fn exec(
     {
         return Err(EdgeError::Message("client is read-only".into()).into());
     }
-    if args.flag('K') {
-        inject(server, args, tc);
-        return Ok(());
-    }
-    // cmd-send-keys.c:211-219: -M is the batch's mouse event to the pane
-    // under it; "no mouse target" without one.
-    if args.flag('M') {
-        let Some(m) = item.mouse.as_ref() else {
-            return Err(EdgeError::Message("no mouse target".into()).into());
-        };
-        let Some(p) = m.target.pane_found(&server.model).and_then(|f| f.pane) else {
-            return Err(EdgeError::Message("no mouse target".into()).into());
-        };
-        // window_pane_key(wp, tc, ...): a mode's key callback needs the
-        // client; a program gets it either way.
-        let m = m.clone();
-        server.forward_mouse(p, tc, &m);
-        return Ok(());
-    }
     let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let repeat = if args.flag('N') {
         super::number_expanded(server, found, args.value('N'), 1, i64::from(u32::MAX)).map_err(
@@ -86,12 +67,33 @@ pub fn exec(
         let mouse = item.mouse.clone();
         return mode_command(server, args, found, p, tc, mouse.as_ref());
     }
+    // cmd-send-keys.c:211-219: -M is the batch's mouse event to the pane
+    // under it; "no mouse target" without one.
+    if args.flag('M') {
+        let Some(m) = item.mouse.as_ref() else {
+            return Err(EdgeError::Message("no mouse target".into()).into());
+        };
+        let Some(p) = m.target.pane_found(&server.model).and_then(|f| f.pane) else {
+            return Err(EdgeError::Message("no mouse target".into()).into());
+        };
+        // window_pane_key(wp, tc, ...): a mode's key callback needs the
+        // client; a program gets it either way.
+        let m = m.clone();
+        server.forward_mouse(p, tc, &m);
+        return Ok(());
+    }
     if args.flag('R') {
         reset_pane(server, p);
         // cmd-send-keys.c:242-243: nothing more without keys.
         if args.positionals.is_empty() {
             return Ok(());
         }
+    }
+    // cmd-send-keys.c:244-265: with -K each key goes to the client
+    // (cmd_send_keys_inject_key), once -N, -X, -M and -R had their turn.
+    if args.flag('K') {
+        inject(server, args, tc, repeat);
+        return Ok(());
     }
     if in_mode {
         mode_keys(server, item, args, found, p, repeat, tc);
@@ -454,16 +456,9 @@ fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
 /// (cmd-send-keys.c:75-92), handled after this command. No target client
 /// is not an error (`CMD_CLIENT_CANFAIL`). Names that are not keys are
 /// sent character by character (`cmd_send_keys_inject_string`).
-fn inject(server: &mut Server, args: &Args, tc: Option<ClientId>) {
+fn inject(server: &mut Server, args: &Args, tc: Option<ClientId>, repeat: i64) {
     let Some(tc) = tc else {
         return;
-    };
-    let repeat = if args.flag('N') {
-        args.value('N')
-            .and_then(|n| n.parse::<usize>().ok())
-            .unwrap_or(1)
-    } else {
-        1
     };
     for _ in 0..repeat {
         for arg in &args.positionals {

@@ -947,6 +947,24 @@ fn confirm_before_wants_a_client_first() {
     });
 }
 
+/// send-keys checks in `cmd_send_keys_exec`'s order (cmd-send-keys.c:183-265):
+/// the `-N` count, `-X` (`not in a mode`), `-M` (`no mouse target`), `-R`,
+/// and only then `-K` hands the keys to the client, so `-K` with any of
+/// the others gets their error first.
+#[test]
+fn send_keys_checks_in_order() {
+    compare("send_keys_checks_in_order", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["send-keys", "-M", "-X", "cancel"]),
+            w.run(&["send-keys", "-M", "-N", "abc"]),
+            w.run(&["send-keys", "-K", "-M", "a"]),
+            w.run(&["send-keys", "-K", "-X", "cancel"]),
+            w.run(&["send-keys", "-K", "-N", "0", "a"]),
+        ]
+    });
+}
+
 /// `detach-client` with no attached client: `CMD_CLIENT_TFLAG` fails first,
 /// whatever `-a`, `-s`, `-P` or `-E` say (cmd-queue.c:604-609).
 #[test]
