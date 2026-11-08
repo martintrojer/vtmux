@@ -378,6 +378,12 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
     call.entry.ensure_implemented()?;
     server.refresh_client_targets();
+    // cmdq_fire_command (cmd-queue.c:602-607): `CMD_CLIENT_CFLAG` without
+    // `CMD_CLIENT_CANFAIL` finds the `-c` client (else the current one)
+    // before the source and target, so a missing one is the error.
+    if matches!(call.entry.name, "display-menu" | "display-popup") {
+        command_prompt::target_client(server, item, call.args.value('c'))?;
+    }
     let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
     // command runs; commands without a target slot get the client's

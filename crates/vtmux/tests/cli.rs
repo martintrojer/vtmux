@@ -891,6 +891,25 @@ fn command_errors() {
     });
 }
 
+/// display-menu and display-popup are `CMD_CLIENT_CFLAG` without
+/// `CMD_CLIENT_CANFAIL`: the client is found before the target, so a
+/// command client gets `no current client` whatever `-t` names
+/// (cmd-queue.c:602-607).
+#[test]
+fn menu_and_popup_want_a_client_first() {
+    compare("menu_and_popup_want_a_client_first", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["display-popup"]),
+            w.run(&["display-popup", "-t", "nope"]),
+            w.run(&["display-popup", "-t", "a:9"]),
+            w.run(&["display-popup", "-c", "nope", "-t", "%99"]),
+            w.run(&["display-menu", "-t", "nope", "x", "y", "z"]),
+            w.run(&["display-menu", "-c", "nope", "-t", "a:9", "x", "y", "z"]),
+        ]
+    });
+}
+
 /// `detach-client` with no attached client: `CMD_CLIENT_TFLAG` fails first,
 /// whatever `-a`, `-s`, `-P` or `-E` say (cmd-queue.c:604-609).
 #[test]
