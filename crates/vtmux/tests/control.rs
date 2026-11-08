@@ -1389,6 +1389,30 @@ fn empty_line_behind_a_waiting_command_exits() {
     });
 }
 
+/// control.c `control_read_callback` parses every line it has read as it
+/// reads them, before any of them runs: lines that come in one read do
+/// not see an alias or a global environment variable an earlier one of
+/// them sets (`unknown command`, `$RVQ` empty), while lines sent after
+/// those ran do.
+#[test]
+fn lines_read_together_are_parsed_before_they_run() {
+    compare("lines_read_together_are_parsed_before_they_run", |w| {
+        w.run(&["new", "-d", "-s", "c", "-n", "w", "cat", "-"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        c.send(
+            "set -s command-alias[100] 'rvz=display -p rvz'\n\
+             rvz\n\
+             setenv -g RVQ x\n\
+             display -p \"[$RVQ]\"",
+        );
+        c.wait("five guards", |t| {
+            t.matches("%end").count() + t.matches("%error").count() == 5
+        });
+        script(w, &mut c, &["rvz", "display -p \"[$RVQ]\""])
+    });
+}
+
 /// control-notify.c `control_window_layout_changed_cb` formats
 /// `%layout-change` as the event fires, not when the command is done: a
 /// command that unzooms (window.c `window_unzoom` fires one) and then

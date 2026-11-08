@@ -56,6 +56,9 @@ pub struct Guard {
 pub struct ControlState {
     /// Unconsumed stdin bytes.
     pub(crate) inbuf: Vec<u8>,
+    /// Lines read and parsed, waiting for their turn: each with its text
+    /// (a snapshot carries that) and what it parsed to.
+    lines: std::collections::VecDeque<(String, Result<Vec<cmd::CommandCall>, cmd::CmdError>)>,
     /// Stdin is read (`control_ready`, after the argv command attached).
     ready: bool,
     eof: bool,
@@ -161,8 +164,16 @@ impl ControlState {
     #[must_use]
     pub fn parts(&self, streams: &queue::Streams) -> ControlParts {
         let (items, due) = self.subs.parts();
+        // Lines parsed but not run go back in front of the unread bytes,
+        // to be parsed again after the upgrade.
+        let mut inbuf: Vec<u8> = Vec::new();
+        for (line, _) in &self.lines {
+            inbuf.extend_from_slice(&vtmux_core::rawstr::to_bytes(line));
+            inbuf.push(b'\n');
+        }
+        inbuf.extend_from_slice(&self.inbuf);
         ControlParts {
-            inbuf: self.inbuf.clone(),
+            inbuf,
             ready: self.ready,
             eof: self.eof,
             guard_depth: self.guard_depth,
@@ -651,7 +662,9 @@ impl Server {
         self.control_read(id);
     }
 
-    /// `control_read_callback`: every complete line is a command; an empty
+    /// `control_read_callback`: every complete line is a command, parsed as
+    /// it is read, so before the lines ahead of it have run (an alias or a
+    /// global environment variable one of them sets is not seen); an empty
     /// line asks to exit and stops reading. Lines already read still run
     /// after a command made the client exit, as in tmux.
     pub(crate) fn control_read(&mut self, id: ClientId) {
@@ -664,34 +677,17 @@ impl Server {
             {
                 return;
             }
-            // A blocked line holds the queue: the lines behind it wait.
-            // tmux reads them all the same (they queue behind it), so
-            // an empty line among them makes the client exit now, with
+            self.control_parse_lines(id);
+            // A blocked line holds the queue: the lines behind it wait. An
+            // empty line among those read makes the client exit now, with
             // the blocked command and those lines never run.
             if self.is_parked(id) {
-                if let Some(cs) = self.control_mut(id)
-                    && (cs.inbuf.first() == Some(&b'\n')
-                        || cs.inbuf.windows(2).any(|w| w == b"\n\n"))
-                {
-                    cs.exit.get_or_insert(Exit::Return);
-                    cs.inbuf.clear();
-                }
                 break;
             }
-            let Some(cs) = self.control_mut(id) else {
-                return;
-            };
-            let Some(nl) = cs.inbuf.iter().position(|&b| b == b'\n') else {
+            let Some((_, parsed)) = self.control_mut(id).and_then(|cs| cs.lines.pop_front()) else {
                 break;
             };
-            let mut line: Vec<u8> = cs.inbuf.drain(..=nl).collect();
-            line.pop();
-            if line.is_empty() {
-                cs.exit.get_or_insert(Exit::Return);
-                cs.inbuf.clear();
-                break;
-            }
-            self.control_line(id, &vtmux_core::rawstr::from_vec(line));
+            self.control_line(id, parsed);
         }
         // EOF counts only once stdin is read (`control_ready`): before
         // that tmux has not enabled the read event (control.c
@@ -705,11 +701,41 @@ impl Server {
         }
     }
 
-    /// One stdin line: parsed like a config line (cmd-parse.y via
+    /// Parse every complete line read (`cmd_parse_and_append(line, NULL,
+    /// ...)`: no parse input, so a `%if` sees no client, control.c:719),
+    /// until an empty line, which asks to exit and drops the rest.
+    fn control_parse_lines(&mut self, id: ClientId) {
+        loop {
+            let Some(cs) = self.control_mut(id) else {
+                return;
+            };
+            let Some(nl) = cs.inbuf.iter().position(|&b| b == b'\n') else {
+                return;
+            };
+            let mut line: Vec<u8> = cs.inbuf.drain(..=nl).collect();
+            line.pop();
+            if line.is_empty() {
+                cs.exit.get_or_insert(Exit::Return);
+                cs.inbuf.clear();
+                return;
+            }
+            let line = vtmux_core::rawstr::from_vec(line);
+            let parsed = cmd::parse_config_with(
+                &line,
+                &mut GlobalEnv::new(&mut self.global_env, &self.model, &self.info),
+                ParseOpts::default(),
+            );
+            if let Some(cs) = self.control_mut(id) {
+                cs.lines.push_back((line, parsed));
+            }
+        }
+    }
+
+    /// One stdin line, parsed like a config line (cmd-parse.y via
     /// `cmd_parse_and_append`), run with guard flags 1. A parse error is
     /// its own guarded item, prefixed `parse error: ` (control.c:672-680),
     /// and does not change the exit status.
-    fn control_line(&mut self, id: ClientId, line: &str) {
+    fn control_line(&mut self, id: ClientId, parsed: Result<Vec<cmd::CommandCall>, cmd::CmdError>) {
         let Some(client) = self.clients.get(&id) else {
             return;
         };
@@ -726,13 +752,7 @@ impl Server {
             current: None,
             mouse: None,
         };
-        match cmd::parse_config_with(
-            line,
-            // cmd_parse_and_append(line, NULL, ...): no parse input, so
-            // a `%if` sees no client (control.c:719).
-            &mut GlobalEnv::new(&mut self.global_env, &self.model, &self.info),
-            ParseOpts::default(),
-        ) {
+        match parsed {
             Ok(calls) => {
                 let batch = crate::cmdq::NewBatch::new(item, calls, crate::cmdq::End::ControlLine);
                 self.cmdq_append(Some(id), batch);
