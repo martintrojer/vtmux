@@ -98,6 +98,14 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
     if args.flag('S') {
         server.status_redraw_client(tc);
     } else {
+        // server_redraw_client: tmux draws every cell again
+        // (screen_redraw_screen), which puts right a terminal whose screen
+        // something else changed (passthrough, a program writing to the
+        // tty, a character the terminal drew wider than tmux counts it).
+        // A frame diffed against the last one would send nothing.
+        if let Some(c) = server.clients.get_mut(&tc) {
+            c.compositor.invalidate();
+        }
         server.redraw_client(tc);
     }
     Ok(())

@@ -1,0 +1,26 @@
+name = "refresh_client_repaints"
+size = [20, 5]
+# refresh-client draws every cell again (server_redraw_client, then
+# screen_redraw_screen), so it puts right a terminal whose screen something
+# else wrote to: here the pane program writes to the client's terminal
+# itself (`#{client_tty}`), as a stray background job does. A frame diffed
+# against the last one would send nothing. No screen is taken between the
+# write and the refresh: tmux 3.8 was seen to redraw in full by itself one
+# to three seconds after such a write (cause not traced), so what it shows
+# there depends on timing.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "4", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do case $l in T*) printf \"${l#T}\" >\"$(tmux display -p '#{client_tty}')\";; *) printf \"$l\";; esac; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "one\\r\\ntwo\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "T\\033[1;1HXYZ\\033[3;1Hstray\r" } },
+  { wait_for = "fed" },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
