@@ -9,7 +9,8 @@ use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::options::TreeId;
 
-use super::{Item, expand};
+use super::{Item, expand, expand_as};
+use crate::format_ctx::Kind;
 use crate::names::{check_name, clean_name};
 use crate::server::{NewGroup, NewSession, Server};
 use crate::target::Found;
@@ -86,7 +87,9 @@ pub fn exec(
     }
     let window_name = match args.value('n') {
         Some(n) => {
-            let n = expand(server, found, n);
+            // format_single(item, tmp, c, NULL, NULL, NULL)
+            // (cmd-new-session.c:103, 113, 178).
+            let n = expand_as(server, found, Kind::Unknown, n);
             if !check_name(&n) {
                 return Err(EdgeError::InvalidWindowName(n).into());
             }
@@ -96,7 +99,7 @@ pub fn exec(
     };
     let session_name = match args.value('s') {
         Some(n) => {
-            let n = expand(server, found, n);
+            let n = expand_as(server, found, Kind::Unknown, n);
             if !check_name(&n) {
                 return Err(EdgeError::InvalidSessionName(n).into());
             }
@@ -150,7 +153,7 @@ pub fn exec(
     let detached = args.flag('d') || item.client.is_none();
     let cwd = match args.value('c') {
         Some(c) => {
-            let c = expand(server, found, c);
+            let c = expand_as(server, found, Kind::Unknown, c);
             if c.starts_with('/') {
                 PathBuf::from(c)
             } else {
@@ -232,7 +235,14 @@ pub fn exec(
         .map_err(|e| EdgeError::CreateWindowFailed(crate::server::spawn_failed(&e)))?;
     if args.flag('P') {
         let template = args.value('F').unwrap_or(TEMPLATE);
-        let text = expand(server, Found::from_session(&server.model, s), template);
+        // format_single(item, template, c, s, s->curw, NULL)
+        // (cmd-new-session.c:351): a window's tree.
+        let text = expand_as(
+            server,
+            Found::from_session(&server.model, s),
+            Kind::Window,
+            template,
+        );
         item.print(&text);
     }
     if !detached {

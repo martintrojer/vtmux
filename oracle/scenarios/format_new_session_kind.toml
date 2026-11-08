@@ -1,0 +1,12 @@
+name = "format_new_session_kind"
+# new-session expands -s, -n and -c with a tree that describes nothing (format_single(item, tmp, c,
+# NULL, NULL, NULL), cmd-new-session.c:103, 113, 178) and -P's template as a window's (format_single(
+# item, template, c, s, s->curw, NULL), cmd-new-session.c:351).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "x#{session_format}#{window_format}#{pane_format}", "-n", "n#{session_format}#{window_format}#{pane_format}", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["ls", "-F", "#{session_name}"] },
+  { run = ["lsw", "-a", "-F", "#{session_name} #{window_name}"] },
+  { run = ["new", "-d", "-P", "-F", "#{session_name} #{session_format}#{window_format}#{pane_format}", "-s", "y", "-n", "w", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "t"] },
+]

@@ -894,6 +894,19 @@ pub fn expand(server: &Server, found: Found, template: &str) -> String {
     format::expand_str(template, &ctx)
 }
 
+/// [`expand`] for a tree that describes `kind` whatever `found` holds
+/// (`format_single` given fewer of session, winlink and pane).
+pub fn expand_as(
+    server: &Server,
+    found: Found,
+    kind: crate::format_ctx::Kind,
+    template: &str,
+) -> String {
+    let mut ctx = server.format_ctx(found, None);
+    ctx.kind = kind;
+    format::expand_str(template, &ctx)
+}
+
 /// `args_strtonum_and_expand` (arguments.c:942-973).
 pub fn number_expanded(
     server: &Server,
