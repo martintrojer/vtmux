@@ -158,7 +158,7 @@
       },
       {
         "divergence": {
-          "id": "D-044",
+          "id": "D-051",
           "expect": {
             "kind": "cli",
             "stdout": "base\nsolo\nz\n",
@@ -176,7 +176,7 @@
       },
       {
         "divergence": {
-          "id": "D-044",
+          "id": "D-051",
           "expect": {
             "kind": "cli",
             "stdout": "[a][x][y]\n",

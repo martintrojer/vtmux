@@ -1,4 +1,4 @@
-# server_check_unattached (server-fn.c:529-560): run after every client leaves (server_client_lost, server-client.c:565), command clients included, and after a client changes session (server_client_set_session, server-client.c:479). A session nobody is attached to goes when destroy-unattached says so: on always, keep-last unless it is the last of its group, keep-group unless it is alone in its group, in name order. tmux walks its session tree while it removes from it, so a pass that destroys a session can skip the next one (D-044).
+# server_check_unattached (server-fn.c:529-560): run after every client leaves (server_client_lost, server-client.c:565), command clients included, and after a client changes session (server_client_set_session, server-client.c:479). A session nobody is attached to goes when destroy-unattached says so: on always, keep-last unless it is the last of its group, keep-group unless it is alone in its group, in name order. tmux walks its session tree while it removes from it, so a pass that destroys a session can skip the next one (D-051).
 name = "destroy_unattached"
 size = [40, 6]
 steps = [
@@ -16,9 +16,9 @@ steps = [
   { run = ["new", "-d", "-s", "z", "-t", "x"] },
   { run = ["new", "-d", "-s", "solo", "-n", "w", "-x", "40", "-y", "5", "cat", "-"] },
   { run = ["set", "-g", "destroy-unattached", "keep-last"] },
-  { divergence = { id = "D-044", expect = { kind = "cli", stdout = "base\nsolo\nz\n", stderr = "", exit = 0 } } },
+  { divergence = { id = "D-051", expect = { kind = "cli", stdout = "base\nsolo\nz\n", stderr = "", exit = 0 } } },
   { run = ["ls", "-F", "#{session_name}"] },
-  { divergence = { id = "D-044", expect = { kind = "cli", stdout = "[a][x][y]\n", stderr = "", exit = 0 } } },
+  { divergence = { id = "D-051", expect = { kind = "cli", stdout = "[a][x][y]\n", stderr = "", exit = 0 } } },
   { run = ["show", "-gv", "@log"] },
   { run = ["set", "-g", "destroy-unattached", "off"] },
   { run = ["kill-session", "-a", "-t", "base"] },
