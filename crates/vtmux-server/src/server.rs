@@ -4854,7 +4854,8 @@ impl Server {
         };
         // screen_reinit and a fresh input parser: alternate screen off,
         // scroll region, cursor home, visible lines cleared, modes back to
-        // cursor+wrap, default attributes, default tabs. input_free ends
+        // cursor+wrap, default attributes, default tabs (DECST8C,
+        // `screen_reset_tabs`). input_free ends
         // synchronized output (input.c:922).
         pane.term.reset_input();
         pane.term.stop_sync();
@@ -4870,9 +4871,12 @@ impl Server {
         // it), and nothing homes it again; then saved_cx and saved_cy go
         // (screen.c:122-125).
         pane.term.feed(
-            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[20l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
+            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[20l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2031l\x1b[?5W",
         );
         let _ = pane.term.take_replies();
+        // The mode bits the terminal does not hold: blinking and the very
+        // visible cursor (the shape stays).
+        pane.term.reinit_cursor_modes();
         pane.term.forget_alternate_saved();
         // screen_reinit (spawn.c:329) under the current `extended-keys`.
         pane.term.set_extended_keys(extended_keys);

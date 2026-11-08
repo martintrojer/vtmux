@@ -1,0 +1,140 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "respawn_reinit_modes",
+  "inputs": {
+    "name": "respawn_reinit_modes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "sh",
+          "-c",
+          "printf '\\033[?12h\\033[34l\\033[?2031h\\033[3g\\033[1 q\\033[?2004h'; tmux wait-for -S one; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "one"
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:w",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{bracket_paste_flag}|#{pane_private_modes}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "tmux wait-for -S two; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "two"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{bracket_paste_flag}|#{pane_private_modes}|#{pane_tabs}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1|1|block|1|7,12,25,2004,2031|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|0|block|0|7,25|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
