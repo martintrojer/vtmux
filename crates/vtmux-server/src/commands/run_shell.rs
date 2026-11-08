@@ -65,7 +65,8 @@ impl Done {
     /// The commands made from `value` (`args_make_commands`): a `{ }`
     /// block as it is, a string parsed now (for the client found when the
     /// command ran). Queued after the waiting step, or for `-b` at the end
-    /// of the client's queue. A parse error is reported instead.
+    /// of the client's queue in a state of their own. A parse error is
+    /// reported instead.
     fn queue(&self, server: &mut Server, value: &ArgValue) {
         let calls = match make_commands(
             server,
@@ -86,7 +87,13 @@ impl Done {
         }
         let cwd = server.client_cwd(self.client, None);
         let mut item = Item::new(self.client, cwd);
-        item.origin = self.origin;
+        // cmdq_get_command(cmdlist, NULL): a new state, so neither the
+        // current target nor the mouse event of the command that ran.
+        item.origin = Origin {
+            current: None,
+            mouse: None,
+            ..self.origin
+        };
         if let Some(c) = self.client
             && let Some(hello) = server.clients.get(&c).and_then(|c| c.hello.as_ref())
         {

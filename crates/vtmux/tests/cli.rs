@@ -2775,6 +2775,46 @@ fn run_shell_background() {
     });
 }
 
+/// The commands `if-shell -b` and `run-shell -b -C` queue once their job
+/// is done have a state of their own (`cmdq_get_command(cmdlist, NULL)`,
+/// cmd-if-shell.c `cmd_if_shell_callback`, cmd-run-shell.c
+/// `cmd_run_shell_timer`): in a hook they see neither its formats nor its
+/// target, so `#{session_name}` is the best session's. Without -b they
+/// share the hook's state. A `run -C` string is expanded when the
+/// command runs, so it still has both.
+#[test]
+fn background_commands_start_from_no_state() {
+    compare("background_commands_start_from_no_state", |w| {
+        let fmt = "[#{hook}][#{session_name}]";
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["new", "-d", "-s", "b", "cat", "-"]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "after-new-window",
+                &format!(
+                    "if -b true {{ set -gF @h1 '{fmt}' }} ; \
+                     run -b -C {{ set -gF @h2 '{fmt}' }} ; \
+                     run -b -C \"set -gF @h3 '{fmt}'\" ; \
+                     if true {{ set -gF @h4 '{fmt}' }}"
+                ),
+            ]),
+            w.run(&["neww", "-d", "-t", "a", "cat", "-"]),
+        ];
+        for opt in ["@h1", "@h2", "@h3", "@h4"] {
+            let start = Instant::now();
+            let mut r = w.run(&["show", "-gv", opt]);
+            while r.code != 0 && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(20));
+                r = w.run(&["show", "-gv", opt]);
+            }
+            runs.push(r);
+        }
+        runs
+    });
+}
+
 /// `if-shell` (cmd-if-shell.c): the shell command's exit status picks the
 /// first or second command, string or `{ }` block, formats expanded in the
 /// shell command; -F tests the expanded text instead; the chosen commands
