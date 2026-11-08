@@ -968,6 +968,22 @@ Recorded per commit in git history; the list is kept current:
   binaries; Debug `-Dtest-filter="Terminal: "` 1047/1049 with the known
   `tabClear single` failure in each. Not an upstream candidate (tmux's
   model).
+
+- `patches/0030-import-saved-cursor-as-saved.patch` (`c/vtmux_state.zig`
+  `installScreen`, patch 0017's importer): the saved cursor (DECSC, SCP)
+  is imported as exported, off the screen too. A screen shrunk below or
+  narrowed past a saved cursor keeps it where it was, as tmux keeps
+  `input_save_state`'s position unclamped and Ghostty's own resize
+  leaves it (`Terminal.restoreCursor` clamps it when it is used); the
+  importer clamped it to the screen, so after a live upgrade a screen
+  grown back restored the cursor at the old bottom row instead.
+  Found by `state_roundtrip`'s fuzz (seed 11) once `CSI 25;264 s` saved
+  the cursor as tmux's SCP does, before a resize to two rows. Test: Rust
+  `state_roundtrip::saved_cursor_off_a_shrunk_screen` (fails without the
+  change: the re-exported state differs, y 1 for 4); no Zig test.
+  Changes the patch stack, so an upgrade across it moves history as
+  rows. Not an upstream candidate (the importer is vtmux's).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

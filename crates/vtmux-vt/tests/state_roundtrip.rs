@@ -87,6 +87,28 @@ fn pane(cols: u16, rows: u16, limit: usize, bytes: &[u8]) -> PaneTerm {
     t
 }
 
+/// A cursor saved before the screen shrank past it stays where it was
+/// (tmux never clamps `input_save_state`'s position), so after an import
+/// and a grow back DECRC puts it there, as without the import (patch
+/// 0030).
+#[test]
+fn saved_cursor_off_a_shrunk_screen() {
+    for save in [&b"\x1b7"[..], b"\x1b[s"] {
+        let mut a = pane(30, 12, 100, b"\x1b[5;6H");
+        a.feed(save);
+        a.resize(30, 2);
+        let state = a.export_state();
+        let mut b = PaneTerm::import_state(&state).unwrap();
+        assert_same(&a, &b, "saved off screen");
+        for t in [&mut a, &mut b] {
+            t.resize(30, 12);
+            t.feed(b"\x1b8");
+        }
+        assert_eq!(b.cursor(), a.cursor());
+        assert_eq!(b.cursor(), (5, 4));
+    }
+}
+
 #[test]
 fn plain_text_and_history() {
     let mut text = Vec::new();

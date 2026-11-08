@@ -1,0 +1,19 @@
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -1188,9 +1188,13 @@
+             ) orelse break :click .none },
+         };
+     };
++    // vtmux: as it was, off the screen too. A screen shrunk since the
++    // cursor was saved keeps it where it was (tmux's input_save_state
++    // position is never clamped, and Terminal.restoreCursor clamps it then),
++    // so a screen grown back restores it there.
+     screen.saved_cursor = if (s.saved_present) .{
+-        .x = @min(s.saved_x, pages.cols - 1),
+-        .y = @min(s.saved_y, pages.rows - 1),
++        .x = s.saved_x,
++        .y = s.saved_y,
+         .style = styleFromC(s.saved_pen),
+         .protected = s.saved_protected,
+         .pending_wrap = s.saved_pending_wrap,
