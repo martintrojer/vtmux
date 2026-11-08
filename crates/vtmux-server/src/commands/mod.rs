@@ -378,11 +378,18 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
     call.entry.ensure_implemented()?;
     server.refresh_client_targets();
-    // cmdq_fire_command (cmd-queue.c:602-607): `CMD_CLIENT_CFLAG` without
-    // `CMD_CLIENT_CANFAIL` finds the `-c` client (else the current one)
-    // before the source and target, so a missing one is the error.
-    if matches!(call.entry.name, "display-menu" | "display-popup") {
-        command_prompt::target_client(server, item, call.args.value('c'))?;
+    // cmdq_fire_command (cmd-queue.c:600-614): `CMD_CLIENT_CFLAG` and
+    // `CMD_CLIENT_TFLAG` without `CMD_CLIENT_CANFAIL` find the `-c` or `-t`
+    // client (else the current one) before the source, the target and
+    // anything the command itself checks, so a missing one is the error.
+    let client_flag = match call.entry.name {
+        "display-menu" | "display-popup" | "switch-client" => Some('c'),
+        "command-prompt" | "confirm-before" | "detach-client" | "suspend-client"
+        | "lock-client" | "refresh-client" => Some('t'),
+        _ => None,
+    };
+    if let Some(flag) = client_flag {
+        command_prompt::target_client(server, item, call.args.value(flag))?;
     }
     let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the

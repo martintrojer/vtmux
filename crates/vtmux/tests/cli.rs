@@ -931,6 +931,22 @@ fn menu_and_popup_want_a_client_first() {
     });
 }
 
+/// confirm-before is `CMD_CLIENT_TFLAG`: the client is found before its
+/// exec parses the command (cmd-queue.c:608-613, then
+/// `args_make_commands_now`), so a bad command from a command client is
+/// still `no current client`.
+#[test]
+fn confirm_before_wants_a_client_first() {
+    compare("confirm_before_wants_a_client_first", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["confirm-before", "nosuch"]),
+            w.run(&["confirm-before", "-t", "nope", "nosuch"]),
+            w.run(&["confirm-before", "-c", "xx", "{"]),
+        ]
+    });
+}
+
 /// `detach-client` with no attached client: `CMD_CLIENT_TFLAG` fails first,
 /// whatever `-a`, `-s`, `-P` or `-E` say (cmd-queue.c:604-609).
 #[test]

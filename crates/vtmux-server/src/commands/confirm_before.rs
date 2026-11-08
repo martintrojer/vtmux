@@ -30,7 +30,8 @@ pub(crate) struct Pending {
 
 /// `cmd_confirm_before_exec`.
 pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), CmdError> {
-    // args_make_commands_now: the command is parsed before anything else.
+    // args_make_commands_now: the command is parsed first in exec, after
+    // the queue found the client (CMD_CLIENT_TFLAG, `run_one`).
     let value = args
         .positionals
         .first()
