@@ -3795,13 +3795,16 @@ impl Server {
         };
         {
             let source = self.render_source();
-            let mut ctx =
-                self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
             // status_redraw (status.c:241-244): the client's tree, FORMAT_STATUS
             // and maybe FORMAT_FORCE, format_defaults(ft, c, NULL, NULL, NULL).
-            ctx.jobs = Some(jobs);
-            ctx.kind = crate::format_ctx::Kind::Unknown;
-            status.draw(&source, &mut ctx, s, caps, screen, lines, top);
+            let ctx = || {
+                let mut ctx =
+                    self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+                ctx.jobs = Some(jobs);
+                ctx.kind = crate::format_ctx::Kind::Unknown;
+                ctx
+            };
+            status.draw(&source, ctx, s, caps, screen, lines, top);
         }
         if let Some(c) = self.clients.get_mut(&id) {
             c.status = status;

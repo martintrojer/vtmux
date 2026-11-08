@@ -395,17 +395,19 @@ impl StatusLine {
     }
 
     /// Session `s`'s status, as this client should show it in `screen`,
-    /// redrawn first when needed. `ctx` is the client's status format tree
+    /// redrawn first when needed. `ctx` makes the client's status format tree
     /// (`format_create(c, NULL, FORMAT_NONE, FORMAT_STATUS)` +
-    /// `format_defaults(ft, c, ...)`); `lines` is `status_line_size(c)`; `top`
+    /// `format_defaults(ft, c, ...)`), only for a redraw: it lists every
+    /// client, so making it for every frame of every client is quadratic in
+    /// the clients; `lines` is `status_line_size(c)`; `top`
     /// is `status-position top`. A message takes at least one row, over the
     /// pane area when the status is off (screen-redraw.c:1795-1800); the
     /// cursor is hidden while it shows (`TTY_NOCURSOR`).
     #[expect(clippy::too_many_arguments, reason = "status_redraw's inputs")]
-    pub fn draw(
+    pub fn draw<'c>(
         &mut self,
         source: &Source<'_>,
-        ctx: &mut Ctx<'_>,
+        ctx: impl FnOnce() -> Ctx<'c>,
         s: SessionId,
         caps: Caps,
         screen: &mut Snapshot,
@@ -415,6 +417,7 @@ impl StatusLine {
         let cols = usize::from(screen.cols);
         let lines = usize::from(lines);
         if self.needs_redraw(cols, lines) {
+            let ctx = &mut ctx();
             self.redraw = false;
             self.drawn += 1;
             if let Some(m) = &self.message {
