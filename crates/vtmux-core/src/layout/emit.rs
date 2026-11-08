@@ -17,25 +17,45 @@ pub fn checksum(s: &str) -> u16 {
     })
 }
 
-/// `layout_cell_zindex`: how many floating panes sit above `pane` in the
-/// window's z-order.
-fn zindex(root: &Cell<PaneId>, win: &WindowPanes, pane: PaneId) -> u32 {
+/// `layout_cell_zindex` (layout-custom.c:311-337): how many floating panes
+/// sit above `pane` in the window's z-order. `zoomed` is the zoomed pane
+/// when `root` is the layout saved by the zoom: an active zoom target that
+/// floated there is dumped in front (0) and every other pane one further
+/// back, so the dump keeps the z-indexes from before the zoom, which put
+/// the target behind the panes floating over it.
+fn zindex(root: &Cell<PaneId>, win: &WindowPanes, zoomed: Option<PaneId>, pane: PaneId) -> u32 {
+    let floats = |p: PaneId| {
+        root.find_pane(p)
+            .is_some_and(|at| root.get(&at).is_floating())
+    };
     let mut i = 0;
+    if let Some(z) = zoomed
+        && win.active == Some(z)
+        && floats(z)
+    {
+        if pane == z {
+            return 0;
+        }
+        i += 1;
+    }
     for &wq in &win.z_order {
         if wq == pane {
             break;
         }
-        if root
-            .find_pane(wq)
-            .is_some_and(|p| root.get(&p).is_floating())
-        {
+        if floats(wq) {
             i += 1;
         }
     }
     i
 }
 
-fn append_v2(c: &Cell<PaneId>, root: &Cell<PaneId>, win: &WindowPanes, out: &mut String) -> bool {
+struct Dump<'a> {
+    root: &'a Cell<PaneId>,
+    win: &'a WindowPanes,
+    zoomed: Option<PaneId>,
+}
+
+fn append_v2(c: &Cell<PaneId>, d: &Dump, out: &mut String) -> bool {
     let g = c.g();
     let ty = match c {
         Cell::Node(n) if n.dir == Dir::TopBottom => 'v',
@@ -57,24 +77,24 @@ fn append_v2(c: &Cell<PaneId>, root: &Cell<PaneId>, win: &WindowPanes, out: &mut
                 if i > 0 {
                     out.push(',');
                 }
-                if !append_v2(ch, root, win, out) {
+                if !append_v2(ch, d, out) {
                     return false;
                 }
             }
             out.push(']');
         }
         Cell::Pane(l) | Cell::Floating(l) => {
-            if win.active == Some(l.pane) {
+            if d.win.active == Some(l.pane) {
                 out.push_str(",\"a\":true");
-            } else if let Some(i) = win.last_index_of(l.pane) {
+            } else if let Some(i) = d.win.last_index_of(l.pane) {
                 let _ = write!(out, ",\"l\":{i}");
             }
-            let Some(i) = win.index_of(l.pane) else {
+            let Some(i) = d.win.index_of(l.pane) else {
                 return false;
             };
             let _ = write!(out, ",\"i\":{i}");
             if c.is_floating() {
-                let _ = write!(out, ",\"z\":{}", zindex(root, win, l.pane));
+                let _ = write!(out, ",\"z\":{}", zindex(d.root, d.win, d.zoomed, l.pane));
             }
             let _ = write!(out, ",\"I\":\"%{}\"", l.pane.0);
         }
@@ -85,10 +105,13 @@ fn append_v2(c: &Cell<PaneId>, root: &Cell<PaneId>, win: &WindowPanes, out: &mut
 
 /// The v2 string for `root`, as `#{window_layout}` prints it; `None` where
 /// tmux's `layout_dump` returns NULL (a pane missing from the window).
+/// `zoomed` is the zoomed pane when `root` is the layout a zoom saved
+/// (`w->saved_layout_root`), see [`zindex`].
 #[must_use]
-pub fn dump_v2(root: &Cell<PaneId>, win: &WindowPanes) -> Option<String> {
+pub fn dump_v2(root: &Cell<PaneId>, win: &WindowPanes, zoomed: Option<PaneId>) -> Option<String> {
     let mut body = String::new();
-    append_v2(root, root, win, &mut body).then(|| format!("{{\"V\":2,\"L\":{body}}}"))
+    let d = Dump { root, win, zoomed };
+    append_v2(root, &d, &mut body).then(|| format!("{{\"V\":2,\"L\":{body}}}"))
 }
 
 /// `layout_custom_copy_layout`: the tiled part only; a node left with one

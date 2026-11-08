@@ -118,7 +118,14 @@ impl Layout {
     /// Emit as `#{window_layout}` prints (v2), for [`WindowPanes`] state.
     #[must_use]
     pub fn dump_v2(&self, win: &WindowPanes) -> Option<String> {
-        dump_v2(&self.root, win)
+        dump_v2(&self.root, win, None)
+    }
+
+    /// As [`Self::dump_v2`], for the layout a zoom of pane `zoomed` saved
+    /// (`#{window_layout}` while zoomed).
+    #[must_use]
+    pub fn dump_v2_saved(&self, win: &WindowPanes, zoomed: PaneId) -> Option<String> {
+        dump_v2(&self.root, win, Some(zoomed))
     }
 
     /// Emit as a control client without `new-layouts` sees it (v1).

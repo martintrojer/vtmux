@@ -1,0 +1,21 @@
+# #{window_layout} while a floating pane is zoomed (layout-custom.c layout_cell_zindex): the dump is of the layout the zoom saved, and an active zoom target that floated there is written in front ("z":0) with every other floating pane one further back, so the dump keeps the z-indexes from before the zoom although the zoom put the target behind the panes floating over it (#{pane_z}). With a pane over the zoom active instead, the target counts where the zoom left it, last. A v2 layout applied while zoomed unzooms and takes its z-indexes.
+name = "layout_zoomed_float_zindex"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-d", "-h", "-t", "%0", "cat", "-"] },
+  { run = ["new-pane", "-d", "-t", "%0", "-x", "30", "-y", "10", "-X", "10", "-Y", "5", "cat", "-"] },
+  { run = ["new-pane", "-Ad", "-t", "%0", "-x", "15", "-y", "5", "-X", "15", "-Y", "8", "cat", "-"] },
+  { run = ["new-pane", "-d", "-t", "%0", "-x", "12", "-y", "5", "-X", "40", "-Y", "8", "cat", "-"] },
+  { run = ["select-pane", "-t", "%2"] },
+  { run = ["display", "-p", "-t", "a", "#{window_layout}"] },
+  { run = ["resize-pane", "-Z", "-t", "%2"] },
+  { run = ["display", "-p", "-t", "a", "#{window_zoomed_flag} #{window_layout}"] },
+  { run = ["display", "-p", "-t", "a", "#{window_visible_layout}"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} z#{pane_z} f#{pane_floating_flag} a#{pane_active}"] },
+  { run = ["select-pane", "-t", "%3"] },
+  { run = ["display", "-p", "-t", "a", "#{window_zoomed_flag} #{window_layout}"] },
+  { run = ["select-pane", "-t", "%2"] },
+  { run = ["select-layout", "-t", "a", "{\"V\":2,\"L\":{\"t\":\"h\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":40,\"h\":24,\"x\":0,\"y\":0,\"l\":0,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":10,\"h\":3,\"x\":41,\"y\":9,\"i\":4,\"z\":2,\"I\":\"%4\"},{\"t\":\"p\",\"w\":13,\"h\":3,\"x\":16,\"y\":9,\"i\":3,\"z\":1,\"I\":\"%3\"},{\"t\":\"p\",\"w\":28,\"h\":8,\"x\":11,\"y\":6,\"a\":true,\"i\":2,\"z\":0,\"I\":\"%2\"},{\"t\":\"p\",\"w\":39,\"h\":24,\"x\":41,\"y\":0,\"i\":1,\"I\":\"%1\"}]}}"] },
+  { run = ["display", "-p", "-t", "a", "#{window_zoomed_flag} #{window_layout}"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} z#{pane_z} f#{pane_floating_flag} a#{pane_active}"] },
+]

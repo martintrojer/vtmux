@@ -313,8 +313,7 @@ status = "pass"
 status = "pass"
 
 [tests."layout-custom.sh"]
-status = "xfail"
-reason = "v1 dumps for control clients and the double %layout-change of a v1 layout pass (oracle control_layout_v1); the floating-zoom loop then needs `new-pane -A` (PANE_FLOATOVERZOOM: a float kept above a zoomed pane): `not implemented in vtmux yet: new-pane -A`"
+status = "pass"
 
 [tests."layout-nesting-limit.sh"]
 status = "pass"

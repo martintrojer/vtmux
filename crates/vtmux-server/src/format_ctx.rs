@@ -522,7 +522,10 @@ impl<'a> Ctx<'a> {
             // the v1 form.
             "window_layout" if self.old_layouts => w.full_layout().dump_v1(),
             "window_visible_layout" if self.old_layouts => w.layout.dump_v1(),
-            "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
+            "window_layout" => match &w.zoom {
+                Some(z) => z.saved.dump_v2_saved(&self.layout_panes(w), z.pane)?,
+                None => w.layout.dump_v2(&self.layout_panes(w))?,
+            },
             "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,
             _ => return self.winlink_value(w, wl, name),
         })
