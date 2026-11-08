@@ -226,6 +226,9 @@ pub struct Draw {
     pub inside: styled::Cell,
     /// How empty runs are cleared ([`Clear`]).
     pub clear: Clear,
+    /// `REDRAW_ISOLATES` ([`super::Caps::isolates`]): vertical border spans
+    /// are wrapped in bidi isolates.
+    pub isolates: bool,
 }
 
 /// How `tty_draw_line_clear` (tty-draw.c:52-90) clears a run of ten or
@@ -414,6 +417,7 @@ struct DrawKey {
     outside: styled::Cell,
     inside: styled::Cell,
     clear: Clear,
+    isolates: bool,
     theme: Theme,
     size: (u16, u16),
 }
@@ -443,6 +447,7 @@ impl DrawKey {
             outside: d.outside.clone(),
             inside: d.inside.clone(),
             clear: d.clear,
+            isolates: d.isolates,
             theme,
             size: (cols, rows),
         }
@@ -584,8 +589,60 @@ fn compose_row(
             ended_written = full && written;
             x = end;
         }
+        put_isolates(scene, d, line, y, width);
     }
     ended_written
+}
+
+/// `REDRAW_END_ISOLATE` and `REDRAW_START_ISOLATE` (screen-redraw.c:
+/// 103-104): Pop Directional Isolate, Left-to-Right Isolate.
+const END_ISOLATE: char = '\u{2069}';
+const START_ISOLATE: char = '\u{2066}';
+
+/// `redraw_draw_border_span` under `REDRAW_ISOLATES` (screen-redraw.c:
+/// 1256-1264): each span of `CELL_UD` border cells is written between
+/// `REDRAW_END_ISOLATE` and `REDRAW_START_ISOLATE`, so a bidi terminal
+/// does not reorder text across it. Both are zero-width: on the terminal
+/// the end isolate joins the character left of the span and the start
+/// isolate the span's last cell. Frames are cells, so they are put on
+/// those cells, and a frame that rewrites one cell rewrites its isolate
+/// with it rather than adding another. A blank cell left of the span is
+/// written as a space to carry it: tmux's own grid joins a zero-width
+/// character to an erased cell, but libghostty-vt (and so an outer vtmux)
+/// drops it there (compat/DIVERGENCES.md D-039). Cells with equal border data are one span (`redraw_compare_data`), an
+/// arrow cell always one of its own. Only with [`Draw::isolates`].
+fn put_isolates(scene: &Scene, d: &Draw, line: &mut [Cell], y: u16, width: u16) {
+    if !d.isolates {
+        return;
+    }
+    let vertical = |x: u16| match scene.get(x, y) {
+        SceneCell::Border(b) if b.junction() == Junction::Vertical => Some(b),
+        _ => None,
+    };
+    let same = |a: u16, b: u16| match (scene.get(a, y), scene.get(b, y)) {
+        (SceneCell::Border(p), SceneCell::Border(q)) => p == q && !p.arrow,
+        _ => false,
+    };
+    for x in 0..width {
+        if vertical(x).is_none() {
+            continue;
+        }
+        if x > 0 && !same(x - 1, x) {
+            let mut at = usize::from(x - 1);
+            if line[at].width == 0 && at > 0 && line[at - 1].width == 2 {
+                at -= 1;
+            }
+            let cell = &mut line[at];
+            if cell.text.is_empty() {
+                cell.text.push(' ');
+                cell.width = 1;
+            }
+            cell.text.push(END_ISOLATE);
+        }
+        if x + 1 >= width || !same(x, x + 1) {
+            line[usize::from(x)].text.push(START_ISOLATE);
+        }
+    }
 }
 
 /// One `tty_draw_line` span of `cell`'s pane (or status line) in `cells`
@@ -1040,6 +1097,7 @@ mod tests {
                 outside: space.clone(),
                 inside: space.clone(),
                 clear: Clear::Bce,
+                isolates: false,
             };
             let scene = Scene::cached(&scenes, view.clone(), 20, 4);
             let blank = |cols, rows| vtmux_vt::Snapshot {

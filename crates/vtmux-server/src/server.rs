@@ -1968,6 +1968,10 @@ impl Server {
         }
         let mut term = term;
         term.set_utf8(client.hello.as_ref().is_some_and(|h| h.flags.utf8));
+        // REDRAW_ISOLATES reads CLIENT_UTF8, known only now.
+        if let Some(caps) = client.caps.as_mut() {
+            caps.isolates = crate::render::Caps::from_term(&term).isolates;
+        }
         client.term = Some(std::rc::Rc::new(term));
         client.compositor.invalidate();
         client.attached = Some(s);

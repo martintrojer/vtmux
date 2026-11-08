@@ -415,6 +415,7 @@ impl Source<'_> {
                 unused()
             },
             clear: caps.clear(),
+            isolates: caps.isolates,
         };
         Some((scene, draw))
     }

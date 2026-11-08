@@ -209,6 +209,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            isolates: false,
         }
     }
 

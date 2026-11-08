@@ -1,0 +1,28 @@
+# A UTF-8 client whose terminal has Bidi (here from terminal-overrides, read when it attaches) gets each vertical border span between bidi isolates (screen-redraw.c redraw_draw_border_span, 1256-1264; redraw_draw_ctx 1620-1621): U+2069 before the span, which joins the cell left of it, and U+2066 after it, on the span's last cell. Junctions, horizontal borders and every border of a client without Bidi have none. An arrow (pane-border-indicators) is a span of its own, as are a floating pane's sides; after a wide character the U+2069 joins it. A blank cell left of the span is written as a space to carry the U+2069: tmux erases it and writes the isolate after, which the observer terminal (libghostty-vt) drops there, so client b's screens are vtmux's (D-039); on a terminal that joins it to the erased cell, as tmux's own grid does (regress screen-redraw-bidi.sh), both show it.
+name = "bidi_border_isolates"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "sh", "-c", "printf 'LEFT 12345\\nLEFT 67890'; exec cat -"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "pane-border-indicators", "arrows"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["splitw", "-h", "-t", "%0", "sh", "-c", "printf 'RIGHT 1\\nRIGHT 2\\nRIGHT 3'; exec cat -"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { run = ["splitw", "-v", "-t", "%1", "cat", "-"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t2"] },
+  { run = ["new-pane", "-d", "-t", "%0", "-x", "8", "-y", "3", "-X", "3", "-Y", "5", "sh", "-c", "printf '1234\\343\\201\\202'; exec cat -"] },
+  { run = ["select-pane", "-t", "%3", "-T", "t3"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-as", "terminal-overrides", ",*:Bidi=\\E[8h"] },
+  { attach = { session = "a", id = "b" } },
+  { divergence = { id = "D-039", expect = { kind = "screen", rows = ["LEFT 12345          \u2069\\e[37m\u2502\u2066\\e[39mRIGHT 1", "LEFT 67890          \u2069\\e[37m\u2502\u2066\\e[39mRIGHT 2", "                    \u2069\\e[37m\u2502\u2066\\e[39mRIGHT 3", "                    \u2069\\e[37m\u2502\u2066\\e[39m", "                    \u2069\\e[37m\u2502\u2066\\e[39m", "   \\e[37m\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2510\\e[39m         \\e[32m\u251c\u2500\u2193\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "\\e[39m   \u2069\\e[37m\u2502\u2066\\e[39m1234\u3042\u2069\\e[37m\u2502\u2066\\e[39m         \u2069\\e[32m\u2502\u2066\\e[39m", "   \\e[37m\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2518\\e[39m         \u2069\\e[32m\u2192\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"], cursor = [21, 6] } } },
+  { screen = { id = "b" } },
+  { run = ["select-pane", "-t", "%0"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-039", expect = { kind = "screen", rows = ["LEFT 12345          \u2069\\e[32m\u2502\u2066\\e[39mRIGHT 1", "LEFT 67890          \u2069\\e[32m\u2190\u2066\\e[39mRIGHT 2", "                    \u2069\\e[32m\u2502\u2066\\e[39mRIGHT 3", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "   \\e[37m\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2510\\e[39m         \\e[32m\u251c\\e[37m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "\\e[39m   \u2069\\e[37m\u2502\u2066\\e[39m1234\u3042\u2069\\e[37m\u2502\u2066\\e[39m         \u2069\\e[32m\u2502\u2066\\e[39m", "   \\e[37m\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2518\\e[39m         \u2069\\e[32m\u2190\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "                    \u2069\\e[32m\u2502\u2066\\e[39m", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"], cursor = [10, 1] } } },
+  { screen = { id = "b" } },
+  { screen = {} },
+]

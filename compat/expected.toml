@@ -411,8 +411,7 @@ status = "pass"
 status = "pass"
 
 [tests."screen-redraw-bidi.sh"]
-status = "xfail"
-reason = "bidi-single passes ($TMUX_PANE picks the session, not the window: cli tmux_pane_picks_the_session_not_the_window); bidi-split needs the Bidi terminal override's isolates (U+2069 before and U+2066 after each vertical border span, screen-redraw.c:1256-1264), which vtmux does not draw"
+status = "pass"
 
 [tests."screen-redraw-cache.sh"]
 status = "pass"

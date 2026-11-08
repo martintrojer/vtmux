@@ -51,6 +51,10 @@ pub struct Caps {
     /// Not a terminal capability, but per client and part of what every
     /// drawing of it depends on, as caps are.
     pub light_theme: bool,
+    /// `REDRAW_ISOLATES` (screen-redraw.c:1620-1621): the client is UTF-8
+    /// (`CLIENT_UTF8`) and its terminal has `Bidi`, so vertical borders
+    /// are drawn between bidi isolates.
+    pub isolates: bool,
 }
 impl Caps {
     /// How [`compose::draw_line_by`] may clear a run of empty cells.
@@ -96,6 +100,7 @@ impl Caps {
             overlay: false,
             no_am: !term.has_name("am"),
             light_theme: false,
+            isolates: term.feature_present("utf8") && term.has_name("Bidi"),
         }
     }
     /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
@@ -676,6 +681,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            isolates: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -705,6 +711,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            isolates: false,
         }
     }
 
@@ -787,6 +794,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            isolates: false,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -824,6 +832,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            isolates: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");
