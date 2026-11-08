@@ -392,8 +392,7 @@ status = "pass"
 status = "pass"
 
 [tests."prompt-words-history.sh"]
-status = "skip"
-reason = "fails against reference tmux 3.8"
+status = "pass"
 
 [tests."renumber-window-limit.sh"]
 status = "pass"

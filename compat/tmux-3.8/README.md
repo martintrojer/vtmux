@@ -35,12 +35,13 @@ Isolated re-runs (`--only`, no parallel load): `prompt-words-history` failed 4 o
 (it failed under load in an earlier observation).
 
 - **Unreliable on the reference:** `prompt-words-history.sh` (fails most runs:
-  prompt result `show-r`, expected `history-command`), `screen-redraw-menus.sh`
+  prompt result `show-r`, expected `history-command`; a race in the test, fixed
+  by a wait, see *Test races*), `screen-redraw-menus.sh`
   (scene `menu-over-split` differs; timing-dependent), `terminal-feature-utf8.sh`
   (seen failing once under load).
 - No test failed in all four runs, so there is no stable failure. In
-  `expected.toml`: `prompt-words-history.sh` is `skip` ("fails against reference
-  tmux 3.8", it fails most runs); the other two are `flaky = true`.
+  `expected.toml` the other two were `flaky = true`; `prompt-words-history.sh`
+  was `skip` until its patch.
 
 ## Test races
 
@@ -105,3 +106,18 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   reference alike. The patch polls `capturep` (max 10 s more) until the
   capture matches the result file; with the delay it then passes on both.
   `GENERATE=1` still captures once.
+- `prompt-words-history.sh`
+  (`0008-prompt-words-history-wait-for-the-prompt.patch`): after the
+  completion scene the script sends `Escape` to the inner client and, two
+  quick inner commands later, `M-r` for the next prompt. The inner client
+  holds a lone `\033` for `escape-time` (10 ms in 3.8, `tty_keys_next`
+  tty-keys.c), and when the `M-r` arrives first the bytes read as `M-Escape`
+  then `r`, so the still-open prompt ends as `show-r` (expected
+  `history-command`). The server log of a failing reference run (`-v`) has
+  the `Escape` partial at .382051 and `\033\033` complete at .390976, 9 ms
+  later. Unpatched it failed every run on a 96-core Linux host, reference and
+  vtmux alike; the script passes with a `sleep 0.7` there. The patch waits
+  for the state instead: up to 10 s for the outer capture to show the inner
+  status line, each prompt opening, the completion list, and each prompt
+  closing (where it slept 0.2 s, and after that `Escape`). Patched it passes
+  on both, 5/5 on vtmux and 3/3 on the reference under 48 busy loops.

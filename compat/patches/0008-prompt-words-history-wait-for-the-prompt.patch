@@ -1,0 +1,95 @@
+--- a/regress/prompt-words-history.sh
++++ b/regress/prompt-words-history.sh
+@@ -47,6 +47,24 @@
+ 	fail "prompt result is '$got', expected '$want'"
+ }
+ 
++# vtmux (compat/tmux-3.8/README.md, Test races): wait (max 10 s) until the
++# outer pane shows (has) or no longer shows (lacks) a text, rather than for a
++# fixed time.
++wait_capture()
++{
++	i=0
++	while :; do
++		if capture | grep -Fq -- "$2"; then
++			[ "$1" = has ] && return 0
++		else
++			[ "$1" = lacks ] && return 0
++		fi
++		[ "$i" -lt 100 ] || fail "outer pane $1 '$2' after 10 s"
++		sleep 0.1
++		i=$((i + 1))
++	done
++}
++
+ bind_prompt()
+ {
+ 	initial=$1
+@@ -60,10 +78,11 @@
+ 	shift
+ 	$INNER set-option -g @result sentinel || exit 1
+ 	$OUTER send-keys M-r || exit 1
+-	sleep 0.2
++	wait_capture has '(word)'
+ 	$OUTER send-keys "$@" || exit 1
+ 	$OUTER send-keys Enter || exit 1
+ 	wait_result "$want"
++	wait_capture lacks '(word)'
+ }
+ 
+ run_vi_prompt()
+@@ -72,7 +91,7 @@
+ 	shift
+ 	$INNER set-option -g @result sentinel || exit 1
+ 	$OUTER send-keys M-r || exit 1
+-	sleep 0.2
++	wait_capture has '(word)'
+ 	# Send Escape separately so the terminal's escape-time handling does not
+ 	# combine it with the first vi command as a Meta key.
+ 	$OUTER send-keys Escape || exit 1
+@@ -82,6 +101,7 @@
+ 	$OUTER send-keys "$@" || exit 1
+ 	$OUTER send-keys Enter || exit 1
+ 	wait_result "$want"
++	wait_capture lacks '(word)'
+ }
+ 
+ $INNER new-session -d -s prompt -x80 -y24 'exec sleep 100' || exit 1
+@@ -92,6 +112,7 @@
+ $OUTER set-option -g status off || exit 1
+ $OUTER set-option -g window-size manual || exit 1
+ sleep 1
++wait_capture has '[prompt]'
+ 
+ # Emacs Meta-f stops after the first word; Meta-b returns to the start of the
+ # previous word. Inserting a marker makes the cursor position observable.
+@@ -121,16 +142,19 @@
+ $INNER set-option -g status-keys emacs || exit 1
+ bind_prompt ''
+ $OUTER send-keys M-r || exit 1
+-sleep 0.2
++wait_capture has '(word)'
+ $OUTER send-keys -l 'show-' || exit 1
+ $OUTER send-keys Tab || exit 1
+-sleep 0.2
++wait_capture has 'show-environment'
+ captured=$(capture)
+ printf '%s\n' "$captured" | grep -Fq 'show-buffer' ||
+ 	fail "ambiguous completion list was not drawn"
+ printf '%s\n' "$captured" | grep -Fq 'show-environment' ||
+ 	fail "ambiguous completion list was incomplete"
+ $OUTER send-keys Escape || exit 1
++# The next M-r must not reach the inner client within its escape-time of the
++# Escape (10 ms), or the two are read as M-Escape and r.
++wait_capture lacks '(word)'
+ 
+ # Add entries to both history rings through real prompts.
+ bind_prompt 'history-command'
+@@ -138,6 +162,7 @@
+ $INNER bind-key -n M-s command-prompt -T search -I history-search \
+ 	-p '(search-history)' "set-option -g @result '%%'" || exit 1
+ $OUTER send-keys M-s || exit 1
++wait_capture has '(search-history)'
+ $OUTER send-keys Enter || exit 1
+ wait_result history-search
+ 
