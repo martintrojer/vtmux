@@ -406,6 +406,8 @@ impl Server {
             self.fire_session_changed(id, old);
         }
         self.redraw_client(id);
+        // server-client.c:479.
+        self.check_unattached();
     }
 
     /// `server_client_handle_key0` for a key or paste marker from client

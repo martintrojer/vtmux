@@ -1,0 +1,809 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "destroy_unattached",
+  "inputs": {
+    "name": "destroy_unattached",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "base",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "exit-empty",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-closed",
+          "set -gaF @log '[#{hook_session_name}]'"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "a",
+          "destroy-unattached",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "x",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "y",
+          "-t",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "z",
+          "-t",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "solo",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "destroy-unattached",
+          "keep-last"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-044",
+          "expect": {
+            "kind": "cli",
+            "stdout": "base\nsolo\nz\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-044",
+          "expect": {
+            "kind": "cli",
+            "stdout": "[a][x][y]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "destroy-unattached",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-a",
+          "-t",
+          "base"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "destroy-unattached",
+          "keep-last"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "p",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "q",
+          "-t",
+          "p"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "solo",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "destroy-unattached",
+          "keep-group"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "destroy-unattached",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "d",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "attach": {
+          "session": "c"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "c",
+          "destroy-unattached",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} #{session_attached}"
+        ]
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "switch-client -t d\r"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} #{session_attached}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "d",
+          "destroy-unattached",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} #{session_attached}"
+        ]
+      },
+      {
+        "keys": "\u0002d"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "base\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[a]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "base\nsolo\ny\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[a][x][z]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "base\nq\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "q\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[p][base][solo]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "c 1\nd 0\nq 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "d 1\nq 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[p][base][solo][c]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[d] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "d 1\nq 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "q\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[p][base][solo][c][d]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

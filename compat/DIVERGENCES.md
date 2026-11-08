@@ -412,3 +412,11 @@ product reasons" category.
 - vtmux behaviour: the popup's terminal is a `PaneTerm`, and libghostty-vt reflows its primary screen on every resize, so the cut cells move to the next row.
 - Evidence: reference tmux 3.8, a `-B -w 20` popup whose job printed `E[<0;2;2ME[<32;3;3ME` and `[<0;3;3m` (one wrapped line), narrowed to 17 with a Meta right-button drag: tmux shows `E[<0;2;2ME[<32;3;` and `[<0;3;3m`, vtmux `E[<0;2;2ME[<32;3;` and `3ME[<0;3;3m`. Found by audit_modes_menus.
 - Category: Deferred (needs a resize without reflow in vtmux-vt).
+
+### D-051: `destroy-unattached` judges every session once the ones before it are gone
+
+- Test / assertion: oracle `destroy_unattached`, the two steps annotated D-044 (`ls` and the `session-closed` log after `set -g destroy-unattached keep-last` with a group of three).
+- tmux behaviour: `server_check_unattached` (server-fn.c:529-560) walks the session tree with `RB_FOREACH` while `session_destroy` (session.c:206) does `RB_REMOVE` on the session it is at, so the next session comes from the removed node's stale links. Which session that skips depends on the tree's shape: with sessions base, solo, x, y, z and x, y, z in one group, keep-last destroys x, skips y and destroys z, keeping y and leaving `base solo y`.
+- vtmux behaviour: the sessions are visited in name order, each judged once the ones before it are gone: x and y go, z, the last of the group, stays (`base solo z`).
+- Evidence: reference tmux 3.8, the scenario's trace (`base\nsolo\ny\n`, log `[a][x][z]`).
+- Category: Do not copy tmux bug (iteration over a tree being removed from; copying it means modelling tmux's red-black tree).

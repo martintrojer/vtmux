@@ -1415,8 +1415,9 @@ impl Server {
         self.attached_lost(id);
         // server-client.c:527.
         self.cancel_requests(id);
-        // server-client.c:564.
+        // server-client.c:564-565.
         self.recalculate_sizes();
+        self.check_unattached();
         self.files.remove(&id);
     }
 
@@ -4754,6 +4755,34 @@ impl Server {
             self.close_pane_io(pane);
         }
         self.close_dropped();
+    }
+
+    /// `server_check_unattached` (server-fn.c:529-560), after a client
+    /// leaves or changes session: every session with no attached client
+    /// whose `destroy-unattached` says so goes, in name order, each
+    /// judged once the ones before it are gone (`keep-last` keeps the
+    /// last of a group, `keep-group` a session alone in its group).
+    pub(crate) fn check_unattached(&mut self) {
+        let names: Vec<SessionId> = self.model.by_name.values().copied().collect();
+        for s in names {
+            if !self.model.sessions.contains_key(&s) || self.attached_sessions().contains(&s) {
+                continue;
+            }
+            let group = self.model.groups.members_of(s).map(<[_]>::len);
+            let destroy = match self
+                .model
+                .number_option(TreeId::Session(s), "destroy-unattached")
+            {
+                1 => true,
+                2 => group.is_some_and(|n| n > 1),
+                3 => group != Some(1),
+                _ => false,
+            };
+            if destroy {
+                self.destroy_session(s);
+                self.drain_events();
+            }
+        }
     }
 
     /// `server_destroy_session` (server-fn.c:486-527): the clients of a
