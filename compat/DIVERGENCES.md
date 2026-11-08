@@ -460,3 +460,11 @@ product reasons" category.
 - vtmux behaviour: every frame is drawn from the composed cells, and each cell gets its own underline colour (the terminal's `Setulc`/`Setulc1` permitting).
 - Evidence: reference tmux 3.8 with `terminal-features ',xterm*:usstyle:overline'` on xterm-256color, the bytes of the attach redraw (`\e[Hx\e[4mAB\e(B\e[m`, `\e[HnoneX`, `\e[58:5:9mnone \e[53mover`); task audit_client_tty_output.
 - Category: Deferred (copying it means drawing the redraw path with tmux's run grouping and its unrecorded palette colour, a wrong underline colour on the terminal)
+
+### D-049: a styled underline on a terminal without `Smulx` is a plain underline
+
+- Test / assertion: oracle `attach_underline_styles` (annotated: the first attach, xterm-256color without `usstyle`); `render` `underline_styles_colours_and_overline_follow_the_terminal`.
+- tmux behaviour: `tty_attributes` (tty.c:2735-2743) writes a double, curly, dotted or dashed underline as `Smulx` with its number and nothing without it: a terminal that lacks `Smulx` (xterm-256color unless `terminal-features` gives `usstyle`) shows the cell with no underline at all, so a program's spell-check squiggle or diagnostics underline disappears.
+- vtmux behaviour: the cell gets a plain underline (`ESC[4m`, when the terminal has `smul`) in place of the style, with its underline colour as usual. With `Smulx`, tmux's form (`ESC[4:NM`).
+- Evidence: reference tmux 3.8 on xterm-256color shows `curly dbl dotdash` with no underline and only the plain `u` underlined (trace `attach_underline_styles`, the first screen); task low_tty_underline_fallback_civis.
+- Category: Do not copy tmux bug (the program's text loses a distinction it asked for, where a plain underline keeps the cells marked)

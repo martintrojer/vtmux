@@ -6,6 +6,9 @@ steps = [
   { run = ["set", "-g", "status-right", ""] },
   { run = ["select-pane", "-t", "a", "-T", "p"] },
   { attach = { session = "a" } },
+  # D-049: no `Smulx`, so tmux draws the curly, double, dotted and dashed
+  # underlines with none; vtmux falls back to a plain one.
+  { divergence = { id = "D-049", expect = { kind = "screen", rows = ["\\e[4mcurly\\e[0m \\e[4mdbl\\e[0m \\e[4mdotdash\\e[0m \\e[4mu\\e[0m", "\\e[4mpal\\e[0m \\e[4mrgb\\e[0m over", "", "", "", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"], cursor = [0, 2] } } },
   { screen = {} },
   { attach = { session = "a", id = "t", term = "tmux" } },
   { screen = { id = "t" } },

@@ -52,6 +52,26 @@
         }
       },
       {
+        "divergence": {
+          "id": "D-049",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "\\e[4mcurly\\e[0m \\e[4mdbl\\e[0m \\e[4mdotdash\\e[0m \\e[4mu\\e[0m",
+              "\\e[4mpal\\e[0m \\e[4mrgb\\e[0m over",
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+            ],
+            "cursor": [
+              0,
+              2
+            ]
+          }
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -132,7 +152,7 @@
       }
     },
     {
-      "step": 5,
+      "step": 6,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -150,7 +170,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -168,7 +188,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -177,7 +197,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -195,7 +215,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "cli",
         "stdout": "xterm-256color|bpaste,ccolour,clipboard,cstyle,focus,title\ntmux|bpaste,focus,title\nxterm-256color|bpaste,ccolour,clipboard,cstyle,focus,overline,title,usstyle\n",

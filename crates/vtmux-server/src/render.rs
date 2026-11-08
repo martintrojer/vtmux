@@ -987,14 +987,23 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
     } else {
         a.standout
     };
+    // A double, curly, dotted or dashed underline is `Smulx` with its
+    // number; a terminal without it gets a plain one (D-049), where tmux
+    // writes nothing (tty.c:2735-2743).
+    let styled = match wanted.underline {
+        Underline::Double => 2,
+        Underline::Curly => 3,
+        Underline::Dotted => 4,
+        Underline::Dashed => 5,
+        Underline::None | Underline::Single => 0,
+    };
+    let plain_underline =
+        wanted.underline == Underline::Single || (styled != 0 && !a.underline_styles);
     for (on, code) in [
         ((wanted.bold || bright) && a.bold, Some(1)),
         (wanted.faint && a.dim, Some(2)),
         (wanted.italic, italics),
-        (
-            wanted.underline == Underline::Single && a.underline,
-            Some(4),
-        ),
+        (plain_underline && a.underline, Some(4)),
         (wanted.blink && a.blink, Some(5)),
         (inverse, a.reverse),
         (wanted.invisible && a.invisible, Some(8)),
@@ -1005,15 +1014,7 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
             let _ = write!(out, "\x1b[{code}m");
         }
     }
-    // tty_attributes: the other underlines are `Smulx` with their number.
-    let styled = match wanted.underline {
-        Underline::Double => 2,
-        Underline::Curly => 3,
-        Underline::Dotted => 4,
-        Underline::Dashed => 5,
-        Underline::None | Underline::Single => 0,
-    };
-    if styled != 0 && caps.attrs.underline_styles {
+    if styled != 0 && a.underline_styles {
         let _ = write!(out, "\x1b[4:{styled}m");
     }
     color(out, fg, false);
@@ -1175,10 +1176,21 @@ mod tests {
             };
             String::from_utf8(Compositor::default().frame(vtmux_vt::snapshot(&pane), caps)).unwrap()
         };
+        // D-049: without `Smulx` the styled underlines are a plain one,
+        // where tmux writes none (tty.c:2735-2743).
         let plain = frame_of(Attrs::XTERM);
         assert!(
-            plain.contains("\x1b[1;1H\x1b[0mc\x1b[0m\x1b[4mu\x1b[0md"),
+            plain.contains("\x1b[1;1H\x1b[0m\x1b[4mc\x1b[0m\x1b[4mu\x1b[0m\x1b[4md"),
             "{plain:?}"
+        );
+        // No `smul` either: no underline at all.
+        let none = frame_of(Attrs {
+            underline: false,
+            ..Attrs::XTERM
+        });
+        assert!(
+            none.contains("\x1b[1;1H\x1b[0mc\x1b[0mu\x1b[0md"),
+            "{none:?}"
         );
         let styled = frame_of(Attrs {
             underline_styles: true,
