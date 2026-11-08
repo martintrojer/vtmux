@@ -530,6 +530,14 @@ fn job_count(cpus: usize, census: Option<(usize, usize)>) -> usize {
     cpus.min(by_ptys).max(1)
 }
 
+/// Is `name` (under `/dev`) a macOS PTY's slave? `ttys` and three digits or
+/// more (`ttys%03d`), not the 16 legacy BSD nodes `ttys0`..`ttysf` that
+/// every Mac has whether or not anything uses them.
+fn is_macos_pty_slave(name: &str) -> bool {
+    name.strip_prefix("ttys")
+        .is_some_and(|d| d.len() >= 3 && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// PTYs in use on the host and the most it allows, when it says. macOS has a
 /// `/dev/ttysNNN` node per PTY, made when its master opens and removed when
 /// both sides have closed, up to `kern.tty.ptmx_max` (511 by default); Linux
@@ -544,10 +552,7 @@ fn pty_census() -> Option<(usize, usize)> {
         })
     };
     if cfg!(target_os = "macos") {
-        let used = count("/dev", &|n| {
-            n.strip_prefix("ttys")
-                .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
-        })?;
+        let used = count("/dev", &is_macos_pty_slave)?;
         let out = Command::new("/usr/sbin/sysctl")
             .args(["-n", "kern.tty.ptmx_max"])
             .output()
@@ -629,9 +634,48 @@ fn log_pty_holders(logs: &Path, name: &str) {
             note.push('\n');
         }
     }
+    // A server holds its panes' masters with no controlling terminal, so ps
+    // shows it on `??`; lsof names every process holding masters.
+    if let Ok(o) = Command::new("lsof")
+        .args(["-nP", "-w", "-F", "pc", "/dev/ptmx"])
+        .output()
+    {
+        let holders = ptmx_holders(&String::from_utf8_lossy(&o.stdout));
+        if !holders.is_empty() {
+            note.push_str("--- PTY masters held (count pid command), from lsof /dev/ptmx:\n");
+            for (n, pid, cmd) in holders {
+                let _ = writeln!(note, "{n:>4} {pid} {cmd}");
+            }
+        }
+    }
     if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&path) {
         let _ = std::io::Write::write_all(&mut f, note.as_bytes());
     }
+}
+
+/// `lsof -F pc /dev/ptmx` output (`p<pid>`, `c<command>`, then one `f<fd>`
+/// line per descriptor) as (masters, pid, command), most masters first.
+fn ptmx_holders(lsof: &str) -> Vec<(usize, String, String)> {
+    let mut out: Vec<(usize, String, String)> = Vec::new();
+    for line in lsof.lines() {
+        match line.split_at_checked(1) {
+            Some(("p", pid)) => out.push((0, pid.to_owned(), String::new())),
+            Some(("c", cmd)) => {
+                if let Some(last) = out.last_mut() {
+                    cmd.clone_into(&mut last.2);
+                }
+            }
+            Some(("f", _)) => {
+                if let Some(last) = out.last_mut() {
+                    last.0 += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    out.retain(|h| h.0 > 0);
+    out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    out
 }
 
 fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran> {
@@ -1029,6 +1073,30 @@ mod tests {
         assert!(may_start(2, Some((447, 511))));
         assert!(!may_start(2, Some((448, 511))));
         assert!(may_start(2, None));
+    }
+
+    /// macOS's 16 legacy `ttys0`..`ttysf` nodes are no PTYs in use.
+    #[test]
+    fn macos_census_counts_only_ttys_nnn() {
+        assert!(is_macos_pty_slave("ttys000"));
+        assert!(is_macos_pty_slave("ttys510"));
+        assert!(!is_macos_pty_slave("ttys0"));
+        assert!(!is_macos_pty_slave("ttys9"));
+        assert!(!is_macos_pty_slave("ttysf"));
+        assert!(!is_macos_pty_slave("ttys"));
+        assert!(!is_macos_pty_slave("tty.usb"));
+    }
+
+    #[test]
+    fn ptmx_holders_count_masters_per_process() {
+        let lsof = "p7358\ncghostty\nf9\np13453\ncvtmux\nf8\nf10\nf11\np99\ncidle\n";
+        assert_eq!(
+            ptmx_holders(lsof),
+            [
+                (3, "13453".to_owned(), "vtmux".to_owned()),
+                (1, "7358".to_owned(), "ghostty".to_owned()),
+            ]
+        );
     }
 
     #[test]
