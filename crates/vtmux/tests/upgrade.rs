@@ -215,6 +215,32 @@ impl World {
         out
     }
 
+    /// The sessions, windows and panes, without what a rebuild without
+    /// terminal state loses (history, cursor).
+    fn layout(&self) -> String {
+        let panes = "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_pid} \
+                     #{pane_tty} #{pane_width}x#{pane_height} #{pane_title} #{pane_dead}";
+        let mut out = String::new();
+        for args in [
+            &[
+                "ls",
+                "-F",
+                "#{session_id} #{session_name} #{session_windows}",
+            ][..],
+            &[
+                "lsw",
+                "-a",
+                "-F",
+                "#{window_id} #{window_name} #{window_layout}",
+            ],
+            &["lsp", "-a", "-F", panes],
+        ] {
+            writeln!(out, "$ {args:?}").unwrap();
+            out.push_str(&self.run(args));
+        }
+        out
+    }
+
     /// [`Self::observe`], taken again (up to 5 times) while it differs
     /// from `want`: tmux cuts a format expansion short after 100 ms
     /// (format.c `format_check_time`), which a loaded host can make a
@@ -918,7 +944,24 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
 /// no session at all).
 #[test]
 fn a_copy_mode_page_past_the_limit_costs_only_that_copy_mode() {
-    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")]);
+    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")], false);
+}
+
+/// [`a_copy_mode_page_past_the_limit_costs_only_that_copy_mode`] when the
+/// rebuild without that copy mode fails too (the test hook): the new
+/// image's own rebuild without any terminal state serves every session,
+/// window and pane, before any switch back to the image that wrote the
+/// stream, which can't read it either.
+#[test]
+fn a_copy_mode_page_past_the_limit_keeps_the_sessions_when_nothing_else_rebuilds() {
+    copy_mode_past_the_limit(
+        &bin(),
+        &[
+            ("VTMUX_TEST_COPY_ONE_PAGE", "1"),
+            ("VTMUX_TEST_RESUME_FAIL", "always"),
+        ],
+        true,
+    );
 }
 
 /// [`a_copy_mode_page_past_the_limit_costs_only_that_copy_mode`] from a
@@ -932,12 +975,26 @@ fn a_server_from_before_8c94c6e_keeps_its_sessions_through_the_copy_mode_race() 
     let old = PathBuf::from(
         std::env::var_os("VTMUX_ONE_PAGE_COPY_BINARY").expect("VTMUX_ONE_PAGE_COPY_BINARY is set"),
     );
-    copy_mode_past_the_limit(&old, &[]);
+    copy_mode_past_the_limit(&old, &[], false);
+}
+
+/// [`a_copy_mode_page_past_the_limit_keeps_the_sessions_when_nothing_else_rebuilds`]
+/// from a real server of a build before 8c94c6e (the reviewer's case: with
+/// the test hook, such a server upgraded onto 55500a0 was switched back to
+/// and served no session). `VTMUX_ONE_PAGE_COPY_BINARY` as above.
+#[test]
+#[ignore = "needs VTMUX_ONE_PAGE_COPY_BINARY, a build before 8c94c6e"]
+fn a_server_from_before_8c94c6e_keeps_its_sessions_when_nothing_else_rebuilds() {
+    let old = PathBuf::from(
+        std::env::var_os("VTMUX_ONE_PAGE_COPY_BINARY").expect("VTMUX_ONE_PAGE_COPY_BINARY is set"),
+    );
+    copy_mode_past_the_limit(&old, &[("VTMUX_TEST_RESUME_FAIL", "always")], true);
 }
 
 /// The copy mode tests above, on a server started from `server` with
-/// `server_env`, upgraded onto this build.
-fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)]) {
+/// `server_env`, upgraded onto this build. With `bare`, the test hook
+/// fails every rebuild that keeps terminal state.
+fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bool) {
     let world = World::new();
     world.populate_from(server, server_env);
     world.run(&["set", "-g", "history-limit", "100000"]);
@@ -961,6 +1018,7 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)]) {
     let pid = world.pid();
     let panes = world.pane_pids();
     let before = world.observe();
+    let layout = world.layout();
 
     // Open when the upgrade starts: refused, nothing lost.
     world.run(&["copy-mode", "-t", "a:big"]);
@@ -993,10 +1051,18 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)]) {
     .unwrap();
     set_executable(&wrapper);
     let message = failed(world.upgrade(&wrapper));
+    // The new image serves: the answer says the upgrade took effect, and
+    // without what.
+    let without = if bare {
+        "the panes' terminal state".to_owned()
+    } else {
+        format!("{pane}'s copy mode")
+    };
+    let took_effect = format!("live upgrade took effect without {without}: {BIN}: ");
     assert!(
-        message.starts_with("live upgrade failed: ")
+        message.starts_with(&took_effect)
             && message.contains(&format!("in {pane}'s copy mode"))
-            && message.ends_with(&format!("; restored without {pane}'s copy mode")),
+            && !message.contains("switch"),
         "{message}"
     );
 
@@ -1007,15 +1073,17 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)]) {
         "{args}"
     );
     assert_eq!(world.pane_pids(), panes);
-    // Every pane's history and screen, the long one's too.
-    assert_eq!(world.observe_like(&before), before);
+    if bare {
+        // Every session, window and pane, their screens and history gone.
+        assert_eq!(world.layout(), layout);
+    } else {
+        // Every pane's history and screen, the long one's too.
+        assert_eq!(world.observe_like(&before), before);
+    }
     assert_eq!(big("#{pane_in_mode}").trim(), "0");
     world.echo("a:big", "kept");
     let log = world.run(&["show-messages"]);
-    assert!(
-        log.contains(&format!("; restored without {pane}'s copy mode")),
-        "{log}"
-    );
+    assert!(log.contains(&took_effect), "{log}");
 }
 
 /// The dry run on its own: `--vtmux-check-snapshot` on a descriptor that

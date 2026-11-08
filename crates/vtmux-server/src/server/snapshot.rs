@@ -1850,7 +1850,7 @@ impl Server {
                 None => {
                     if let (snap::PaneMode::Copy(_), Some(salvaged)) = (m, salvaged.as_deref_mut())
                     {
-                        salvaged.push(snap::Part::PaneMode(x.id, n));
+                        salvaged.push(snap::Part::PaneMode(x.id, n, snap::ModeKind::Copy));
                     }
                 }
             }

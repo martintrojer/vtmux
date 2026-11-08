@@ -307,9 +307,21 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
     let bad = partial.unreadable();
     assert_eq!(
         bad,
-        [(Part::PaneMode(1, 0), Error::MissingChunk(copy_page))]
+        [(
+            Part::PaneMode(1, 0, ModeKind::Copy),
+            Error::MissingChunk(copy_page)
+        )]
     );
     assert_eq!(bad[0].0.to_string(), "%1's copy mode");
+    // The same grid in view mode is named as view mode.
+    let mut viewed = partial.clone();
+    let PaneMode::Copy(c) = viewed.panes[0].modes[0].clone() else {
+        unreachable!()
+    };
+    viewed.panes[0].modes[0] = PaneMode::View(c);
+    let bad_view = viewed.unreadable();
+    assert_eq!(bad_view[0].0, Part::PaneMode(1, 0, ModeKind::View));
+    assert_eq!(bad_view[0].0.to_string(), "%1's view mode");
     partial.without(&[bad[0].0]);
     assert_eq!(partial.check(), Ok(()));
     let mut want = s.clone();
@@ -324,7 +336,7 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
         parts,
         [
             Part::PaneTerm(1),
-            Part::PaneMode(1, 0),
+            Part::PaneMode(1, 0, ModeKind::Copy),
             Part::PopupTerm(popup)
         ]
     );

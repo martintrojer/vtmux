@@ -474,17 +474,36 @@ fn decode_fetching(
 pub enum Part {
     /// Pane `id`'s terminal state (its screens and history).
     PaneTerm(u32),
-    /// Pane `id`'s copy or view mode, the `n`th of its modes.
-    PaneMode(u32, usize),
+    /// Pane `id`'s copy or view mode (which `kind`), the `n`th of its
+    /// modes.
+    PaneMode(u32, usize, ModeKind),
     /// The terminal state of client `id`'s popup.
     PopupTerm(u32),
+}
+
+/// Which of the modes holding a frozen grid a [`Part::PaneMode`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ModeKind {
+    /// [`PaneMode::Copy`].
+    Copy,
+    /// [`PaneMode::View`].
+    View,
+}
+
+impl std::fmt::Display for ModeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Copy => "copy mode",
+            Self::View => "view mode",
+        })
+    }
 }
 
 impl std::fmt::Display for Part {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PaneTerm(id) => write!(f, "%{id}'s terminal state"),
-            Self::PaneMode(id, _) => write!(f, "%{id}'s copy mode"),
+            Self::PaneMode(id, _, kind) => write!(f, "%{id}'s {kind}"),
             Self::PopupTerm(id) => write!(f, "client {id}'s popup terminal state"),
         }
     }
@@ -612,10 +631,13 @@ impl Snapshot {
                 out.push((Part::PaneTerm(p.id), e));
             }
             for (n, m) in p.modes.iter().enumerate() {
-                if let PaneMode::Copy(c) | PaneMode::View(c) = m
-                    && let Some(e) = first_bad(&c.history)
-                {
-                    out.push((Part::PaneMode(p.id, n), e));
+                let (c, kind) = match m {
+                    PaneMode::Copy(c) => (c, ModeKind::Copy),
+                    PaneMode::View(c) => (c, ModeKind::View),
+                    PaneMode::Clock(_) | PaneMode::Closed(()) => continue,
+                };
+                if let Some(e) = first_bad(&c.history) {
+                    out.push((Part::PaneMode(p.id, n, kind), e));
                 }
             }
         }
@@ -647,7 +669,7 @@ impl Snapshot {
                         p.term = None;
                     }
                 }
-                Part::PaneMode(id, n) => {
+                Part::PaneMode(id, n, _) => {
                     if let Some(p) = self.panes.iter_mut().find(|p| p.id == id)
                         && n < p.modes.len()
                     {
