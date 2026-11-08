@@ -5,6 +5,14 @@
 # cursor, and the selection's end, on the row above, and the copy has no
 # trailing empty line. emacs mode keeps the row. Each drag is released in
 # the same write, before the 50 ms edge timer could scroll again.
+#
+# Each drag first clicks the empty end of the status line (unbound,
+# MouseDown1StatusDefault): a press within KEYC_CLICK_TIMEOUT (300 ms) of
+# the one before is a second or triple click (server-client.c
+# server_client_check_mouse), and the steps between two drags take about
+# that long, so which binding a press hit depended on the host's speed.
+# A press at another location resets the click sequence, so every pane
+# press is a plain MouseDown1Pane however long the steps take.
 name = "copy_mouse_drag_edges"
 size = [20, 12]
 steps = [
@@ -16,33 +24,33 @@ steps = [
   { attach = { session = "a" } },
   { screen = {  } },
   { run = ["set", "-g", "mode-keys", "vi"] },
-  { keys = "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },
   { run = ["delete-buffer"] },
-  { keys = "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },
   { run = ["delete-buffer"] },
-  { keys = "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },
   { run = ["delete-buffer"] },
   { run = ["set", "-g", "mode-keys", "emacs"] },
-  { keys = "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },
   { run = ["delete-buffer"] },
-  { keys = "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },
   { run = ["delete-buffer"] },
-  { keys = "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
+  { keys = "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
   { screen = {  } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
   { run = ["show-buffer"] },

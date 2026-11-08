@@ -71,7 +71,7 @@
         ]
       },
       {
-        "keys": "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
       },
       {
         "screen": {}
@@ -96,7 +96,7 @@
         ]
       },
       {
-        "keys": "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
       },
       {
         "screen": {}
@@ -121,7 +121,7 @@
         ]
       },
       {
-        "keys": "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
       },
       {
         "screen": {}
@@ -154,7 +154,7 @@
         ]
       },
       {
-        "keys": "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
       },
       {
         "screen": {}
@@ -179,7 +179,7 @@
         ]
       },
       {
-        "keys": "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
       },
       {
         "screen": {}
@@ -204,7 +204,7 @@
         ]
       },
       {
-        "keys": "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
+        "keys": "\u001b[<0;20;12M\u001b[<0;20;12m\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
       },
       {
         "screen": {}
@@ -416,22 +416,22 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "\\e[30m\\e[43m[0]\\e[39m\\e[49m 36 foo-bar baz.q",
+          "row 36 foo-bar baz.q",
           "ux",
           "row 37 foo-bar baz.q",
           "ux",
           "row 38 foo-bar baz.q",
           "ux",
-          "\\e[30m\\e[43mrow 39 foo-bar baz.q",
-          "ux \\e[39m\\e[49m",
+          "row 39 foo-bar baz.q",
+          "ux",
           "row 40 foo-bar baz.q",
           "ux",
           "",
           "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
         ],
         "cursor": [
-          1,
-          7
+          0,
+          10
         ]
       }
     },
@@ -439,7 +439,7 @@
       "step": 20,
       "observation": {
         "kind": "cli",
-        "stdout": "1,0,1,7,0,76,2,77\n",
+        "stdout": "0,,,,,,,\n",
         "stderr": "",
         "exit": 0
       }
@@ -448,9 +448,9 @@
       "step": 21,
       "observation": {
         "kind": "cli",
-        "stdout": "",
-        "stderr": "no buffers\n",
-        "exit": 1
+        "stdout": "w 36 foo-bar baz.qux\nrow 37 foo-bar baz.qux\nrow 38 foo-bar baz.qux\nrow 39 foo-bar baz.qux",
+        "stderr": "",
+        "exit": 0
       }
     },
     {
@@ -458,8 +458,8 @@
       "observation": {
         "kind": "cli",
         "stdout": "",
-        "stderr": "no buffer\n",
-        "exit": 1
+        "stderr": "",
+        "exit": 0
       }
     },
     {
@@ -578,22 +578,22 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "\\e[30m\\e[43m[0]\\e[39m\\e[49m 36 foo-bar baz.q",
+          "row 36 foo-bar baz.q",
           "ux",
           "row 37 foo-bar baz.q",
           "ux",
           "row 38 foo-bar baz.q",
           "ux",
-          "\\e[30m\\e[43mrow 39 foo-bar baz.q",
-          "ux\\e[39m\\e[49m",
+          "row 39 foo-bar baz.q",
+          "ux",
           "row 40 foo-bar baz.q",
           "ux",
           "",
           "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
         ],
         "cursor": [
-          2,
-          7
+          0,
+          10
         ]
       }
     },
@@ -601,7 +601,7 @@
       "step": 36,
       "observation": {
         "kind": "cli",
-        "stdout": "1,0,2,7,0,76,2,77\n",
+        "stdout": "0,,,,,,,\n",
         "stderr": "",
         "exit": 0
       }
