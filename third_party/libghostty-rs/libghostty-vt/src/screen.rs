@@ -84,6 +84,34 @@ impl GridRef<'_> {
         }
     }
 
+    /// The reference `n` rows below this one, its column kept: one step
+    /// along the page list from this row's page, where
+    /// [`Terminal::grid_ref`] walks it from the top. `InvalidValue` past
+    /// the end. (vtmux: `ghostty_grid_ref_down`, patch 0033.)
+    pub fn down(&self, n: usize) -> Result<Self> {
+        let mut out = ffi::sized!(ffi::GridRef);
+        let result =
+            unsafe { ffi::ghostty_grid_ref_down(std::ptr::from_ref(&self.inner), n, &raw mut out) };
+        from_result(result)?;
+        Ok(Self {
+            inner: out,
+            _phan: PhantomData,
+        })
+    }
+
+    /// As [`GridRef::down`], `n` rows above this one. (vtmux:
+    /// `ghostty_grid_ref_up`, patch 0033.)
+    pub fn up(&self, n: usize) -> Result<Self> {
+        let mut out = ffi::sized!(ffi::GridRef);
+        let result =
+            unsafe { ffi::ghostty_grid_ref_up(std::ptr::from_ref(&self.inner), n, &raw mut out) };
+        from_result(result)?;
+        Ok(Self {
+            inner: out,
+            _phan: PhantomData,
+        })
+    }
+
     /// Every cell of this reference's row, in one call (the reference's x
     /// is ignored). (vtmux: `ghostty_grid_ref_row_cells`, patch 0005.)
     pub fn row_cells(&self, out: &mut Vec<Cell>) -> Result<()> {

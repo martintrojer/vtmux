@@ -3746,6 +3746,22 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " The grid reference n rows below ref, stepped to from ref's own\n page (vtmux patch 0033-grid-ref-step.patch).\n"]
+    pub fn ghostty_grid_ref_down(
+        ref_: *const GridRef,
+        n: usize,
+        out_ref: *mut GridRef,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " The grid reference n rows above ref (vtmux patch\n 0033-grid-ref-step.patch).\n"]
+    pub fn ghostty_grid_ref_up(
+        ref_: *const GridRef,
+        n: usize,
+        out_ref: *mut GridRef,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Copy every cell of the grid reference's row (vtmux patch\n 0005-clone-screen.patch); out_len gets the row's cell count.\n"]
     pub fn ghostty_grid_ref_row_cells(
         ref_: *const GridRef,

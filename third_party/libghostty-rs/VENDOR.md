@@ -1001,6 +1001,27 @@ Recorded per commit in git history; the list is kept current:
   -Dtest-filter=decaln -Dtest-filter=DECALN` (Debug) passes. Found by
   `scripts/emu_fuzz.py`. Not an upstream candidate (tmux's model).
 
+- `patches/0033-grid-ref-step.patch` (`c/grid_ref.zig`, `c/main.zig`,
+  `lib_vt.zig`, `include/ghostty/vt/grid_ref.h`): `ghostty_grid_ref_down`
+  and `ghostty_grid_ref_up` move a grid ref `n` rows (`Pin.down`,
+  `Pin.up`: along the page list from the ref's own page), INVALID_VALUE
+  past either end. `ghostty_terminal_grid_ref` resolves a screen point by
+  walking the page list from the oldest page, so vtmux reading every row
+  of a long history (a copy-mode search, `capture-pane -S -`,
+  `#{history_bytes}`, the alternate screen copying the primary history)
+  took time quadratic in its length: about 3 s for a search of 1M lines.
+  Stepping from the row read before makes each row constant time.
+  Read-only, no layout change. Wrapper: `GridRef::down`, `GridRef::up`
+  (`libghostty-vt/src/screen.rs`), bindings added by hand to
+  `bindings.rs`; vtmux uses them in `capture.rs` `row_ref_near`. Tests:
+  new `grid_ref_down and grid_ref_up step as a lookup resolves (vtmux)`
+  (3000 lines over several pages: every row stepped to one at a time
+  down and up, and in strides, is the row a lookup gives; past either end
+  is refused) and `grid_ref_down and grid_ref_up null node`; `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
+  -Dtest-filter=grid_ref` (Debug) passes. Upstream candidate: a C API
+  user reading many rows has no other way to avoid the walk.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

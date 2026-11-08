@@ -1,0 +1,182 @@
+diff --git a/include/ghostty/vt/grid_ref.h b/include/ghostty/vt/grid_ref.h
+index 12ef52309..0dfed7e4e 100644
+--- a/include/ghostty/vt/grid_ref.h
++++ b/include/ghostty/vt/grid_ref.h
+@@ -151,6 +151,34 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_row_cells(const GhosttyGridRef *ref,
+                                                      size_t buf_len,
+                                                      size_t *out_len);
+ 
++/**
++ * The reference n rows below ref (vtmux), reached by stepping along the
++ * page list from ref's own page instead of walking it from the top, so a
++ * reader going through the rows in order resolves each in constant time.
++ * The column is kept (or clamped to a narrower page's last). Valid, as
++ * any grid reference, only while the terminal is unchanged.
++ *
++ * @param ref Pointer to the grid reference
++ * @param n Rows to move down
++ * @param[out] out_ref On success, the moved reference (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_INVALID_VALUE if the ref's
++ *         node is NULL or the row is past the end of the screen
++ *
++ * @ingroup grid_ref
++ */
++GHOSTTY_API GhosttyResult ghostty_grid_ref_down(const GhosttyGridRef *ref,
++                                                size_t n,
++                                                GhosttyGridRef *out_ref);
++
++/**
++ * As ghostty_grid_ref_down, n rows above ref (vtmux).
++ *
++ * @ingroup grid_ref
++ */
++GHOSTTY_API GhosttyResult ghostty_grid_ref_up(const GhosttyGridRef *ref,
++                                              size_t n,
++                                              GhosttyGridRef *out_ref);
++
+ /**
+  * Get the grapheme cluster codepoints for the cell at the grid reference's
+  * position.
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index a22847378..5472fa711 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -435,6 +435,8 @@ comptime {
+             @export(&c.grid_ref_row, .{ .name = "ghostty_grid_ref_row" });
+             @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
+             @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
++            @export(&c.grid_ref_down, .{ .name = "ghostty_grid_ref_down" });
++            @export(&c.grid_ref_up, .{ .name = "ghostty_grid_ref_up" });
+             @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
+             @export(&c.grid_ref_hyperlink_id, .{ .name = "ghostty_grid_ref_hyperlink_id" });
+             @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
+diff --git a/src/terminal/c/grid_ref.zig b/src/terminal/c/grid_ref.zig
+index bc661c8b9..9c5369b3b 100644
+--- a/src/terminal/c/grid_ref.zig
++++ b/src/terminal/c/grid_ref.zig
+@@ -77,6 +77,35 @@ pub fn grid_ref_row_cells(
+     return .success;
+ }
+ 
++/// vtmux: the reference `n` rows below `ref` (x kept, or the last column
++/// of a narrower page), in a step along the page list from the ref's own
++/// page rather than a walk from the top: a reader going through the rows
++/// in order resolves each in constant time. INVALID_VALUE for a null node
++/// or a row past the end. Valid while the page list is unchanged, as any
++/// grid ref.
++pub fn grid_ref_down(
++    ref: *const CGridRef,
++    n: usize,
++    out: ?*CGridRef,
++) callconv(lib.calling_conv) Result {
++    const p = ref.toPin() orelse return .invalid_value;
++    const moved = p.down(n) orelse return .invalid_value;
++    if (out) |o| o.* = .fromPin(moved);
++    return .success;
++}
++
++/// vtmux: as grid_ref_down, `n` rows above `ref`.
++pub fn grid_ref_up(
++    ref: *const CGridRef,
++    n: usize,
++    out: ?*CGridRef,
++) callconv(lib.calling_conv) Result {
++    const p = ref.toPin() orelse return .invalid_value;
++    const moved = p.up(n) orelse return .invalid_value;
++    if (out) |o| o.* = .fromPin(moved);
++    return .success;
++}
++
+ pub fn grid_ref_graphemes(
+     ref: *const CGridRef,
+     out_buf: ?[*]u32,
+@@ -312,3 +341,76 @@ test "grid_ref_hyperlink_uri with hyperlink" {
+     try testing.expectEqual(Result.success, grid_ref_hyperlink_uri(&ref, &buf, buf.len, &len));
+     try testing.expectEqualStrings("https://example.com", buf[0..len]);
+ }
++
++test "grid_ref_down and grid_ref_up null node" {
++    const ref = CGridRef{};
++    var out: CGridRef = undefined;
++    try testing.expectEqual(Result.invalid_value, grid_ref_down(&ref, 1, &out));
++    try testing.expectEqual(Result.invalid_value, grid_ref_up(&ref, 1, &out));
++}
++
++test "grid_ref_down and grid_ref_up step as a lookup resolves (vtmux)" {
++    var terminal: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &terminal,
++        80,
++        4,
++    ));
++    defer terminal_c.free(terminal);
++    try testing.expectEqual(
++        Result.success,
++        terminal_c.set(terminal, .scrollback_max_bytes, null),
++    );
++
++    // Enough lines for history over several pages.
++    var buf: [32]u8 = undefined;
++    for (0..3000) |i| {
++        const line = try std.fmt.bufPrint(&buf, "\r\nline {d}", .{i});
++        terminal_c.vt_write(terminal, line.ptr, line.len);
++    }
++    const list = &terminal.?.terminal.screens.active.pages;
++    try testing.expect(list.pages.first != list.pages.last);
++    const total = list.total_rows;
++
++    const at = struct {
++        fn at(t: terminal_c.Terminal, y: usize) CGridRef {
++            var r: CGridRef = undefined;
++            std.debug.assert(terminal_c.grid_ref(
++                t,
++                point.Point.cval(.{ .screen = .{ .x = 0, .y = @intCast(y) } }),
++                &r,
++            ) == .success);
++            return r;
++        }
++    }.at;
++
++    // One row at a time, both ways, and in strides that cross pages.
++    var down = at(terminal, 0);
++    var up = at(terminal, total - 1);
++    for (1..total) |y| {
++        try testing.expectEqual(Result.success, grid_ref_down(&down, 1, &down));
++        const want = at(terminal, y);
++        try testing.expectEqual(want.node, down.node);
++        try testing.expectEqual(want.y, down.y);
++        try testing.expectEqual(Result.success, grid_ref_up(&up, 1, &up));
++        const want_up = at(terminal, total - 1 - y);
++        try testing.expectEqual(want_up.node, up.node);
++        try testing.expectEqual(want_up.y, up.y);
++    }
++    const first = at(terminal, 0);
++    var stride: CGridRef = undefined;
++    try testing.expectEqual(Result.success, grid_ref_down(&first, 2999, &stride));
++    try testing.expectEqual(at(terminal, 2999).node, stride.node);
++    try testing.expectEqual(at(terminal, 2999).y, stride.y);
++    try testing.expectEqual(Result.success, grid_ref_up(&stride, 2998, &stride));
++    try testing.expectEqual(at(terminal, 1).y, stride.y);
++
++    // Past either end.
++    var out: CGridRef = undefined;
++    try testing.expectEqual(Result.invalid_value, grid_ref_up(&first, 1, &out));
++    const last = at(terminal, total - 1);
++    try testing.expectEqual(Result.invalid_value, grid_ref_down(&last, 1, &out));
++    try testing.expectEqual(Result.success, grid_ref_down(&first, total - 1, &out));
++    try testing.expectEqual(Result.invalid_value, grid_ref_down(&first, total, &out));
++}
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 22e161ead..cd0bd403d 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -276,6 +276,8 @@ pub const grid_ref_cell = grid_ref.grid_ref_cell;
+ pub const grid_ref_row = grid_ref.grid_ref_row;
+ pub const grid_ref_graphemes = grid_ref.grid_ref_graphemes;
+ pub const grid_ref_row_cells = grid_ref.grid_ref_row_cells;
++pub const grid_ref_down = grid_ref.grid_ref_down;
++pub const grid_ref_up = grid_ref.grid_ref_up;
+ pub const grid_ref_hyperlink_uri = grid_ref.grid_ref_hyperlink_uri;
+ pub const grid_ref_hyperlink_id = grid_ref.grid_ref_hyperlink_id;
+ pub const grid_ref_style = grid_ref.grid_ref_style;
