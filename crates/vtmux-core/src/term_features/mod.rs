@@ -292,6 +292,13 @@ fn feature_value(name: &str) -> Option<&'static str> {
         "fsl" => "\x07",
         "Eneks" => "\x1b[>4;2m",
         "Dseks" => "\x1b[>4m",
+        // `bpaste`, `focus`, `appesc`.
+        "Enbp" => "\x1b[?2004h",
+        "Dsbp" => "\x1b[?2004l",
+        "Enfcs" => "\x1b[?1004h",
+        "Dsfcs" => "\x1b[?1004l",
+        "Enesc" => "\x1b[?7727h",
+        "Dsesc" => "\x1b[?7727l",
         // `cstyle`, `ccolour`.
         "Ss" => "\x1b[%p1%d q",
         "Se" => "\x1b[2 q",

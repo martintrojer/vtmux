@@ -2016,7 +2016,7 @@ impl Server {
     /// changed (a reply to the startup queries, or the start timer):
     /// the capabilities are taken again, `Eneks` asks for extended keys
     /// when `extended-keys` is on, `Enfcs` for focus reports when
-    /// `focus-events` is. tmux then redraws the client in full; vtmux's
+    /// `focus-events` is, and `Enesc` for the application escape mode. tmux then redraws the client in full; vtmux's
     /// frames are diffs of finished screens (D14), so it redraws only when
     /// the capabilities it draws with changed.
     pub(crate) fn update_features(&mut self, id: ClientId) {
@@ -2032,11 +2032,10 @@ impl Server {
         if extended_keys && let Some(eneks) = term.enable_extended_keys() {
             out.extend_from_slice(eneks.as_bytes());
         }
-        // `Enfcs` comes with the `focus` feature, which every terminal
-        // vtmux knows has.
         if focus {
-            out.extend_from_slice(b"\x1b[?1004h");
+            out.extend(term.code("Enfcs", &[]).unwrap_or_default().into_bytes());
         }
+        out.extend(term.code("Enesc", &[]).unwrap_or_default().into_bytes());
         let caps = crate::render::Caps::from_term(term);
         // tty_apply_features (tty-features.c:562-563).
         if term

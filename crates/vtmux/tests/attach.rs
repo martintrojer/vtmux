@@ -5225,6 +5225,37 @@ fn cursor_style_and_colour_reach_the_terminal() {
     }
 }
 
+/// `tty_update_features` and `tty_stop_tty` (tty.c:506, 565): a terminal
+/// with the `appesc` feature (mintty's) gets `Enesc` once its features
+/// are known and `Dsesc` when the client detaches.
+#[test]
+fn application_escape_mode_follows_the_appesc_feature() {
+    for bin in bins() {
+        let what = bin.display().to_string();
+        let w = World::new(bin);
+        assert!(
+            w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat", "-"])
+                .status
+                .success()
+        );
+        let features = ["set", "-as", "terminal-features", ",xterm*:appesc"];
+        assert!(w.cli(&features).status.success());
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| a.text().contains("\x1b[c"));
+        // The terminal's DA reply: its features are known now.
+        a.keys(b"\x1b[?62;22c");
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            a.text().contains("\x1b[?7727h")
+        });
+        assert!(!a.text().contains("\x1b[?7727l"), "{what}");
+        assert!(w.cli(&["detach-client"]).status.success());
+        a.exited(0);
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            a.text().contains("\x1b[?7727l")
+        });
+    }
+}
+
 /// `server_client_reset_state` with a window menu (server-client.c:
 /// 2201-2203, menu.c:633-634): the menu's screen gives the modes, all
 /// motion when it takes the mouse (opened by a mouse event or with -M),

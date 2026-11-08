@@ -254,9 +254,7 @@ pub fn restart(term: &Term, clear: bool, rows: u32) -> Vec<u8> {
     if term.has(Cap::Kmous) {
         out.push_str("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l");
     }
-    if term.has_name("Enbp") {
-        out.push_str("\x1b[?2004h");
-    }
+    out.push_str(&term.code("Enbp", &[]).unwrap_or_default());
     if term.vt100_like() {
         out.push_str("\x1b[?2031h\x1b[?996n");
     }
@@ -274,8 +272,9 @@ pub fn lock_screen(term: &Term) -> Vec<u8> {
 /// `tty_stop_tty` (tty.c:470-520). `clear` is `clear-on-attach`: on, the
 /// screen is cleared and `rmcup` leaves the alternate screen; off, there is
 /// none to leave and the clear comes last. A cursor style or colour the
-/// terminal was given goes back to its default first. `csr` and `sgr0` are xterm's
-/// forms; the focus reports and extended keys go off as `Dsfcs` and
+/// terminal was given goes back to its default first. `csr` and `sgr0`
+/// are xterm's forms; bracketed paste, the application escape mode, focus
+/// reports and extended keys go off as `Dsbp`, `Dsesc`, `Dsfcs` and
 /// `Dseks` say.
 #[must_use]
 pub fn teardown(term: &Term, clear: bool, cursor: &crate::outer_cursor::OuterCursor) -> Vec<u8> {
@@ -290,11 +289,8 @@ pub fn teardown(term: &Term, clear: bool, cursor: &crate::outer_cursor::OuterCur
     if term.has(Cap::Kmous) {
         out.push_str("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l");
     }
-    if term.has_name("Dsbp") {
-        out.push_str("\x1b[?2004l");
-    }
-    if term.has_name("Dsfcs") {
-        out.push_str("\x1b[?1004l");
+    for name in ["Dsbp", "Dsesc", "Dsfcs"] {
+        out.push_str(&term.code(name, &[]).unwrap_or_default());
     }
     out.push_str(term.disable_extended_keys().unwrap_or_default());
     out.push_str(s(if clear { "rmcup" } else { "clear" }));
