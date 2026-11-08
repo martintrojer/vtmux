@@ -1,0 +1,16 @@
+name = "format_table_no_environ"
+# A format_table name whose callback gives nothing stays empty even when the environment has a
+# variable of that name (format.c format_find:4641-4649); other names fall back to the session, then
+# the global, environment (format.c:4665-4675).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "t"] },
+  { run = ["set-environment", "-g", "client_name", "G1"] },
+  { run = ["set-environment", "-g", "pane_dead_status", "G2"] },
+  { run = ["set-environment", "-g", "buffer_name", "G3"] },
+  { run = ["set-environment", "-g", "copy_cursor_x", "G4"] },
+  { run = ["set-environment", "-g", "VTX", "G5"] },
+  { run = ["set-environment", "-t", "a", "VTX", "S5"] },
+  { run = ["display", "-p", "-t", "a", "[#{client_name}][#{pane_dead_status}][#{buffer_name}][#{copy_cursor_x}][#{VTX}]"] },
+  { run = ["display", "-p", "-t", "a", "#{?client_name,y,n}#{?copy_cursor_x,y,n}"] },
+]

@@ -1157,8 +1157,13 @@ impl FormatContext for Ctx<'_> {
     fn get(&self, name: &str) -> Option<String> {
         self.find_before_environ(name)
             // format_find falls back to the session, then global,
-            // environment (format.c:4665-4675).
+            // environment (format.c:4665-4675), but not for a format_table
+            // name, whose callback's answer stands even when it is none
+            // (format.c:4641-4649).
             .or_else(|| {
+                if FORMAT_TABLE.binary_search(&name).is_ok() {
+                    return None;
+                }
                 let entry = self
                     .session()
                     .and_then(|s| s.env.find(name))
@@ -1707,3 +1712,13 @@ const COPY_FORMATS: &[&str] = &[
     "copy_cursor_line",
     "copy_cursor_hyperlink",
 ];
+
+#[cfg(test)]
+mod table_tests {
+    /// `get` looks names up in [`super::FORMAT_TABLE`] by binary search, as
+    /// tmux's `format_table_get` does (`bsearch`).
+    #[test]
+    fn format_table_is_sorted() {
+        assert!(super::FORMAT_TABLE.windows(2).all(|w| w[0] < w[1]));
+    }
+}
