@@ -140,7 +140,7 @@
       },
       {
         "divergence": {
-          "id": "D-044",
+          "id": "D-047",
           "expect": {
             "kind": "screen",
             "rows": [

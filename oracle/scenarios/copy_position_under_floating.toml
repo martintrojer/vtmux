@@ -5,7 +5,7 @@ size = [60, 16]
 # screen_write_fast_copy (screen-write.c:667-717), which format_draw
 # writes through, stops at the first cell a floating pane hides, so the
 # visible end of the indicator ("0]") never reaches the mode's screen and
-# tmux draws blanks there (D-044); vtmux draws it. Plain pane text there
+# tmux draws blanks there (D-047); vtmux draws it. Plain pane text there
 # shows on both.
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat", "-"] },
@@ -23,7 +23,7 @@ steps = [
   { screen = {} },
   { run = ["copy-mode", "-t", "%0"] },
   { settle = { react = true } },
-  { divergence = { id = "D-044", expect = { kind = "screen", rows = ["\\e[37m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\\e[30m\\e[43m0]\\e[33m\\e[49m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "\\e[37m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\\e[39m  \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mx"], cursor = [0, 0] } } },
+  { divergence = { id = "D-047", expect = { kind = "screen", rows = ["\\e[37m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\\e[30m\\e[43m0]\\e[33m\\e[49m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "                           \\e[37m\u2502\\e[39m  \\e[33m\u2502\\e[39m", "\\e[37m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\\e[39m  \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[33m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "                              \\e[37m\u2502\\e[39m", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mx"], cursor = [0, 0] } } },
   { screen = {} },
   { run = ["send", "-X", "-t", "%0", "cancel"] },
   { keys = "abcdefghijklmnopqrstuvwxyz0123" },
