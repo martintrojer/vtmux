@@ -1878,6 +1878,7 @@ impl Server {
         item.origin = origin;
         let argv = hello.argv.clone();
         let hello_flags = hello.flags;
+        let shell = hello.ext.shell;
         let control = hello_flags.control != vtmux_core::protocol::ControlMode::None;
         let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
@@ -1907,6 +1908,15 @@ impl Server {
         // runs (server-client.c:3052-3060, cfg.c start_cfg).
         if !self.config_loaded {
             self.start_cfg(id, origin);
+        }
+        // `-c` (MSG_SHELL): nothing to run; the answer waits for the config
+        // as a command would (cfg_client_done), so the config's
+        // default-shell counts.
+        if shell {
+            let batch = crate::cmdq::NewBatch::new(item, Vec::new(), crate::cmdq::End::Shell);
+            self.cmdq_append(Some(id), batch);
+            self.cmdq_process();
+            return;
         }
         if control {
             // The argv command runs with guard flags 0 (cmd-queue.c:594).
@@ -2388,6 +2398,26 @@ impl Server {
                 shell,
             },
         );
+    }
+
+    /// `server_client_dispatch_shell` (server-client.c:3065-3078): the
+    /// global `default-shell`, or /bin/sh when it fails `checkshell`, for a
+    /// `-c` client to run its command with; then the connection closes
+    /// (`proc_kill_peer`). The command is the client's own: `Exec`'s is
+    /// empty.
+    pub(crate) fn send_shell(&mut self, id: ClientId) {
+        let shell = self.default_shell(TreeId::GlobalSession);
+        self.send(
+            id,
+            &ServerMsg::Exec {
+                command: String::new(),
+                shell,
+            },
+        );
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.closing = true;
+        }
+        self.flush_client(id);
     }
 
     /// `server_client_suspend` (server-client.c:598-610): the terminal is

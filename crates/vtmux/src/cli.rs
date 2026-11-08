@@ -12,12 +12,15 @@ use vtmux_core::protocol::ControlMode;
 const OPTSTRING: &str = "2c:CDdf:hlL:NqS:T:uUvV";
 
 #[derive(Debug, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // one per getopt flag
 pub struct Cli {
     pub control: ControlMode,
     /// `-c shell-command`.
     pub shell_command: Option<String>,
     /// `-D`: do not fork the server.
     pub no_fork: bool,
+    /// `-l`: `-c` and `detach-client -E` run a login shell.
+    pub login: bool,
     /// Every `-f` file, in order (the first `-f` replaces the defaults).
     pub config_files: Vec<PathBuf>,
     pub label: Option<String>,
@@ -116,9 +119,9 @@ pub fn parse(args: &[OsString], progname: &str) -> Result<Cli, Early> {
                 }
                 ('h', _) => return Err(Early::Help),
                 ('V', _) => return Err(Early::Version),
-                // -l (login shell for -c) and -v (logging) change nothing
-                // vtmux does yet; accepted like -q.
-                ('l' | 'q' | 'v', _) => {}
+                ('l', _) => cli.login = true,
+                // -v (logging) changes nothing vtmux does; accepted like -q.
+                ('q' | 'v', _) => {}
                 ('L', Some(v)) => cli.label = Some(v),
                 ('N', _) => cli.no_start = true,
                 ('S', Some(v)) => cli.socket = Some(PathBuf::from(v)),
@@ -164,6 +167,8 @@ mod tests {
         assert_eq!(p(&["ls", "-V"]).unwrap().command, [&b"ls"[..], b"-V"]);
         assert_eq!(p(&["--", "-x"]).unwrap().command, [b"-x"]);
         assert_eq!(p(&["-CC"]).unwrap().control, ControlMode::ControlControl);
+        assert!(p(&["-l", "-c", "x"]).unwrap().login);
+        assert!(!p(&["-c", "x"]).unwrap().login);
         // `-fL`: L is -f's argument.
         assert_eq!(p(&["-fL"]).unwrap().config_files, vec![PathBuf::from("L")]);
     }

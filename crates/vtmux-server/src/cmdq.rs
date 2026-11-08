@@ -82,6 +82,8 @@ pub enum End {
     ControlLine,
     /// `cfg_done`: the config files have run.
     Config,
+    /// `server_client_dispatch_shell`: a `-c` client is told its shell.
+    Shell,
     /// Nothing to hand back (key bindings, appended commands).
     Quiet,
 }
@@ -773,6 +775,7 @@ impl Server {
                 self.control_read(id);
             }
             (End::Config, _) => self.cfg_done(),
+            (End::Shell, Some(id)) => self.send_shell(id),
             _ => self.end_quiet(&mut item),
         }
     }

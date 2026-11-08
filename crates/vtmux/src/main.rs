@@ -311,10 +311,13 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         Ok(cli) => cli,
         Err(code) => return code,
     };
-    if cli.shell_command.is_some() || cli.no_fork {
-        write_err(b"not implemented in vtmux yet: -c and -D");
+    if cli.no_fork {
+        write_err(b"not implemented in vtmux yet: -D");
         return ExitCode::from(1);
     }
+    // tmux.c:415-416: a login shell (`argv[0]` starting `-`) runs `-c`
+    // as one, as `-l` asks.
+    let login = cli.login || argv0.as_bytes().first() == Some(&b'-');
     let utf8 = detect_utf8(cli.utf8);
 
     let default_socket = cli.socket.is_none()
@@ -378,9 +381,10 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         },
         // An attached client re-executes on an upgrade (decision 4).
         ext: HelloExt {
-            follows_upgrade: cli.control == ControlMode::None,
+            follows_upgrade: cli.control == ControlMode::None && cli.shell_command.is_none(),
             reattach: None,
             pixels: tty_pixels(),
+            shell: cli.shell_command.is_some(),
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
@@ -392,7 +396,11 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         argv0: argv0.clone(),
         socket: path.clone(),
         sent_size: None,
+        login,
     };
+    if let Some(command) = &cli.shell_command {
+        return shell_relay(&mut stream, command, &how);
+    }
     match (cli.control, lone_upgrade(&cli.command)) {
         (ControlMode::None, Some(up)) => upgrade_relay(
             &mut stream,
@@ -402,7 +410,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             &how,
         ),
         (ControlMode::None, None) => relay(&mut stream, None, &how),
-        _ => control_relay(&mut stream, saved_tio.as_ref()),
+        _ => control_relay(&mut stream, saved_tio.as_ref(), login),
     }
 }
 
@@ -450,16 +458,19 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
             follows_upgrade: true,
             reattach: Some(token.to_owned()),
             pixels: tty_pixels(),
+            shell: false,
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
+    let login = argv0.as_bytes().first() == Some(&b'-');
     let how = Reattach {
         argv0,
         socket: socket.to_owned(),
         sent_size,
+        login,
     };
     match protocol::read_msg::<ServerMsg>(&mut stream) {
         // Told to attach again: said as a detached client says it.
@@ -696,7 +707,7 @@ fn wait_exit(rest: &std::sync::mpsc::Receiver<Option<Vec<u8>>>) {
 /// that closes the server's DCS, then puts the settings back
 /// (client.c:425-429); `detach-client -E` puts them back before the exec
 /// (client.c:403-405).
-fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
+fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>, login: bool) -> ExitCode {
     let after = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rest) = std::sync::mpsc::channel();
     if let Ok(writer) = stream.try_clone() {
@@ -719,7 +730,7 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
             Ok(Some(ServerMsg::Exec { command, shell })) => {
                 restore_tty(saved);
                 return ExitCode::from(
-                    u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
+                    u8::try_from(vtmux_client::attach::exec(&shell, &command, login)).unwrap_or(1),
                 );
             }
             Ok(Some(ServerMsg::Flags { wait_exit })) => wait = wait_exit,
@@ -764,6 +775,20 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
+/// `-c` (client.c `client_exec` on `MSG_SHELL`): the server names the
+/// shell and closes; run `command` with it in place of this process.
+/// Anything else (`access denied`, a lost server) ends as [`relay`] ends
+/// it.
+fn shell_relay(stream: &mut UnixStream, command: &str, how: &Reattach) -> ExitCode {
+    match protocol::read_msg::<ServerMsg>(stream) {
+        Ok(Some(ServerMsg::Exec { shell, .. })) => ExitCode::from(
+            u8::try_from(vtmux_client::attach::exec(&shell, command, how.login)).unwrap_or(1),
+        ),
+        Ok(Some(first)) => relay(stream, Some(first), how),
+        Ok(None) | Err(_) => relay(stream, None, how),
+    }
+}
+
 /// Print what the server sends until `Exit`, `first` (already read) then
 /// the rest, doing the file I/O it asks for (file.c, client side). Once
 /// attached, the client comes back after an upgrade as `how` says.
@@ -791,7 +816,8 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
             }
             Ok(Some(ServerMsg::Exec { command, shell })) => {
                 return ExitCode::from(
-                    u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
+                    u8::try_from(vtmux_client::attach::exec(&shell, &command, how.login))
+                        .unwrap_or(1),
                 );
             }
             Ok(Some(ServerMsg::Ready)) => {

@@ -62,7 +62,9 @@
 //!   [`ServerMsg::UpgradeNotice`]; the other bits 0), then `reattach`
 //!   option of string (the notice's token); then, from protocol 10,
 //!   `pixels`: the terminal's `ws_xpixel` and `ws_ypixel`, u32 each,
-//!   written only when not both 0. A `Hello`
+//!   written only when not both 0; from protocol 11, `upgrade` bit 1:
+//!   the client asks for the shell to run `-c` with (tmux's `MSG_SHELL`),
+//!   answered with an [`ServerMsg::Exec`] whose `command` is empty. A `Hello`
 //!   whose fields are all unset has an empty `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
@@ -110,8 +112,10 @@ use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change. The frozen frames (module docs)
 /// never change, whatever this says. `tests::this_versions_frames` pins
-/// every other frame to it. 10: `Resize` carries the pixel size.
-pub const PROTOCOL_VERSION: u32 = 10;
+/// every other frame to it. 10: `Resize` carries the pixel size. 11:
+/// `Hello` may ask for the shell (`HelloExt::shell`), which an older
+/// server would take for an empty command, `new-session`.
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// The first protocol version with the frozen frames: a control client of
 /// this version or later talks to any server of this version or later.
@@ -215,6 +219,10 @@ pub struct HelloExt {
     /// it doesn't say, as tmux reads it with `TIOCGWINSZ` (tty.c
     /// `tty_resize`).
     pub pixels: (u32, u32),
+    /// `-c shell-command` (client.c:248-250, `MSG_SHELL`): no command, the
+    /// server answers with the shell to run it with
+    /// (`server_client_dispatch_shell`).
+    pub shell: bool,
 }
 
 impl HelloExt {
@@ -231,7 +239,7 @@ impl HelloExt {
         if *self == Self::default() {
             return;
         }
-        out.push(u8::from(self.follows_upgrade));
+        out.push(u8::from(self.follows_upgrade) | u8::from(self.shell) << 1);
         put_option(out, self.reattach.as_ref(), |o, t| {
             put_bytes(o, t.as_bytes());
         });
@@ -248,8 +256,10 @@ impl HelloExt {
         if r.buf.is_empty() {
             return Ok(Self::default());
         }
-        // Bits other than 0 are a later build's.
-        let follows_upgrade = r.u8()? & 1 != 0;
+        // Bits other than 0 and 1 are a later build's.
+        let bits = r.u8()?;
+        let follows_upgrade = bits & 1 != 0;
+        let shell = bits & 2 != 0;
         let reattach = if r.buf.is_empty() {
             None
         } else {
@@ -267,6 +277,7 @@ impl HelloExt {
             follows_upgrade,
             reattach,
             pixels,
+            shell,
         })
     }
 }
@@ -1712,7 +1723,7 @@ mod tests {
     /// [`FROZEN_SINCE`]) and rewrite `VERSION` and the goldens with it.
     #[test]
     fn this_versions_frames() {
-        const VERSION: u32 = 10;
+        const VERSION: u32 = 11;
         assert_eq!(
             PROTOCOL_VERSION, VERSION,
             "the goldens below are protocol {VERSION}'s"
@@ -1792,7 +1803,7 @@ mod tests {
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want.clone()), frame.len())
         );
-        let frame = hello_golden_with(9, 0, b"\xfe", b"");
+        let frame = hello_golden_with(9, 0, b"\xfc", b"");
         assert_eq!(
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want.clone()), frame.len())
@@ -1801,8 +1812,9 @@ mod tests {
             follows_upgrade: true,
             reattach: Some("a1B2c3D4e5F6g7H8".into()),
             pixels: (800, 480),
+            shell: true,
         };
-        let mut ext = b"\x03\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
+        let mut ext = b"\x07\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
         ext.extend_from_slice(b"\x20\x03\x00\x00\xe0\x01\x00\x00");
         ext.extend_from_slice(b"later");
         let frame = hello_golden_with(9, 0, &ext, b"");
@@ -1838,6 +1850,7 @@ mod tests {
                     follows_upgrade: true,
                     reattach: None,
                     pixels: (0, 0),
+                    shell: false,
                 },
                 b"\x01\x00",
             ),
@@ -1846,6 +1859,7 @@ mod tests {
                     follows_upgrade: true,
                     reattach: Some("0123456789abcdef".into()),
                     pixels: (0, 0),
+                    shell: false,
                 },
                 b"\x01\x01\x10\x00\x00\x000123456789abcdef",
             ),
@@ -1854,8 +1868,18 @@ mod tests {
                     follows_upgrade: false,
                     reattach: None,
                     pixels: (800, 480),
+                    shell: false,
                 },
                 b"\x00\x00\x20\x03\x00\x00\xe0\x01\x00\x00",
+            ),
+            (
+                HelloExt {
+                    follows_upgrade: false,
+                    reattach: None,
+                    pixels: (0, 0),
+                    shell: true,
+                },
+                b"\x02\x00",
             ),
         ] {
             let m = with(ext);

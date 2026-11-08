@@ -33,6 +33,9 @@ pub struct Reattach {
     /// sent again only if the terminal has changed size since, so the
     /// server sees no resize that did not happen.
     pub sent_size: Option<(u32, u32)>,
+    /// `-l`, or `argv[0]` starting `-` (tmux.c:415-416, 459-460):
+    /// `detach-client -E` runs a login shell.
+    pub login: bool,
 }
 
 /// Called after Ready; the server owns startup and teardown escapes.
@@ -52,7 +55,7 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach) -> i32 {
         }
         // The terminal is restored (run dropped its guard): the process
         // becomes the command.
-        Ok(Leave::Exec { command, shell }) => exec(&shell, &command),
+        Ok(Leave::Exec { command, shell }) => exec(&shell, &command, how.login),
         // The terminal has its modes back and has taken every frame: the
         // process becomes the new binary, on the same terminal.
         Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how),
@@ -86,17 +89,23 @@ impl Leave {
     }
 }
 
+/// `shell_argv0` (tmux.c:257-272): the shell's basename, `-` in front
+/// for a login shell.
+fn shell_argv0(shell: &Path, login: bool) -> OsString {
+    let base = shell.file_name().unwrap_or(shell.as_os_str());
+    let mut name = OsString::from(if login { "-" } else { "" });
+    name.push(base);
+    name
+}
+
 /// `client_exec` (client.c:492-509): `shell -c command` in place of this
-/// process, with `SHELL` set to `shell` and a login-shell `argv[0]` when
-/// the client is a login shell (`shell_argv0`, which vtmux does not
-/// track: `argv[0]` is the shell's basename). Only returns, with the exit
-/// status, if the exec fails.
+/// process, with `SHELL` set to `shell` and [`shell_argv0`] as `argv[0]`.
+/// Only returns, with the exit status, if the exec fails.
 #[must_use]
-pub fn exec(shell: &Path, command: &str) -> i32 {
+pub fn exec(shell: &Path, command: &str, login: bool) -> i32 {
     use std::os::unix::process::CommandExt;
-    let name = shell.file_name().unwrap_or(shell.as_os_str());
     let err = std::process::Command::new(shell)
-        .arg0(name)
+        .arg0(shell_argv0(shell, login))
         .args(["-c", command])
         .env("SHELL", shell)
         .exec();
@@ -582,4 +591,18 @@ fn send_size(stream: &mut UnixStream) -> io::Result<()> {
             ypixel: u32::from(ws.ws_ypixel),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reference: `tmux -l -c 'echo $0'` with default-shell /bin/bash
+    /// prints `-bash`; without `-l`, `bash`.
+    #[test]
+    fn login_shell_argv0() {
+        assert_eq!(shell_argv0(Path::new("/bin/bash"), false), "bash");
+        assert_eq!(shell_argv0(Path::new("/bin/bash"), true), "-bash");
+        assert_eq!(shell_argv0(Path::new("sh"), true), "-sh");
+    }
 }

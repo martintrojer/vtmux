@@ -1256,6 +1256,7 @@ impl super::Client {
             follows_upgrade: hello.ext.follows_upgrade,
             reattach: None,
             pixels: hello.ext.pixels,
+            shell: false,
         };
         let (was, now) = (h.tty.as_ref()?, hello.tty.as_ref()?);
         let changed = (was.cols, was.rows) != (now.cols, now.rows);

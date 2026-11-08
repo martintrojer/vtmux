@@ -1068,6 +1068,37 @@ fn kill_server() {
     });
 }
 
+/// `-c shell-command` (client.c:248-250, `client_exec`;
+/// server-client.c `server_client_dispatch_shell`): the command runs with
+/// the server's `default-shell` (/bin/sh when it fails `checkshell`), as
+/// `$0` its basename, `SHELL` set to it, and the client's exit status. It
+/// starts a server, which has read its config first (the shell answer waits
+/// as a command does), and which exits after it with nothing to keep it;
+/// `-N` starts none.
+#[test]
+fn shell_command_flag() {
+    compare("shell_command_flag", |w| {
+        std::fs::write(
+            w.dir().join("c"),
+            "set -g default-shell /bin/bash\nset -g exit-empty off\n",
+        )
+        .unwrap();
+        let mut runs = vec![
+            w.run(&["-N", "-c", "echo $0"]),
+            w.run(&["-f", "c", "-c", "echo $0 $SHELL; exit 3"]),
+            w.run(&["show", "-gv", "default-shell"]),
+            w.run(&["set", "-g", "default-shell", "/bin/sh"]),
+            w.run(&["-c", "echo $0 $SHELL"]),
+            w.run(&["kill-server"]),
+        ];
+        w.wait_gone();
+        runs.push(w.run(&["-c", "echo ${TMUX:-unset}"]));
+        w.wait_gone();
+        runs.push(w.run(&["ls"]));
+        runs
+    });
+}
+
 /// Under its own name (D20, D21): `vtmux-UID` socket directory, `vtmux`
 /// in getopt messages and usage, and `-V` printing the D25 version.
 #[test]
