@@ -847,9 +847,18 @@ pub fn cursor_of(
     let (Some(d), Some(pane)) = (draw.panes.get(&p), model.panes.get(&p)) else {
         return (None, false);
     };
-    let Some((cx, cy)) = d.content.cursor else {
+    let Some((mut cx, cy)) = d.content.cursor else {
         return (None, false);
     };
+    // The program's own screen: tmux's `s->cx` is the column count while
+    // a wrap is pending (Ghostty keeps the last column and a flag), so the
+    // cursor of a full line sits on the border right of the pane.
+    if Rc::ptr_eq(&d.content, &pane.term.screen().shared()) {
+        let (tx, ty) = pane.term.cursor();
+        if ty == cy && tx > cx {
+            cx = tx;
+        }
+    }
     let x = i64::from(pane.rect.xoff) + i64::from(cx) - i64::from(view.ox);
     let y = i64::from(pane.rect.yoff) + i64::from(cy) - i64::from(view.oy);
     let shown = |at: i64, size: u32| (0..=i64::from(size)).contains(&at);

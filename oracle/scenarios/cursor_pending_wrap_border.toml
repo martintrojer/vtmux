@@ -1,0 +1,24 @@
+name = "cursor_pending_wrap_border"
+size = [40, 10]
+# A pane whose program filled its line to the last column has a wrap
+# pending: tmux's s->cx is then the pane's width, and
+# server_client_reset_state (server-client.c:2240-2276) puts the terminal
+# cursor at xoff + cx, on the border right of the pane. The next character
+# wraps and the cursor comes back into the pane.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["selectp", "-t", "%0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "-l", "20", "cat", "-"] },
+  { run = ["selectp", "-t", "%1", "-T", "t"] },
+  { run = ["selectp", "-t", "%0"] },
+  { attach = { session = "a" } },
+  { keys = "0123456789012345678" },
+  { settle = {} },
+  { run = ["display", "-p", "#{cursor_x},#{cursor_y}"] },
+  { screen = {} },
+  { keys = "x" },
+  { settle = {} },
+  { run = ["display", "-p", "#{cursor_x},#{cursor_y}"] },
+  { screen = {} },
+]

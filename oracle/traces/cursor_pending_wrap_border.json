@@ -1,0 +1,230 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "cursor_pending_wrap_border",
+  "inputs": {
+    "name": "cursor_pending_wrap_border",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "-l",
+          "20",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "%1",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "0123456789012345678"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "19,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789012345678\\e[32m│",
+          "\\e[39m                   \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          19,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789012345678\\e[32m│",
+          "\\e[39mx                  \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[32m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "                   \\e[37m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          1,
+          1
+        ]
+      }
+    }
+  ]
+}
