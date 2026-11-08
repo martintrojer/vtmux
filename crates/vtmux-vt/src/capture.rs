@@ -683,6 +683,39 @@ impl ScreenCopy {
         }
     }
 
+    /// Row `y` as the text a search reads (`window_copy_stringify`: a
+    /// space for a blank, one byte for each cell), appended to `out`
+    /// (cleared first), and whether the row wraps onto the next. `None`
+    /// when a cell is anything but a narrow ASCII character or a blank (a
+    /// wide, grapheme, tab or line-drawing cell, or any other character),
+    /// or the row cannot be read from the copy; the row then has to be
+    /// read with [`ScreenCopy::used_row`]. It costs one page-list walk and
+    /// one call for the cells, and builds no cell structures: a search
+    /// over a long history reads every line.
+    pub fn ascii_text(&self, y: usize, out: &mut String) -> Option<bool> {
+        out.clear();
+        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
+            return None;
+        }
+        let term = self.term.as_ref()?;
+        let row_ref = row_ref_at(term, y + self.retained - self.hsize)?;
+        let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
+        let mut raw = Vec::new();
+        row_ref.row_cells(&mut raw).ok()?;
+        // An incomplete reflow can leave the page narrower than the screen.
+        raw.truncate(self.cols);
+        out.reserve(self.cols);
+        for cell in &raw {
+            out.push(CellBits(cell.bits()).ascii()?);
+        }
+        // A cell past the end of the row is a blank.
+        out.extend(std::iter::repeat_n(
+            ' ',
+            self.cols.saturating_sub(raw.len()),
+        ));
+        Some(wrapped)
+    }
+
     /// The hyperlink of the cell at `(x, y)` when the copy was taken (see
     /// [`PaneTerm::hyperlink`]); history hidden by an alternate screen has
     /// none.
@@ -698,6 +731,12 @@ impl ScreenCopy {
     #[must_use]
     pub fn history_size(&self) -> usize {
         self.hsize
+    }
+
+    /// The copy's width.
+    #[must_use]
+    pub fn cols(&self) -> usize {
+        self.cols
     }
 
     /// When history row `y` scrolled in (see [`PaneTerm::history_time`]).
@@ -905,6 +944,26 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
     read_screen_row(&term.term, y + retained - hsize, cols)
 }
 
+/// The reference to row `y` of a screen (history first, `y` counted from
+/// the oldest row Ghostty keeps). Ghostty resolves a screen point by
+/// walking its pages from the oldest and an active point from the newest:
+/// a row of the active area is read as one, at a cost that does not grow
+/// with the history.
+fn row_ref_at<'t>(term: &'t Terminal<'_, '_>, y: usize) -> Option<GridRef<'t>> {
+    let (at, y): (fn(PointCoordinate) -> Point, usize) =
+        match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
+            Some(active) => (Point::Active, active),
+            None => (Point::Screen, y),
+        };
+    #[cfg(test)]
+    tests::LOOKUPS.with(|n| n.set(n.get() + 1));
+    term.grid_ref(at(PointCoordinate {
+        x: 0,
+        y: u32::try_from(y).unwrap_or(u32::MAX),
+    }))
+    .ok()
+}
+
 /// Read one row of the active screen, spacer cells included: one page-list
 /// walk for the row and one call for its cells; a cell's style and
 /// grapheme are looked up only when it has them.
@@ -921,20 +980,7 @@ fn read_screen_cells(
     cols: usize,
     used_only: bool,
 ) -> (Vec<RowCell>, bool) {
-    // Ghostty resolves a screen point by walking its pages from the oldest
-    // and an active point from the newest: a row of the active area is
-    // read as one, at a cost that does not grow with the history.
-    let (at, y): (fn(PointCoordinate) -> Point, usize) =
-        match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
-            Some(active) => (Point::Active, active),
-            None => (Point::Screen, y),
-        };
-    #[cfg(test)]
-    tests::LOOKUPS.with(|n| n.set(n.get() + 1));
-    let Ok(row_ref) = term.grid_ref(at(PointCoordinate {
-        x: 0,
-        y: u32::try_from(y).unwrap_or(u32::MAX),
-    })) else {
+    let Some(row_ref) = row_ref_at(term, y) else {
         return (Vec::new(), false);
     };
     let (wrapped, styled, linked) = row_ref.row().map_or((false, true, true), |row| {
@@ -1094,6 +1140,28 @@ impl CellBits {
 
     fn tab(self) -> u8 {
         self.byte(48)
+    }
+
+    /// The cell as a search sees it when that is one ASCII byte: a blank
+    /// (nothing written, or only a colour) is a space. `None` for a wide,
+    /// spacer, tab or protected (line-drawing) cell, a grapheme cluster
+    /// and any codepoint past ASCII.
+    fn ascii(self) -> Option<char> {
+        if self.0 == 0 {
+            return Some(' ');
+        }
+        if self.field(42, 2) != 0 || self.tab() != 0 || self.is_protected() {
+            return None;
+        }
+        match self.content_tag() {
+            CellContentTag::Codepoint => match self.codepoint() {
+                0 => Some(' '),
+                c @ 1..=0x7f => char::from_u32(c),
+                _ => None,
+            },
+            CellContentTag::CodepointGrapheme => None,
+            CellContentTag::BgColorPalette | CellContentTag::BgColorRgb => Some(' '),
+        }
     }
 }
 

@@ -297,6 +297,20 @@ impl Grid {
         RowRef::Read(row)
     }
 
+    /// Line `y` as the text a search reads, a byte for each of the `sx`
+    /// cells, in `out`; whether it wraps onto the next line. `None` unless
+    /// the line is still the entry copy's, unread, and made of narrow ASCII
+    /// characters and blanks only ([`ScreenCopy::ascii_text`]): the line
+    /// then has to be read as a [`Row`] with [`Grid::peek`].
+    pub fn ascii_text(&self, y: usize, out: &mut String) -> Option<bool> {
+        let line = self.lines.get(y)?;
+        let (src, source) = (line.src?, self.source.as_ref()?);
+        if line.row.get().is_some() || source.cols() != self.sx {
+            return None;
+        }
+        source.ascii_text(src, out)
+    }
+
     /// The hyperlink of the cell at `(x, y)`: from the pane's grid as it
     /// was on entry, while the line is still that grid's (a reflowed line
     /// has none).

@@ -98,6 +98,17 @@ impl Pattern {
         }
     }
 
+    /// The pattern as bytes when every cell is one ASCII character other
+    /// than a tab, and there is at least one.
+    fn ascii_bytes(&self) -> Option<Vec<u8>> {
+        let bytes: Vec<u8> = self
+            .cells
+            .iter()
+            .map(|(t, w)| (*w == 1 && t.len() == 1 && t != "\t").then(|| t.as_bytes()[0]))
+            .collect::<Option<_>>()?;
+        (!bytes.is_empty()).then_some(bytes)
+    }
+
     /// `regcomp(REG_EXTENDED)`, `REG_ICASE` when matching ignoring case.
     fn regex(&self) -> Option<Regex> {
         Regex::new(&self.text, self.cis).ok()
@@ -705,10 +716,35 @@ impl CopyMode {
         };
         let mut nfound = 0usize;
         let mut stopped = false;
+        // Lines out of view are only counted, and most are plain ASCII:
+        // those are counted from their text alone ([`Self::count_ascii`]).
+        let (shown_from, shown_to) = self.visible_lines();
+        let plain = if re.is_some() {
+            None
+        } else {
+            pat.ascii_bytes()
+        };
+        let mut text = String::new();
         loop {
             self.search.marks = Some(vec![0; sx * sy]);
             self.search.generation = 1;
             for py in start..end {
+                if !(shown_from..shown_to).contains(&py)
+                    && let Some(n) =
+                        self.count_ascii(re.as_ref(), plain.as_deref(), pat.cis, py, &mut text)
+                {
+                    nfound += n;
+                    let now = Instant::now();
+                    if now - start_time > SEARCH_TIMEOUT {
+                        self.search.timeout = true;
+                        break;
+                    }
+                    if stop.is_some_and(|s| now > s) {
+                        stopped = true;
+                        break;
+                    }
+                    continue;
+                }
                 let mut px = 0;
                 loop {
                     let found = match &re {
@@ -749,20 +785,85 @@ impl CopyMode {
             break;
         }
         if !visible_only {
-            if stopped {
-                self.search.count = match nfound {
-                    n if n > 1000 => 1000,
-                    n if n > 100 => 100,
-                    n if n > 10 => 10,
-                    _ => -1,
-                };
-                self.search.more = true;
-            } else {
-                self.search.count = i64::try_from(nfound).unwrap_or(i64::MAX);
-                self.search.more = false;
-            }
+            self.set_count(nfound, stopped);
         }
         true
+    }
+
+    /// `searchcount` and `searchmore` once all of history was looked at:
+    /// `stopped` when it ran out of time, so only a lower bound is known.
+    fn set_count(&mut self, nfound: usize, stopped: bool) {
+        if stopped {
+            self.search.count = match nfound {
+                n if n > 1000 => 1000,
+                n if n > 100 => 100,
+                n if n > 10 => 10,
+                _ => -1,
+            };
+            self.search.more = true;
+        } else {
+            self.search.count = i64::try_from(nfound).unwrap_or(i64::MAX);
+            self.search.more = false;
+        }
+    }
+
+    /// How many matches line `py` has when it is out of view, counted as
+    /// the loop of [`Self::search_marks`] counts them but from the line's
+    /// text: `None` unless the line is plain narrow ASCII, not wrapped, and
+    /// the search can be told from bytes (a regular expression, or a plain
+    /// pattern of single ASCII cells; `plain`). A cell is then a byte, so
+    /// a match's cell is its byte offset and its width its length
+    /// (`window_copy_cstrtocellpos` finds nothing else), and the next
+    /// search starts where the match ends with `REG_NOTBOL`
+    /// (`window_copy_search_lr_regex`), without building the cells.
+    fn count_ascii(
+        &self,
+        re: Option<&Regex>,
+        plain: Option<&[u8]>,
+        cis: bool,
+        py: usize,
+        text: &mut String,
+    ) -> Option<usize> {
+        #[cfg(test)]
+        if tests::NO_ASCII_COUNT.with(std::cell::Cell::get) {
+            return None;
+        }
+        if re.is_none() && plain.is_none() {
+            return None;
+        }
+        if self.backing.ascii_text(py, text)? {
+            return None;
+        }
+        #[cfg(test)]
+        tests::ASCII_COUNTED.with(|n| n.set(n.get() + 1));
+        let (mut n, mut px) = (0, 0);
+        while px < text.len() {
+            let end = if let Some(re) = re {
+                let Ok(Some(m)) = re.find_with(&text[px..], px != 0) else {
+                    break;
+                };
+                match &m.captures[0] {
+                    Some(range) if !range.is_empty() => px + range.end,
+                    _ => break,
+                }
+            } else {
+                let pat = plain?;
+                let found = text.as_bytes()[px..].windows(pat.len()).position(|w| {
+                    w.iter().zip(pat).all(|(&c, &p)| {
+                        if cis {
+                            c.to_ascii_lowercase() == p
+                        } else {
+                            c == p
+                        }
+                    })
+                });
+                let Some(at) = found else { break };
+                px + at + pat.len()
+            };
+            n += 1;
+            px = end;
+        }
+        Some(n)
     }
 
     /// `window_copy_match_start_end`: the run of cells with the mark at
@@ -851,7 +952,104 @@ impl CopyMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mode::copy::CopyMode;
     use vtmux_vt::PaneTerm;
+
+    thread_local! {
+        /// Count every line the slow way.
+        pub(super) static NO_ASCII_COUNT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Lines counted from their text ([`Grid::count_ascii`]).
+        pub(super) static ASCII_COUNTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// `repeat` blocks of one line of each kind on a 40x6 pane: plain and
+    /// coloured ASCII (counted from the text), and lines that have to be
+    /// read as cells: accented, wide, with a tab, wrapped (a 100 character
+    /// line is two full rows and a short one). `kinds` is how many of each
+    /// block's eight lines count from the text.
+    fn mixed(repeat: usize) -> (PaneTerm, usize) {
+        let mut t = PaneTerm::new(40, 6, 2000);
+        for i in 0..repeat {
+            let long = format!("{i} {}", "some filler text here ".repeat(5));
+            for line in [
+                format!("plain line {i} with some filler"),
+                format!("caf\u{e9} au lait {i} some filler"),
+                format!("\u{4e2d}\u{6587} wide {i} some"),
+                format!("\x1b[41mred bg {i} some filler\x1b[0m"),
+                format!("tab\there {i} some"),
+                long,
+                format!("Some CAPS {i} and some more"),
+                String::new(),
+            ] {
+                t.feed(format!("{line}\r\n").as_bytes());
+            }
+        }
+        (t, 4)
+    }
+
+    fn count(
+        t: &PaneTerm,
+        command: &str,
+        pattern: &str,
+        slow: bool,
+    ) -> (Option<(i64, bool)>, usize) {
+        let env = Env {
+            vi: false,
+            line_numbers: 0,
+            separators: String::new(),
+            wrap_search: true,
+            mouse: false,
+            slider: None,
+        };
+        NO_ASCII_COUNT.with(|f| f.set(slow));
+        let before = ASCII_COUNTED.with(std::cell::Cell::get);
+        let size = (usize::from(t.cols()), usize::from(t.rows()));
+        let mut m = CopyMode::new(t, size, false, (false, false), false, None);
+        m.command(&env, command, &[pattern.to_owned()], false)
+            .unwrap();
+        let info = m.search_info().2;
+        NO_ASCII_COUNT.with(|f| f.set(false));
+        (info, ASCII_COUNTED.with(std::cell::Cell::get) - before)
+    }
+
+    /// Counting a line out of view from its text gives the count the cells
+    /// give, for plain text (with and without case) and regular
+    /// expressions (anchors, an empty match, a match to the end of the
+    /// line), and it is what counts the plain and coloured ASCII lines.
+    #[test]
+    fn counting_from_text_agrees_with_counting_cells() {
+        let (t, fast_lines) = mixed(12);
+        let mut taken = 0;
+        for (command, pattern) in [
+            ("search-backward-text", "some"),
+            ("search-backward-text", "Some"),
+            ("search-backward-text", "e"),
+            ("search-backward-text", " "),
+            ("search-backward-text", "filler text"),
+            ("search-backward-text", "\u{e9}"),
+            ("search-backward", "^plain"),
+            ("search-backward", "^."),
+            ("search-backward", "^[a-z]+ "),
+            ("search-backward", "some$"),
+            ("search-backward", "so.e"),
+            ("search-backward", "e+"),
+            ("search-backward", " *$"),
+            ("search-backward", "x*"),
+            ("search-backward", "(some|more)"),
+            ("search-backward", "[0-9]+ "),
+            ("search-backward", "\\bsome\\b"),
+        ] {
+            let (want, none) = count(&t, command, pattern, true);
+            assert_eq!(none, 0);
+            let (got, n) = count(&t, command, pattern, false);
+            assert_eq!(got, want, "{command} {pattern}");
+            assert!(want.is_some_and(|(c, more)| c >= 0 && !more), "{want:?}");
+            taken = taken.max(n);
+        }
+        // Every plain and coloured line out of view was counted from its
+        // text (the pane shows the last six).
+        assert!(taken >= fast_lines * 12 - 6, "{taken}");
+    }
 
     fn grid(text: &str, cols: u16) -> Grid {
         let mut t = PaneTerm::new(cols, 4, 100);
