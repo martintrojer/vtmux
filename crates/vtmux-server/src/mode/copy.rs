@@ -1200,16 +1200,23 @@ impl CopyMode {
         let mut cells = Vec::with_capacity(sx * sy);
         for py in 0..sy {
             // screen_write_nputs: "%*u " in the gutter, cut at the edge.
+            // Each cell goes through screen_write_cell, which selects it as
+            // screen_check_selection says (screen-write.c:2765): a
+            // selection set while the gutter was narrower (its `clipx`)
+            // covers it.
             if width != 0 {
                 let current = py == self.cy;
                 let label = format!("{:>w$} ", self.line_number(numbers, py), w = width - 1);
-                for ch in label.chars().take(width.min(sx)) {
+                for (x, ch) in label.chars().take(width.min(sx)).enumerate() {
                     let mut c = Cell {
                         text: ch.to_string().as_str().into(),
                         width: 1,
                         ..Cell::default()
                     };
                     paint(&mut c, Paint::LineNumber { current });
+                    if self.selected(x, py) {
+                        paint(&mut c, Paint::Selection);
+                    }
                     cells.push(c);
                 }
                 // A gutter as wide as the pane: the text's one column
@@ -1223,11 +1230,15 @@ impl CopyMode {
                 let mut c = row.cells.get(fx).cloned().unwrap_or_else(blank);
                 // window_copy_write_one: a TAB cell is written as its width
                 // in spaces and its padding is skipped; one cut by the edge
-                // is a single space.
+                // is a single space. A cell cut by the edge is written as
+                // grid_default_cell (window-copy.c:5242), with no current
+                // line, mark or match style; only the selection applies.
+                let mut cut = false;
                 if c.tab {
                     tab_left = usize::from(c.width);
                     if fx + tab_left > nx {
                         c = blank();
+                        cut = true;
                     }
                 }
                 if tab_left > 0 {
@@ -1243,12 +1254,15 @@ impl CopyMode {
                 // a space.
                 if c.width == 2 && fx + 1 >= nx {
                     c = blank();
+                    cut = true;
                 }
-                if py == self.cy {
-                    paint(&mut c, Paint::CurrentLine);
-                }
-                if let Some(p) = self.paint_of(fx, py, vi) {
-                    paint(&mut c, p);
+                if !cut {
+                    if py == self.cy {
+                        paint(&mut c, Paint::CurrentLine);
+                    }
+                    if let Some(p) = self.paint_of(fx, py, vi) {
+                        paint(&mut c, p);
+                    }
                 }
                 if self.selected(text.start + fx, py) {
                     paint(&mut c, Paint::Selection);
@@ -3851,6 +3865,50 @@ mod selection_tests {
         assert!(!s.cells[0].style.bold && s.cells[4].style.bold);
         assert_eq!(s.cursor, Some((4, 1)));
         assert!(!m.selection_mask(true, 3)[3]);
+    }
+
+    /// A selection set without line numbers keeps its columns and `clipx`
+    /// when they come on, so it covers the gutter (`screen_write_cell`); a
+    /// wide character cut at the text's edge is a default cell, without
+    /// `copy-mode-current-line-style` (window-copy.c:5242).
+    #[test]
+    fn gutter_selection_and_cut_cells() {
+        let e = Env {
+            line_numbers: 2,
+            ..env(true)
+        };
+        let mut m = mode("aaaaaaaaaaaaaaa\u{4e16}\r\nb\r\n", true);
+        run(
+            &mut m,
+            &e,
+            &[
+                "line-numbers-off",
+                "history-top",
+                "begin-selection",
+                "cursor-down",
+                "line-numbers-on",
+            ],
+        );
+        let painted = |c: &mut Cell, p: Paint| match p {
+            Paint::Selection => c.style.bold = true,
+            Paint::CurrentLine => c.style.underline = vtmux_vt::Underline::Single,
+            _ => {}
+        };
+        let s = m.screen(true, 2, &painted);
+        let bold = |y: usize| -> Vec<bool> {
+            s.cells[y * 20..y * 20 + 6]
+                .iter()
+                .map(|c| c.style.bold)
+                .collect()
+        };
+        assert_eq!(bold(0), [true; 6]);
+        assert_eq!(bold(1), [true, false, false, false, false, false]);
+        // The cursor's row is the first again: its wide character is cut.
+        run(&mut m, &e, &["clear-selection", "cursor-up"]);
+        let s = m.screen(true, 2, &painted);
+        let underlined = |x: usize| s.cells[x].style.underline != vtmux_vt::Underline::None;
+        assert!(underlined(4) && underlined(18));
+        assert!(!underlined(19) && s.cells[19].text.is_empty());
     }
 
     #[test]

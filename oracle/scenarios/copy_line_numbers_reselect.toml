@@ -1,0 +1,67 @@
+# A selection set with line numbers off keeps its screen columns and
+# clipx when they come on (window_copy_set_line_numbers1 only redraws),
+# so the gutter is selected where the selection covers it
+# (screen_write_cell, screen_check_selection), for a vi rectangle and an
+# emacs selection, until the next window_copy_set_selection. One step is
+# D-010: a move redraws only the rows the cursor crossed, and tmux keeps
+# the old selection on the others.
+name = "copy_line_numbers_reselect"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "i=1; while [ $i -le 1200 ]; do echo \"n$i\"; i=$((i+1)); done; i=1; while [ $i -le 4 ]; do echo \"word$i foo bar\"; i=$((i+1)); done; echo 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDDEEEEEEEEEEFFFFFFFFFFGGGGGGGGGGHHHHHHHHHHIIIII'; echo tail; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["set", "-g", "copy-mode-line-numbers", "hybrid"] },
+  { run = ["setw", "-g", "mode-keys", "vi"] },
+  { attach = { session = "a" } },
+  # A vi rectangle set with the numbers toggled off.
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "5", "cursor-up"] },
+  { run = ["send-keys", "-t", "a", "-X", "begin-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "2", "cursor-up"] },
+  { run = ["send-keys", "-t", "a", "-X", "end-of-line"] },
+  { run = ["send-keys", "-t", "a", "-X", "rectangle-toggle"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-left"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_line_numbers}] [#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-on"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # The next move sets the selection again: clear of the gutter.
+  { run = ["send-keys", "-t", "a", "-X", "cursor-left"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "copy-selection-and-cancel"] },
+  { run = ["show-buffer"] },
+  # An emacs selection beside absolute numbers, toggled off and on.
+  { run = ["setw", "-g", "mode-keys", "emacs"] },
+  { run = ["set", "-g", "copy-mode-line-numbers", "absolute"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "3", "cursor-up"] },
+  { run = ["send-keys", "-t", "a", "-X", "end-of-line"] },
+  { run = ["send-keys", "-t", "a", "-X", "begin-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-up"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_line_numbers}] [#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  # Off: the selection keeps the gutter's clipx.
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-left"] },
+  { settle = { react = true } },
+  # D-010: only the cursor's row is redrawn; tmux keeps the start's row
+  # as it was.
+  { divergence = { id = "D-010", expect = { kind = "screen", rows = ["word1 foo bar                   \\e[30m\\e[43m[0/1200]", "\\e[39m\\e[49mword2 foo bar", "word3 foo bar", "word4 foo bar", "AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD", "EEEEEEEEEEFFFFFFFFFFGGGGGGGGGGHHHHHHHHH\\e[30m\\e[43mH", "IIIII\\e[39m\\e[49m", "tail", "", "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"], cursor = [39, 5] } } },
+  { screen = {} },
+  # On: the selection set without numbers covers the gutter.
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "copy-selection-and-cancel"] },
+  { run = ["show-buffer"] },
+]
