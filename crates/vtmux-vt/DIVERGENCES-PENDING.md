@@ -54,8 +54,10 @@ and the probes from `review_vt_wrap`.
   `fmt_zwj_cursor_x`; regress `combine-test.sh`; cli
   `program_output_reaches_the_grid_as_in_tmux`. Ghostty's clustering drops a
   zero-width character that starts a grapheme (U+200B, U+2028); patch
-  `0008-cluster-keeps-zero-width.patch` attaches it as before. What is left
-  (a lone regional indicator, VS16 after a non-emoji) is D-031.
+  `0008-cluster-keeps-zero-width.patch` attaches it as before. In the
+  server, patch `0027-tmux-clusters.patch` replaces Ghostty's clustering rules
+  with tmux's (a lone regional indicator, VS16 after a non-emoji, anything
+  after a ZWJ); what is left is D-031.
 
 ## P4. Tab cells: closed (`d_tab_capture`)
 

@@ -6220,6 +6220,13 @@ fn program_output_reaches_the_grid_as_in_tmux() {
                 r"printf 'x\360\237\207\254\360\237\207\247y\360\237\221\215\360\237\217\273z\342\235\244\357\270\217.'",
             ),
             ("c1", r"printf 'xa\302\205b\342\200\250c\342\200\213d'"),
+            // tmux's own widths and joins (D-031, patch 0027): a lone
+            // regional indicator is one column, U+261D two, U+FE0F makes
+            // `z` two, anything joins after a ZWJ, U+3164 is dropped.
+            (
+                "widths",
+                r"printf 'x\360\237\207\254y\342\230\235z\357\270\217.\342\200\215\360\237\230\200\343\205\244|'",
+            ),
         ];
         let state = "#{cursor_x},#{cursor_y} #{history_size} #{alternate_on} [#{pane_title}]";
         let mut runs = vec![w.run(&["new", "-d", "-s", "a", "-x", "26", "-y", "5", "cat"])];

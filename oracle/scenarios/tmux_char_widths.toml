@@ -1,0 +1,53 @@
+name = "tmux_char_widths"
+size = [20, 9]
+# tmux's own character widths and joins, where Ghostty's clustering gives
+# others (D-031, vendored patch 0027): a lone regional indicator is one
+# column (utf8_default_width_cache, utf8.c), and so is the third of three;
+# U+261D is two (the same table); U+FE0F joins any character and makes it
+# two columns while variation-selector-always-wide is on
+# (screen_write_combine, screen-write.c), one after it is off; U+FE0E changes
+# no width; anything joins a cell that ends with a ZWJ; a skin-tone modifier
+# joins the base after it (utf8_should_combine, utf8-combined.c); U+3164 is
+# dropped; codepoint-widths wins over tmux's table. The program prints each
+# input line's text as escapes (`printf "$l"`). The observer counts some of
+# these characters as other widths (as a terminal may), so the screen shows
+# where each puts the next cell: after a cell U+FE0F made wide, both move the
+# cursor (tmux's TTY_CTX_CELL_INVALIDATE, tty.c tty_cmd_cell). The screen is
+# taken with the cursor at the start of a line, and before the redraw the
+# option changes bring: where tmux's idea of the terminal's cursor drifts
+# (tty_cursor skips a move to where it thinks it is), vtmux moves it.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "x\\360\\237\\207\\254y\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "ri #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\r\\n\\360\\237\\207\\254\\360\\237\\207\\247\\360\\237\\207\\254y\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "ri3 #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\r\\nx\\357\\270\\217y\\344\\270\\200\\357\\270\\217z\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "vs16 #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\r\\n\\342\\230\\235y\\342\\214\\232\\357\\270\\216z\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "table #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\r\\nx\\342\\200\\215\\360\\237\\230\\200y\\360\\237\\217\\273\\360\\237\\221\\213z\\343\\205\\244.\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "join #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\r\\n\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-s", "variation-selector-always-wide", "off"] },
+  { feed = { pane = "%0", bytes = "\\r\\nx\\357\\270\\217y\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "vs16off #{cursor_x},#{cursor_y}"] },
+  { run = ["set", "-s", "codepoint-widths", "U+1F1EC=2"] },
+  { feed = { pane = "%0", bytes = "\\r\\n\\360\\237\\207\\254y\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "option #{cursor_x},#{cursor_y}"] },
+  { run = ["capturep", "-p", "-S", "-", "-E", "-"] },
+]

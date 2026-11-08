@@ -39,6 +39,20 @@ pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) -> crate::error::Result<()
     })
 }
 
+/// vtmux: make grapheme clustering (mode 2027) join characters into a cell
+/// as tmux's `screen_write_combine` does instead of by UAX #29: zero-width
+/// characters, U+200D and U+FE0F join the cell before (U+FE0F making a
+/// one-column cell two columns when `vs16_wide`, tmux's
+/// `variation-selector-always-wide`), anything joins a cell that ends with
+/// U+200D, two lone regional indicators and an emoji skin-tone modifier
+/// with one of tmux's bases join into two columns, Hangul jamo join as
+/// tmux's do and U+3164 is dropped. Process-wide; cells already printed
+/// keep their text.
+pub fn set_tmux_clusters(enabled: bool, vs16_wide: bool) {
+    // SAFETY: two flags read by printing; no pointers.
+    unsafe { ffi::ghostty_unicode_set_tmux_clusters(enabled, vs16_wide) }
+}
+
 /// Measures the terminal display width of the first grapheme cluster in a sequence.
 ///
 /// This uses the exact same grapheme segmentation and cluster width rules the

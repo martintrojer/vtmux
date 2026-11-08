@@ -604,7 +604,7 @@ impl Compositor {
                     &cell.text
                 });
                 x += u16::from(cell.width.max(1));
-                at = (x < screen.cols).then_some((x, y));
+                at = (x < screen.cols && !joined_wide(cell)).then_some((x, y));
             }
         }
         place_cursor(&mut out, &mut style, &screen, caps);
@@ -620,6 +620,21 @@ impl Compositor {
         out.into_bytes()
     }
 }
+/// A cell a joined character made two columns wide from one (U+FE0F, a
+/// regional indicator pair: `screen_write_combine`'s `force_wide`). The
+/// terminal may still count it as one, so where its cursor is after it is
+/// not known: tmux sends the cell with `TTY_CTX_CELL_INVALIDATE`, which
+/// forgets the cursor (`tty_cmd_cell`, tty.c), and so the next cell gets a
+/// cursor move.
+fn joined_wide(cell: &vtmux_vt::Cell) -> bool {
+    let mut chars = cell.text.chars();
+    cell.width == 2
+        && chars
+            .next()
+            .is_some_and(|c| vtmux_core::width::char_width(c) == 1)
+        && chars.next().is_some()
+}
+
 /// End the frame's drawing (`\x1b[0m`) and move the cursor. A column
 /// past the last one is the terminal's pending wrap after the row's last
 /// cell, which `tty_cursor` leaves alone (tty.c:2468); writing that cell

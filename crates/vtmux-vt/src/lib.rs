@@ -31,6 +31,18 @@ pub use text::CellText;
 pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) {
     libghostty_vt::unicode::set_width_overrides(ranges).expect("valid width ranges");
 }
+
+/// Panes join characters into a cell as tmux's `screen_write_combine` does
+/// (screen-write.c) rather than by Unicode's grapheme rules (vendored patch
+/// 0027): U+FE0F joins any character and, with `vs16_wide` (tmux's
+/// `variation-selector-always-wide`), makes a one-column cell two columns;
+/// anything joins a cell that ends with a ZWJ; two lone regional indicators,
+/// and a skin-tone modifier with one of tmux's bases, join into two columns.
+/// Process-wide, like [`set_width_overrides`]; cells already printed keep
+/// their text.
+pub fn set_tmux_clusters(vs16_wide: bool) {
+    libghostty_vt::unicode::set_tmux_clusters(true, vs16_wide);
+}
 pub use palette::PaletteState;
 pub use term::{
     AltSaved, CellState, CompressedPages, Compression, CompressionActivity, ExtendedKeys,

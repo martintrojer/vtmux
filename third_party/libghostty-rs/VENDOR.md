@@ -784,6 +784,44 @@ Recorded per commit in git history; the list is kept current:
   before (no history) and 0.036 s after; from row 20 0.026 s and 0.042 s.
   Not an upstream candidate (tmux's model).
 
+- `patches/0027-tmux-clusters.patch` (`unicode/main.zig` `tmux_clusters`,
+  `tmux_vs16_wide`, `setTmuxClusters`, `tmuxJamo`, `tmuxShouldCombine`,
+  `tmuxMayJoin`; `Terminal.zig` `tmuxCombine`, `print`, `printSliceFast`,
+  `printSliceFill`; `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/unicode.h`): with a process-wide switch
+  (`ghostty_unicode_set_tmux_clusters(enabled, vs16_wide)`, off by default,
+  like patch 0007's overrides), mode 2027 joins characters into a cell as
+  tmux's `screen_write_combine` (screen-write.c) does instead of by UAX #29.
+  U+200D, U+FE0F and zero-width characters join the cell before, or are
+  dropped where there is none; U+FE0F makes a one-column cell two columns
+  while `vs16_wide` (tmux's `variation-selector-always-wide`), after any
+  character, not only an emoji variation base (upstream dropped it there),
+  and U+FE0E changes no width (upstream narrowed an emoji); any character
+  joins a cell that ends with a ZWJ (0xA0-0xFF too: the slice fast path
+  leaves a Latin-1 character after a cell with graphemes to `print`); two
+  lone regional indicators, and an emoji skin-tone modifier with one of
+  tmux's 72 bases in either order, join into two columns
+  (`utf8_should_combine`, utf8-combined.c); Hangul jamo join as
+  `hanguljamo_check_state` says (a medial or final jamo that cannot join is
+  dropped); U+3164 is dropped wherever it comes; a cell stops joining at 32
+  bytes of UTF-8 (`UTF8_SIZE`). Everything else, a spacing mark or a prepend
+  character included, takes a cell of its own. A cell on the last column
+  that U+FE0F would widen stays one column with the wrap pending: tmux puts
+  its padding past the edge, where Ghostty has no cell, and the next
+  character wraps in both. The slice fast path batches a character only
+  when `tmuxMayJoin` says tmux could not join it to the one before. vtmux
+  turns it on in the server (`vtmux_vt::set_tmux_clusters`), with tmux's
+  own width table (`utf8_default_width_cache`) as overrides under
+  `codepoint-widths` (D-031); the oracle's observer stays on Ghostty's
+  rules. Wrapper: `unicode::set_tmux_clusters` (`libghostty-vt/src/unicode.rs`,
+  `bindings.rs` by hand). Tests: `Terminal: tmux clusters (vtmux)` (each case
+  through `print` and `printSlice`) and `tmux clustering rules (vtmux)`;
+  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug)
+  `-Dtest-filter=vtmux` 67/67 and 71/71, `print` 109/109 and 110/110,
+  `grapheme` 89/89 and 97/97 (the two test binaries); the switch is off
+  in Ghostty's own tests, so their behaviour is upstream's. Not an upstream
+  candidate (tmux's model).
+
 - `patches/0028-tmux-alternate-screen.patch` (`Terminal.zig` new fields
   `tmux_alternate`, `tmux_alt_saved` and `TmuxAltSaved`,
   `tmuxSwitchScreenMode`, `tmuxRestoreAltCursor`, `resize`,
@@ -926,7 +964,6 @@ Recorded per commit in git history; the list is kept current:
   binaries; Debug `-Dtest-filter="Terminal: "` 1047/1049 with the known
   `tabClear single` failure in each. Not an upstream candidate (tmux's
   model).
-
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

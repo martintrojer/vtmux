@@ -202,11 +202,19 @@ pub(crate) fn with_option_host<R>(
 
 impl Server {
     /// `utf8_update_width_cache` (utf8.c:412): the server's widths follow
-    /// `codepoint-widths` (server.c:212 at start, then on every change).
+    /// tmux's own table and `codepoint-widths` (server.c:212 at start, then
+    /// on every change). The pane grid also joins characters as tmux's
+    /// `screen_write_combine` does, which reads
+    /// `variation-selector-always-wide` as it writes.
     pub(crate) fn update_width_cache(&self) {
-        let items = self.array_option(vtmux_core::options::TreeId::Server, "codepoint-widths");
+        let tree = vtmux_core::options::TreeId::Server;
+        let items = self.array_option(tree, "codepoint-widths");
         vtmux_core::width::set_codepoint_widths(&items);
-        vtmux_vt::set_width_overrides(&vtmux_core::width::codepoint_width_ranges());
+        vtmux_vt::set_width_overrides(&vtmux_core::width::grid_width_ranges());
+        let vs16_wide = self
+            .model
+            .number_option(tree, "variation-selector-always-wide");
+        vtmux_vt::set_tmux_clusters(vs16_wide != 0);
     }
 
     /// `options_push_changes` (options.c:1359-1475) for option `name`,
@@ -231,8 +239,9 @@ impl Server {
             // options.c:1409-1411.
             self.status_timer_start_all();
         }
-        if name == "codepoint-widths" {
-            // options.c:1460-1461: utf8_update_width_cache.
+        if name == "codepoint-widths" || name == "variation-selector-always-wide" {
+            // options.c:1460-1461: utf8_update_width_cache; tmux reads the
+            // other as it writes (screen_write_combine).
             self.update_width_cache();
         }
         if matches!(name, "window-style" | "window-active-style") {

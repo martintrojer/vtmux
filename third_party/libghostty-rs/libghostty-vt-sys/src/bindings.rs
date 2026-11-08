@@ -5900,6 +5900,10 @@ unsafe extern "C" {
         len: usize,
     ) -> Result::Type;
 }
+unsafe extern "C" {
+    #[doc = " Make grapheme clustering (mode 2027) join characters as tmux's\n screen_write_combine does (vtmux patch 0027, unicode.h). Process-wide.\n Not safe while another thread prints.\n"]
+    pub fn ghostty_unicode_set_tmux_clusters(enabled: bool, vs16_wide: bool);
+}
 #[doc = " One row of an exported page (vtmux patch 0017, vtmux_state.h)."]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]

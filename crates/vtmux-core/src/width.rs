@@ -834,6 +834,25 @@ pub fn codepoint_width_ranges() -> Vec<(u32, u32, u8)> {
     CODEPOINT_WIDTHS.with(|w| flatten(&w.borrow()))
 }
 
+/// The widths the pane grid takes over Ghostty's table, as
+/// [`codepoint_width_ranges`] gives them: tmux's own table first
+/// (`utf8_default_width_cache`, which `utf8_update_width_cache` puts in its
+/// cache before the option's items, utf8.c:425-428), then `codepoint-widths`
+/// over it. Neighbouring code points of one width are one range.
+#[must_use]
+pub fn grid_width_ranges() -> Vec<(u32, u32, u8)> {
+    let mut items: Vec<(u32, u32, u8)> = OVERRIDES.iter().map(|&(c, w)| (c, c, w)).collect();
+    CODEPOINT_WIDTHS.with(|w| items.extend(w.borrow().iter().copied()));
+    let mut out: Vec<(u32, u32, u8)> = Vec::new();
+    for (lo, hi, w) in flatten(&items) {
+        match out.last_mut() {
+            Some(last) if last.1 + 1 == lo && last.2 == w => last.1 = hi,
+            _ => out.push((lo, hi, w)),
+        }
+    }
+    out
+}
+
 fn flatten(items: &[(u32, u32, u8)]) -> Vec<(u32, u32, u8)> {
     let mut out: Vec<(u32, u32, u8)> = Vec::new();
     for &(lo, hi, width) in items {
@@ -1599,7 +1618,30 @@ mod tests {
             codepoint_width_ranges(),
             [(0x3b1, 0x3b1, 2), (0x3b2, 0x3b2, 0), (0x3b3, 0x3b3, 2)]
         );
+        let grid = grid_width_ranges();
+        assert!(grid.contains(&(0x3b2, 0x3b2, 0)), "the option's items");
+        assert!(
+            grid.contains(&(0x0001_f1e6, 0x0001_f1ff, 1)),
+            "tmux's table, neighbours joined: {grid:x?}"
+        );
+        set_codepoint_widths(&["U+1F1E7=2"]);
+        let grid = grid_width_ranges();
+        assert!(
+            grid.contains(&(0x0001_f1e6, 0x0001_f1e6, 1))
+                && grid.contains(&(0x0001_f1e7, 0x0001_f1e7, 2))
+                && grid.contains(&(0x0001_f1e8, 0x0001_f1ff, 1)),
+            "the option wins over tmux's table: {grid:x?}"
+        );
         set_codepoint_widths::<&str>(&[]);
+        assert_eq!(
+            grid_width_ranges().len(),
+            OVERRIDES
+                .windows(2)
+                .filter(|p| p[0].0 + 1 != p[1].0 || p[0].1 != p[1].1)
+                .count()
+                + 1,
+            "tmux's table alone"
+        );
         assert_eq!(char_width('α'), 1);
         assert_eq!(
             flatten(&[(0x10, 0x200, 1), (0x100, 0x7fff_ffff, 2), (0x150, 0x160, 0)]),

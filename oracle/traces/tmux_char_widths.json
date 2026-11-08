@@ -1,0 +1,432 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "tmux_char_widths",
+  "inputs": {
+    "name": "tmux_char_widths",
+    "size": [
+      20,
+      9
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "x\\360\\237\\207\\254y\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "ri #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\n\\360\\237\\207\\254\\360\\237\\207\\247\\360\\237\\207\\254y\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "ri3 #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\nx\\357\\270\\217y\\344\\270\\200\\357\\270\\217z\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "vs16 #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\n\\342\\230\\235y\\342\\214\\232\\357\\270\\216z\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "table #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\nx\\342\\200\\215\\360\\237\\230\\200y\\360\\237\\217\\273\\360\\237\\221\\213z\\343\\205\\244.\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "join #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\n\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "variation-selector-always-wide",
+          "off"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\nx\\357\\270\\217y\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "vs16off #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "codepoint-widths",
+          "U+1F1EC=2"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\\r\\n\\360\\237\\207\\254y\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "option #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-p",
+          "-S",
+          "-",
+          "-E",
+          "-"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ri 3,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ri3 4,1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "vs16 6,2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "table 6,3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "join 6,4\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "x🇬y",
+          "🇬🇧🇬y",
+          "x y一z",
+          "☝y⌚︎z",
+          "x‍😀y🏻👋z.",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m           \\e[30mx"
+        ],
+        "cursor": [
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "vs16off 2,6\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "option 3,7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x🇬y\n🇬🇧🇬y\nx️y一️z\n☝y⌚︎z\nx‍😀y🏻👋z.\n\nx️y\n🇬y\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

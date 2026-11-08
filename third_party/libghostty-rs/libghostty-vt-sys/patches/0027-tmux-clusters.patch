@@ -1,0 +1,444 @@
+diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
+index e6361602b..4c21e7aae 100644
+--- a/include/ghostty/vt/unicode.h
++++ b/include/ghostty/vt/unicode.h
+@@ -27,6 +27,7 @@
+  * @{
+  */
+ 
++#include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
+ #include <ghostty/vt/types.h>
+@@ -169,6 +170,20 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
+     const GhosttyUnicodeWidthRange *ranges,
+     size_t len);
+ 
++/**
++ * Make grapheme clustering (mode 2027) join characters into a cell as
++ * tmux's screen_write_combine does instead of by UAX #29 (vtmux):
++ * U+200D, U+FE0F and zero-width characters join the cell before, U+FE0F
++ * making a one-column cell two columns when vs16_wide is true (tmux's
++ * variation-selector-always-wide); any character joins a cell that ends
++ * with U+200D; two lone regional indicators, and an emoji skin-tone
++ * modifier with one of tmux's bases (either order), join into two
++ * columns; Hangul jamo join as tmux's do and U+3164 is dropped.
++ * Process-wide; cells already printed keep their text. Not safe while
++ * another thread prints.
++ */
++GHOSTTY_API void ghostty_unicode_set_tmux_clusters(bool enabled, bool vs16_wide);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 46537320a..693ec3b8f 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -252,6 +252,7 @@ comptime {
+         @export(&c.unicode_codepoint_width, .{ .name = "ghostty_unicode_codepoint_width" });
+         @export(&c.unicode_grapheme_width, .{ .name = "ghostty_unicode_grapheme_width" });
+         @export(&c.unicode_set_width_overrides, .{ .name = "ghostty_unicode_set_width_overrides" });
++        @export(&c.unicode_set_tmux_clusters, .{ .name = "ghostty_unicode_set_tmux_clusters" });
+         @export(&c.size_report_encode, .{ .name = "ghostty_size_report_encode" });
+         @export(&c.style_default, .{ .name = "ghostty_style_default" });
+         @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 06701afb9..3c0427f06 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -719,6 +719,20 @@ fn printSliceFast(
+     // and so does a C1 control (zero width there).
+     if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
+     if (cp0 >= 0x80 and cp0 <= 0x9F) return 0;
++    // vtmux: with tmux's clustering, 0xA0-0xFF joins a cell that ends
++    // with a ZWJ, and U+3164 is dropped: print() decides those.
++    if (unicode.tmux_clusters and grapheme_cluster) tmux: {
++        if (cp0 == 0x3164) return 0;
++        if (cp0 < 0xA0 or cp0 > 0xFF) break :tmux;
++        if (screen.cursor.pending_wrap) return 0;
++        if (screen.cursor.x == 0) break :tmux;
++        const immediate = screen.cursorCellLeft(1);
++        const prev: *Cell = switch (immediate.wide) {
++            .spacer_tail => screen.cursorCellLeft(2),
++            else => immediate,
++        };
++        if (prev.hasGrapheme()) return 0;
++    }
+     if (cp0 <= 0xFF) {
+         // C0 control characters (0x00-0x0F) aren't printable. The
+         // stream never sends these (they're routed to execute), but
+@@ -769,6 +783,12 @@ fn printSliceFast(
+         // cluster state machine replay; only print() can do that.
+         if (prev.hasGrapheme()) return 0;
+ 
++        // vtmux: with tmux's clustering, its rules decide.
++        if (unicode.tmux_clusters) {
++            if (unicode.tmuxMayJoin(prev.content.codepoint.data, @intCast(cp0))) return 0;
++            break :gate;
++        }
++
+         // A simple single-codepoint previous cell: print() would run
+         // exactly this break check from the default state.
+         var state: uucode.grapheme.BreakState = .default;
+@@ -985,6 +1005,11 @@ fn printSliceFill(
+             }
+             if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
+                 if (!grapheme_cluster) continue;
++                // vtmux: with tmux's clustering, its rules decide.
++                if (unicode.tmux_clusters) {
++                    if (!unicode.tmuxMayJoin(@intCast(cps[idx - 1]), @intCast(cp))) continue;
++                    break :run idx;
++                }
+                 var state: uucode.grapheme.BreakState = .default;
+                 if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) continue;
+             }
+@@ -1299,6 +1324,63 @@ inline fn printSliceCheckExpected(style_id: style.Id) u64 {
+     return @bitCast(e);
+ }
+ 
++/// vtmux: what tmux's `screen_write_combine` (screen-write.c) does with
++/// `c` written after the cell `prev`, which has text.
++const TmuxCombine = enum {
++    /// `c` takes a cell of its own.
++    own,
++    /// `c` is dropped.
++    dropped,
++    /// `c` joins `prev`.
++    joined,
++    /// `c` joins `prev`, which becomes two columns if it was one.
++    joined_wide,
++};
++
++fn tmuxCombine(self: *Terminal, prev: *const Cell, c: u21) TmuxCombine {
++    const width: u2 = if (c >= 0x80 and c <= 0x9F) 0 else unicode.printWidth(c);
++    // A character that makes no sense on its own: dropped when it
++    // cannot join.
++    const zero_width = c == 0x200D or c == 0xFE0F or width == 0;
++    var force_wide = c == 0xFE0F and unicode.tmux_vs16_wide;
++    const alone: TmuxCombine = if (zero_width) .dropped else .own;
++
++    const base: u21 = prev.content.codepoint.data;
++    const rest: []const u21 = if (prev.hasGrapheme())
++        self.screens.active.cursor.page_pin.node.page().lookupGrapheme(prev).?
++    else
++        &.{};
++    const last: u21 = if (rest.len > 0) rest[rest.len - 1] else base;
++
++    if (!zero_width) {
++        // hanguljamo_check_state: a medial jamo joins an initial one, a
++        // final jamo a medial one; otherwise either is dropped.
++        switch (unicode.tmuxJamo(c)) {
++            .choseong => return .own,
++            .jungseong => if (unicode.tmuxJamo(last) != .choseong) return .dropped,
++            .jongseong => if (unicode.tmuxJamo(last) != .jungseong) return .dropped,
++            .none => {
++                var cell_ri: usize = @intFromBool(unicode.tmuxIsRegional(base));
++                for (rest) |cp| cell_ri += @intFromBool(unicode.tmuxIsRegional(cp));
++                const c_ri: usize = @intFromBool(unicode.tmuxIsRegional(c));
++                if (unicode.tmuxShouldCombine(base, cell_ri, c, c_ri) or
++                    unicode.tmuxShouldCombine(c, c_ri, base, cell_ri))
++                    force_wide = true
++                else if (last != 0x200D)
++                    return .own;
++            },
++        }
++    }
++
++    // A tmux cell holds at most 32 bytes of UTF-8 (UTF8_SIZE).
++    var bytes: usize = std.unicode.utf8CodepointSequenceLength(c) catch 4;
++    bytes += std.unicode.utf8CodepointSequenceLength(base) catch 4;
++    for (rest) |cp| bytes += std.unicode.utf8CodepointSequenceLength(cp) catch 4;
++    if (bytes > 32) return alone;
++
++    return if (force_wide) .joined_wide else .joined;
++}
++
+ pub fn print(self: *Terminal, c: u21) !void {
+     // log.debug("print={x} y={} x={}", .{ c, self.screens.active.cursor.y, self.screens.active.cursor.x });
+ 
+@@ -1336,11 +1418,17 @@ pub fn print(self: *Terminal, c: u21) !void {
+     else
+         self.scrolling_region.right + 1;
+ 
++    // vtmux: tmux drops U+3164 HANGUL FILLER wherever it comes
++    // (screen_write_combine).
++    if (unicode.tmux_clusters and c == 0x3164) return;
++
+     // Perform grapheme clustering if grapheme support is enabled (mode 2027).
+     // This is MUCH slower than the normal path so the conditional below is
+     // purposely ordered in least-likely to most-likely so we can drop out
+     // as quickly as possible.
+-    if (c > 255 and
++    // vtmux: with tmux's clustering, 0x80-0xFF can join a cell too (one
++    // that ends with a ZWJ).
++    if ((c > 255 or (unicode.tmux_clusters and c >= 0x80)) and
+         self.modes.get(.grapheme_cluster) and
+         self.screens.active.cursor.x > 0)
+     grapheme: {
+@@ -1383,8 +1471,26 @@ pub fn print(self: *Terminal, c: u21) !void {
+         // necessarily a grapheme break.
+         if (prev.cell.codepoint() == 0) break :grapheme;
+ 
++        // vtmux: with tmux's clustering, tmux's rules decide whether c
++        // joins the cell, takes its own or is dropped, and whether the
++        // cell becomes two columns. A cell in the last column stays one
++        // column: tmux makes it two with its padding past the edge
++        // (screen_write_combine), where Ghostty has no cell.
++        const tmux_effect: ?unicode.GraphemeWidthEffect = if (unicode.tmux_clusters)
++            switch (self.tmuxCombine(prev.cell, c)) {
++                .own => break :grapheme,
++                .dropped => return,
++                .joined => .no_change,
++                .joined_wide => if (self.screens.active.cursor.x - prev.left == right_limit - 1)
++                    .no_change
++                else
++                    .wide,
++            }
++        else
++            null;
++
+         var previous_codepoint: u21 = prev.cell.content.codepoint.data;
+-        const grapheme_break = brk: {
++        const grapheme_break = if (tmux_effect != null) false else brk: {
+             var state: uucode.grapheme.BreakState = .default;
+             if (prev.cell.hasGrapheme()) {
+                 const cps = self.screens.active.cursor.page_pin.node.page().lookupGrapheme(prev.cell).?;
+@@ -1408,7 +1514,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+         // If we can NOT break, this means that "c" is part of a grapheme
+         // with the previous char.
+         if (!grapheme_break) {
+-            switch (unicode.graphemeWidthEffect(previous_codepoint, c)) {
++            switch (tmux_effect orelse unicode.graphemeWidthEffect(previous_codepoint, c)) {
+                 .ignore => return,
+                 .wide => wide: {
+                     if (prev.cell.wide == .wide) break :wide;
+@@ -6140,6 +6246,81 @@ test "Terminal: width overrides (vtmux)" {
+     try testing.expectEqual(@as(usize, 9), t.screens.active.cursor.x);
+ }
+ 
++/// vtmux: print `cps` on a fresh 20x3 terminal with mode 2027, through
++/// printSlice when `slice`, else print() one at a time; expect the cursor
++/// and the screen's text.
++fn testTmuxClusters(slice: bool, cps: []const u32, x: usize, y: usize, text: []const u8) !void {
++    var t = try init(testing.io, testing.allocator, .{ .cols = 20, .rows = 3 });
++    defer t.deinit(testing.allocator);
++    t.modes.set(.grapheme_cluster, true);
++    if (slice) try t.printSlice(cps) else for (cps) |cp| try t.print(@intCast(cp));
++    try testing.expectEqual(x, t.screens.active.cursor.x);
++    try testing.expectEqual(y, t.screens.active.cursor.y);
++    const str = try t.plainString(testing.allocator);
++    defer testing.allocator.free(str);
++    try testing.expectEqualStrings(text, str);
++}
++
++test "Terminal: tmux clusters (vtmux)" {
++    // tmux's own width for the regional indicators (utf8_default_width_cache).
++    const ranges = [_]unicode.WidthRange{.{ .first = 0x1F1E6, .last = 0x1F1FF, .width = 1 }};
++    try unicode.setWidthOverrides(&ranges);
++    defer unicode.setWidthOverrides(&.{}) catch unreachable;
++    unicode.setTmuxClusters(true, true);
++    defer unicode.setTmuxClusters(false, true);
++
++    const g: u32 = 0x1F1EC; // regional indicator G
++    const b: u32 = 0x1F1E7; // regional indicator B
++    const x19: [19]u32 = @splat('x');
++    const Case = struct { cps: []const u32, x: usize, y: usize, text: []const u8 };
++    const cases = [_]Case{
++        // VS16 joins any character and makes it two columns.
++        .{ .cps = &.{ 'x', 0xFE0F, 'y' }, .x = 3, .y = 0, .text = "x\u{FE0F}y" },
++        // ... and stays on a wide one.
++        .{ .cps = &.{ 0x4E00, 0xFE0F, 'y' }, .x = 3, .y = 0, .text = "\u{4E00}\u{FE0F}y" },
++        // VS15 changes no width.
++        .{ .cps = &.{ 0x231A, 0xFE0E, 'y' }, .x = 3, .y = 0, .text = "\u{231A}\u{FE0E}y" },
++        // A lone regional indicator, a pair, and a third on its own.
++        .{ .cps = &.{ g, 'y' }, .x = 2, .y = 0, .text = "\u{1F1EC}y" },
++        .{ .cps = &.{ g, b, g, 'y' }, .x = 4, .y = 0, .text = "\u{1F1EC}\u{1F1E7}\u{1F1EC}y" },
++        // Anything joins a cell that ends with a ZWJ.
++        .{ .cps = &.{ 'x', 0x200D, 0x1F600, 'y' }, .x = 2, .y = 0, .text = "x\u{200D}\u{1F600}y" },
++        .{ .cps = &.{ 'x', 0x200D, 0xE9, 'y' }, .x = 2, .y = 0, .text = "x\u{200D}\u{E9}y" },
++        // A skin-tone modifier and its base join either way round.
++        .{ .cps = &.{ 0x1F3FB, 0x1F44B, 'y' }, .x = 3, .y = 0, .text = "\u{1F3FB}\u{1F44B}y" },
++        .{ .cps = &.{ 0x1F44B, 0x1F3FB, 'y' }, .x = 3, .y = 0, .text = "\u{1F44B}\u{1F3FB}y" },
++        // A spacing mark takes a cell of its own.
++        .{ .cps = &.{ 0x915, 0x93E, 'y' }, .x = 3, .y = 0, .text = "\u{915}\u{93E}y" },
++        // U+3164 is dropped.
++        .{ .cps = &.{ 'x', 0x3164, 'y' }, .x = 2, .y = 0, .text = "xy" },
++        .{ .cps = &.{ 0x3164, 'y' }, .x = 1, .y = 0, .text = "y" },
++        // Hangul jamo: a medial one joins an initial one.
++        .{ .cps = &.{ 0x1100, 0x1161, 'y' }, .x = 3, .y = 0, .text = "\u{1100}\u{1161}y" },
++        // VS16 on the last column: the cell stays there, the wrap pending.
++        .{ .cps = &(x19 ++ [_]u32{ 0x263A, 0xFE0F, 'y' }), .x = 1, .y = 1, .text = "xxxxxxxxxxxxxxxxxxx\u{263A}\u{FE0F}\ny" },
++    };
++    for (cases) |c| {
++        try testTmuxClusters(false, c.cps, c.x, c.y, c.text);
++        try testTmuxClusters(true, c.cps, c.x, c.y, c.text);
++    }
++
++    // The first case makes a wide cell.
++    {
++        var t = try init(testing.io, testing.allocator, .{ .cols = 20, .rows = 3 });
++        defer t.deinit(testing.allocator);
++        t.modes.set(.grapheme_cluster, true);
++        try t.print('x');
++        try t.print(0xFE0F);
++        const cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?.cell;
++        try testing.expectEqual(Cell.Wide.wide, cell.wide);
++    }
++
++    // Without variation-selector-always-wide, VS16 joins and widens nothing.
++    unicode.setTmuxClusters(true, false);
++    try testTmuxClusters(false, &.{ 'x', 0xFE0F, 'y' }, 2, 0, "x\u{FE0F}y");
++    try testTmuxClusters(true, &.{ 'x', 0xFE0F, 'y' }, 2, 0, "x\u{FE0F}y");
++}
++
+ test "Terminal: print wide char at edge creates spacer head" {
+     var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
+     defer t.deinit(testing.allocator);
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 7220c3ebc..b069cab61 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -265,6 +265,7 @@ pub const type_json = types.get_json;
+ pub const unicode_codepoint_width = unicode.codepoint_width;
+ pub const unicode_grapheme_width = unicode.grapheme_width;
+ pub const unicode_set_width_overrides = unicode.set_width_overrides;
++pub const unicode_set_tmux_clusters = unicode.set_tmux_clusters;
+ 
+ pub const grid_ref_cell = grid_ref.grid_ref_cell;
+ pub const grid_ref_row = grid_ref.grid_ref_row;
+diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
+index cac19be09..e3de5f403 100644
+--- a/src/terminal/c/unicode.zig
++++ b/src/terminal/c/unicode.zig
+@@ -47,6 +47,11 @@ test "set_width_overrides" {
+     try testing.expectEqual(0xFF, unicode_pkg.narrow_max);
+ }
+ 
++/// vtmux: tmux's clustering for mode 2027 (see `unicode.setTmuxClusters`).
++pub fn set_tmux_clusters(enabled: bool, vs16_wide: bool) callconv(lib.calling_conv) void {
++    unicode_pkg.setTmuxClusters(enabled, vs16_wide);
++}
++
+ pub fn grapheme_width(
+     cps: ?[*]const u32,
+     len: usize,
+diff --git a/src/unicode/main.zig b/src/unicode/main.zig
+index 99a4fd6b0..154deaf16 100644
+--- a/src/unicode/main.zig
++++ b/src/unicode/main.zig
+@@ -85,6 +85,114 @@ pub inline fn printWidth(cp: u21) u2 {
+     return if (cp <= 0xFF) 1 else table.get(cp).width;
+ }
+ 
++/// vtmux: mode 2027 joins characters into a cell as tmux's
++/// `screen_write_combine` does (screen-write.c), not by UAX #29: see
++/// `Terminal.tmuxCombine`. Process-wide like the width overrides; set
++/// with `setTmuxClusters`.
++pub var tmux_clusters: bool = false;
++
++/// vtmux: tmux's `variation-selector-always-wide`: under `tmux_clusters`,
++/// U+FE0F joined to a one-column cell makes it two columns.
++pub var tmux_vs16_wide: bool = true;
++
++/// vtmux: turn tmux's clustering on or off. Not safe while another
++/// thread prints.
++pub fn setTmuxClusters(enabled: bool, vs16_wide: bool) void {
++    tmux_clusters = enabled;
++    tmux_vs16_wide = vs16_wide;
++}
++
++/// vtmux: tmux's Hangul jamo classes (utf8-combined.c
++/// `hanguljamo_get_class`), old and extended jamo included.
++pub const TmuxJamo = enum { none, choseong, jungseong, jongseong };
++
++pub fn tmuxJamo(cp: u21) TmuxJamo {
++    return switch (cp) {
++        0x1100...0x115F, 0xA960...0xA97C => .choseong,
++        0x1160...0x11A7, 0xD7B0...0xD7C6 => .jungseong,
++        0x11A8...0x11FF, 0xD7CB...0xD7FB => .jongseong,
++        else => .none,
++    };
++}
++
++pub inline fn tmuxIsRegional(cp: u21) bool {
++    return cp >= 0x1F1E6 and cp <= 0x1F1FF;
++}
++
++/// vtmux: tmux's `utf8_should_combine(with, add)` (utf8-combined.c),
++/// which looks at the first character of each side: two lone regional
++/// indicators, or an emoji skin-tone modifier (`with`) and one of the
++/// characters tmux lists as taking one (`add`). `with_ri` and `add_ri`
++/// count the regional indicators in each side's whole cell.
++pub fn tmuxShouldCombine(with: u21, with_ri: usize, add: u21, add_ri: usize) bool {
++    if (tmuxIsRegional(add) and tmuxIsRegional(with)) return with_ri == 1 and add_ri == 1;
++    const skin_base = switch (add) {
++        0x1F44B...0x1F450,
++        0x1F466...0x1F469,
++        0x1F46E,
++        0x1F470...0x1F478,
++        0x1F47C,
++        0x1F481...0x1F483,
++        0x1F485...0x1F487,
++        0x1F4AA,
++        0x1F575,
++        0x1F57A,
++        0x1F590,
++        0x1F595,
++        0x1F596,
++        0x1F645...0x1F647,
++        0x1F64B...0x1F64F,
++        0x1F6B4...0x1F6B6,
++        0x1F926,
++        0x1F937...0x1F939,
++        0x1F93D,
++        0x1F93E,
++        0x1F9B5,
++        0x1F9B6,
++        0x1F9B8,
++        0x1F9B9,
++        0x1F9CD...0x1F9CF,
++        0x1F9D1...0x1F9DF,
++        => true,
++        else => false,
++    };
++    return skin_base and with >= 0x1F3FB and with <= 0x1F3FF;
++}
++
++/// vtmux: whether tmux could join `cp` (a character with a width) to a
++/// cell holding only `prev`, or drop it: false means `cp` takes a cell of
++/// its own. The print fast paths batch only such characters.
++pub fn tmuxMayJoin(prev: u21, cp: u21) bool {
++    if (cp == 0x3164 or prev == 0x200D) return true;
++    switch (tmuxJamo(cp)) {
++        .jungseong, .jongseong => return true,
++        .choseong, .none => {},
++    }
++    const prev_ri: usize = @intFromBool(tmuxIsRegional(prev));
++    const cp_ri: usize = @intFromBool(tmuxIsRegional(cp));
++    return tmuxShouldCombine(prev, prev_ri, cp, cp_ri) or
++        tmuxShouldCombine(cp, cp_ri, prev, prev_ri);
++}
++
++test "tmux clustering rules (vtmux)" {
++    const testing = @import("std").testing;
++    try testing.expectEqual(TmuxJamo.choseong, tmuxJamo(0x1100));
++    try testing.expectEqual(TmuxJamo.choseong, tmuxJamo(0x115F));
++    try testing.expectEqual(TmuxJamo.jungseong, tmuxJamo(0x1160));
++    try testing.expectEqual(TmuxJamo.jongseong, tmuxJamo(0x11A8));
++    try testing.expectEqual(TmuxJamo.none, tmuxJamo(0xAC00));
++    try testing.expect(tmuxShouldCombine(0x1F1EC, 1, 0x1F1E7, 1));
++    try testing.expect(!tmuxShouldCombine(0x1F1EC, 2, 0x1F1E7, 1));
++    try testing.expect(tmuxShouldCombine(0x1F3FB, 0, 0x1F44B, 0));
++    try testing.expect(!tmuxShouldCombine(0x1F44B, 0, 0x1F3FB, 0));
++    try testing.expect(!tmuxShouldCombine(0x1F3FB, 0, 0x261D, 0));
++    try testing.expect(tmuxMayJoin(0x1F44B, 0x1F3FB));
++    try testing.expect(tmuxMayJoin(0x1F3FB, 0x1F44B));
++    try testing.expect(tmuxMayJoin('x', 0x3164));
++    try testing.expect(!tmuxMayJoin('x', 0x1F600));
++    try testing.expect(!tmuxMayJoin(0x1F1EC, 0x1F600));
++}
++
+ test "codepointWidth" {
+     const testing = @import("std").testing;
+ 
