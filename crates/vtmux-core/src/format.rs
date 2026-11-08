@@ -74,7 +74,7 @@ pub trait Clock {
 /// the end, and the limit is there to stop a runaway one, which burns CPU.
 /// tmux counts wall time (`get_timer`, format.c:4750), so a host that
 /// preempts the process for [`TIME_LIMIT_MS`] in the middle of a finite
-/// template makes the rest of it empty (D-046).
+/// template makes the rest of it empty (D-052).
 #[derive(Debug, Clone, Copy)]
 pub struct SystemClock(u64);
 
@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     /// A host that preempts the process does not cut a finite expansion
-    /// short (D-046): sleeping for longer than the limit costs no CPU time.
+    /// short (D-052): sleeping for longer than the limit costs no CPU time.
     #[test]
     fn system_clock_does_not_count_time_the_thread_is_off_the_cpu() {
         let clock = SystemClock::new();
