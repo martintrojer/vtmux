@@ -1,0 +1,57 @@
+# The wheel during a mouse drag in copy mode (window-copy.c
+# window_copy_cmd_scroll_up, window_copy_cmd_scroll_down): with a button
+# held (mouse_drag_flag) `scroll-up`/`scroll-down` move the cursor, so
+# the selection grows with it, where a selection with no drag only scrolls
+# the view; and the wheel down to the bottom with a selection does not
+# leave copy mode even with scroll-exit (copy-mode -e). First a drag from
+# the shell (copy-mode -M) with the wheel up and up again, then copy mode
+# from the wheel and a drag in it with the wheel up, down to the bottom
+# and its release (copy-pipe-and-cancel). mode-keys vi: its selection
+# keeps the cell under the cursor at the screen's bottom right corner,
+# which an emacs selection drops (and tmux, not redrawing it, still shows,
+# compat/DIVERGENCES.md D-010).
+name = "copy_mouse_wheel_drag"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; i=1; while [ $i -le 30 ]; do printf 'line %s alpha-beta gamma\\r\\n' $i; i=$((i+1)); done; printf 'end word.here (x)'; tmux wait-for -S ready; exec cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "mode-keys", "vi"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
+  { wait_for = "ready" },
+  { attach = { session = "a" } },
+  { screen = {  } },
+  { keys = "\u001b[<0;3;4M\u001b[<32;4;4M\u001b[<32;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<64;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<64;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<32;12;6M\u001b[<0;12;6m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { run = ["list-buffers", "-F", "#{buffer_name}:#{buffer_sample}"] },
+  { run = ["delete-buffer"] },
+  { keys = "\u001b[<64;3;4M\u001b[<64;3;4M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<0;3;4M\u001b[<32;4;4M\u001b[<32;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<64;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<65;10;6M\u001b[<65;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<65;10;6M" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { keys = "\u001b[<0;10;6m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"] },
+  { run = ["list-buffers", "-F", "#{buffer_name}:#{buffer_sample}"] },
+]

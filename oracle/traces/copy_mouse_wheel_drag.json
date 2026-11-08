@@ -1,0 +1,659 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "copy_mouse_wheel_drag",
+  "inputs": {
+    "name": "copy_mouse_wheel_drag",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "sh",
+          "-c",
+          "stty raw -echo; i=1; while [ $i -le 30 ]; do printf 'line %s alpha-beta gamma\\r\\n' $i; i=$((i+1)); done; printf 'end word.here (x)'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mode-keys",
+          "vi"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "[#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;3;4M\u001b[<32;4;4M\u001b[<32;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<32;12;6M\u001b[<0;12;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}:#{buffer_sample}"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;3;4M\u001b[<64;3;4M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;3;4M\u001b[<32;4;4M\u001b[<32;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<65;10;6M\u001b[<65;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<65;10;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;10;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{selection_present},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y},#{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}:#{buffer_sample}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line 23 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 alpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          17,
+          8
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/22]\\e[39m\\e[49m3 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "li\\e[30m\\e[43mne 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 al\\e[39m\\e[49mpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          5
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0,1,2,25,9,27,9,5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[5/22]\\e[39m\\e[49m8 alpha-beta gamma",
+          "line 19 alpha-beta gamma",
+          "line 20 alpha-beta gamma",
+          "line 21 alpha-beta gamma",
+          "line 22 alpha-beta gamma",
+          "line 23 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "li\\e[30m\\e[43mne 26 al\\e[39m\\e[49mpha-beta gamma",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          8
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,5,1,2,25,9,25,9,8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[10/22]\\e[39m\\e[49m alpha-beta gamma",
+          "line 14 alpha-beta gamma",
+          "line 15 alpha-beta gamma",
+          "line 16 alpha-beta gamma",
+          "line 17 alpha-beta gamma",
+          "line 18 alpha-beta gamma",
+          "line 19 alpha-beta gamma",
+          "line 20 alpha-beta gamma",
+          "line 21 a\\e[30m\\e[43mlpha-beta gamma",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          8
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,10,1,2,25,9,20,9,8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line 23 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 alpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          17,
+          8
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "buffer0:ha-beta gamma\\nline 19 alpha-beta gamma\\nline 20 alpha-beta gamma\\nline 21 alpha-beta gamma\\nline 22 alpha-beta gamma\\nline 23 alpha-beta gamma\\nline 24 alpha-beta gamma\\nline 25 alpha-beta gamma\\nlin\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[5/22]\\e[39m\\e[49m8 alpha-beta gamma",
+          "line 19 alpha-beta gamma",
+          "line 20 alpha-beta gamma",
+          "line 21 alpha-beta gamma",
+          "line 22 alpha-beta gamma",
+          "line 23 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          23,
+          8
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,5,0,,,,,23,8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[5/22]\\e[39m\\e[49m8 alpha-beta gamma",
+          "line 19 alpha-beta gamma",
+          "line 20 alpha-beta gamma",
+          "li\\e[30m\\e[43mne 21 alpha-beta gamma",
+          "line 22 alpha-beta gamma",
+          "line 23 al\\e[39m\\e[49mpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          5
+        ]
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,5,1,2,20,9,22,9,5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[10/22]\\e[39m\\e[49m alpha-beta gamma",
+          "line 14 alpha-beta gamma",
+          "line 15 alpha-beta gamma",
+          "line 16 alpha-beta gamma",
+          "line 17 alpha-beta gamma",
+          "line 18 alpha-beta gamma",
+          "line 19 alpha-beta gamma",
+          "line 20 alpha-beta gamma",
+          "li\\e[30m\\e[43mne 21 al\\e[39m\\e[49mpha-beta gamma",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          8
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,10,1,2,20,9,20,9,8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/22]3 al\\e[39m\\e[49mpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 alpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          0
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0,1,2,20,9,22,9,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/22]3 al\\e[39m\\e[49mpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 alpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          9,
+          0
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0,1,2,20,9,22,9,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line 23 alpha-beta gamma",
+          "line 24 alpha-beta gamma",
+          "line 25 alpha-beta gamma",
+          "line 26 alpha-beta gamma",
+          "line 27 alpha-beta gamma",
+          "line 28 alpha-beta gamma",
+          "line 29 alpha-beta gamma",
+          "line 30 alpha-beta gamma",
+          "end word.here (x)",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          17,
+          8
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "buffer1:ne 21 alpha-beta gamma\\nline 22 alpha-beta gamma\\nline 23 al\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
