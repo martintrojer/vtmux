@@ -4672,7 +4672,14 @@ fn popup_osc52_and_passthrough_reach_its_client() {
             let name = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
                 .trim()
                 .to_owned();
-            let script = "printf '\\033]52;c;cG9w\\007\\033Ptmux;\\033\\033]52;p;cHQ=\\007\\033\\\\POPUP'; exec cat -";
+            // The program waits for a line before it prints. tmux drops a
+            // popup's OSC 52 and passthrough while the client's overlay is
+            // still to be drawn (`popup_set_client_cb`: CLIENT_REDRAWOVERLAY,
+            // set by `server_client_set_overlay` until the next
+            // `server_client_check_redraw`, which a pending write to the
+            // client defers), so a program that prints at once races that
+            // first draw. READY is on the client's screen once it is drawn.
+            let script = "printf READY; read x; printf '\\033]52;c;cG9w\\007\\033Ptmux;\\033\\033]52;p;cHQ=\\007\\033\\\\POPUP'; exec cat -";
             // Opening one waits for it to close (cmd-display-menu.c:703).
             let mut opened = Command::new(&w.bin)
                 .args(w.args())
@@ -4684,7 +4691,11 @@ fn popup_osc52_and_passthrough_reach_its_client() {
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .unwrap();
-            a.wait(|a| a.text().contains("POPUP"));
+            // (the limits only end a hang)
+            let limit = Duration::from_secs(30);
+            a.wait_for(limit, |a| a.text().contains("READY"));
+            a.keys(b"\r");
+            a.wait_for(limit, |a| a.text().contains("POPUP"));
             // Everything before it is in once a later redraw is.
             w.cli(&["refresh-client", "-t", &name]);
             a.keys(b"END");

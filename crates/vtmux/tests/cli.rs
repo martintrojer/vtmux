@@ -8160,15 +8160,38 @@ fn set_hook_monitor_fires_on_change() {
                 "-T",
                 "-B",
                 "@t::#{==:#{@v},2}",
-                "set -ga @tt '#{hook_value},'",
+                "set -ga @tt '#{hook_value},'; wait-for -S t",
             ]),
         ];
-        // The first sample (one second in) only remembers the values.
-        std::thread::sleep(Duration::from_millis(1600));
+        // The first sample (one second in) only remembers the values, and
+        // every monitor hook has a timer of its own (hooks.c
+        // `hooks_monitor_add`: `monitor_create_session`). Wait until the
+        // last timer has sampled once: a heartbeat monitor added after the
+        // others reports a change only after its first sample, and a timer
+        // due earlier has run by the time a later one does (libevent runs
+        // the expired timers in due order; vtmux's `hook_monitor_timers`,
+        // oldest first). No quiet time is long enough on a loaded host.
+        w.run(&["set", "-g", "@hb", "0"]);
+        w.run(&["set-hook", "-g", "-B", "@hbeat::#{@hb}", "set -g @hbf 1"]);
+        let end = Instant::now() + Duration::from_secs(60);
+        for beat in 1.. {
+            w.run(&["set", "-g", "@hb", &beat.to_string()]);
+            if !w.run(&["show", "-gqv", "@hbf"]).stdout.is_empty() {
+                break;
+            }
+            assert!(Instant::now() < end, "no heartbeat");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        w.run(&["set-hook", "-gu", "-B", "@hbeat"]);
         for v in ["1", "2"] {
             runs.push(w.run(&["set", "-g", "@v", v]));
             runs.push(w.run(&["wait-for", "m"]));
             runs.push(w.run(&["wait-for", "p"]));
+            if v == "2" {
+                // `-T`'s timer is its own: its report is in before the next
+                // value is set.
+                runs.push(w.run(&["wait-for", "t"]));
+            }
             runs.push(w.run(&["show", "-gv", "@rm"]));
             runs.push(w.run(&["show", "-gv", "@rp"]));
         }
