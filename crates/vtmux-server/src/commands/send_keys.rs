@@ -101,7 +101,7 @@ pub fn exec(
     }
     let literal = args.flag('l');
     let hex = args.flag('H');
-    let Some(modes) = server.model.key_modes(p) else {
+    let Some(modes) = server.model.key_modes_now(p) else {
         return Ok(());
     };
     let mut sent = Vec::new();
@@ -434,7 +434,7 @@ fn mode_keys(
 /// or for a literal key (`-H`) the byte as it is (`input_key_pane`,
 /// input-keys.c:585-589).
 fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
-    let Some(modes) = server.model.key_modes(p) else {
+    let Some(modes) = server.model.key_modes_now(p) else {
         return;
     };
     let Some(pane) = server.model.panes.get_mut(&p) else {
