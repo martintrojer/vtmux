@@ -22,7 +22,7 @@ steps = [
   { screen = {} },
   { run = ["lsc", "-F", "#{client_session} #{client_flags}"] },
   { run = ["copy-mode", "-t", "a"] },
-  { run = ["set", "-g", "lock-command", "printf 'L2 %s' \"$TMUX\" | cut -c1-6; read x"] },
+  { run = ["set", "-g", "lock-command", "printf 'L2 %s\n' \"$TMUX\" | cut -c1-6; read x"] },
   { run = ["lock-session", "-t", "a"] },
   { settle = { react = true } },
   { screen = {} },

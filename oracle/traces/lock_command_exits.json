@@ -99,7 +99,7 @@
           "set",
           "-g",
           "lock-command",
-          "printf 'L2 %s' \"$TMUX\" | cut -c1-6; read x"
+          "printf 'L2 %s\n' \"$TMUX\" | cut -c1-6; read x"
         ]
       },
       {
