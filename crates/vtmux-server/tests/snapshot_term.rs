@@ -294,28 +294,17 @@ fn page_shapes(t: &PaneTerm) -> Vec<String> {
         .collect()
 }
 
-/// The alternate screen up over primary history, the frozen copy and
-/// marks with it, a sync hold, links with bytes that aren't UTF-8.
-/// What main added to a pane's state after the spike: REP's last print
-/// (also with the REP half-parsed) and a narrowed alternate screen's
-/// cells-used counts past its width.
 /// Rows that keep tmux's line flags beyond their cells (Ghostty patch
 /// 0034: a wide character and a link overwritten) cross a snapshot, on
 /// the screen, in the history and in the history an alternate screen
-/// hides, and the stream then says it needs
-/// [`snap::TMUX_LINE_FLAGS_FEATURE`]; cells that still say so need nothing.
+/// hides, beside the rows ([`snap::KeptRows`]); cells that still say so
+/// keep nothing beside them.
 #[test]
 fn kept_line_flags_cross_a_snapshot() {
     let keeps = |t: snap::TermState| {
-        snap::Snapshot {
-            panes: vec![snap::Pane {
-                id: 1,
-                term: Some(t),
-                ..snap::Pane::default()
-            }],
-            ..snap::Snapshot::default()
-        }
-        .keeps_line_flags()
+        let kept = |rows: &[snap::Row]| rows.iter().any(|r| r.kept.any());
+        let pages = t.primary.history.iter().any(|p| !p.kept.is_empty());
+        pages || kept(&t.primary.rows)
     };
     let lines = "\u{3042}B\rX\r\n\x1b]8;;http://e\x1b\\a\x1b]8;;\x1b\\\rb\r\n";
     for form in [Form::Rows, Form::SamePin] {
@@ -338,6 +327,11 @@ fn kept_line_flags_cross_a_snapshot() {
     }
 }
 
+/// The alternate screen up over primary history, the frozen copy and
+/// marks with it, a sync hold, links with bytes that aren't UTF-8.
+/// What main added to a pane's state after the spike: REP's last print
+/// (also with the REP half-parsed) and a narrowed alternate screen's
+/// cells-used counts past its width.
 #[test]
 fn rep_and_a_narrowed_alternate_screen() {
     for form in [Form::Rows, Form::SamePin] {

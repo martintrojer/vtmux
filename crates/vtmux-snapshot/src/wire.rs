@@ -15,6 +15,10 @@
 //! - `one`: written unless it equals its default; absent reads as the default.
 //! - `opt`: an `Option`, written when `Some` (so `Some(default)` survives).
 //! - `many`: a `Vec`, one field per element in order.
+//!
+//! A `many` field of rows may name a second tag (`1 / 13 => many rows`):
+//! the rows' kept line flags go under it, after them
+//! ([`crate::row::KeptRows`]).
 
 use crate::Error;
 use std::cell::Cell;
@@ -397,6 +401,7 @@ where
 ///         1 => one name: String,
 ///         2 => opt parent: Option<u32>,
 ///         3 => many children: Vec<u32>,
+///         4 / 5 => many rows: Vec<Row>,
 ///     }
 /// }
 /// ```
@@ -408,7 +413,7 @@ macro_rules! record {
     (
         $(#[$m:meta])*
         pub struct $name:ident {
-            $( $(#[$fm:meta])* $tag:literal => $mode:ident $field:ident : $ty:ty ),* $(,)?
+            $( $(#[$fm:meta])* $tag:literal $(/ $kept:literal)? => $mode:ident $field:ident : $ty:ty ),* $(,)?
         }
     ) => {
         $(#[$m])*
@@ -419,7 +424,10 @@ macro_rules! record {
 
         impl $crate::wire::Value for $name {
             fn put(&self, out: &mut Vec<u8>) {
-                $( $crate::wire::$mode::put(out, $tag, &self.$field); )*
+                $(
+                    $crate::wire::$mode::put(out, $tag, &self.$field);
+                    $( $crate::row::kept::put(out, $kept, &self.$field); )?
+                )*
             }
 
             fn get(buf: &[u8], cx: &$crate::wire::Ctx) -> Result<Self, $crate::Error> {
@@ -428,7 +436,10 @@ macro_rules! record {
                 let mut r = $crate::wire::Reader::new(buf);
                 while let Some((tag, body)) = r.field()? {
                     match tag {
-                        $( $tag => $crate::wire::$mode::get(&mut v.$field, body, cx)?, )*
+                        $(
+                            $tag => $crate::wire::$mode::get(&mut v.$field, body, cx)?,
+                            $( $kept => $crate::row::kept::get(&mut v.$field, body, cx)?, )?
+                        )*
                         _ => {}
                     }
                 }

@@ -154,7 +154,7 @@ record! {
     /// The alternate screen has no history.
     pub struct Screen {
         /// The visible rows, top first.
-        1 => many rows: Vec<Row>,
+        1 / 13 => many rows: Vec<Row>,
         /// History, oldest page first; each page's rows oldest first.
         2 => many history: Vec<HistoryPage>,
         3 => one cursor: Cursor,
@@ -297,7 +297,7 @@ record! {
     /// came up (tmux's `saved_grid`), while it is up.
     pub struct AltEntry {
         /// The primary's visible rows then.
-        1 => many saved: Vec<Row>,
+        1 / 11 => many saved: Vec<Row>,
         /// tmux's primary history then, oldest first.
         2 => many history: Vec<HistoryPage>,
         3 => many marks: Vec<FrozenMark>,
@@ -326,7 +326,7 @@ record! {
     /// tmux's `MODE_SYNC`: the screen a pane in synchronized output keeps
     /// showing.
     pub struct SyncHold {
-        1 => many rows: Vec<Row>,
+        1 / 6 => many rows: Vec<Row>,
         /// Since the last `?2026h` (the 1 s timer re-arms on each).
         2 => one since_ms: u64,
         /// The held screen's width, cursor and whether it was shown.

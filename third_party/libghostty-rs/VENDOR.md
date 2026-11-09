@@ -1109,7 +1109,9 @@ Recorded per commit in git history; the list is kept current:
     (`moveCells`, a partial `clonePartialRowFrom`: left and right
     margins, which tmux has not got) bring their row's bits. So a row
     with an extended cell always has the bit, which vtmux's snapshot
-    relies on (it stores only the bits a row's cells don't imply).
+    relies on (it stores only the bits a row's cells don't imply, beside
+    the rows under their own tags, `vtmux_snapshot::KeptRows`, which a
+    build before them skips).
     Readers OR them with what the cells say now (vtmux `capture.rs`
     `LineKept`).
   - A narrow character over half of a wide one: tmux writes the other

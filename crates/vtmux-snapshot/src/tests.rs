@@ -500,35 +500,62 @@ fn damaged_bodies_with_a_matching_hash_fail_without_panicking() {
     assert_eq!(decode(&frame(&body)), Err(Error::Truncated));
 }
 
-/// Rows keeping tmux's line flags, added within v1 under
-/// [`TMUX_LINE_FLAGS_FEATURE`], round-trip, on the screen and in history
-/// pages; the golden stream has none.
+/// Rows keeping tmux's line flags, added within v1 beside the rows
+/// ([`KeptRows`]), round-trip everywhere rows go (a screen, the screen
+/// saved under an alternate one, a synchronized-output hold, copy mode, a
+/// history page), and need no [`Meta::requires`] entry: a reader before
+/// them skips the tags and reads the rest unchanged. The golden stream has
+/// none.
 #[test]
-fn kept_line_flags_round_trip() {
+fn kept_line_flags_round_trip_and_require_nothing() {
+    let plain = sample();
     let mut s = sample();
-    assert!(!s.keeps_line_flags());
-    s.meta.requires = vec![TMUX_LINE_FLAGS_FEATURE.into()];
-    let term = s.panes[0].term.as_mut().unwrap();
-    term.primary.rows[0].kept.extended = true;
-    assert!(s.keeps_line_flags());
-    assert_eq!(decode(&encode(&s)).unwrap(), s);
-
-    let mut s = sample();
-    s.meta.requires = vec![TMUX_LINE_FLAGS_FEATURE.into()];
-    let term = s.panes[0].term.as_mut().unwrap();
+    let kept = KeptLineFlags {
+        extended: true,
+        hyperlink: false,
+    };
+    let linked = KeptLineFlags {
+        extended: true,
+        hyperlink: true,
+    };
     let row = Row {
-        kept: KeptLineFlags {
-            extended: false,
-            hyperlink: true,
-        },
+        kept,
         ..sample_row()
     };
-    term.primary.history = vec![HistoryPage::from_rows(&[row], true)];
-    assert!(s.keeps_line_flags());
-    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let term = s.panes[0].term.as_mut().unwrap();
+    term.primary.rows[1].kept = kept;
+    term.primary.rows[2].kept = linked;
+    term.primary.history = vec![HistoryPage::from_rows(&[sample_row(), row.clone()], true)];
+    term.alt_entry.as_mut().unwrap().saved[0].kept = linked;
+    term.sync.as_mut().unwrap().rows[0].kept = kept;
+    let PaneMode::Copy(c) = &mut s.panes[0].modes[0] else {
+        panic!("copy mode first")
+    };
+    c.rows[0].kept = kept;
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back.meta.requires, Vec::<String>::new());
+    assert_eq!(back, s);
+    let t = back.panes[0].term.as_ref().unwrap();
+    assert_eq!(t.primary.history[0].decode_rows().unwrap()[1], row);
+
+    // Without the kept flags the stream is the sample's.
+    let mut cleared = back;
+    let term = cleared.panes[0].term.as_mut().unwrap();
+    for r in &mut term.primary.rows {
+        r.kept = KeptLineFlags::default();
+    }
+    term.primary
+        .history
+        .clone_from(&plain.panes[0].term.as_ref().unwrap().primary.history);
+    term.alt_entry.as_mut().unwrap().saved[0].kept = KeptLineFlags::default();
+    term.sync.as_mut().unwrap().rows[0].kept = KeptLineFlags::default();
+    if let PaneMode::Copy(c) = &mut cleared.panes[0].modes[0] {
+        c.rows[0].kept = KeptLineFlags::default();
+    }
+    assert_eq!(encode(&cleared), encode(&plain));
 
     let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
-    assert!(!golden.keeps_line_flags());
+    assert!(golden.pages().iter().all(|p| p.kept.is_empty()));
 }
 
 #[test]

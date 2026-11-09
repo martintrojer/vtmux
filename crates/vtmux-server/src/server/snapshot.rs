@@ -1300,7 +1300,7 @@ impl Server {
         // every build before them did after an upgrade, and its terminal
         // shows the next title set): `vtmux_snapshot`, *Changing the
         // format*.
-        let mut s = snap::Snapshot {
+        snap::Snapshot {
             meta,
             server,
             sessions,
@@ -1308,12 +1308,7 @@ impl Server {
             panes,
             clients,
             descriptors,
-        };
-        let flags = snap::TMUX_LINE_FLAGS_FEATURE.to_string();
-        if !s.meta.requires.contains(&flags) && s.keeps_line_flags() {
-            s.meta.requires.push(flags);
         }
-        s
     }
 
     #[expect(clippy::too_many_lines, reason = "one field after another")]

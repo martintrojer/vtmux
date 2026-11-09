@@ -482,7 +482,7 @@ record! {
         /// History of the frozen grid, oldest first.
         1 => many history: Vec<HistoryPage>,
         /// Its visible rows.
-        2 => many rows: Vec<Row>,
+        2 / 55 => many rows: Vec<Row>,
         /// `mode-keys`: false emacs, true vi.
         3 => one vi: bool,
         4 => one sx: u32,

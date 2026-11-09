@@ -487,8 +487,9 @@ fn line_flags_of_cells(row: &snap::Row) -> (bool, bool) {
 }
 
 /// The line flags a row keeps (Ghostty patch 0034) go in the snapshot only
-/// where its cells don't say so ([`snap::Row::kept`]), so that
-/// nearly every stream goes without [`snap::TMUX_LINE_FLAGS_FEATURE`].
+/// where its cells don't say so ([`snap::Row::kept`]), beside the rows
+/// ([`snap::KeptRows`]): what a reader before them derives from the cells
+/// is all it misses.
 fn keep_line_flags(row: &mut snap::Row, extended: bool, hyperlink: bool) {
     let (by_cells, linked) = line_flags_of_cells(row);
     row.kept = snap::KeptLineFlags {
