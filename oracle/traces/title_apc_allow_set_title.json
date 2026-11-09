@@ -1,0 +1,275 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "title_apc_allow_set_title",
+  "inputs": {
+    "name": "title_apc_allow_set_title",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "stty raw -echo min 1 time 20; s() { printf \"$1\\033[5n\"; dd bs=1 count=4 >/dev/null 2>&1; tmux wait-for -S \"r$2\"; tmux wait-for \"g$2\"; }; s '\\033_one\\033\\\\' 1; s '\\033]2;two\\007\\033]0;two\\007\\033_three\\033\\\\' 2; s '\\033_fo\\007ur\\030' 3; s '\\033_\\033\\\\' 4; exec cat"
+        ]
+      },
+      {
+        "wait_for": "r1"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-set-title",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g1"
+        ]
+      },
+      {
+        "wait_for": "r2"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-set-title",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g2"
+        ]
+      },
+      {
+        "wait_for": "r3"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g3"
+        ]
+      },
+      {
+        "wait_for": "r4"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g4"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "one\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "one\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "four\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
