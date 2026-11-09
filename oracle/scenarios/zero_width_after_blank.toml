@@ -1,0 +1,10 @@
+name = "zero_width_after_blank"
+# A zero-width character after a cell nothing was written to joins that
+# blank cell in tmux (screen-write.c screen_write_combine), so capture-pane
+# shows it after a space; libghostty-vt drops it (D-063).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "3", "sh", "-c", "printf 'a\\033[4G\\342\\200\\215b\\015\\012\\033[3G\\314\\201c'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { divergence = { id = "D-063", expect = { kind = "cli", stdout = "a  b\n  c\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+]

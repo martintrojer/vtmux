@@ -1,0 +1,10 @@
+name = "decrc_anonymous_link"
+# DECRC restores the anonymous link DECSC saved, the same link to tmux
+# (input.c input_restore_state), so capture-pane -e writes one OSC 8 over
+# A and C; to Ghostty it is a new link, so vtmux writes it again (D-061).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "3", "sh", "-c", "printf '\\033]8;;http://a/\\033\\\\A\\0337\\033]8;;\\033\\\\B\\0338C\\033]8;;\\033\\\\'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { divergence = { id = "D-061", expect = { kind = "cli", stdout = "\u001b]8;;http://a/\u001b\\A\u001b]8;;http://a/\u001b\\C\u001b]8;;\u001b\\\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]

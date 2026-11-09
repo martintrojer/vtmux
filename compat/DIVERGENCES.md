@@ -492,3 +492,35 @@ product reasons" category.
 - vtmux behaviour: `#{client_utf8}` is 0 and `list-clients` has no `UTF-8` flag, as in tmux, and command output to such a client is sanitised (`display -p` prints `_`), but frames carry the cells' UTF-8 text and line drawing whatever the client.
 - Evidence: reference tmux 3.8 and vtmux side by side with the owner's `.tmux.conf`, both attached 160x45 under `TERM=xterm-256color LANG=C`: tmux's status row is ` main     1 sub  ... _ 10%    _ 14%    _ devserver    _ 6d 15h` and its pane borders `x` and `+` in ACS; vtmux's shows the glyphs and `┃`, `→`.
 - Category: Deferred (needs `enacs`, `smacs`, `rmacs` and `acsc` in the terminal table, which `tests/terminfo_table.py` must regenerate on a host with every terminal's terminfo, and the frame encoder to track the charset as `tty_attributes` and `tty_reset` do).
+
+### D-061: a restored anonymous link is a new link
+
+- Test / assertion: oracle `decrc_anonymous_link` (annotated, the `capture-pane -e`).
+- tmux behaviour: DECRC and RCP restore the cell DECSC saved, its link number included (input.c `input_restore_state`), and `?1049l` the one the alternate screen saved (screen.c `screen_alternate_off`). An anonymous link (OSC 8 with no `id=`) is a link of its own (hyperlinks.c `hyperlinks_put`), so text written before DECSC and after DECRC under it is one link: `capture-pane -e` writes one OSC 8 over both (`grid_string_cells_code` compares the link numbers).
+- vtmux behaviour: Ghostty's cursor saves no link, so vtmux gives Ghostty tmux's link again after such a sequence by sending it the OSC 8 that set it (`PenLinks`, term.rs). An anonymous link sent again is a new link to Ghostty (its implicit id counts up), so the capture writes the OSC 8 again where the restored link starts. A link with an `id=` is the same link both ways. What the text links to and every capture without `-e` match.
+- Evidence: reference tmux 3.8, `printf '\033]8;;http://a/\033\\A\0337\033]8;;\033\\B\0338C'`: tmux `ESC]8;;http://a/ESC\AC ESC]8;;ESC\`, vtmux `ESC]8;;http://a/ESC\A ESC]8;;http://a/ESC\C ESC]8;;ESC\`. Found by `scripts/emu_fuzz.py --gen round2` (decsc).
+- Category: Deferred (restoring the same link needs Ghostty's cursor to keep its hyperlink through DECSC and a screen switch: a Ghostty patch).
+
+### D-062: DECSTBM under origin mode homes the cursor to the region
+
+- Test / assertion: oracle `decstbm_origin_home` (annotated, the capture and the cursor).
+- tmux behaviour: DECSTBM puts the cursor at the top left of the screen whatever DECOM says (screen-write.c `screen_write_scrollregion`: `screen_write_set_cursor(ctx, 0, 0)`, not relative to the region), so under `?6h` the cursor is above the region it set, and text goes to row 0.
+- vtmux behaviour: Ghostty's `setTopAndBottomMargin` homes the cursor through `setCursorPos(1, 1)`, which origin mode makes the region's top left: `ESC[?6h ESC[3;5r X` writes X on row 2, cursor `1,2` (tmux `1,0`). Without origin mode the two agree.
+- Evidence: reference tmux 3.8, the scenario's trace. 13 of 144 `--gen round2` seeds from 300000 minimised to it (origin, margins). The D4 arbiter (esctest, vttest) has not been run on it (D22).
+- Category: Deferred (the arbiter's verdict decides between Ghostty's home and tmux's).
+
+### D-063: a zero-width character after a cell nothing was written to is dropped
+
+- Test / assertion: oracle `zero_width_after_blank` (annotated, the capture).
+- tmux behaviour: `screen_write_combine` (screen-write.c) joins a zero-width character (ZWJ, a combining mark, a variation selector) to the cell left of the cursor whatever it holds, a cleared cell's space included, so `a CHA 4 ZWJ b` captures as `a  ` ZWJ `b` and a combining acute after `CHA 3` as two spaces and the mark.
+- vtmux behaviour: libghostty-vt drops a zero-width character whose cell before has no text (Terminal.zig `print`), as D-039 found for the bidi isolate: the capture has no ZWJ or mark there. A zero-width character after text joins it as in tmux (patch 0027).
+- Evidence: reference tmux 3.8, the scenario's trace; `--gen round2` (zwj): a lone ZWJ after a CHA is the most common minimised case of that generator (12 of 16 in the 144 seeds from 300000).
+- Category: Deferred (Ghostty grid by D-039's reading; the arbiter has not been run on it).
+
+### D-064: with autowrap off, a mark after the last column joins the last character
+
+- Test / assertion: oracle `combining_nowrap_last_column` (annotated, the capture).
+- tmux behaviour: under `?7l` a character printed in the last column leaves tmux's cursor on that column (`screen_write_cell`, `not_wrap`), and `screen_write_combine` joins a following combining mark to the cell left of the cursor (`cx - 1`): `0123456789` then U+0301 on 10 columns puts the accent on the 8, not on the 9 it follows.
+- vtmux behaviour: Ghostty joins the mark to the character it follows (the 9), with or without autowrap, as xterm does.
+- Evidence: reference tmux 3.8, the scenario's trace (`012345678́9`); `--gen round2` (widemargin, zwj, decsc).
+- Category: Do not copy tmux bug (the mark changes a character the program did not put it on).

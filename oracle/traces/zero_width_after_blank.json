@@ -1,0 +1,82 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "zero_width_after_blank",
+  "inputs": {
+    "name": "zero_width_after_blank",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "3",
+          "sh",
+          "-c",
+          "printf 'a\\033[4G\\342\\200\\215b\\015\\012\\033[3G\\314\\201c'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "divergence": {
+          "id": "D-063",
+          "expect": {
+            "kind": "cli",
+            "stdout": "a  b\n  c\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a  ‍b\n  ́c\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

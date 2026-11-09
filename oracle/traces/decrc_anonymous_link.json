@@ -1,0 +1,83 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "decrc_anonymous_link",
+  "inputs": {
+    "name": "decrc_anonymous_link",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "3",
+          "sh",
+          "-c",
+          "printf '\\033]8;;http://a/\\033\\\\A\\0337\\033]8;;\\033\\\\B\\0338C\\033]8;;\\033\\\\'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "divergence": {
+          "id": "D-061",
+          "expect": {
+            "kind": "cli",
+            "stdout": "\u001b]8;;http://a/\u001b\\A\u001b]8;;http://a/\u001b\\C\u001b]8;;\u001b\\\n\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;;http://a/\u001b\\AC\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+name = "combining_nowrap_last_column"
+# With autowrap off, a character printed in the last column leaves tmux's
+# cursor there (screen_write_cell), and a combining mark after it joins the
+# cell left of the cursor (screen_write_combine: cx - 1), the character
+# before the one it follows; Ghostty joins it to the last character
+# printed (D-064).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "10", "-y", "3", "sh", "-c", "printf '\\033[?7l0123456789\\314\\201'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { divergence = { id = "D-064", expect = { kind = "cli", stdout = "0123456789\u0301\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+]

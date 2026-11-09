@@ -1,0 +1,12 @@
+name = "decstbm_origin_home"
+# DECSTBM puts the cursor at the top left of the screen, origin mode or not
+# (screen-write.c screen_write_scrollregion: screen_write_set_cursor(ctx,
+# 0, 0)); Ghostty puts it at the region's top left under DECOM (D-062).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033[?6h\\033[3;5rX'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { divergence = { id = "D-062", expect = { kind = "cli", stdout = "\n\nX\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+  { divergence = { id = "D-062", expect = { kind = "cli", stdout = "1,2,1\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y},#{origin_flag}"] },
+]
