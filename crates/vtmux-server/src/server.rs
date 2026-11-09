@@ -2440,7 +2440,7 @@ impl Server {
     /// client without a session, on its way out or already suspended is
     /// left alone. So is a control client, which tmux marks suspended for
     /// good (it never reads `MSG_SUSPEND`, so never wakes) and starves of pane
-    /// output: compat/DIVERGENCES.md D-048.
+    /// output: compat/DIVERGENCES.md D-057.
     pub fn suspend_client(&mut self, id: ClientId) {
         let Some(c) = self.clients.get(&id) else {
             return;

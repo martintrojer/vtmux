@@ -1,13 +1,13 @@
-# suspend-client on a control client (server-client.c server_client_suspend): tmux marks it suspended and sends MSG_SUSPEND, which a control client never reads (client.c handles it only once attached) and so never answers with MSG_WAKEUP. From then on it is not listed, its session counts no attached client and it gets no %output, for good. D-048: vtmux leaves a control client alone, as it does any client it cannot suspend; the annotated steps hold what vtmux shows. suspend-client with no -t takes the current client, here the control client, the only one attached.
+# suspend-client on a control client (server-client.c server_client_suspend): tmux marks it suspended and sends MSG_SUSPEND, which a control client never reads (client.c handles it only once attached) and so never answers with MSG_WAKEUP. From then on it is not listed, its session counts no attached client and it gets no %output, for good. D-057: vtmux leaves a control client alone, as it does any client it cannot suspend; the annotated steps hold what vtmux shows. suspend-client with no -t takes the current client, here the control client, the only one attached.
 name = "suspend_client_control"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "read l; echo got; tmux wait-for -S got; exec cat -"] },
   { control = { argv = ["attach", "-t", "a"], id = "k" } },
   { run = ["suspend-client"] },
-  { divergence = { id = "D-048", expect = { kind = "cli", stdout = "a|attached,focused,control-mode,UTF-8\n", stderr = "", exit = 0 } } },
+  { divergence = { id = "D-057", expect = { kind = "cli", stdout = "a|attached,focused,control-mode,UTF-8\n", stderr = "", exit = 0 } } },
   { run = ["lsc", "-F", "#{client_session}|#{client_flags}"] },
-  { divergence = { id = "D-048", expect = { kind = "cli", stdout = "1\n", stderr = "", exit = 0 } } },
+  { divergence = { id = "D-057", expect = { kind = "cli", stdout = "1\n", stderr = "", exit = 0 } } },
   { run = ["display", "-p", "#{session_attached}"] },
   { control_send = { id = "k", line = "display -p still" } },
   { control_wait = { id = "k", until = "%end" } },
@@ -15,6 +15,6 @@ steps = [
   { wait_for = "got" },
   { control_send = { id = "k", line = "lsc -F '#{client_flags}'" } },
   { control_wait = { id = "k", until = "%end" } },
-  { divergence = { id = "D-048", expect = { kind = "control", lines = ["%begin <TIME> #1 0", "%end <TIME> #1 0", "%session-changed $0 a", "%begin <TIME> #2 1", "still", "%end <TIME> #2 1", "%output %0 x\\r\\ngot\\r\\n", "%begin <TIME> #3 1", "attached,focused,control-mode,UTF-8", "%end <TIME> #3 1", "%exit"], stderr = "", exit = 0 } } },
+  { divergence = { id = "D-057", expect = { kind = "control", lines = ["%begin <TIME> #1 0", "%end <TIME> #1 0", "%session-changed $0 a", "%begin <TIME> #2 1", "still", "%end <TIME> #2 1", "%output %0 x\\r\\ngot\\r\\n", "%begin <TIME> #3 1", "attached,focused,control-mode,UTF-8", "%end <TIME> #3 1", "%exit"], stderr = "", exit = 0 } } },
   { control_close = { id = "k" } },
 ]

@@ -43,7 +43,7 @@
       },
       {
         "divergence": {
-          "id": "D-048",
+          "id": "D-057",
           "expect": {
             "kind": "cli",
             "stdout": "a|attached,focused,control-mode,UTF-8\n",
@@ -61,7 +61,7 @@
       },
       {
         "divergence": {
-          "id": "D-048",
+          "id": "D-057",
           "expect": {
             "kind": "cli",
             "stdout": "1\n",
@@ -115,7 +115,7 @@
       },
       {
         "divergence": {
-          "id": "D-048",
+          "id": "D-057",
           "expect": {
             "kind": "control",
             "lines": [
