@@ -20,6 +20,7 @@ use libghostty_vt::terminal::{
 use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
+use crate::notify::Notification;
 use crate::progress::ProgressBar;
 
 mod state;
@@ -466,6 +467,7 @@ impl PaneTerm {
         let mouse_scan = Rc::clone(&mouse);
         let events = Rc::new(RefCell::new(Events::default()));
         let belled = Rc::clone(&events);
+        let notified = Rc::clone(&events);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
@@ -497,6 +499,17 @@ impl PaneTerm {
                 })
             })
             .and_then(|t| t.on_bell(move |_| belled.borrow_mut().push(TermEvent::Bells(1))))
+            // D30: the server decides who gets it (`vtmux-notifications`).
+            .and_then(|t| {
+                t.on_desktop_notification(move |_, title, body| {
+                    notified
+                        .borrow_mut()
+                        .push(TermEvent::Notification(Notification {
+                            title: title.to_vec(),
+                            body: body.to_vec(),
+                        }));
+                })
+            })
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")));
         registered.expect("libghostty effect registration");
@@ -3365,6 +3378,9 @@ pub enum TermEvent {
     /// changed or not: tmux redraws the window's borders and status
     /// (`input_set_progress_bar`, input.c:3016-3026).
     Progress,
+    /// A desktop notification libghostty found (OSC 9 not `ConEmu`, OSC
+    /// 777;notify), which tmux drops (spec D30).
+    Notification(Notification),
 }
 
 /// The events not yet taken, BELs in a row counted in one. Unbounded:
@@ -5713,6 +5729,38 @@ mod tests {
         assert_eq!(back.title(), shown);
     }
 
+    /// D30: libghostty decides what is a notification. OSC 9 that is not a
+    /// `ConEmu` command and `OSC 777;notify;title;body` are, each in order;
+    /// `9;4` stays progress, the other `ConEmu` forms and other 777s are
+    /// nothing, and an OSC 9 inside `DCS tmux;` is passthrough, never seen
+    /// by Ghostty. The grid shows none of it.
+    #[test]
+    fn notifications_are_what_libghostty_reports() {
+        let mut t = PaneTerm::new(20, 3, 10);
+        t.feed(b"\x1b]9;hello\x07\x1b]777;notify;T;a;b\x1b\\");
+        t.feed(b"\x1b]9;4;1;50\x07\x1b]9;1;100\x07\x1b]9;2;box\x07\x1b]9;3;tab\x07");
+        t.feed(b"\x1b]9;12\x07\x1b]777;other;x;y\x07\x1b]777;notify;notitle\x07");
+        t.feed(b"\x1bPtmux;\x1b\x1b]9;wrapped\x07\x1b\\");
+        t.feed(b"\x1b]777;notify;;empty\x07X");
+        let got: Vec<Notification> = t
+            .take_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                TermEvent::Notification(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        let n = |title: &[u8], body: &[u8]| Notification {
+            title: title.to_vec(),
+            body: body.to_vec(),
+        };
+        assert_eq!(got, [n(b"", b"hello"), n(b"T", b"a;b"), n(b"", b"empty")]);
+        assert_eq!(t.progress_bar().progress, 50);
+        assert_eq!(t.take_passthrough().len(), 1);
+        let shown = crate::capture::capture(&t, crate::CaptureOpts::default());
+        assert!(shown.starts_with(b"X\n\n"), "{shown:?}");
+    }
+
     #[test]
     fn osc_9_4_sets_the_progress_bar() {
         let mut t = PaneTerm::new(20, 5, 100);
@@ -5736,9 +5784,17 @@ mod tests {
             (t.progress_bar().state.name(), t.progress_bar().progress),
             ("paused", 7)
         );
-        // Malformed: nothing set, no redraw.
+        // Malformed: nothing set, no redraw. libghostty's OSC 9 parser
+        // takes the first two for notifications (osc9.zig falls back to
+        // one when no `ConEmu` form matches), which only D30 reads.
         t.feed(b"\x1b]9;4;7;1\x07\x1b]9;1\x07\x1b]9\x07");
-        assert_eq!(t.take_events(), []);
+        let n = |body: &[u8]| {
+            TermEvent::Notification(Notification {
+                title: Vec::new(),
+                body: body.to_vec(),
+            })
+        };
+        assert_eq!(t.take_events(), [n(b"4;7;1"), n(b"1")]);
         assert_eq!(t.progress_bar().state.name(), "paused");
         // RIS keeps it (screen_write_reset leaves it); a respawn resets.
         t.feed(b"\x1bc");

@@ -1,0 +1,31 @@
+name = "notifications_off"
+size = [40, 8]
+# D30 off, the default (vtmux-notifications): a pane's desktop notifications
+# are dropped, as tmux 3.8 drops them (input.c input_osc_9 handles only 9;4,
+# input_exit_osc has no 777). OSC 9 and OSC 777, by BEL and by ST, with an
+# empty title and a ConEmu form, from the current window and from a
+# background one: the screen, the pane's grid, title, window name and
+# progress bar are tmux's. Each input ends with a marker the screen waits for.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "sh", "-c", "stty -echo; tmux wait-for -S up; exec cat -"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "t"] },
+  { wait_for = "up" },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "a\u001b]9;one\u0007b\u001b]777;notify;Two;body two\u001b\\c\u001b]9;2;box\u0007d\u001b]777;notify;;e\u0007f\u001b]777;notify;bad\u001b\\m1\r" } },
+  { wait_screen = { has = ["m1"] } },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-e", "-t", "%0"] },
+  { run = ["display", "-p", "-t", "%0", "#{pane_title}|#{window_name}|#{pane_pb_state}"] },
+  { run = ["neww", "-n", "v", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:v", "-T", "tv"] },
+  { settle = { react = true } },
+  { feed = { pane = "%0", bytes = "\u001b]9;background\u0007\u001b]777;notify;Bg;two\u001b\\m2\r" } },
+  { wait_pane = { pane = "%0", has = "m2" } },
+  { screen = {} },
+  { run = ["select-window", "-t", "a:w"] },
+  { wait_screen = { has = ["m2"] } },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-e", "-t", "%0"] },
+]

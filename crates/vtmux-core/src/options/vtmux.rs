@@ -16,7 +16,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 5] = [
+pub(super) static EXTENSIONS: [OptionDef; 6] = [
     // D29: the kitty keyboard protocol, pane side (spec, *Protocol
     // extensions (D28)*).
     OptionDef {
@@ -28,6 +28,18 @@ pub(super) static EXTENSIONS: [OptionDef; 5] = [
         separator: None,
         default: DefaultValue::Flag(false),
         text: Some("Grant the kitty keyboard protocol to programs that ask for it."),
+        unit: None,
+    },
+    // D30: desktop notifications (OSC 9, OSC 777) to Ghostty clients.
+    OptionDef {
+        name: "vtmux-notifications",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Send panes' desktop notifications (OSC 9, OSC 777) to Ghostty clients."),
         unit: None,
     },
     // D26: the pane blend.

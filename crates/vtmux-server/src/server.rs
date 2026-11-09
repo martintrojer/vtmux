@@ -182,6 +182,8 @@ pub(crate) struct Client {
     /// `DCS tmux;` payloads for the terminal, written after this tick's
     /// frame (`tty_cmd_rawstring`).
     pub(crate) passthrough: Vec<u8>,
+    /// How its desktop notifications are limited (spec D30).
+    pub(crate) notified: crate::notify::Limit,
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
@@ -298,6 +300,7 @@ impl Client {
             compositor: crate::render::Compositor::default(),
             window_cache: crate::render::WindowCache::default(),
             passthrough: Vec::new(),
+            notified: crate::notify::Limit::default(),
             reattach: None,
             view: crate::view::View::default(),
             pan: None,
@@ -5759,6 +5762,7 @@ impl Server {
                 self.model
                     .redraw(crate::model::Redraw::WindowStatus(window));
             }
+            TermEvent::Notification(n) => self.pane_notification(window, &n),
         }
     }
 
@@ -6788,6 +6792,84 @@ mod tests {
         server.clients.insert(id, client);
         server.attach_client(id, s).unwrap();
         (id, peer)
+    }
+
+    /// D30: with `vtmux-notifications` on, a pane's notification goes to
+    /// every attached Ghostty client whose session holds the pane's window,
+    /// current or not (a linked window counts), in the pane's form, once per
+    /// Ghostty's limits. Not to a client of another terminal, a session
+    /// without the window, a suspended client or a control client. Off,
+    /// nothing goes.
+    #[test]
+    fn notifications_go_to_ghostty_clients_of_the_window() {
+        use crate::server::snapshot::tests::{connect, hello, ok};
+        use vtmux_core::protocol::ControlMode;
+        const XTVERSION: &[u8] = b"\x1bP>|ghostty 1.2.3\x1b\\";
+        let (mut server, p, s, dir) = share_server("notify");
+        for words in [
+            &["new", "-d", "-s", "b", "-n", "bw", "cat", "-"][..],
+            &["link-window", "-d", "-s", "a:0", "-t", "b:5"],
+            &["new", "-d", "-s", "c", "-n", "cw", "cat", "-"],
+        ] {
+            ok(&mut server, &dir, words);
+        }
+        let session = |server: &super::Server, name: &str| {
+            server
+                .model
+                .sessions
+                .iter()
+                .find(|(_, x)| x.name == name)
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let (b, c) = (session(&server, "b"), session(&server, "c"));
+        let mut clients = Vec::new();
+        for (session, ghostty) in [(s, true), (s, false), (b, true), (c, true), (s, true)] {
+            let (id, peer) = attach_test_client(&mut server, session, &dir);
+            if ghostty {
+                server.on_client_input(id, XTVERSION).unwrap();
+            }
+            clients.push((id, peer));
+        }
+        // The last is suspended (`suspend-client`): its terminal is not ours.
+        server.clients.get_mut(&clients[4].0).unwrap().suspended = true;
+        let (control, _control_peer) = connect(
+            &mut server,
+            hello(&["attach", "-t", "a"], &dir, None, ControlMode::Control),
+        );
+        let take = |server: &mut super::Server| -> Vec<Vec<u8>> {
+            let mut ids: Vec<super::ClientId> = clients.iter().map(|(id, _)| *id).collect();
+            ids.push(control);
+            ids.iter()
+                .map(|id| std::mem::take(&mut server.clients.get_mut(id).unwrap().passthrough))
+                .collect()
+        };
+        take(&mut server);
+        server.pane_input(p, b"\x1b]9;off\x07", false);
+        assert_eq!(take(&mut server), vec![Vec::<u8>::new(); 6], "off");
+        ok(
+            &mut server,
+            &dir,
+            &["set", "-s", "vtmux-notifications", "on"],
+        );
+        server.pane_input(p, b"\x1b]777;notify;T;body\x1b\\", false);
+        let osc = b"\x1b]777;notify;T;body\x1b\\".to_vec();
+        let none = Vec::new();
+        assert_eq!(
+            take(&mut server),
+            [
+                osc,
+                none.clone(),
+                b"\x1b]777;notify;T;body\x1b\\".to_vec(),
+                none.clone(),
+                none.clone(),
+                none
+            ],
+        );
+        // Within the second: cut, for every client.
+        server.pane_input(p, b"\x1b]9;again\x07", false);
+        assert_eq!(take(&mut server), vec![Vec::<u8>::new(); 6], "limited");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// A server for [`shared_frames_are_each_clients_own`] in its own

@@ -7981,3 +7981,150 @@ fn kitty_keys_grant_follows_the_program() {
         file_is(&out, &full);
     }
 }
+
+/// The desktop notifications in a terminal's bytes: each OSC 9 (not the
+/// `9;4` progress bar) and OSC 777, whole, terminator included.
+fn notifications(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(at) = bytes[i..].windows(2).position(|x| x == b"\x1b]") {
+        let start = i + at;
+        let body = &bytes[start + 2..];
+        let Some(e) = body.iter().position(|&b| b == 0x07 || b == 0x1b) else {
+            break;
+        };
+        let end = start + 2 + e + if body[e] == 0x1b { 2 } else { 1 };
+        if (body.starts_with(b"9;") && !body.starts_with(b"9;4;")) || body.starts_with(b"777;") {
+            out.push(bytes[start..end.min(bytes.len())].to_vec());
+        }
+        i = end.min(bytes.len());
+    }
+    out
+}
+
+/// A world for the D30 tests: session `a`, whose window 0 (`w`) runs a
+/// program that writes each file named on a line of its input, and is
+/// not current (window 1, `cat -`, is); `allow-passthrough all`; a client
+/// attached that says it is Ghostty when `ghostty`.
+fn notify_world(bin: PathBuf, ghostty: bool) -> (World, Attached) {
+    let w = World::new(bin);
+    let mut a = w.attach(&[
+        "new",
+        "-s",
+        "a",
+        "-n",
+        "w",
+        "sh",
+        "-c",
+        "while read -r f; do cat \"$f\"; done",
+    ]);
+    a.wait(|a| status_row(a).starts_with("[a]"));
+    w.cli(&["set", "-g", "status-right", ""]);
+    w.cli(&["set", "-g", "allow-passthrough", "all"]);
+    w.cli(&["neww", "-n", "other", "cat", "-"]);
+    a.wait(|a| status_row(a).contains("1:other*"));
+    if ghostty {
+        a.keys(b"\x1bP>|ghostty 1.2.3\x1b\\");
+        let end = Instant::now() + Duration::from_secs(5);
+        while !String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_termtype}"]).stdout)
+            .starts_with("ghostty ")
+        {
+            assert!(Instant::now() < end, "no termtype");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    (w, a)
+}
+
+/// The background pane of [`notify_world`] writes `bytes`, then a
+/// passthrough marker: the client's bytes from before it up to the
+/// marker, once the marker is there. A notification sent goes ahead of
+/// passthrough read with or after it, so what is not there by then never
+/// comes.
+fn notify_emit(w: &World, a: &Attached, n: usize, bytes: &[u8]) -> Vec<u8> {
+    let marker = format!("\x1b]1337;mark={n}\x07");
+    let mut payload = bytes.to_vec();
+    payload.extend_from_slice(format!("\x1bPtmux;\x1b\x1b]1337;mark={n}\x07\x1b\\").as_bytes());
+    let file = w.home.path().join(format!("emit{n}"));
+    std::fs::write(&file, payload).unwrap();
+    let start = a.bytes.lock().unwrap().len();
+    w.cli(&["send-keys", "-t", "a:0", "-l", &file.display().to_string()]);
+    w.cli(&["send-keys", "-t", "a:0", "Enter"]);
+    let has = |a: &Attached| {
+        a.bytes.lock().unwrap()[start..]
+            .windows(marker.len())
+            .any(|x| x == marker.as_bytes())
+    };
+    a.wait_for(Duration::from_secs(20), has);
+    let got = a.bytes.lock().unwrap()[start..].to_vec();
+    let end = got
+        .windows(marker.len())
+        .position(|x| x == marker.as_bytes())
+        .unwrap();
+    got[..end].to_vec()
+}
+
+/// What D30's tests have a pane write: OSC 9 and 777, by BEL and by ST.
+const NOTIFY: &[u8] = b"\x1b]9;one\x07\x1b]777;notify;Two;body two\x1b\\";
+
+/// D30 off (the default): a Ghostty client gets no notification from a
+/// pane, as from tmux 3.8, which drops them (input.c `input_osc_9`,
+/// `input_exit_osc`).
+#[test]
+fn notifications_off_reach_no_terminal() {
+    par::each(&bins(), |bin| {
+        let (w, a) = notify_world(bin.clone(), true);
+        let got = notify_emit(&w, &a, 0, NOTIFY);
+        assert_eq!(
+            notifications(&got),
+            Vec::<Vec<u8>>::new(),
+            "{}",
+            bin.display()
+        );
+    });
+}
+
+/// D30 on: a Ghostty client gets a background pane's OSC 9 and OSC 777,
+/// each in its own form, within Ghostty's limits (one a second, an
+/// identical one once in 5 s): a flood comes down to its first. `9;4`
+/// and the `ConEmu` forms are not notifications, and an OSC 9 by
+/// `DCS tmux;` passthrough arrives once, as passthrough.
+#[test]
+fn notifications_on_reach_a_ghostty_client() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), true);
+    w.cli(&["set", "-s", "vtmux-notifications", "on"]);
+    let ours = |n: &[u8]| notifications(n);
+    let got = notify_emit(
+        &w,
+        &a,
+        0,
+        b"\x1b]9;4;1;50\x07\x1b]9;2;box\x07\x1b]9;one\x07",
+    );
+    assert_eq!(ours(&got), [b"\x1b]9;one\x1b\\".to_vec()]);
+    // Later than a second after the one before, so this one goes too.
+    thread::sleep(Duration::from_millis(1100));
+    let got = notify_emit(&w, &a, 1, b"\x1b]777;notify;Two;body two\x1b\\");
+    assert_eq!(ours(&got), [b"\x1b]777;notify;Two;body two\x1b\\".to_vec()]);
+    thread::sleep(Duration::from_millis(1100));
+    let got = notify_emit(
+        &w,
+        &a,
+        2,
+        b"\x1b]9;f1\x07\x1b]9;f2\x07\x1b]777;notify;F;3\x07\x1b]9;f1\x07",
+    );
+    assert_eq!(ours(&got), [b"\x1b]9;f1\x1b\\".to_vec()], "a flood");
+    // Passthrough is as before: the payload raw, with nothing added
+    // (and a second after the flood, so an addition would not be cut).
+    thread::sleep(Duration::from_millis(1100));
+    let got = notify_emit(&w, &a, 3, b"\x1bPtmux;\x1b\x1b]9;wrapped\x07\x1b\\");
+    assert_eq!(ours(&got), [b"\x1b]9;wrapped\x07".to_vec()], "passthrough");
+}
+
+/// D30 on: a client whose terminal is not Ghostty gets nothing.
+#[test]
+fn notifications_on_skip_other_terminals() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), false);
+    w.cli(&["set", "-s", "vtmux-notifications", "on"]);
+    let got = notify_emit(&w, &a, 0, NOTIFY);
+    assert_eq!(notifications(&got), Vec::<Vec<u8>>::new());
+}

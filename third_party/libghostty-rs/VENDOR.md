@@ -42,6 +42,11 @@ Recorded per commit in git history; the list is kept current:
   (`GHOSTTY_TERMINAL_DATA_MEMORY_USAGE`, a sized struct, already in the
   bindings) re-exported as `terminal::MemoryUsage`; vtmux's compression
   tests read compressed pages and resident bytes from it.
+- `libghostty-vt/src/terminal.rs`: `Terminal::on_desktop_notification`
+  (`GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION`, `GhosttyTerminalDesktopNotification`,
+  already in the bindings): the title and body of an OSC 9 (not ConEmu)
+  or OSC 777 notification, as bytes. vtmux sends them on to Ghostty
+  clients (spec D30).
 - `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
   (name order, `git apply`) to the fetched ghostty; the source stamp
   records the commit and the patch contents. Not applied to a

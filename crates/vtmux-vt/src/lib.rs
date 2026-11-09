@@ -8,6 +8,7 @@
 pub mod capture;
 mod dcs;
 pub mod kitty_keys;
+pub mod notify;
 pub mod palette;
 pub mod progress;
 pub mod snapshot;
@@ -45,6 +46,7 @@ pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) {
 pub fn set_tmux_clusters(vs16_wide: bool) {
     libghostty_vt::unicode::set_tmux_clusters(true, vs16_wide);
 }
+pub use notify::Notification;
 pub use palette::PaletteState;
 pub use progress::{ProgressBar, ProgressState};
 pub use term::{

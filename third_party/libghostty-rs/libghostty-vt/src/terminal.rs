@@ -1774,6 +1774,32 @@ handlers! {
         }
     }
 
+    /// Call the given function when the running program asks for a desktop
+    /// notification: an OSC 9 that is not a ConEmu command, or
+    /// `OSC 777;notify;title;body`. The title is empty for OSC 9. Both are
+    /// the program's bytes, borrowed for the call only. (vtmux addition.)
+    pub fn on_desktop_notification(
+        &mut self,
+        tag = DESKTOP_NOTIFICATION,
+        from = GhosttyTerminalDesktopNotificationFn(
+            notification: *const ffi::TerminalDesktopNotification
+        ),
+        to = <'t>DesktopNotificationFn(&'t [u8], &'t [u8]),
+    ) |term, func| {
+        // SAFETY: libghostty passes a valid sized struct whose strings
+        // live for the duration of the callback. `size` covers both
+        // fields (they are the struct's first members after it).
+        let fields = unsafe {
+            let n = &*notification;
+            let end = std::mem::offset_of!(ffi::TerminalDesktopNotification, body)
+                + std::mem::size_of::<ffi::String>();
+            (n.size >= end).then(|| (n.title.to_bytes(), n.body.to_bytes()))
+        };
+        if let Some((title, body)) = fields {
+            func(&term, title, body);
+        }
+    }
+
     /// Call the given function when the running program performs a clipboard write.
     ///
     ///
