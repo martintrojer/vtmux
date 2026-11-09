@@ -306,21 +306,12 @@ impl World {
         );
     }
 
-    /// Poll until the server is gone: `ls` fails to connect. A server
-    /// that is exiting still accepts and at once closes a connection
-    /// (server.c `server_accept` while `server_exit`), which the client
-    /// reports as `server exited unexpectedly`; a command run then would
-    /// meet the same fate, so that is not gone yet.
+    /// [`common::wait_gone`].
     fn wait_gone(&self) {
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
+        common::wait_gone(|| {
             let ls = self.run(&["ls"]);
-            if ls.code != 0 && !ls.stderr.contains("server exited unexpectedly") {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        panic!("server did not exit ({})", self.bin.display());
+            (ls.code == 0, ls.stderr)
+        });
     }
 }
 

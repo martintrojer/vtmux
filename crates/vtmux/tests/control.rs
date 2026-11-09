@@ -1223,11 +1223,9 @@ fn too_far_behind_lets_a_stalled_client_go() {
     let (mut fast, mut c) = flood_with_a_stalled_client(&w, &[]);
     // Let go, the stalled client leaves its session and the list; how
     // soon after the age passes depends on the machine, so no fixed stall.
-    let end = Instant::now() + Duration::from_secs(20);
-    while w.run(&["lsc", "-F", "x"]).0.lines().count() > 1 {
-        assert!(Instant::now() < end, "stalled client never let go");
-        thread::sleep(Duration::from_millis(50));
-    }
+    common::wait("the stalled client to go", || {
+        w.run(&["lsc", "-F", "x"]).0.lines().count() <= 1
+    });
     c.start_reading();
     c.wait("%exit", |t| t.contains("%exit"));
     let _ = fast.kill();

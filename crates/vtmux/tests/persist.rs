@@ -11,7 +11,7 @@ mod common;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use vtmux_core::protocol;
 use vtmux_server::persist;
@@ -137,14 +137,14 @@ impl World {
     /// Wait for the server process to be gone.
     fn gone(&self) {
         let pid = self.pid.expect("server pid");
-        wait_until("the server exits", || {
+        common::wait("the server exits", || {
             rustix::process::test_kill_process(pid).is_err()
         });
     }
 
     /// Wait for the first checkpoint; its manifest.
     fn state_when_written(&self) -> PathBuf {
-        wait_until("a checkpoint", || {
+        common::wait("a checkpoint", || {
             state_dirs(&self.states(), &self.name)
                 .iter()
                 .any(|d| d.join(persist::MANIFEST).is_file())
@@ -163,7 +163,7 @@ impl World {
     /// (`server exited unexpectedly`, client.c `CLIENT_EXIT_LOST_SERVER`),
     /// as tmux's does, so a command run next waits for this.
     fn wait_no_server(&self) {
-        wait_until("no server listens", || {
+        common::wait("no server listens", || {
             self.run(&["ls"]).1.starts_with("no server running on ")
         });
     }
@@ -194,14 +194,6 @@ fn state_dirs(states: &Path, name: &str) -> Vec<PathBuf> {
         .collect();
     out.sort();
     out
-}
-
-fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(20);
-    while !f() {
-        assert!(Instant::now() < end, "timed out waiting until {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 fn mode(path: &Path) -> u32 {
@@ -350,7 +342,7 @@ fn a_layout_checkpoint_on_disk_holds_no_pane_text() {
             Some(&config),
         );
         w.ok(&["set", "-s", "vtmux-persist", setting]);
-        wait_until("the pane shows the text", || {
+        common::wait("the pane shows the text", || {
             w.ok(&["capture-pane", "-p", "-t", "a"]).contains(SECRET)
         });
         w.ok(&[
@@ -360,7 +352,7 @@ fn a_layout_checkpoint_on_disk_holds_no_pane_text() {
             "export PASSWORD=SENDKEYSSECRET",
             "Enter",
         ]);
-        wait_until("cat echoes the keys", || {
+        common::wait("cat echoes the keys", || {
             w.ok(&["capture-pane", "-p", "-t", "a"])
                 .matches("SENDKEYSSECRET")
                 .count()
@@ -529,7 +521,7 @@ fn a_second_server_on_a_locked_directory_writes_nothing() {
     let second = World::start_with(&["cat", "-"], &env2, Some(&socket), None);
     second.ok(&["set", "-s", "vtmux-persist", "layout"]);
     second.ok(&["rename-window", "-t", "a:0", "second"]);
-    wait_until("the second server reports the lock", || {
+    common::wait("the second server reports the lock", || {
         second
             .ok(&["show-messages"])
             .contains("in use by another server")
@@ -562,7 +554,7 @@ fn sigterm_checkpoints() {
 fn the_last_session_gone_checkpoints() {
     let w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
     w.ok(&["set", "-s", "vtmux-persist", "layout"]);
-    wait_until("a periodic checkpoint", || {
+    common::wait("a periodic checkpoint", || {
         w.state().join(persist::MANIFEST).is_file()
     });
     w.ok(&["kill-session", "-t", "a"]);
@@ -581,7 +573,7 @@ fn a_changed_server_is_checkpointed_on_its_interval() {
     w.ok(&["set", "-s", "vtmux-persist", "layout"]);
     let manifest = w.state_when_written();
     w.ok(&["new-window", "-d", "-n", "later", "cat", "-"]);
-    wait_until("a checkpoint with the new window", || {
+    common::wait("a checkpoint with the new window", || {
         persist::load(&w.state()).is_ok_and(|(s, _)| s.windows.iter().any(|x| x.name == "later"))
     });
     assert!(w.state().join(persist::MANIFEST_PREV).is_file());
@@ -616,7 +608,7 @@ impl World {
     /// everything done before it too.
     fn wait_saved(&self) {
         self.ok(&["set", "-g", "@saved", "yes"]);
-        wait_until("a checkpoint with @saved", || {
+        common::wait("a checkpoint with @saved", || {
             persist::load(&self.state())
                 .is_ok_and(|(s, _)| s.server.session_options.iter().any(|o| o.name == "@saved"))
         });
@@ -792,7 +784,7 @@ fn attach_with_no_server_restores_and_attaches() {
     w.wait_saved();
     w.kill_9();
     let client = Attached::new(&w, &["attach", "-t", "a"]);
-    wait_until("the attached client shows the restored pane", || {
+    common::wait("the attached client shows the restored pane", || {
         let screen = client.screen();
         screen.contains("Pane is dead") && screen.contains("0:restored*")
     });
@@ -805,7 +797,7 @@ impl World {
     /// `cat`'s copy both show, so the next line's echo can't come between.
     fn echo(&self, pane: &str, word: &str) {
         self.ok(&["send-keys", "-t", pane, word, "Enter"]);
-        wait_until("the pane echoing", || {
+        common::wait("the pane echoing", || {
             self.ok(&["capture-pane", "-p", "-t", pane])
                 .matches(word)
                 .count()
@@ -904,7 +896,7 @@ fn respawn_pane_restarts_the_saved_command_in_its_saved_cwd() {
     w.repid();
     assert_eq!(w.ok(&["display", "-p", "-t", "a:1", "#{pane_dead}"]), "1\n");
     w.ok(&["respawn-pane", "-t", "a:1"]);
-    wait_until("the pane runs its command in its cwd", || {
+    common::wait("the pane runs its command in its cwd", || {
         w.ok(&["capture-pane", "-p", "-t", "a:1"])
             .contains(&format!("in={cwd}\n"))
     });
@@ -921,7 +913,7 @@ fn respawn_pane_restarts_the_saved_command_in_its_saved_cwd() {
             here = std::fs::canonicalize(w.dir.path()).unwrap().display()
         )
     );
-    wait_until("the respawned pane runs cat", || {
+    common::wait("the respawned pane runs cat", || {
         w.ok(&["display", "-p", "-t", "a:2", "#{pane_current_command}"]) == "cat\n"
     });
 }
@@ -1122,7 +1114,7 @@ fn a_copy_mode_page_past_the_limit_is_left_out_of_the_restore() {
             "#{history_size} #{pane_in_mode}",
         ])
     };
-    wait_until("the long history", || {
+    common::wait("the long history", || {
         w.ok(&[
             "display",
             "-p",
@@ -1172,13 +1164,13 @@ fn full_set_to_layout_leaves_no_history_on_disk() {
         &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
     );
     w.ok(&["set", "-s", "vtmux-persist", "full"]);
-    wait_until("the pane has history", || {
+    common::wait("the pane has history", || {
         w.ok(&["display", "-p", "-t", "a", "#{history_size}"]) != "0\n"
     });
     // Two full checkpoints, a change between: history in `manifest.prev`.
     w.wait_saved();
     w.ok(&["set", "-g", "@again", "yes"]);
-    wait_until("both manifests hold history", || {
+    common::wait("both manifests hold history", || {
         [persist::MANIFEST, persist::MANIFEST_PREV]
             .iter()
             .all(|m| persist::load_file(&w.state(), m).is_ok_and(|(s, _)| !s.pages().is_empty()))
@@ -1186,7 +1178,7 @@ fn full_set_to_layout_leaves_no_history_on_disk() {
     assert_ne!(files(&w.state().join(persist::CHUNKS)).len(), 0);
 
     w.ok(&["set", "-s", "vtmux-persist", "layout"]);
-    wait_until("a layout checkpoint, and no history left", || {
+    common::wait("a layout checkpoint, and no history left", || {
         let dir = w.state();
         [persist::MANIFEST, persist::MANIFEST_PREV].iter().all(|m| {
             persist::load_file(&dir, m).is_ok_and(|(s, _)| {

@@ -81,27 +81,13 @@ impl World {
     fn attach(&self, args: &[&str]) -> Attached {
         self.attach_sized(args, 40, 10)
     }
-    /// Poll until the server is gone: `ls` fails to connect. tmux's
-    /// exiting server still accepts and at once closes a connection
-    /// (server.c `server_accept` while `server_exit`), which the client
-    /// reports as `server exited unexpectedly`; a command run then would
-    /// meet the same fate, so that is not gone yet.
+    /// [`common::wait_gone`].
     fn wait_gone(&self) {
-        let end = Instant::now() + Duration::from_secs(5);
-        loop {
+        common::wait_gone(|| {
             let ls = self.cli(&["ls"]);
-            if !ls.status.success()
-                && !String::from_utf8_lossy(&ls.stderr).contains("server exited unexpectedly")
-            {
-                return;
-            }
-            assert!(
-                Instant::now() < end,
-                "server did not exit ({})",
-                self.bin.display()
-            );
-            thread::sleep(Duration::from_millis(50));
-        }
+            let stderr = String::from_utf8_lossy(&ls.stderr).into_owned();
+            (ls.status.success(), stderr)
+        });
     }
     fn attach_sized(&self, args: &[&str], cols: u16, rows: u16) -> Attached {
         self.attach_env(args, cols, rows, &[])
@@ -289,11 +275,9 @@ impl Attached {
         // What the client wrote last (its teardown, `[detached]`) may still
         // be in the terminal: read it to the end (a slow terminal takes a
         // while), unless a stalled terminal holds it there.
-        let end = Instant::now() + Duration::from_secs(10);
-        while !self.eof.load(Ordering::Acquire) && !self.paused.load(Ordering::Relaxed) {
-            assert!(Instant::now() < end, "terminal never closed");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait("the terminal to close", || {
+            self.eof.load(Ordering::Acquire) || self.paused.load(Ordering::Relaxed)
+        });
         let text = self.text();
         let tail: String = text
             .chars()
@@ -855,18 +839,11 @@ fn send_keys_k_delivers_keys_to_the_pane() {
                 .status
                 .success()
         );
-        let start = Instant::now();
-        let bytes = loop {
-            let bytes = std::fs::read(&out).unwrap_or_default();
-            if bytes.ends_with(b".") {
-                break bytes;
-            }
-            assert!(
-                start.elapsed() < Duration::from_secs(5),
-                "{want_mode}: {bytes:?}"
-            );
-            thread::sleep(Duration::from_millis(20));
-        };
+        let bytes = common::wait_for(
+            want_mode,
+            || std::fs::read(&out).unwrap_or_default(),
+            |b| b.ends_with(b"."),
+        );
         let keys: Vec<u8> = bytes[..bytes.len() - 1].to_vec();
         // Each key is followed by the `|` mark, so the last one is too.
         let got = String::from_utf8_lossy(&keys);
@@ -894,19 +871,11 @@ fn pasted_bytes_reach_the_pane_as_sent() {
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
         a.wait(|_| pane_line(&w) == "R");
         let read_until = |end: &[u8]| {
-            let start = Instant::now();
-            loop {
-                let bytes = std::fs::read(&out).unwrap_or_default();
-                if bytes.ends_with(end) {
-                    break bytes;
-                }
-                assert!(
-                    start.elapsed() < Duration::from_secs(5),
-                    "{}: {bytes:?}",
-                    bin.display()
-                );
-                thread::sleep(Duration::from_millis(20));
-            }
+            common::wait_for(
+                &bin.display().to_string(),
+                || std::fs::read(&out).unwrap_or_default(),
+                |b| b.ends_with(end),
+            )
         };
         a.keys(b"\x1b[200~a\xe6b\xf0\x9f\x98\x80c\x1b[A\x1b[201~.");
         let got = read_until(b".");
@@ -1002,18 +971,11 @@ fn typed_meta_bspace_follows_the_backspace_option() {
             thread::sleep(Duration::from_millis(30));
         }
         a.keys(b".");
-        let start = Instant::now();
-        let bytes = loop {
-            let bytes = std::fs::read(&out).unwrap_or_default();
-            if bytes.ends_with(b".") {
-                break bytes;
-            }
-            assert!(
-                start.elapsed() < Duration::from_secs(5),
-                "{option} {want_mode} {format}: {bytes:?}"
-            );
-            thread::sleep(Duration::from_millis(20));
-        };
+        let bytes = common::wait_for(
+            &format!("{option} {want_mode} {format}"),
+            || std::fs::read(&out).unwrap_or_default(),
+            |b| b.ends_with(b"."),
+        );
         format!(
             "{option} {want_mode} {format}: {}",
             String::from_utf8_lossy(&bytes).escape_debug()
@@ -1659,11 +1621,7 @@ fn list_clients_default_template_and_client_variables() {
             .spawn()
             .unwrap();
         let listed = |w: &World| String::from_utf8_lossy(&w.cli(&["lsc"]).stdout).into_owned();
-        let start = Instant::now();
-        while listed(&w).lines().count() < 2 {
-            assert!(start.elapsed() < Duration::from_secs(5), "{}", listed(&w));
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait_for("two clients", || listed(&w), |l| l.lines().count() >= 2);
         let pid = control.id();
         let tty = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_tty}"]).stdout)
             .lines()
@@ -2809,17 +2767,14 @@ fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static st
     thread::sleep(Duration::from_millis(50));
     a.resize(62, 20);
     // The server has the second size once the window has it.
-    let end = Instant::now() + Duration::from_secs(5);
-    while String::from_utf8_lossy(
-        &w.cli(&["display", "-p", "-t", "a", "#{window_width}"])
-            .stdout,
-    )
-    .trim()
-        != "62"
-    {
-        assert!(Instant::now() < end, "window never got the second size");
-        thread::sleep(Duration::from_millis(10));
-    }
+    common::wait("the window's second size", || {
+        String::from_utf8_lossy(
+            &w.cli(&["display", "-p", "-t", "a", "#{window_width}"])
+                .stdout,
+        )
+        .trim()
+            == "62"
+    });
     std::fs::write(&go, b"").unwrap();
     thread::sleep(Duration::from_millis(600));
     let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
@@ -3359,11 +3314,9 @@ fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
         assert!(w.cli(&["kill-server"]).status.success());
         a.exited(1);
         // Written as the server exits: wait for the whole line.
-        let end = Instant::now() + Duration::from_secs(10);
-        while !std::fs::read_to_string(&file).is_ok_and(|t| t.ends_with('\n')) {
-            assert!(Instant::now() < end, "history file not written");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait("the history file", || {
+            std::fs::read_to_string(&file).is_ok_and(|t| t.ends_with('\n'))
+        });
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             "command:set -g @h one\n",
@@ -3423,11 +3376,9 @@ fn history_file_keeps_lines_that_are_not_utf8() {
         );
         std::fs::remove_file(&file).unwrap();
         assert!(w.cli(&["kill-server"]).status.success());
-        let end = Instant::now() + Duration::from_secs(10);
-        while !std::fs::read(&file).is_ok_and(|t| t.ends_with(b"\n") && t.len() == data.len()) {
-            assert!(Instant::now() < end, "history file not written");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait("the history file", || {
+            std::fs::read(&file).is_ok_and(|t| t.ends_with(b"\n") && t.len() == data.len())
+        });
         assert_eq!(std::fs::read(&file).unwrap(), data, "{}", w.bin.display());
     });
 }
@@ -4619,15 +4570,10 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
             }
             let start = a.bytes.lock().unwrap().len();
             w.cli(&["send-keys", "-t", target, "Enter"]);
-            let end = Instant::now() + Duration::from_secs(5);
-            loop {
+            common::wait(&format!("{} {mode}: the marker", bin.display()), || {
                 let out = w.cli(&["capture-pane", "-p", "-t", target]);
-                if String::from_utf8_lossy(&out.stdout).contains('Y') {
-                    break;
-                }
-                assert!(Instant::now() < end, "{} {mode}: no marker", bin.display());
-                thread::sleep(Duration::from_millis(20));
-            }
+                String::from_utf8_lossy(&out.stdout).contains('Y')
+            });
             thread::sleep(Duration::from_millis(300));
             let got = a.bytes.lock().unwrap()[start..].to_vec();
             let has = |needle: &[u8]| got.windows(needle.len()).any(|x| x == needle);
@@ -4789,15 +4735,10 @@ fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
             // Let the redraw of this cycle happen before the next.
             thread::sleep(Duration::from_millis(500));
         }
-        let end = Instant::now() + Duration::from_secs(5);
-        loop {
+        common::wait(&format!("{}: the marker", bin.display()), || {
             let out = w.cli(&["capture-pane", "-p", "-t", "a:0"]);
-            if String::from_utf8_lossy(&out.stdout).contains('Y') {
-                break;
-            }
-            assert!(Instant::now() < end, "{}: no marker", bin.display());
-            thread::sleep(Duration::from_millis(20));
-        }
+            String::from_utf8_lossy(&out.stdout).contains('Y')
+        });
         thread::sleep(Duration::from_millis(300));
         let got = a.bytes.lock().unwrap()[start..].to_vec();
         let n = got.windows(OSC52.len()).filter(|x| *x == OSC52).count();
@@ -4980,11 +4921,7 @@ fn xtversion_reply_names_the_terminal() {
             |w: &World| String::from_utf8_lossy(&w.cli(&["lsc", "-F", F]).stdout).into_owned();
         let mut out = lsc(&w);
         a.keys(b"\x1bP>|foot(1.2)\x1b\\");
-        let end = Instant::now() + Duration::from_secs(5);
-        while !lsc(&w).starts_with("foot") {
-            assert!(Instant::now() < end);
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait("the foot client", || lsc(&w).starts_with("foot"));
         out.push_str(&lsc(&w));
         a.keys(b"x");
         a.wait(|_| pane_line(&w) == "x");
@@ -5031,15 +4968,11 @@ fn attached_keys_reach_the_pane_in_its_key_mode() {
             // C-S-a and S-Enter as CSI u, C-Tab, M-C-Left as xterm, then
             // Escape + a and a plain `.` to end.
             a.keys(b"\x1b[97;6u\x1b[13;2u\x1b[9;5u\x1b[1;7D\x1b[1;5D\x1ba.");
-            let end = Instant::now() + Duration::from_secs(5);
-            let bytes = loop {
-                let bytes = std::fs::read(&file).unwrap_or_default();
-                if bytes.ends_with(b".") {
-                    break bytes;
-                }
-                assert!(Instant::now() < end, "{mode}: {bytes:?}");
-                thread::sleep(Duration::from_millis(20));
-            };
+            let bytes = common::wait_for(
+                mode,
+                || std::fs::read(&file).unwrap_or_default(),
+                |b| b.ends_with(b"."),
+            );
             out.push(format!(
                 "{mode}: {}",
                 String::from_utf8_lossy(&bytes).escape_debug()
@@ -5781,11 +5714,7 @@ const RECORDING: &str = "recording";
 /// `wheel_up_pane_enters_copy_mode_or_forwards`).
 fn recorder_ready(a: &Attached, file: &std::path::Path) {
     a.wait(|a| pane_text(a).contains(RECORDING));
-    let end = Instant::now() + Duration::from_secs(5);
-    while !file.exists() {
-        assert!(Instant::now() < end, "no {}", file.display());
-        thread::sleep(Duration::from_millis(20));
-    }
+    common::wait(&file.display().to_string(), || file.exists());
 }
 
 /// Type `.` and wait (at most 5 s) for `file` to end with it: everything
@@ -5883,11 +5812,9 @@ fn mouse_forwarding_matches_tmux() {
             ] {
                 assert!(w.cli(cmd).status.success(), "{cmd:?}");
             }
-            let end = Instant::now() + Duration::from_secs(5);
-            while display_t(&w, "a:0.1", "#{mouse_any_flag}") != "1" {
-                assert!(Instant::now() < end);
-                thread::sleep(Duration::from_millis(20));
-            }
+            common::wait("mouse_any_flag", || {
+                display_t(&w, "a:0.1", "#{mouse_any_flag}") == "1"
+            });
             let mut a = w.attach(&["attach", "-t", "a"]);
             a.wait(|a| pane_text(a).contains("[a]"));
             a.keys(&forwarded_events(x10));
@@ -5952,11 +5879,7 @@ fn mouse_forwarding_far_columns() {
                 240,
                 5,
             );
-            let end = Instant::now() + Duration::from_secs(5);
-            while display(&w, "#{mouse_any_flag}") != "1" {
-                assert!(Instant::now() < end);
-                thread::sleep(Duration::from_millis(20));
-            }
+            common::wait("mouse_any_flag", || display(&w, "#{mouse_any_flag}") == "1");
             // A click at column 230, row 2.
             if report == "sgr" {
                 a.keys(b"\x1b[<0;230;2M\x1b[<0;230;2m");
@@ -6171,15 +6094,12 @@ fn border_drag_in_one_read_fires_each_step() {
                 s
             });
             // The control client is attached once it is listed.
-            let start = Instant::now();
-            while String::from_utf8_lossy(&w.cli(&["lsc"]).stdout)
-                .lines()
-                .count()
-                < 2
-            {
-                assert!(start.elapsed() < Duration::from_secs(5), "{what}");
-                thread::sleep(Duration::from_millis(20));
-            }
+            common::wait(what, || {
+                String::from_utf8_lossy(&w.cli(&["lsc"]).stdout)
+                    .lines()
+                    .count()
+                    >= 2
+            });
             assert!(w.cli(&["set", "-g", "@n", ""]).status.success());
             a.keys(bytes.as_bytes());
             let hooks = stable(Duration::from_millis(500), || {
@@ -6394,11 +6314,9 @@ fn default_bindings_drag_or_forward() {
         ] {
             assert!(w.cli(cmd).status.success(), "{cmd:?}");
         }
-        let end = Instant::now() + Duration::from_secs(5);
-        while display_t(&w, "a:0.1", "#{mouse_any_flag}") != "1" {
-            assert!(Instant::now() < end);
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait("mouse_any_flag", || {
+            display_t(&w, "a:0.1", "#{mouse_any_flag}") == "1"
+        });
         let mut a = w.attach(&["attach", "-t", "a"]);
         a.wait(|a| pane_text(a).contains("[a]"));
         a.wait(|a| pane_text(a).contains("gamma"));
@@ -6550,11 +6468,9 @@ fn tmux_shim_reaches_this_server_from_children() {
             "run-shell 'tmux set -g @hook \"$(tmux display -p ok)\"'",
         ]);
         cli(&["neww", "-d"]);
-        let end = Instant::now() + Duration::from_secs(5);
-        while cli(&["show", "-gv", "@hook"]) != "ok" {
-            assert!(Instant::now() < end, "{ctx}: hook");
-            thread::sleep(Duration::from_millis(50));
-        }
+        common::wait(&format!("{ctx}: hook"), || {
+            cli(&["show", "-gv", "@hook"]) == "ok"
+        });
 
         // A #() job in the status line.
         cli(&["set", "-g", "status-interval", "1"]);
@@ -6562,11 +6478,9 @@ fn tmux_shim_reaches_this_server_from_children() {
         a.wait(|a| status_row(a).contains("<fmtjob>"));
 
         cli(&["kill-server"]);
-        let end = Instant::now() + Duration::from_secs(5);
-        while std::path::Path::new(&shim_dir).exists() {
-            assert!(Instant::now() < end, "{ctx}: shim dir left behind");
-            thread::sleep(Duration::from_millis(50));
-        }
+        common::wait(&format!("{ctx}: shim dir left behind"), || {
+            !std::path::Path::new(&shim_dir).exists()
+        });
     }
 }
 
@@ -6843,11 +6757,9 @@ fn suspend_client_stops_and_sigcont_redraws() {
 
         a.keys(b"\x02\x1a");
         a.wait_labelled(&ctx, limit, |a| a.text().contains("STOPPED"));
-        let end = Instant::now() + limit;
-        while proc_state(pid) != 'T' {
-            assert!(Instant::now() < end, "{ctx}: client {pid} not stopped");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait(&format!("{ctx}: client {pid} to stop"), || {
+            proc_state(pid) == 'T'
+        });
         // The terminal was handed back before the stop.
         let text = a.text();
         let stopped = text.rfind("STOPPED").unwrap();
@@ -6859,11 +6771,9 @@ fn suspend_client_stops_and_sigcont_redraws() {
         // A suspended client is not listed.
         assert_eq!(cli(&["lsc"]), "", "{ctx}");
         w.cli(&["send-keys", "-t", "a", "zebra", "Enter"]);
-        let end = Instant::now() + limit;
-        while !cli(&["capture-pane", "-p", "-t", "a"]).contains("zebra") {
-            assert!(Instant::now() < end, "{ctx}: pane output");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait(&format!("{ctx}: pane output"), || {
+            cli(&["capture-pane", "-p", "-t", "a"]).contains("zebra")
+        });
         let before = a.text().len();
         thread::sleep(Duration::from_millis(200));
         assert_eq!(proc_state(pid), 'T', "{ctx}");
@@ -6894,16 +6804,8 @@ fn line_count(path: &std::path::Path) -> usize {
 
 /// Wait until `path` has `n` lines.
 fn wait_lines(ctx: &str, path: &std::path::Path, n: usize) {
-    let end = Instant::now() + Duration::from_secs(5);
-    while line_count(path) < n {
-        assert!(
-            Instant::now() < end,
-            "{ctx}: {} has {} lines, want {n}",
-            path.display(),
-            line_count(path)
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+    let what = format!("{ctx}: {} lines in {}", n, path.display());
+    common::wait_for(&what, || line_count(path), |&got| got >= n);
 }
 
 /// `server_lock_client` (server-fn.c:197-218) and client.c `MSG_LOCK`: the
@@ -6969,11 +6871,9 @@ fn lock_client_runs_the_lock_command_and_redraws() {
         // Not listed, and nothing drawn while locked.
         assert_eq!(cli(&["lsc"]), "", "{ctx}");
         w.cli(&["send-keys", "-t", "a", "yak", "Enter"]);
-        let end = Instant::now() + limit;
-        while !cli(&["capture-pane", "-p", "-t", "a"]).contains("yak\nyak") {
-            assert!(Instant::now() < end, "{ctx}: pane output");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait(&format!("{ctx}: pane output"), || {
+            cli(&["capture-pane", "-p", "-t", "a"]).contains("yak\nyak")
+        });
         let before = a.text().len();
         thread::sleep(Duration::from_millis(200));
         assert_eq!(a.text().len(), before, "{ctx}: drawn while locked");
@@ -7348,14 +7248,11 @@ fn blend_world(cmds: &[&[&str]], env: &[(&str, &str)]) -> (World, Attached) {
     }
     // Both panes have drawn before the client attaches, so its frames do
     // not depend on when their output arrived.
-    let end = Instant::now() + Duration::from_secs(5);
     for t in ["a:0.0", "a:0.1"] {
-        while !String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-t", t]).stdout)
-            .starts_with("RED")
-        {
-            assert!(Instant::now() < end, "pane {t}");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait(&format!("pane {t}"), || {
+            String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-t", t]).stdout)
+                .starts_with("RED")
+        });
     }
     let a = w.attach_env(&["attach", "-t", "a"], 40, 6, env);
     a.wait(|a| blend_cell(a, 0).text == "R" && blend_cell(a, RIGHT).text == "R");
@@ -7850,21 +7747,13 @@ fn pane_lifecycles_leave_no_descriptor_behind() {
 /// Wait (at most 10 s) until the file a `cat > file` pane writes holds
 /// exactly `want`.
 fn file_is(path: &std::path::Path, want: &[u8]) {
-    let end = Instant::now() + Duration::from_secs(10);
-    loop {
-        let got = std::fs::read(path).unwrap_or_default();
-        if got == want {
-            return;
-        }
-        assert!(
-            Instant::now() < end,
-            "{}: {:?}, want {:?}",
-            path.display(),
-            String::from_utf8_lossy(&got),
-            String::from_utf8_lossy(want)
-        );
-        thread::sleep(Duration::from_millis(20));
-    }
+    let what = format!(
+        "{} to be {:?}",
+        path.display(),
+        String::from_utf8_lossy(want)
+    );
+    let read = || String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned();
+    common::wait_for(&what, read, |got| got.as_bytes() == want);
 }
 
 /// D29 on (spec, *Protocol extensions (D28)*): a program that pushes kitty
@@ -7965,11 +7854,7 @@ fn kitty_keys_grant_follows_the_program() {
             out.display()
         );
         cli_ok(&w, &["respawn-pane", "-k", "-t", "a", "sh", "-c", &script]);
-        let end = Instant::now() + Duration::from_secs(10);
-        while pane_line(&w) != "R" {
-            assert!(Instant::now() < end, "{what}: {:?}", pane_line(&w));
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait(&format!("{what}: the pane's R"), || pane_line(&w) == "R");
         // The option flips after the program's push: neither way changes
         // what it was granted.
         let flipped = if option == "on" { "off" } else { "on" };
@@ -8025,13 +7910,10 @@ fn notify_world(bin: PathBuf, ghostty: bool) -> (World, Attached) {
     a.wait(|a| status_row(a).contains("1:other*"));
     if ghostty {
         a.keys(b"\x1bP>|ghostty 1.2.3\x1b\\");
-        let end = Instant::now() + Duration::from_secs(5);
-        while !String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_termtype}"]).stdout)
-            .starts_with("ghostty ")
-        {
-            assert!(Instant::now() < end, "no termtype");
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait("the termtype", || {
+            String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_termtype}"]).stdout)
+                .starts_with("ghostty ")
+        });
     }
     (w, a)
 }
@@ -8264,18 +8146,11 @@ impl<'a> InbandLog<'a> {
 
     /// `pane`'s plain text once it holds `has`.
     fn shows(&self, pane: &str, has: &str) {
-        let end = Instant::now() + Duration::from_secs(20);
-        loop {
-            let text = cli_ok(self.w, &["capture-pane", "-p", "-t", pane]);
-            if text.contains(has) {
-                return;
-            }
-            assert!(
-                Instant::now() < end,
-                "{pane} never showed {has:?}: {text:?}"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait_for(
+            &format!("{pane} to show {has:?}"),
+            || cli_ok(self.w, &["capture-pane", "-p", "-t", pane]),
+            |text| text.contains(has),
+        );
     }
 
     /// `pane`'s size, columns and rows.
@@ -8315,16 +8190,11 @@ impl<'a> InbandLog<'a> {
         let m = format!("<{}>", self.marks);
         cli_ok(self.w, &["send-keys", "-t", pane, "-l", &m]);
         self.want.push_str(&m);
-        let end = Instant::now() + Duration::from_secs(20);
-        loop {
-            let got =
-                String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned();
-            if got == self.want {
-                return;
-            }
-            assert!(Instant::now() < end, "log {got:?}, want {:?}", self.want);
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait_for(
+            &format!("the log to be {:?}", self.want),
+            || String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned(),
+            |got| *got == self.want,
+        );
     }
 
     /// The program in `pane` has started; `granted`: it was sent a report
@@ -8344,11 +8214,9 @@ impl<'a> InbandLog<'a> {
         f();
         let after = self.size(pane);
         assert_ne!(before, after, "{what} changes {pane}'s size");
-        let end = Instant::now() + Duration::from_secs(20);
-        while self.tty_size(pane) != after {
-            assert!(Instant::now() < end, "{what}: {pane}'s tty never {after:?}");
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait(&format!("{what}: {pane}'s tty never {after:?}"), || {
+            self.tty_size(pane) == after
+        });
         if reported {
             self.want.push_str(&Self::report(after));
         }
@@ -8359,24 +8227,12 @@ impl<'a> InbandLog<'a> {
 /// Wait until window `a:w` is `size` (`WxH`): a client's resize reaches the
 /// server on its own time.
 fn window_is(w: &World, size: &str) {
-    let end = Instant::now() + Duration::from_secs(20);
-    loop {
-        let got = cli_ok(
-            w,
-            &[
-                "display",
-                "-p",
-                "-t",
-                "a:w",
-                "#{window_width}x#{window_height}",
-            ],
-        );
-        if got == size {
-            return;
-        }
-        assert!(Instant::now() < end, "window {got}, want {size}");
-        thread::sleep(Duration::from_millis(10));
-    }
+    let format = "#{window_width}x#{window_height}";
+    common::wait_for(
+        &format!("window {size}"),
+        || cli_ok(w, &["display", "-p", "-t", "a:w", format]),
+        |got| got == size,
+    );
 }
 
 /// D31 on: a program that sets `?2048h` gets a report at once, then one

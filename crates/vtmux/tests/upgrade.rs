@@ -8,6 +8,8 @@
 //! (a listing, a line, bytes on a terminal), never a fixed sleep.
 mod common;
 
+use common::wait;
+
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -364,14 +366,6 @@ fn output_retrying(make: impl Fn() -> Command) -> std::process::Output {
             }
             other => return other.unwrap(),
         }
-    }
-}
-
-fn wait(what: &str, mut done: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(20);
-    while !done() {
-        assert!(Instant::now() < end, "timed out waiting for {what}");
-        thread::sleep(Duration::from_millis(20));
     }
 }
 
