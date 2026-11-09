@@ -3436,7 +3436,7 @@ impl Server {
     /// output for [`HIDDEN_VIEW_IDLE`] ([`hidden_view_kept`]): an idle
     /// hidden pane keeps only its terminal, and its view is read again
     /// when it is drawn (about 0.7 MB per full 100x50 pane;
-    /// `docs/PERFORMANCE.md`, *Hidden panes*). A busy one keeps it, as
+    /// `docs/test-health/2026-11-09-performance-detail.md`, *Hidden panes*). A busy one keeps it, as
     /// each synchronized update reads it (`?2026h` holds the screen, and
     /// its end compares the rows): rebuilt from a whole-screen read at
     /// every update, that cost 5x tmux's CPU with agent TUIs in hidden

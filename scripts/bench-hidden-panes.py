@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hidden-pane memory and window-switch latency (docs/PERFORMANCE.md, *Hidden panes*).
+"""Hidden-pane memory and window-switch latency (docs/test-health/2026-11-09-performance-detail.md, *Hidden panes*).
 
     python3 scripts/bench-hidden-panes.py <binary> <-L label> [windows=100]
 

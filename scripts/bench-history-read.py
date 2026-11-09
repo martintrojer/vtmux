@@ -22,7 +22,7 @@ characters (a file cached under $TMPDIR), one attached 120x40 client in a pty
 a status) and a character past ASCII, as coloured logs do.
 
 One line per line count on stdout. Works for tmux and vtmux alike. Results:
-docs/PERFORMANCE.md, *Copy mode and search*.
+docs/PERFORMANCE.md, *Big histories*.
 """
 
 import fcntl

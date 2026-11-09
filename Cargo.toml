@@ -25,7 +25,7 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 module_name_repetitions = "allow"
 
-# The shipped binary (docs/PERFORMANCE.md, *Binary size and build profile*):
+# The shipped binary (docs/PERFORMANCE.md, *Binary and build profile*):
 # whole-program LTO in one codegen unit is 9% smaller stripped and 7-18% less
 # server CPU on render-bound work, for about 10 s more build. LTO covers the
 # Rust crates only; libghostty-vt's Zig archive links as native code, still

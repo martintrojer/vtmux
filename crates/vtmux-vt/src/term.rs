@@ -1787,7 +1787,7 @@ impl PaneTerm {
     /// Drop the view [`Self::screen`] keeps (the copied grid and Ghostty's
     /// render state) for a pane no client shows; the next
     /// [`Self::screen`] reads every row again. A 100x50 pane's view is
-    /// about 0.7 MB (`docs/PERFORMANCE.md`, *Hidden panes*).
+    /// about 0.7 MB (`docs/test-health/2026-11-09-performance-detail.md`, *Hidden panes*).
     ///
     /// # Panics
     /// Only while a view returned by [`Self::screen`] is still held.

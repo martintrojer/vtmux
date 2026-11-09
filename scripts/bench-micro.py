@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Micro-benchmarks of the vtmux server against tmux 3.8 that bench.py does not cover
-(docs/PERFORMANCE.md, *Micro-benchmarks*). Reuses bench.py's servers, clients and probes.
+(docs/PERFORMANCE.md, *Agent panes and many clients*). Reuses bench.py's servers, clients and probes.
 
 Usage: mise exec -- python3 scripts/bench-micro.py <scenario>...
 Scenarios:

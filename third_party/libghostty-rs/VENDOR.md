@@ -224,7 +224,7 @@ Recorded per commit in git history; the list is kept current:
   copied from it; `Cell` is `#[repr(transparent)]` over `ffi::Cell` for
   that. A capture of a 1M-line history reads a row per line: the
   allocation, memset and copy were about 10% of `capture-pane -S -`
-  (`docs/PERFORMANCE.md`, *Reading all of a history*).
+  (`docs/test-health/2026-11-09-performance-detail.md`, *Reading all of a history*).
 
 - `patches/0010-palette-256-form.patch` (`style.zig` `Style.Flags`,
   `bgCell`, `Screen.zig` `setAttribute`, `page.zig` `Cell.content`,

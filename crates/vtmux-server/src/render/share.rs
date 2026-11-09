@@ -1,5 +1,5 @@
 //! One turn's window drawing and frame, shared between the clients that
-//! show the same thing (docs/PERFORMANCE.md, *Many clients*).
+//! show the same thing (docs/test-health/2026-11-09-perf-many-clients.md).
 //!
 //! tmux writes each pane update to every client's terminal as it comes;
 //! vtmux composes a whole frame per client (D14), so n clients on one
