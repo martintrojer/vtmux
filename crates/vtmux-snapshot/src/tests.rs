@@ -500,6 +500,37 @@ fn damaged_bodies_with_a_matching_hash_fail_without_panicking() {
     assert_eq!(decode(&frame(&body)), Err(Error::Truncated));
 }
 
+/// Rows keeping tmux's line flags, added within v1 under
+/// [`TMUX_LINE_FLAGS_FEATURE`], round-trip, on the screen and in history
+/// pages; the golden stream has none.
+#[test]
+fn kept_line_flags_round_trip() {
+    let mut s = sample();
+    assert!(!s.keeps_line_flags());
+    s.meta.requires = vec![TMUX_LINE_FLAGS_FEATURE.into()];
+    let term = s.panes[0].term.as_mut().unwrap();
+    term.primary.rows[0].kept.extended = true;
+    assert!(s.keeps_line_flags());
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+
+    let mut s = sample();
+    s.meta.requires = vec![TMUX_LINE_FLAGS_FEATURE.into()];
+    let term = s.panes[0].term.as_mut().unwrap();
+    let row = Row {
+        kept: KeptLineFlags {
+            extended: false,
+            hyperlink: true,
+        },
+        ..sample_row()
+    };
+    term.primary.history = vec![HistoryPage::from_rows(&[row], true)];
+    assert!(s.keeps_line_flags());
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(!golden.keeps_line_flags());
+}
+
 #[test]
 fn a_stream_requiring_an_unknown_feature_is_refused() {
     let mut s = sample();

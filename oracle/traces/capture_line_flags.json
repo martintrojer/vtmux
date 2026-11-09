@@ -1,0 +1,154 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "capture_line_flags",
+  "inputs": {
+    "name": "capture_line_flags",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '\\343\\201\\202BCDE\\rX\\nA\\343\\201\\202B\\r\\033[2CX\\n\\033]8;;http://e\\033\\\\ab\\033]8;;\\033\\\\\\rxy\\n\\033[38;2;1;2;3mab\\033[m\\rxy\\n\\343\\201\\202\\033[2Kc\\nplain'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pNF",
+          "-S",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pR"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "4"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pF",
+          "-S",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "10"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pF",
+          "-S",
+          "-"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "X X BCDE    \nX A XB \nHX xy   \nX xy   \n-   c  \n- plain     \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "G 10x4 (2/2000)\n\tL 0 (-) flags=EXTENDED[2] 6/10\n\t\tC 0,0 data=(1,1,X) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,2 data=(1,1,B) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,3 data=(1,1,C) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,4 data=(1,1,D) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,5 data=(1,1,E) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,6 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,7 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,8 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,9 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 1 (-) flags=EXTENDED[2] 4/5\n\t\tC 1,0 data=(1,1,A) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,2 data=(1,1,X) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,3 data=(1,1,B) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 2 (0) flags=EXTENDED,HYPERLINK[102] 2/5\n\t\tC 2,0 data=(1,1,x) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,1 data=(1,1,y) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,2 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,3 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 3 (1) flags=EXTENDED[2] 2/5\n\t\tC 3,0 data=(1,1,x) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,1 data=(1,1,y) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,2 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,3 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 4 (2) flags=NONE[0] 3/5\n\t\tC 4,0 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,1 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,2 data=(1,1,c) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,3 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 5 (3) flags=NONE[0] 5/10\n\t\tC 5,0 data=(1,1,p) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,1 data=(1,1,l) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,2 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,3 data=(1,1,i) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,4 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,5 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,6 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,7 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,8 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,9 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "WX X BC\n- DE\nX A XB\nHX xy\nX xy\n-   c\nW plai\n- n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "X X BCDE\nX A XB\nHX xy\nX xy\n-   c\n- plain\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

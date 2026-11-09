@@ -463,7 +463,7 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
         next = start + count;
         let cells = p.cells.get(start..next).ok_or(invalid("row cells"))?;
         check(
-            row.flags & !0x0f == 0 && (row.flags >> 2) & 3 != 3,
+            row.flags & !0x3f == 0 && (row.flags >> 2) & 3 != 3,
             "row flags",
         )?;
         // tmux's `cellused` outlives a narrowing without a reflow (the

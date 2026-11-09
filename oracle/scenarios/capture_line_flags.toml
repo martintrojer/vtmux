@@ -1,0 +1,23 @@
+name = "capture_line_flags"
+size = [40, 10]
+# tmux keeps a line's GRID_LINE_EXTENDED and GRID_LINE_HYPERLINK once a cell
+# needed them (grid.c grid_extended_cell), and a character that overwrites
+# half of a wide one leaves the other half a written space
+# (screen_write_overwrite): capture-pane -F gives X and H, -R the flags and
+# NONE cells, after the cells that set them are gone (Ghostty patch 0034).
+# Rows: a wide character overwritten from its first half and from its
+# padding, a link and an RGB colour overwritten, a wide character erased
+# with EL 2 (the line emptied: no flags), and plain text; the first rows
+# scroll into history. Then a reflow keeps the flags on each line's first
+# row (the first line splits: its second row has none); those captures
+# leave out -N, as the cells a reflow allocates are D-027's cellsize model.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "10", "-y", "4", "sh", "-c", "printf '\\343\\201\\202BCDE\\rX\\nA\\343\\201\\202B\\r\\033[2CX\\n\\033]8;;http://e\\033\\\\ab\\033]8;;\\033\\\\\\rxy\\n\\033[38;2;1;2;3mab\\033[m\\rxy\\n\\343\\201\\202\\033[2Kc\\nplain'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pNF", "-S", "-"] },
+  { run = ["capturep", "-pR"] },
+  { run = ["resize-window", "-t", "a", "-x", "4"] },
+  { run = ["capturep", "-pF", "-S", "-"] },
+  { run = ["resize-window", "-t", "a", "-x", "10"] },
+  { run = ["capturep", "-pF", "-S", "-"] },
+]

@@ -1069,6 +1069,87 @@ Recorded per commit in git history; the list is kept current:
   `scripts/emu_fuzz.py --gen round2` (`widemargin`). Not an upstream
   candidate (tmux's model).
 
+- `patches/0034-tmux-line-flags.patch` (`page.zig` `Row.tmux_extended`,
+  `Row.tmux_hyperlink`, `tmuxMarkExtended`, `tmuxEmptied`,
+  `clonePartialRowFrom`, `moveCells`; `Terminal.zig` `printCell`,
+  `writeCell`, `tmuxPenExtended`, `tmuxWrittenBlank`, `printSliceFill`,
+  `markTab`, the grapheme attaches in `print`, `eraseChars`, `eraseLine`;
+  `Screen.zig` `clearRows`, `clearCells`; `PageList.zig`
+  `ReflowCursor.reflowRow`, `ReflowCursor.writeCell`, `tmuxCellExtended`;
+  `c/row.zig` and `screen.h` `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS`;
+  `c/vtmux_state.zig` and `vtmux_state.h` row flags `0x10`, `0x20`):
+  tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` per row (grid.c
+  `grid_extended_cell`), in two of the Row's seven spare bits (five
+  left), and the other half of a wide character a print overwrites
+  (D-027 narrowed; regress `input-unicode.sh` and `input-raw-unicode.sh`
+  pass).
+  - tmux sets the line flags when a cell needs its extended form
+    (`grid_need_extended_cell`: a wide or non-ASCII character, more than
+    one codepoint, an RGB colour, an underline colour, an attribute past
+    the first eight, a tab, a link; HYPERLINK for a link) and keeps them,
+    and the cell's extended entry, when the cell is overwritten or
+    erased, until the line is emptied (`grid_empty_line`). The bits are
+    set by the writes that make such a cell: `printCell` for a character
+    past ASCII before its charset mapping (line drawing maps ASCII and is
+    not one), `writeCell` for a wide character or an extended pen
+    (`tmuxPenExtended`; not on a spacer head, the cell tmux leaves
+    unwritten), the `printSlice` fast path (wide runs, an extended pen,
+    a run with a character past ASCII: the vectorised scan takes ASCII
+    only, so an ASCII run costs no extra pass), grapheme attaches, a tab
+    (`markTab`), an erase to an RGB background (`clearCells`, and
+    `clearRows` after it resets the row: tmux clears to an RGB background
+    with extended cells). They are reset where `tmux_used` is (patch
+    0013's full-row clears, now `tmuxEmptied`) and with the row
+    (`Row.reset`, `clearRows`). A reflow keeps them on the first row of a
+    line it moves, splits or joins onto (`grid_reflow_move`,
+    `grid_reflow_split`'s first line, `grid_reflow_join`'s target), and
+    sets them on a row it writes an extended cell to (`grid_set_cell`;
+    `tmuxCellExtended`, which takes a cell with vtmux's line-drawing mark,
+    Ghostty's protected bit, as ASCII). Cells moved between rows
+    (`moveCells`, a partial `clonePartialRowFrom`: left and right
+    margins, which tmux has not got) bring their row's bits. So a row
+    with an extended cell always has the bit, which vtmux's snapshot
+    relies on (it stores only the bits a row's cells don't imply).
+    Readers OR them with what the cells say now (vtmux `capture.rs`
+    `LineKept`).
+  - A narrow character over half of a wide one: tmux writes the other
+    half as a default cell (`screen_write_overwrite`,
+    `screen_write_clear_cell`), a space that counts as written, where
+    Ghostty erased it to an empty cell (`capture-pane -R` showed it
+    `CLEARED`). `tmuxWrittenBlank` makes the erased half a space when the
+    erase left a default cell (one the cursor's background coloured stays
+    a background cell; tmux keeps the old cell's background, which
+    Ghostty does not).
+  - `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS` (bit 0 EXTENDED, bit 1 HYPERLINK)
+    reads them; the state export and import carry them as row flags
+    `0x10` and `0x20` (`GHOSTTY_VTMUX_ROW_TMUX_EXTENDED`,
+    `GHOSTTY_VTMUX_ROW_TMUX_HYPERLINK`); a page in Ghostty's own form
+    carries the Row as it is. Wrapper: `screen.rs` `Row::tmux_line_flags`,
+    `RowData::TMUX_LINE_FLAGS` added to `bindings.rs` by hand.
+
+  Tests: new `Terminal: tmux line flags (vtmux)` (both print paths, a wide
+  character overwritten from either half, a partial and a full erase, a
+  non-ASCII fast-path run, a strikethrough pen, a link, ED) and
+  `Terminal: tmux line flags follow a reflow (vtmux)`, and `vtmux state:
+  rows round trip into a fresh terminal` checks the bits; vtmux's
+  `capture.rs` `line_flags_outlive_the_cells_that_set_them`,
+  `state_roundtrip.rs` `kept_line_flags_round_trip`, `snapshot_term.rs`
+  `kept_line_flags_cross_a_snapshot` (and its fuzzer, which found the
+  reflow and spacer-head cases), oracle `capture_line_flags`.
+  `Terminal: tmux line flags follow a reflow` is the one new test not
+  run without the change (its join case is the reflow fix the fuzzer
+  asked for). The upstream tests `Terminal: print over wide char at 0,0`,
+  `Terminal: print over wide spacer tail` and `Terminal: overwrite
+  multicodepoint grapheme clears grapheme data` now expect the written
+  space (` `, `"X "`). `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` (Debug, 0001-0034): 7039/7125, 76 skipped, 10
+  failed over the two test binaries: the known `tabClear single` and
+  kitty `temporary file outside directory prefix is rejected` (patch
+  0001's note) and those three upstream tests, before their expectations
+  were changed; after, `-Dtest-filter="Terminal: "` 1061/1063 with the
+  known `tabClear single` in each, and `-Dtest-filter=vtmux` 156/156.
+  Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

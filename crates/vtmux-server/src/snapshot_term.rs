@@ -446,7 +446,62 @@ impl<'a> PageOut<'a> {
                 tab: tab_out(c.tab),
             });
         }
+        keep_line_flags(
+            out,
+            r.flags & RowState::TMUX_EXTENDED != 0,
+            r.flags & RowState::TMUX_HYPERLINK != 0,
+        );
     }
+}
+
+/// What a row's cells say of tmux's line flags: a cell in tmux's extended
+/// form (grid.c `grid_need_extended_cell`: a wide or non-ASCII character,
+/// more than one codepoint, an RGB colour, an underline colour, an
+/// attribute past the first eight, a tab, a link) and a cell with a link.
+/// A spacer head is a cell tmux leaves unwritten.
+fn line_flags_of_cells(row: &snap::Row) -> (bool, bool) {
+    use snap::row::attr;
+    let written = || {
+        row.cells
+            .iter()
+            .filter(|c| c.wide != snap::Wide::SpacerHead)
+    };
+    let link = written().any(|c| c.link != 0);
+    let extended = link
+        || !row.graphemes.is_empty()
+        || written().any(|c| {
+            let st = &c.style;
+            c.wide == snap::Wide::Wide
+                || (c.codepoint >= 0x80 && c.flags & snap::row::cell_flag::ACS == 0)
+                || c.tab != snap::Tab::None
+                || matches!(st.fg, snap::Color::Rgb(..))
+                || matches!(st.bg, snap::Color::Rgb(..))
+                || st.underline_color != snap::Color::Default
+                || st.attrs & (attr::STRIKETHROUGH | attr::OVERLINE) != 0
+                || !matches!(
+                    st.underline,
+                    snap::Underline::None | snap::Underline::Single
+                )
+        });
+    (extended, link)
+}
+
+/// The line flags a row keeps (Ghostty patch 0034) go in the snapshot only
+/// where its cells don't say so ([`snap::Row::kept`]), so that
+/// nearly every stream goes without [`snap::TMUX_LINE_FLAGS_FEATURE`].
+fn keep_line_flags(row: &mut snap::Row, extended: bool, hyperlink: bool) {
+    let (by_cells, linked) = line_flags_of_cells(row);
+    row.kept = snap::KeptLineFlags {
+        extended: extended && !by_cells,
+        hyperlink: hyperlink && !linked,
+    };
+}
+
+/// The line flags a snapshot row puts back: kept, or said by its cells
+/// (which the row held as it was written).
+fn line_flags_in(row: &snap::Row) -> (bool, bool) {
+    let (by_cells, linked) = line_flags_of_cells(row);
+    (row.kept.extended || by_cells, row.kept.hyperlink || linked)
 }
 
 fn layout_of(p: &PageRows) -> snap::term::PageLayout {
@@ -711,11 +766,19 @@ impl PageIn {
             snap::RowPrompt::Prompt => 1,
             snap::RowPrompt::Continuation => 2,
         };
+        let (extended, hyperlink) = line_flags_in(row);
+        let mut flags = u8::from(row.wrapped) | (u8::from(row.continuation) << 1) | (prompt << 2);
+        if extended {
+            flags |= RowState::TMUX_EXTENDED;
+        }
+        if hyperlink {
+            flags |= RowState::TMUX_HYPERLINK;
+        }
         self.page.rows.push(RowState {
             cell_start: start,
             cell_count: narrow::<u16>(row.cells.len() as u64, "row width")?,
             used: row.cells_used,
-            flags: u8::from(row.wrapped) | (u8::from(row.continuation) << 1) | (prompt << 2),
+            flags,
             reserved: [0; 3],
         });
         Ok(())
@@ -904,6 +967,7 @@ fn frozen_out(r: &FrozenRowState) -> snap::Row {
     // The row's width: trailing default blanks were not kept.
     row.cells
         .resize(r.len.max(r.cells.len()), snap::Cell::default());
+    keep_line_flags(&mut row, r.kept_extended, r.kept_hyperlink);
     row
 }
 
@@ -945,10 +1009,13 @@ fn frozen_in(row: &snap::Row) -> FrozenRowState {
             }
         })
         .collect();
+    let (kept_extended, kept_hyperlink) = line_flags_in(row);
     FrozenRowState {
         cells,
         len: row.cells.len(),
         wrapped: row.wrapped,
+        kept_extended,
+        kept_hyperlink,
     }
 }
 

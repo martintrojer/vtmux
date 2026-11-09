@@ -261,6 +261,8 @@ Raw runs: [`test-health/2026-11-09-capture-full-history.md`](test-health/2026-11
 - That error adds about the same to both binaries, which pulls the ratio toward 1. Server CPU is not affected beyond the cost of the `capture-pane` calls.
 - Peak RSS in throughput is about 6 MB above tmux's: the per-pane terminal plus the history it keeps for the 100 MB of output, capped by the default `history-limit` of 2000.
 
+- Ghostty patch 0034 (tmux's line flags, set on every print path) costs nothing measurable: against the build before it, 1.04x the server CPU on the plain log and 1.00x with SGR, and 0.96x to 1.05x in *Agent panes* ([`test-health/2026-11-08-tmux-line-flags.md`](test-health/2026-11-08-tmux-line-flags.md)).
+
 Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf-refresh.md), *Full `bench.py` run*.
 
 ## Rendering and attached clients

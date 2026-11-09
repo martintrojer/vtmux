@@ -223,6 +223,17 @@ impl StyleRow {
     }
 }
 
+/// tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` as a row keeps them
+/// (Ghostty patch 0034): a cell on the line needed tmux's extended form, or
+/// had a link, since the line was last emptied. They stay set when that
+/// cell is overwritten (grid.c `grid_extended_cell`), so readers OR them
+/// with what the cells say now ([`row_extended`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LineKept {
+    pub(crate) extended: bool,
+    pub(crate) hyperlink: bool,
+}
+
 impl Source<'_> {
     /// Line `y` as one codepoint per cell when every cell of it is plain
     /// (`kind`); its cells as [`Source::line`] reads them, 0 for a blank,
@@ -312,6 +323,23 @@ impl Source<'_> {
             }
             Self::Saved(..) => (0, false, false),
             Self::Mode(l, _) => (l.time(y), l.starts(y, false), l.starts(y, true)),
+        }
+    }
+
+    /// The line flags line `y` keeps ([`LineKept`]); `last` is the row just
+    /// read for it ([`Source::line`], [`Source::plain_line`]), which spares
+    /// a lookup of a row of a long history.
+    fn line_kept(&self, y: usize, last: &LastRow<'_>) -> LineKept {
+        match self {
+            Self::Pane(t, p) => match p.screen_row(y) {
+                None => t.frozen_row(y).map(|f| f.kept).unwrap_or_default(),
+                Some((at, _)) => match last {
+                    Some((l, row_ref)) if *l == at => ref_kept(row_ref),
+                    _ => screen_row_kept(&t.term, at),
+                },
+            },
+            Self::Saved(rows, _) => rows.get(y).map(|r| r.kept).unwrap_or_default(),
+            Self::Mode(..) => LineKept::default(),
         }
     }
 
@@ -472,7 +500,8 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
             }
             if opts.flags {
                 let cells: &[RowCell] = if plain_wrapped.is_some() { &[] } else { &cells };
-                out.extend_from_slice(row_flags(cells, wrapped, prompt, output).as_bytes());
+                let kept = src.line_kept(y, &at);
+                out.extend_from_slice(row_flags(cells, wrapped, kept, prompt, output).as_bytes());
             }
         }
         if plain_wrapped.is_some() && kind.styled {
@@ -603,15 +632,22 @@ pub fn history_counts(term: &PaneTerm) -> HistoryCounts {
 }
 
 /// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a
-/// space (`X`: [`row_extended`]). vtmux has no dead lines (`D`).
-fn row_flags(cells: &[RowCell], wrapped: bool, prompt: bool, output: bool) -> String {
+/// space (`X`: [`row_extended`] or kept, `H` likewise). vtmux has no dead
+/// lines (`D`).
+fn row_flags(
+    cells: &[RowCell],
+    wrapped: bool,
+    kept: LineKept,
+    prompt: bool,
+    output: bool,
+) -> String {
     let mut f = String::new();
     for (on, c) in [
-        (cells.iter().any(|c| c.link), 'H'),
+        (kept.hyperlink || cells.iter().any(|c| c.link), 'H'),
         (output, 'O'),
         (prompt, 'P'),
         (wrapped, 'W'),
-        (row_extended(cells), 'X'),
+        (kept.extended || row_extended(cells), 'X'),
     ] {
         if on {
             f.push(c);
@@ -1147,6 +1183,7 @@ pub(crate) struct FrozenRow {
     cells: Vec<RowCell>,
     len: usize,
     wrapped: bool,
+    pub(crate) kept: LineKept,
 }
 
 impl FrozenRow {
@@ -1159,6 +1196,10 @@ impl FrozenRow {
         last: &mut LastRow<'t>,
     ) -> Self {
         let (mut cells, wrapped) = read_screen_row_near(term, y, cols, last);
+        let kept = match last {
+            Some((at, row_ref)) if *at == y => ref_kept(row_ref),
+            _ => LineKept::default(),
+        };
         let len = cells.len();
         while cells.last().is_some_and(RowCell::is_default_blank) {
             cells.pop();
@@ -1167,6 +1208,7 @@ impl FrozenRow {
             cells,
             len,
             wrapped,
+            kept,
         }
     }
 
@@ -1197,6 +1239,8 @@ impl FrozenRow {
                 .collect(),
             len: self.len,
             wrapped: self.wrapped,
+            kept_extended: self.kept.extended,
+            kept_hyperlink: self.kept.hyperlink,
         }
     }
 
@@ -1229,6 +1273,10 @@ impl FrozenRow {
                 .collect(),
             len: state.len,
             wrapped: state.wrapped,
+            kept: LineKept {
+                extended: state.kept_extended,
+                hyperlink: state.kept_hyperlink,
+            },
         }
     }
 
@@ -1334,6 +1382,36 @@ fn row_ref_stepped<'t>(
         }
     }
     row_ref_at(term, y)
+}
+
+/// The line flags row `y` of tmux's grid keeps ([`LineKept`]), read as
+/// [`read_row`] reads its cells.
+pub(crate) fn read_row_kept(term: &PaneTerm, y: usize, hsize: usize) -> LineKept {
+    if term.alternate_on() && y < hsize {
+        return term.frozen_row(y).map(|f| f.kept).unwrap_or_default();
+    }
+    let retained = term.term.scrollback_rows().unwrap_or(0);
+    screen_row_kept(&term.term, y + retained - hsize)
+}
+
+/// [`read_row_kept`] for row `y` of the active screen, history included.
+fn screen_row_kept(term: &Terminal<'_, '_>, y: usize) -> LineKept {
+    row_ref_at(term, y)
+        .map(|r| ref_kept(&r))
+        .unwrap_or_default()
+}
+
+/// The line flags the row `row_ref` is of keeps.
+fn ref_kept(row_ref: &GridRef<'_>) -> LineKept {
+    row_ref
+        .row()
+        .ok()
+        .and_then(|row| row.tmux_line_flags().ok())
+        .map(|(extended, hyperlink)| LineKept {
+            extended,
+            hyperlink,
+        })
+        .unwrap_or_default()
 }
 
 /// The reference to row `y` of a screen (history first, `y` counted from
@@ -3093,5 +3171,47 @@ mod tests {
             let more = o.flags || o.hyperlinks;
             assert_eq!(built == 0, !more, "{built} rows built for {o:?}");
         }
+    }
+
+    /// The flag letters `-F` gives each line.
+    fn flag_letters(t: &PaneTerm) -> Vec<String> {
+        let o = CaptureOpts {
+            flags: true,
+            start: LineRef::Start,
+            ..Default::default()
+        };
+        String::from_utf8(capture(t, o))
+            .unwrap()
+            .lines()
+            .map(|l| l.split(' ').next().unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// tmux keeps `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` once a cell
+    /// needed them (grid.c `grid_extended_cell`; Ghostty patch 0034): a
+    /// wide character or a link overwritten still flags its line, the
+    /// other half of the wide character is a written space, and a line
+    /// emptied loses them. The history an alternate screen hides keeps them.
+    #[test]
+    fn line_flags_outlive_the_cells_that_set_them() {
+        let mut t = PaneTerm::new(10, 5, 100);
+        t.feed("\u{3042}B\rX\r\n".as_bytes());
+        t.feed(b"\x1b]8;;http://e\x1b\\a\x1b]8;;\x1b\\\rb\r\n");
+        t.feed("\u{3042}\x1b[2Kc\r\nplain".as_bytes());
+        assert_eq!(flag_letters(&t), ["X", "HX", "-", "-", "-"]);
+        assert_eq!(t.row(0).text(), "X B");
+        let raw = String::from_utf8(raw::capture_grid(&t, 100)).unwrap();
+        assert!(raw.contains("\tL 0 (0) flags=EXTENDED[2] 3/5\n"), "{raw}");
+        assert!(
+            raw.contains("\t\tC 0,1 data=(1,1, ) flags=NONE[0]"),
+            "{raw}"
+        );
+        assert!(
+            raw.contains("\tL 1 (1) flags=EXTENDED,HYPERLINK[102]"),
+            "{raw}"
+        );
+        t.feed(b"\r\n\r\n\r\n\r\n\x1b[?1049h");
+        assert_eq!(t.history_size(), 3);
+        assert_eq!(flag_letters(&t)[..3], ["X", "HX", "-"]);
     }
 }

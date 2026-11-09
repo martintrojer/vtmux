@@ -11,7 +11,9 @@
 mod harness;
 
 use harness::{Fuzz, PROBE, exported, exported_flat, flat_text, fuzz_seeds, observe, unescape};
-use vtmux_vt::{CompressedPages, Compression, PageState, PaneTerm, StateError};
+use vtmux_vt::{
+    CaptureOpts, CompressedPages, Compression, LineRef, PageState, PaneTerm, StateError, capture,
+};
 
 fn assert_same(a: &PaneTerm, b: &PaneTerm, ctx: &str) {
     assert_alike(a, b, ctx, true);
@@ -131,6 +133,31 @@ fn styles_wide_graphemes_links_and_flags() {
         \x1b]133;A\x07$ \x1b]133;B\x07cmd\x1b]133;C\x07\r\nout\r\n\x1b]133;D;2\x07\x1b(0lqk\x1b(B";
     let mut a = pane(30, 6, 50, bytes.as_bytes());
     round_trip(&mut a, CompressedPages::Rows, PROBE, "styles");
+}
+
+/// tmux's line flags a row keeps after the cells that set them are gone
+/// (Ghostty patch 0034) go with the rows, the history an alternate screen
+/// hides too, and stay set after more output.
+#[test]
+fn kept_line_flags_round_trip() {
+    let flags = |t: &PaneTerm| {
+        let o = CaptureOpts {
+            flags: true,
+            start: LineRef::Start,
+            ..CaptureOpts::default()
+        };
+        String::from_utf8(capture(t, o)).unwrap()
+    };
+    let mut bytes = "\u{3042}B\rX\r\n\x1b]8;;http://e\x1b\\a\x1b]8;;\x1b\\\rb\r\n"
+        .as_bytes()
+        .to_vec();
+    let mut a = pane(10, 4, 20, &bytes);
+    let b = round_trip(&mut a, CompressedPages::Rows, b"\x1b[3;1Hq", "line flags");
+    assert!(flags(&b).starts_with("X X B\nHX b\n"), "{}", flags(&b));
+    bytes.extend_from_slice(b"\r\n\r\n\r\n\r\n\x1b[?1049h");
+    let mut a = pane(10, 4, 20, &bytes);
+    let b = round_trip(&mut a, CompressedPages::Rows, b"z", "line flags hidden");
+    assert!(flags(&b).starts_with("X X B\nHX b\n"), "{}", flags(&b));
 }
 
 #[test]

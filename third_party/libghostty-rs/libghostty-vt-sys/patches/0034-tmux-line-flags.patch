@@ -1,0 +1,626 @@
+diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
+index a3592975b..f60b83775 100644
+--- a/include/ghostty/vt/screen.h
++++ b/include/ghostty/vt/screen.h
+@@ -330,6 +330,14 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    * Output type: bool *
+    */
+   GHOSTTY_ROW_DATA_DIRTY = 8,
++
++  /**
++   * vtmux: tmux's line flags kept beyond what the row's cells say (patch
++   * 0034): bit 0 GRID_LINE_EXTENDED, bit 1 GRID_LINE_HYPERLINK.
++   *
++   * Output type: uint8_t *
++   */
++  GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS = 9,
+   GHOSTTY_ROW_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyRowData;
+ 
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+index 46cf8be97..c7fdfc83b 100644
+--- a/include/ghostty/vt/vtmux_state.h
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -38,6 +38,10 @@ extern "C" {
+  * 2 prompt continuation). */
+ #define GHOSTTY_VTMUX_ROW_WRAP 0x01
+ #define GHOSTTY_VTMUX_ROW_WRAP_CONTINUATION 0x02
++/** tmux's line flags kept by the row (patch 0034, Row.tmux_extended and
++ * Row.tmux_hyperlink). */
++#define GHOSTTY_VTMUX_ROW_TMUX_EXTENDED 0x10
++#define GHOSTTY_VTMUX_ROW_TMUX_HYPERLINK 0x20
+ 
+ /**
+  * One row. Its cells are `cells[cell_start .. cell_start + cell_count]`
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index f2dc09530..cf8313276 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -2046,6 +2046,15 @@ const ReflowCursor = struct {
+         }
+ 
+         self.copyRowMetadata(src_row);
++        // vtmux: a line tmux moves, splits or joins onto keeps its line
++        // flags on its first row (grid_reflow_move, grid_reflow_split's
++        // first line, grid_reflow_join's target); the rows it makes and
++        // the cells it joins from other lines take only what their cells
++        // need (grid_set_cell), which readers take from the cells.
++        if (tmux_fresh) {
++            if (src_row.tmux_extended) self.page_row.tmux_extended = true;
++            if (src_row.tmux_hyperlink) self.page_row.tmux_hyperlink = true;
++        }
+ 
+         // vtmux: the destination rows this row's cells start (tmux_hscrolled).
+         const tmux_rows_start = self.total_rows;
+@@ -2836,11 +2845,17 @@ const ReflowCursor = struct {
+                     // These are guaranteed to have no style or grapheme
+                     // data associated with them so we can fast path them.
+                     self.page_cell.* = cell.*;
++                    // vtmux: see tmuxCellExtended below.
++                    if (cell.content_tag == .bg_color_rgb) self.page_row.tmuxMarkExtended(false);
+                     self.cursorForward();
+                     return .success;
+                 },
+             }
+ 
++            // vtmux: tmux's reflow writes the cell with grid_set_cell,
++            // which flags the line it lands on (Row.tmux_extended).
++            if (tmuxCellExtended(cell, src_page)) self.page_row.tmuxMarkExtended(cell.hyperlink);
++
+             // These will create issues by trying to clone managed memory that
+             // isn't set if the current dst row needs to be moved to a new page.
+             // They'll be fixed once we do properly copy the relevant memory.
+@@ -3422,6 +3437,24 @@ const ReflowCursor = struct {
+     }
+ };
+ 
++/// vtmux: whether tmux holds a cell in its extended form
++/// (grid_need_extended_cell; Row.tmux_extended): a wide character or its
++/// padding, a non-ASCII character, more than one codepoint, a tab, a link,
++/// an RGB colour, an underline colour or an attribute past tmux's first
++/// eight. vtmux marks a cell printed in the line-drawing set with the
++/// protected bit (PaneTerm::sync_charset): its mapped glyph is tmux's ASCII.
++fn tmuxCellExtended(cell: *const pagepkg.Cell, page: *const Page) bool {
++    if (cell.wide == .wide or cell.tab != 0 or cell.hyperlink or cell.hasGrapheme()) return true;
++    if (cell.content_tag == .bg_color_rgb) return true;
++    if (cell.content_tag == .codepoint and cell.content.codepoint.data >= 0x80 and !cell.protected)
++        return true;
++    if (!cell.hasStyling()) return false;
++    const s = page.styles.get(page.memory, cell.style_id);
++    return s.fg_color == .rgb or s.bg_color == .rgb or s.underline_color != .none or
++        s.flags.strikethrough or s.flags.overline or
++        (s.flags.underline != .none and s.flags.underline != .single);
++}
++
+ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+     // We only set the new minimums if we're not reflowing. If we are
+     // reflowing, then the outer resize call handles this for us.
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index c1b3b99d2..b85e499a2 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -1879,6 +1879,9 @@ pub fn clearRows(
+             } else {
+                 self.clearCells(page, row, cells);
+                 row.* = .{ .cells = cells_offset };
++                // vtmux: tmux empties the line and clears it in an RGB
++                // background with extended cells (grid_empty_line).
++                if (self.blankCell().content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
+             }
+ 
+             row.dirty = true;
+@@ -1985,7 +1988,11 @@ pub fn clearCells(
+         }
+     }
+ 
+-    @memset(cells, self.blankCell());
++    const blank = self.blankCell();
++    @memset(cells, blank);
++    // vtmux: tmux clears a cell to an RGB background with an extended
++    // cell (grid_clear_cell), which sets GRID_LINE_EXTENDED (Row.tmux_extended).
++    if (blank.content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
+ }
+ 
+ /// Clear cells but only if they are not protected.
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index aefb0012c..f723905db 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -942,6 +942,12 @@ inline fn printSliceStoreRun(
+     }
+ }
+ 
++/// vtmux: whether every codepoint is ASCII.
++fn tmuxAllAscii(cps: []const u32) bool {
++    for (cps) |cp| if (cp >= 0x80) return false;
++    return true;
++}
++
+ /// The row-filling portion of the printSlice fast path, specialized by
+ /// width class. The first codepoint must already be validated by the
+ /// caller (printSliceFast).
+@@ -979,6 +985,9 @@ fn printSliceFill(
+     // can batch. For codepoints after the first, the previous codepoint
+     // in the run is always written as a fresh, single-codepoint cell,
+     // so the grapheme break check against it is exact.
++    // vtmux: whether the run has a character past ASCII (tmux's extended
++    // cell, see writeCell); the vectorised scan below takes ASCII only.
++    var run_ascii = cps[0] < 0x80;
+     const run_len: usize = run: {
+         var idx: usize = 1;
+ 
+@@ -1011,17 +1020,29 @@ fn printSliceFill(
+         while (idx < cps.len) : (idx += 1) {
+             const cp = cps[idx];
+             if (comptime width == .narrow) {
+-                if (cp >= 0x10 and cp <= unicode.narrow_max and !(cp >= 0x80 and cp <= 0x9F)) continue;
++                if (cp >= 0x10 and cp <= unicode.narrow_max and !(cp >= 0x80 and cp <= 0x9F)) {
++                    if (cp >= 0x80) run_ascii = false;
++                    continue;
++                }
+             }
+             if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
+-                if (!grapheme_cluster) continue;
++                if (!grapheme_cluster) {
++                    run_ascii = false;
++                    continue;
++                }
+                 // vtmux: with tmux's clustering, its rules decide.
+                 if (unicode.tmux_clusters) {
+-                    if (!unicode.tmuxMayJoin(@intCast(cps[idx - 1]), @intCast(cp))) continue;
++                    if (!unicode.tmuxMayJoin(@intCast(cps[idx - 1]), @intCast(cp))) {
++                        run_ascii = false;
++                        continue;
++                    }
+                     break :run idx;
+                 }
+                 var state: uucode.grapheme.BreakState = .default;
+-                if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) continue;
++                if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) {
++                    run_ascii = false;
++                    continue;
++                }
+             }
+             break :run idx;
+         }
+@@ -1300,6 +1321,10 @@ fn printSliceFill(
+             cursor.page_row.dirty = true;
+             // vtmux: tmux's cellused (grid_set_cells).
+             cursor.page_row.tmuxRaiseUsed(@as(usize, cursor.x) + k);
++            // vtmux: tmux's GRID_LINE_EXTENDED (see writeCell).
++            if (width == .wide or self.tmuxPenExtended() or
++                (!run_ascii and !tmuxAllAscii(cps[printed..][0 .. k / cells_per_cp])))
++                cursor.page_row.tmuxMarkExtended(false);
+             if (style_id != style.default_id) cursor.page_row.styled = true;
+             self.previous_char = @intCast(cps[printed + k / cells_per_cp - 1]);
+             printed += k / cells_per_cp;
+@@ -1643,6 +1668,9 @@ pub fn print(self: *Terminal, c: u21) !void {
+                 prev.cell.codepoint(),
+             });
+             self.screens.active.cursorMarkDirty();
++            // vtmux: a cell of more than one character is an extended
++            // one in tmux (screen_write_combine).
++            self.screens.active.cursor.page_row.tmuxMarkExtended(false);
+             try self.screens.active.appendGrapheme(prev.cell, c);
+             return;
+         }
+@@ -1707,6 +1735,8 @@ pub fn print(self: *Terminal, c: u21) !void {
+             if (!emoji) return;
+         }
+ 
++        // vtmux: see the grapheme attach above.
++        self.screens.active.cursor.page_row.tmuxMarkExtended(false);
+         try self.screens.active.appendGrapheme(prev, c);
+         return;
+     }
+@@ -1809,6 +1839,11 @@ fn printCell(
+     wide: Cell.Wide,
+     set: charsets.Charset,
+ ) void {
++    // vtmux: tmux keeps a character of more than one UTF-8 byte in an
++    // extended cell (grid_need_extended_cell), whatever charset it is
++    // printed with; line drawing maps ASCII and is not one.
++    if (unmapped_c >= 0x80) self.screens.active.cursor.page_row.tmuxMarkExtended(false);
++
+     const c: u21 = c: {
+         // TODO: non-utf8 handling, gr
+ 
+@@ -1831,6 +1866,31 @@ fn printCell(
+     @call(.always_inline, writeCell, .{ self, c, wide });
+ }
+ 
++/// vtmux: whether a cell written with the cursor's pen needs tmux's
++/// extended cell form for its style or link (grid.c
++/// grid_need_extended_cell): an RGB colour, an underline colour, an
++/// attribute past tmux's first eight (strikethrough, overline, an
++/// underline other than single) or a link.
++fn tmuxPenExtended(self: *const Terminal) bool {
++    const cursor = &self.screens.active.cursor;
++    if (cursor.hyperlink_id != 0) return true;
++    if (cursor.style_id == style.default_id) return false;
++    const s = &cursor.style;
++    return s.fg_color == .rgb or s.bg_color == .rgb or s.underline_color != .none or
++        s.flags.strikethrough or s.flags.overline or
++        (s.flags.underline != .none and s.flags.underline != .single);
++}
++
++/// vtmux: the other half of a wide character a print overwrote, which
++/// writeCell has just erased: tmux writes it as a default cell, a space
++/// that counts as written (screen_write_overwrite, screen_write_clear_cell),
++/// not an erased blank. One the erase gave the cursor's background stays
++/// as it is.
++fn tmuxWrittenBlank(cell: *Cell) void {
++    if (@as(u64, @bitCast(cell.*)) != 0) return;
++    cell.content.codepoint.data = ' ';
++}
++
+ /// Writes c into the cell under the cursor as it is, without a charset.
+ fn writeCell(
+     self: *Terminal,
+@@ -1871,6 +1931,7 @@ fn writeCell(
+                     self.screens.active.cursor.page_row,
+                     spacer_cell[0..1],
+                 );
++                tmuxWrittenBlank(spacer_cell);
+ 
+                 // If we're near the left edge, a wide char may have
+                 // wrapped from the previous row, leaving a spacer_head
+@@ -1897,6 +1958,7 @@ fn writeCell(
+                     self.screens.active.cursor.page_row,
+                     wide_cell[0..1],
+                 );
++                tmuxWrittenBlank(wide_cell);
+                 // If we're near the left edge, a wide char may have
+                 // wrapped from the previous row, leaving a spacer_head
+                 // at the end of that row. Clear it so the previous row
+@@ -1947,6 +2009,15 @@ fn writeCell(
+         .semantic_content = self.screens.active.cursor.semantic_content,
+     };
+ 
++    // vtmux: tmux's GRID_LINE_EXTENDED (grid_extended_cell): a wide
++    // character, or a style or link only an extended cell holds (a
++    // non-ASCII character is printCell's). A spacer head is the cell
++    // tmux leaves unwritten.
++    if (wide == .wide or (wide != .spacer_head and self.tmuxPenExtended()))
++        self.screens.active.cursor.page_row.tmuxMarkExtended(
++            self.screens.active.cursor.hyperlink_id != 0,
++        );
++
+     if (style_changed) {
+         var page = self.screens.active.cursor.page_pin.node.page();
+ 
+@@ -2593,8 +2664,10 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
+ 
+     row[from].tab = @intCast(width);
+     for (from + 1..to) |x| row[x].tab = Cell.tab_continuation;
+-    // vtmux: tmux writes the tab as one cell of its width (cellused).
++    // vtmux: tmux writes the tab as one cell of its width (cellused), an
++    // extended one (GRID_FLAG_TAB, grid_need_extended_cell).
+     self.screens.active.cursor.page_row.tmuxRaiseUsed(to);
++    self.screens.active.cursor.page_row.tmuxMarkExtended(false);
+     self.screens.active.cursorMarkDirty();
+ }
+ 
+@@ -4374,7 +4447,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+     // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
+     // is emptied (cellused 0) and the line above unwrapped.
+     if (self.screens.active.cursor.x == 0 and count >= self.cols) {
+-        self.screens.active.cursor.page_row.tmux_used = 0;
++        self.screens.active.cursor.page_row.tmuxEmptied();
+         self.tmuxUnwrapAbove(self.screens.active.cursor.y);
+     }
+ 
+@@ -4444,7 +4517,7 @@ pub fn eraseLine(
+             if (x == 0) {
+                 self.screens.active.cursorResetWrap();
+                 self.tmuxUnwrapAbove(self.screens.active.cursor.y);
+-                self.screens.active.cursor.page_row.tmux_used = 0;
++                self.screens.active.cursor.page_row.tmuxEmptied();
+             }
+ 
+             // If our X is a wide spacer tail then we need to erase the
+@@ -4464,7 +4537,7 @@ pub fn eraseLine(
+             if (x >= self.cols - 1) {
+                 self.screens.active.cursorResetWrap();
+                 self.tmuxUnwrapAbove(self.screens.active.cursor.y);
+-                self.screens.active.cursor.page_row.tmux_used = 0;
++                self.screens.active.cursor.page_row.tmuxEmptied();
+             }
+ 
+             // If our x is a wide char we need to delete the tail too.
+@@ -4484,7 +4557,7 @@ pub fn eraseLine(
+             // vtmux: tmux's grid_clear_lines also unwraps the line above,
+             // and empties the line (cellused 0).
+             self.tmuxUnwrapAbove(self.screens.active.cursor.y);
+-            self.screens.active.cursor.page_row.tmux_used = 0;
++            self.screens.active.cursor.page_row.tmuxEmptied();
+ 
+             break :complete .{ 0, self.cols };
+         },
+@@ -6861,9 +6934,11 @@ test "Terminal: print over wide char at 0,0" {
+         try testing.expectEqual(Cell.Wide.narrow, cell.wide);
+     }
+     {
++        // vtmux: the other half is a written space, as tmux writes it
++        // (screen_write_overwrite, tmuxWrittenBlank). Upstream: empty.
+         const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
+         const cell = list_cell.cell;
+-        try testing.expectEqual(@as(u21, 0), cell.content.codepoint.data);
++        try testing.expectEqual(@as(u21, ' '), cell.content.codepoint.data);
+         try testing.expectEqual(Cell.Wide.narrow, cell.wide);
+     }
+ 
+@@ -6919,9 +6994,10 @@ test "Terminal: print over wide spacer tail" {
+     try t.print('X');
+ 
+     {
++        // vtmux: a written space (tmuxWrittenBlank). Upstream: empty.
+         const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
+         const cell = list_cell.cell;
+-        try testing.expectEqual(@as(u21, 0), cell.content.codepoint.data);
++        try testing.expectEqual(@as(u21, ' '), cell.content.codepoint.data);
+         try testing.expectEqual(Cell.Wide.narrow, cell.wide);
+     }
+     {
+@@ -8434,9 +8510,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
+     try testing.expectEqual(@as(usize, 0), page.graphemeCount());
+ 
+     {
++        // vtmux: the other half is a written space (tmuxWrittenBlank).
++        // Upstream: "X".
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("X", str);
++        try testing.expectEqualStrings("X ", str);
+     }
+ }
+ 
+@@ -16753,6 +16831,105 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+     try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
+ }
+ 
++test "Terminal: tmux line flags (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++    defer t.deinit(alloc);
++    const row = struct {
++        fn at(term: *Terminal, y: usize) Row {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?.row.*;
++        }
++        fn cell(term: *Terminal, x: usize, y: usize) Cell {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = @intCast(x), .y = @intCast(y) } }).?.cell.*;
++        }
++    };
++
++    // ASCII in the default pen, through either print path, sets nothing.
++    try t.printString("ab");
++    try t.printSlice(&.{ 'c', 'd' });
++    try testing.expect(!row.at(&t, 0).tmux_extended);
++    // A wide character sets it, and overwriting it keeps it; the other
++    // half becomes a written space, not an erased blank.
++    t.setCursorPos(2, 1);
++    try t.printString("A\u{3042}B");
++    try testing.expect(row.at(&t, 1).tmux_extended);
++    t.setCursorPos(2, 2);
++    try t.print('X');
++    try testing.expect(row.at(&t, 1).tmux_extended);
++    try testing.expectEqual(@as(u21, ' '), row.cell(&t, 2, 1).content.codepoint.data);
++    try testing.expectEqual(Cell.Wide.narrow, row.cell(&t, 2, 1).wide);
++    // From the padding: the character's cell becomes the space.
++    t.setCursorPos(3, 1);
++    try t.printString("A\u{3042}B");
++    t.setCursorPos(3, 3);
++    try t.print('X');
++    try testing.expectEqual(@as(u21, ' '), row.cell(&t, 1, 2).content.codepoint.data);
++    // A full-line clear resets it, a partial erase does not.
++    t.setCursorPos(2, 3);
++    t.eraseLine(.right, false);
++    try testing.expect(row.at(&t, 1).tmux_extended);
++    t.eraseLine(.complete, false);
++    try testing.expect(!row.at(&t, 1).tmux_extended);
++    // Non-ASCII through the fast path, and an extended pen.
++    t.setCursorPos(4, 1);
++    try t.printSlice(&.{ 'a', 0xE9 });
++    try testing.expect(row.at(&t, 3).tmux_extended);
++    t.setCursorPos(5, 1);
++    try t.setAttribute(.{ .strikethrough = {} });
++    try t.printSlice(&.{ 'a', 'b' });
++    try testing.expect(row.at(&t, 4).tmux_extended);
++    try testing.expect(!row.at(&t, 4).tmux_hyperlink);
++    try t.setAttribute(.{ .unset = {} });
++    // A link sets both.
++    t.setCursorPos(6, 1);
++    try t.screens.active.startHyperlink("http://example.com", null);
++    try t.print('a');
++    t.screens.active.endHyperlink();
++    try testing.expect(row.at(&t, 5).tmux_extended);
++    try testing.expect(row.at(&t, 5).tmux_hyperlink);
++    // ED's whole rows reset them.
++    t.eraseDisplay(.complete, false);
++    try testing.expect(!row.at(&t, 5).tmux_extended);
++    try testing.expect(!row.at(&t, 5).tmux_hyperlink);
++}
++
++test "Terminal: tmux line flags follow a reflow (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 3, .cols = 10 });
++    defer t.deinit(alloc);
++    const extended = struct {
++        fn at(term: *Terminal, y: usize) bool {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?.row.tmux_extended;
++        }
++    }.at;
++    // A wide character overwritten: the row keeps the flag, its cells
++    // no longer need it.
++    try t.printString("\u{3042}");
++    t.carriageReturn();
++    try t.printString("XY");
++    try testing.expect(extended(&t, 0));
++    // The line keeps it on its first row through a reflow; the row a split
++    // makes takes only what its cells need.
++    try t.printString("abcdef");
++    try t.resize(alloc, .{ .cols = 4, .rows = 3 });
++    try testing.expect(extended(&t, 0));
++    try testing.expect(!extended(&t, 1));
++    try t.resize(alloc, .{ .cols = 10, .rows = 3 });
++    try testing.expect(extended(&t, 0));
++
++    // A row the reflow joins a wide character onto takes the flag
++    // (grid_reflow_join's grid_set_cell).
++    var u = try init(io_impl, alloc, .{ .rows = 3, .cols = 10 });
++    defer u.deinit(alloc);
++    try u.printString("abcdefghij\u{3042}");
++    try testing.expect(!extended(&u, 0));
++    try testing.expect(extended(&u, 1));
++    try u.resize(alloc, .{ .cols = 20, .rows = 3 });
++    try testing.expect(extended(&u, 0));
++}
++
+ test "Terminal: tmux cursor past the last column (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/c/row.zig b/src/terminal/c/row.zig
+index b0da5c457..44402909a 100644
+--- a/src/terminal/c/row.zig
++++ b/src/terminal/c/row.zig
+@@ -51,6 +51,12 @@ pub const RowData = enum(c_int) {
+     /// Output type: bool *
+     dirty = 8,
+ 
++    /// vtmux: tmux's line flags beyond what the cells say (patch 0034,
++    /// `Row.tmux_extended`, `Row.tmux_hyperlink`): bit 0
++    /// GRID_LINE_EXTENDED, bit 1 GRID_LINE_HYPERLINK.
++    /// Output type: uint8_t *
++    tmux_line_flags = 9,
++
+     /// Output type expected for querying the data of the given kind.
+     pub fn OutType(comptime self: RowData) type {
+         return switch (self) {
+@@ -58,6 +64,7 @@ pub const RowData = enum(c_int) {
+             .wrap, .wrap_continuation, .grapheme, .styled, .hyperlink => bool,
+             .kitty_virtual_placeholder, .dirty => bool,
+             .semantic_prompt => SemanticPrompt,
++            .tmux_line_flags => u8,
+         };
+     }
+ };
+@@ -120,6 +127,8 @@ fn getTyped(
+         .semantic_prompt => out.* = @fromBackingInt(@backingInt(row.semantic_prompt)),
+         .kitty_virtual_placeholder => out.* = row.kitty_virtual_placeholder,
+         .dirty => out.* = row.dirty,
++        .tmux_line_flags => out.* = @as(u8, @intFromBool(row.tmux_extended)) |
++            @as(u8, @intFromBool(row.tmux_hyperlink)) << 1,
+     }
+ 
+     return .success;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 83b28589e..444d4b3d0 100644
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -316,6 +316,8 @@ fn rowFlags(row: *const Row) u8 {
+     if (row.wrap) flags |= 0x01;
+     if (row.wrap_continuation) flags |= 0x02;
+     flags |= @as(u8, @backingInt(row.semantic_prompt)) << 2;
++    if (row.tmux_extended) flags |= 0x10;
++    if (row.tmux_hyperlink) flags |= 0x20;
+     return flags;
+ }
+ 
+@@ -790,6 +792,8 @@ fn importRows(
+         row.wrap_continuation = r.flags & 0x02 != 0;
+         row.semantic_prompt = enumFromInt(Row.SemanticPrompt, (r.flags >> 2) & 0x3) orelse .none;
+         row.tmux_used = r.used;
++        row.tmux_extended = r.flags & 0x10 != 0;
++        row.tmux_hyperlink = r.flags & 0x20 != 0;
+         const dst = page.getCells(row);
+         if (r.cell_count > dst.len) return error.Invalid;
+         if (@as(usize, r.cell_start) + r.cell_count > cells.len) return error.Invalid;
+@@ -1647,6 +1651,15 @@ test "vtmux state: rows round trip into a fresh terminal" {
+     const str_b = try sb.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
+     defer testing.allocator.free(str_b);
+     try testing.expectEqualStrings(str_a, str_b);
++    // vtmux (patch 0034): tmux's line flags go with the rows.
++    for (0..3) |y| {
++        const pt: @import("../point.zig").Point = .{ .active = .{ .x = 0, .y = @intCast(y) } };
++        const ra = sa.pages.getCell(pt).?.row;
++        const rb = sb.pages.getCell(pt).?.row;
++        try testing.expectEqual(ra.tmux_extended, rb.tmux_extended);
++        try testing.expectEqual(ra.tmux_hyperlink, rb.tmux_hyperlink);
++    }
++    try testing.expect(sb.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row.tmux_hyperlink);
+ }
+ 
+ test "vtmux state: malformed pages and states are refused" {
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index b71717388..b916ef2cc 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -898,6 +898,9 @@ pub const Page = struct {
+                 copy.hyperlink = dst_row.hyperlink;
+                 copy.styled = dst_row.styled;
+                 copy.dirty |= dst_row.dirty;
++                // vtmux: the row holds cells of both (Row.tmux_extended).
++                copy.tmux_extended = copy.tmux_extended or dst_row.tmux_extended;
++                copy.tmux_hyperlink = copy.tmux_hyperlink or dst_row.tmux_hyperlink;
+             }
+ 
+             // Our cell offset remains the same
+@@ -1107,6 +1110,11 @@ pub const Page = struct {
+         // Clear our destination now matter what
+         self.clearCells(dst_row, dst_left, dst_left + len);
+ 
++        // vtmux: the cells bring the line flags of the row they come from
++        // (Row.tmux_extended).
++        if (src_row.tmux_extended) dst_row.tmux_extended = true;
++        if (src_row.tmux_hyperlink) dst_row.tmux_hyperlink = true;
++
+         // If src has no managed memory, this is very fast.
+         if (!src_row.managedMemory()) {
+             fastmem.copy(Cell, dst_cells, src_cells);
+@@ -2120,7 +2128,21 @@ pub const Row = packed struct(u64) {
+     /// from somewhere that does not keep it measures by its text.
+     tmux_used: size.CellCountInt = 0,
+ 
+-    _padding: u7 = 0,
++    /// vtmux: tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK`
++    /// (grid.c `grid_extended_cell`): a cell on the row has needed tmux's
++    /// extended cell form (a wide or non-ASCII character, an RGB colour,
++    /// an attribute past the first eight, an underline colour, a tab, a
++    /// link) since the row was last emptied, and one of them had a link.
++    /// Set by the writes that make such a cell, kept when the cell is
++    /// overwritten or erased (tmux keeps the flags and the cell's
++    /// extended entry), reset with `tmux_used` by a full-row clear
++    /// (grid_empty_line). Readers OR them with what the row's cells say
++    /// now, so a write that does not set them loses nothing while its
++    /// cell is still there.
++    tmux_extended: bool = false,
++    tmux_hyperlink: bool = false,
++
++    _padding: u5 = 0,
+ 
+     /// The semantic prompt state of the row. See `semantic_prompt`.
+     pub const SemanticPrompt = enum(u2) {
+@@ -2180,6 +2202,21 @@ pub const Row = packed struct(u64) {
+ 
+     /// vtmux: cells up to `end` (exclusive) have been written
+     /// (grid_set_cell's `cellused` update).
++    /// vtmux: a cell needing tmux's extended form was written on the
++    /// row (`tmux_extended`), one with a link if `link`.
++    pub inline fn tmuxMarkExtended(self: *Row, link: bool) void {
++        self.tmux_extended = true;
++        if (link) self.tmux_hyperlink = true;
++    }
++
++    /// vtmux: the row has been emptied (grid_empty_line): no cells used,
++    /// no line flags.
++    pub inline fn tmuxEmptied(self: *Row) void {
++        self.tmux_used = 0;
++        self.tmux_extended = false;
++        self.tmux_hyperlink = false;
++    }
++
+     pub inline fn tmuxRaiseUsed(self: *Row, end: usize) void {
+         const e: size.CellCountInt = @intCast(@min(end, std.math.maxInt(size.CellCountInt)));
+         if (e > self.tmux_used) self.tmux_used = e;

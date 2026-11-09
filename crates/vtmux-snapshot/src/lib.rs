@@ -69,6 +69,11 @@
 //! - A new `oneof!` variant or `value_enum!` number ([`wire`]) is
 //!   state by that rule, unless the enum names an `unknown` fallback
 //!   ([`PaneMode::Closed`]).
+//! - A new row flag (the row codec's flags, which readers of the version
+//!   refuse when unknown) is such a field too: the writer sets it only
+//!   behind a feature name it lists whenever it writes one
+//!   ([`TMUX_LINE_FLAGS_FEATURE`]), so an older reader refuses the stream
+//!   for the name before it meets the flag.
 //! - Anything else (a tag's meaning, the row codec, the header) bumps
 //!   [`FORMAT_VERSION`] and adds a migration step and a golden file
 //!   `tests/golden/v<N>.snap`.
@@ -88,8 +93,8 @@ pub mod wire;
 
 pub use model::*;
 pub use row::{
-    Cell, Color, Grapheme, Hash, HistoryPage, Hyperlink, Osc133, PageBuilder, Row, RowPrompt,
-    Semantic, Style, Tab, Underline, Wide,
+    Cell, Color, Grapheme, Hash, HistoryPage, Hyperlink, KeptLineFlags, Osc133, PageBuilder, Row,
+    RowPrompt, Semantic, Style, Tab, Underline, Wide,
 };
 pub use term::TermState;
 
@@ -115,7 +120,15 @@ pub const KNOWN_FEATURES: &[&str] = &[
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
     TERMINAL_TITLE_FEATURE,
+    TMUX_LINE_FLAGS_FEATURE,
 ];
+
+/// The [`Meta::requires`] name of rows that keep tmux's line flags beyond
+/// what their cells say ([`Row::kept`]:
+/// row flag bits a reader before it refuses as malformed), listed when
+/// some row has one ([`Snapshot::keeps_line_flags`]). Such rows are rare
+/// (a wide character since overwritten), so most streams go without it.
+pub const TMUX_LINE_FLAGS_FEATURE: &str = "tmux-line-flags";
 
 /// The [`Meta::requires`] name of a pane terminal's very visible cursor
 /// ([`term::CursorStyle::very_visible`]), listed when some terminal's is
@@ -691,6 +704,40 @@ impl Snapshot {
                 }
             }
         }
+    }
+
+    /// Whether a row anywhere keeps line flags ([`Row::kept`]), so
+    /// the stream requires [`TMUX_LINE_FLAGS_FEATURE`]: history pages say
+    /// so themselves ([`HistoryPage::line_flags`]), visible rows are looked
+    /// at.
+    #[must_use]
+    pub fn keeps_line_flags(&self) -> bool {
+        fn kept(rows: &[Row]) -> bool {
+            rows.iter().any(|r| r.kept.any())
+        }
+        fn term(t: &TermState) -> bool {
+            let sized = t.sized_primary.as_ref().and_then(|p| p.screen.as_ref());
+            std::iter::once(&t.primary)
+                .chain(sized)
+                .chain(&t.alternate)
+                .any(|s| kept(&s.rows))
+                || t.alt_entry.as_ref().is_some_and(|a| kept(&a.saved))
+                || t.sync.as_ref().is_some_and(|h| kept(&h.rows))
+        }
+        self.pages().into_iter().any(|p| p.line_flags)
+            || self.panes.iter().any(|p| {
+                p.term.as_ref().is_some_and(term)
+                    || p.modes.iter().any(|m| match m {
+                        PaneMode::Copy(c) | PaneMode::View(c) => kept(&c.rows),
+                        _ => false,
+                    })
+            })
+            || self.clients.iter().any(|c| {
+                c.popup
+                    .as_ref()
+                    .and_then(|p| p.term.as_ref())
+                    .is_some_and(term)
+            })
     }
 
     /// Everything the dry run (`--vtmux-check-snapshot`) verifies beyond

@@ -231,8 +231,9 @@ pub struct RowState {
     pub cell_count: u16,
     /// tmux's `cellused` (Ghostty patch 0013).
     pub used: u16,
-    /// [`RowState::WRAPPED`], [`RowState::CONTINUATION`], and in bits 2-3
-    /// Ghostty's semantic prompt mark.
+    /// [`RowState::WRAPPED`], [`RowState::CONTINUATION`], in bits 2-3
+    /// Ghostty's semantic prompt mark, then [`RowState::TMUX_EXTENDED`] and
+    /// [`RowState::TMUX_HYPERLINK`].
     pub flags: u8,
     pub reserved: [u8; 3],
 }
@@ -242,6 +243,11 @@ impl RowState {
     pub const WRAPPED: u8 = 0x01;
     /// The row continues a wrapped one.
     pub const CONTINUATION: u8 = 0x02;
+    /// tmux's `GRID_LINE_EXTENDED` kept by the row (Ghostty patch 0034):
+    /// a cell on it needed tmux's extended form since it was emptied.
+    pub const TMUX_EXTENDED: u8 = 0x10;
+    /// tmux's `GRID_LINE_HYPERLINK` kept likewise.
+    pub const TMUX_HYPERLINK: u8 = 0x20;
 
     #[must_use]
     pub fn wrapped(self) -> bool {
@@ -400,6 +406,10 @@ pub struct FrozenRowState {
     pub cells: Vec<FrozenCell>,
     pub len: usize,
     pub wrapped: bool,
+    /// tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` the row kept
+    /// (Ghostty patch 0034, [`RowState::TMUX_EXTENDED`]).
+    pub kept_extended: bool,
+    pub kept_hyperlink: bool,
 }
 
 /// A cell of a [`FrozenRowState`], as `capture.rs` reads cells.

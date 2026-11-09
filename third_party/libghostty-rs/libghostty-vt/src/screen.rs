@@ -440,6 +440,14 @@ impl Row {
     pub fn is_dirty(self) -> Result<bool> {
         self.get(ffi::RowData::DIRTY)
     }
+    /// vtmux: tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` as the
+    /// row keeps them (patch 0034): set by a write that needed tmux's
+    /// extended cell form, kept when the cell is overwritten, reset when
+    /// the row is emptied. Readers OR them with what the cells say now.
+    pub fn tmux_line_flags(self) -> Result<(bool, bool)> {
+        let bits: u8 = self.get(ffi::RowData::TMUX_LINE_FLAGS)?;
+        Ok((bits & 1 != 0, bits & 2 != 0))
+    }
 }
 
 /// Represents a single terminal cell.

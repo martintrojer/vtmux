@@ -942,6 +942,8 @@ pub mod RowData {
     pub const KITTY_VIRTUAL_PLACEHOLDER: Type = 7;
     #[doc = " Whether this row is dirty and requires a redraw.\n\n Output type: bool *"]
     pub const DIRTY: Type = 8;
+    #[doc = " vtmux: tmux's line flags kept beyond what the row's cells say (patch\n 0034): bit 0 GRID_LINE_EXTENDED, bit 1 GRID_LINE_HYPERLINK.\n\n Output type: uint8_t *"]
+    pub const TMUX_LINE_FLAGS: Type = 9;
     #[doc = " Whether this row is dirty and requires a redraw.\n\n Output type: bool *"]
     pub const MAX_VALUE: Type = 2147483647;
 }

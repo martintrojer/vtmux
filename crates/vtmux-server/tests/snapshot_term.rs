@@ -299,6 +299,45 @@ fn page_shapes(t: &PaneTerm) -> Vec<String> {
 /// What main added to a pane's state after the spike: REP's last print
 /// (also with the REP half-parsed) and a narrowed alternate screen's
 /// cells-used counts past its width.
+/// Rows that keep tmux's line flags beyond their cells (Ghostty patch
+/// 0034: a wide character and a link overwritten) cross a snapshot, on
+/// the screen, in the history and in the history an alternate screen
+/// hides, and the stream then says it needs
+/// [`snap::TMUX_LINE_FLAGS_FEATURE`]; cells that still say so need nothing.
+#[test]
+fn kept_line_flags_cross_a_snapshot() {
+    let keeps = |t: snap::TermState| {
+        snap::Snapshot {
+            panes: vec![snap::Pane {
+                id: 1,
+                term: Some(t),
+                ..snap::Pane::default()
+            }],
+            ..snap::Snapshot::default()
+        }
+        .keeps_line_flags()
+    };
+    let lines = "\u{3042}B\rX\r\n\x1b]8;;http://e\x1b\\a\x1b]8;;\x1b\\\rb\r\n";
+    for form in [Form::Rows, Form::SamePin] {
+        let plain = pane(10, 3, 20, "\u{4e16}\x1b]8;;http://e\x1b\\a".as_bytes());
+        assert!(!keeps(term_to_snapshot(&plain, form)), "{form:?}");
+        let mut a = pane(10, 3, 20, lines.as_bytes());
+        assert!(keeps(term_to_snapshot(&a, form)), "{form:?}");
+        round_trip(&mut a, form, b"\x1b[1;5Hq", &format!("{form:?} screen"));
+        let mut a = pane(10, 3, 20, format!("{lines}\r\n\r\n\r\n").as_bytes());
+        assert_eq!(a.history_size(), 3);
+        assert!(keeps(term_to_snapshot(&a, Form::Rows)), "{form:?} history");
+        round_trip(&mut a, form, b"q", &format!("{form:?} history"));
+        let mut a = pane(
+            10,
+            3,
+            20,
+            format!("{lines}\r\n\r\n\r\n\x1b[?1049h").as_bytes(),
+        );
+        round_trip(&mut a, form, b"q\x1b[?1049l", &format!("{form:?} hidden"));
+    }
+}
+
 #[test]
 fn rep_and_a_narrowed_alternate_screen() {
     for form in [Form::Rows, Form::SamePin] {

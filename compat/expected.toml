@@ -273,8 +273,7 @@ status = "pass"
 status = "pass"
 
 [tests."input-raw-unicode.sh"]
-status = "xfail"
-reason = "expected divergence D-027: scenes overwrite-wide-left and overwrite-wide-pad, a wide character overwritten by half leaves tmux's other half an uncleared space on an EXTENDED line, Ghostty a cleared blank on a plain line (-R model); flag, variation and every other scene pass"
+status = "pass"
 
 [tests."input-raw-wrap.sh"]
 status = "pass"
@@ -295,8 +294,7 @@ status = "pass"
 status = "pass"
 
 [tests."input-unicode.sh"]
-status = "xfail"
-reason = "expected divergence D-027: scenes wide and widepad, -F flags the line X (EXTENDED) in tmux after its wide character is overwritten, vtmux reads Ghostty's current cells and gives -; every other scene passes"
+status = "pass"
 
 [tests."join-pane-modal.sh"]
 status = "pass"

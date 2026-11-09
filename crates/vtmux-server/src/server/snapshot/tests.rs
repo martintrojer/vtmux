@@ -1477,6 +1477,46 @@ fn a_primary_screen_left_at_its_size_requires_nothing() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A row that keeps tmux's line flags beyond its cells (Ghostty patch
+/// 0034: a wide character overwritten) makes the snapshot require
+/// [`snap::TMUX_LINE_FLAGS_FEATURE`]; a wide character still there does
+/// not, nor does a plain pane. The rebuilt pane keeps the flag.
+#[test]
+fn kept_line_flags_are_required_only_where_rows_keep_them() {
+    let dir = temp_dir("lflags");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let p = vtmux_core::ids::PaneId(0);
+    let flags = |s: &mut Server| {
+        let t = &s.model.panes[&p].term;
+        let o = vtmux_vt::CaptureOpts {
+            flags: true,
+            ..vtmux_vt::CaptureOpts::default()
+        };
+        String::from_utf8(vtmux_vt::capture(t, o)).unwrap()
+    };
+    a.model
+        .panes
+        .get_mut(&p)
+        .unwrap()
+        .term
+        .feed("\u{3042}".as_bytes());
+    let wide = a.to_snapshot(snap::Meta::default());
+    assert!(wide.meta.requires.is_empty(), "{:?}", wide.meta.requires);
+    a.model.panes.get_mut(&p).unwrap().term.feed(b"\rX");
+    let kept = a.to_snapshot(snap::Meta::default());
+    assert_eq!(
+        kept.meta.requires,
+        vec![snap::TMUX_LINE_FLAGS_FEATURE.to_string()]
+    );
+    assert!(flags(&mut a).starts_with("X X"), "{}", flags(&mut a));
+
+    let mut b = rebuild(&a, &dir, "b");
+    assert!(flags(&mut b).starts_with("X X"), "{}", flags(&mut b));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A pane's auto-hide scrollbar keeps what it shows and when it hides
 /// (`sb_auto_visible`, `sb_auto_hover`, `sb_auto_timer`), under its
 /// feature name; one left at the default requires nothing.

@@ -15,6 +15,9 @@
 //!   drawing table read backwards), as tmux stores it;
 //! - a link's `id=` comes from Ghostty patch 0006; one opened without an
 //!   id is `NONE`;
+//! - `EXTENDED` and `HYPERLINK` are set when a cell on the line needs
+//!   them now or the row kept them (Ghostty patch 0034: tmux keeps them
+//!   once a cell needed the extended form, `super::LineKept`);
 //! - OSC 133 line data (the flags each kind sets, the prompt, command and
 //!   output columns, the exit status) is kept by [`PaneTerm`] per line, as
 //!   `input_osc_133` keeps it.
@@ -236,8 +239,9 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
             .rposition(|c| !c.empty || c.padding())
             .map_or(0, |i| i + 1);
         let size = tmux_cellsize(&cells, used).max(used);
-        let link = cells.iter().any(|c| c.link);
-        let extended = super::row_extended(&cells);
+        let kept = super::read_row_kept(term, y, hsize);
+        let link = kept.hyperlink || cells.iter().any(|c| c.link);
+        let extended = kept.extended || super::row_extended(&cells);
         let data: Osc133 = osc133
             .iter()
             .find(|(row, _)| *row == y)

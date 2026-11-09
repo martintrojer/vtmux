@@ -14,6 +14,7 @@
 //!
 //! ```text
 //! row    := flags ncells [cells_used] [time] [mark] [links] [graphemes] run*
+//!           (flags bits 9-10, the kept line flags, carry no data of their own)
 //! run    := (count << 2 | uniform << 1 | same_attrs) [attrs] text+
 //! text   := codepoint << 2 | wide          (codepoint 0: an empty cell)
 //! attrs  := mask [fg] [bg] [ul] [attrs] [underline] [flags] [link] [semantic] [tab]
@@ -209,6 +210,29 @@ pub struct Row {
     /// When the row scrolled into history (`grid_line_time`), epoch
     /// seconds; 0 for none.
     pub time: i64,
+    /// tmux's line flags the row keeps where its cells no longer say so.
+    pub kept: KeptLineFlags,
+}
+
+/// tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` as a row keeps
+/// them where its cells no longer say so (a wide character since
+/// overwritten): tmux keeps both once a cell needed them until the line is
+/// emptied. A row carrying either is written only behind
+/// [`crate::TMUX_LINE_FLAGS_FEATURE`] (readers before it refuse the row
+/// flag), and the history page holding it says so
+/// ([`HistoryPage::line_flags`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeptLineFlags {
+    pub extended: bool,
+    pub hyperlink: bool,
+}
+
+impl KeptLineFlags {
+    /// Either flag.
+    #[must_use]
+    pub fn any(self) -> bool {
+        self.extended || self.hyperlink
+    }
 }
 
 const ROW_WRAPPED: u64 = 1 << 0;
@@ -219,6 +243,8 @@ const ROW_TIME: u64 = 1 << 5;
 const ROW_MARK: u64 = 1 << 6;
 const ROW_LINKS: u64 = 1 << 7;
 const ROW_GRAPHEMES: u64 = 1 << 8;
+const ROW_KEPT_EXTENDED: u64 = 1 << 9;
+const ROW_KEPT_HYPERLINK: u64 = 1 << 10;
 
 const A_FG: u64 = 1 << 0;
 const A_BG: u64 = 1 << 1;
@@ -435,6 +461,8 @@ impl Row {
             (ROW_MARK, self.mark.is_some()),
             (ROW_LINKS, !self.links.is_empty()),
             (ROW_GRAPHEMES, !self.graphemes.is_empty()),
+            (ROW_KEPT_EXTENDED, self.kept.extended),
+            (ROW_KEPT_HYPERLINK, self.kept.hyperlink),
         ] {
             if on {
                 flags |= bit;
@@ -533,7 +561,7 @@ impl Row {
     /// Read one row from `r` into `self`, reusing its buffers.
     pub fn decode_from(&mut self, r: &mut Reader<'_>) -> Result<(), Error> {
         let flags = r.varint()?;
-        if flags >> 9 != 0 {
+        if flags >> 11 != 0 {
             return Err(Error::Malformed("unknown row flag"));
         }
         let ncells = usize::try_from(r.varint()?).map_err(|_| Error::Malformed("row too wide"))?;
@@ -542,6 +570,10 @@ impl Row {
         }
         self.wrapped = flags & ROW_WRAPPED != 0;
         self.continuation = flags & ROW_CONTINUATION != 0;
+        self.kept = KeptLineFlags {
+            extended: flags & ROW_KEPT_EXTENDED != 0,
+            hyperlink: flags & ROW_KEPT_HYPERLINK != 0,
+        };
         self.prompt = match (flags >> ROW_PROMPT_SHIFT) & 3 {
             0 => RowPrompt::None,
             1 => RowPrompt::Prompt,
@@ -777,6 +809,9 @@ pub struct HistoryPage {
     /// streams only, never a checkpoint. `rows`, `raw_len`, `hash` and
     /// `data` are then unset.
     pub ghostty: Vec<u8>,
+    /// A row of the page keeps line flags ([`Row::kept`]), so a
+    /// stream holding it requires [`crate::TMUX_LINE_FLAGS_FEATURE`].
+    pub line_flags: bool,
 }
 
 /// Builds a [`HistoryPage`] one row at a time, so a pane's history never
@@ -786,6 +821,7 @@ pub struct PageBuilder {
     raw: Vec<u8>,
     rows: u32,
     cells: u64,
+    line_flags: bool,
 }
 
 impl PageBuilder {
@@ -800,6 +836,7 @@ impl PageBuilder {
         row.encode_into(&mut self.raw);
         self.rows += 1;
         self.cells += row.cells.len() as u64;
+        self.line_flags |= row.kept.any();
     }
 
     /// Whether `row` can join the page without taking it past
@@ -839,6 +876,7 @@ impl PageBuilder {
             compressed,
             data,
             ghostty: Vec::new(),
+            line_flags: self.line_flags,
         }
     }
 }
@@ -952,6 +990,8 @@ impl Value for HistoryPage {
                 // Written only behind the `requires` entry
                 // `crate::ghostty_pages_feature` (decision 23).
                 6 => one::get(&mut p.ghostty, body, cx)?,
+                // Written only behind `crate::TMUX_LINE_FLAGS_FEATURE`.
+                7 => one::get(&mut p.line_flags, body, cx)?,
                 _ => {}
             }
         }
@@ -972,6 +1012,7 @@ impl HistoryPage {
             one::put(out, 5, &self.data);
         }
         one::put(out, 6, &self.ghostty);
+        one::put(out, 7, &self.line_flags);
     }
 
     /// A page in Ghostty's own compressed form ([`HistoryPage::ghostty`]).
@@ -1066,6 +1107,9 @@ pub(crate) mod tests {
                 exit_status: 7,
             }),
             time: 1_790_000_000,
+            // Added within v1: out of the golden sample
+            // (kept_line_flags_round_trip_and_mark_their_page).
+            kept: KeptLineFlags::default(),
         }
     }
 
@@ -1082,6 +1126,36 @@ pub(crate) mod tests {
             Row::decode(&Row::default().encode()).unwrap(),
             Row::default()
         );
+    }
+
+    /// The kept line flags, added within v1 behind
+    /// [`crate::TMUX_LINE_FLAGS_FEATURE`], round-trip and mark the page
+    /// that holds them; a row flag past them is still refused.
+    #[test]
+    fn kept_line_flags_round_trip_and_mark_their_page() {
+        let cx = Ctx::new(1);
+        for (extended, hyperlink) in [(true, false), (false, true), (true, true)] {
+            let row = Row {
+                kept: KeptLineFlags {
+                    extended,
+                    hyperlink,
+                },
+                ..sample_row()
+            };
+            assert_eq!(Row::decode(&row.encode()).unwrap(), row);
+            let page = HistoryPage::from_rows(&[sample_row(), row], false);
+            assert!(page.line_flags);
+            for inline in [true, false] {
+                let mut out = Vec::new();
+                page.put_with(&mut out, inline);
+                assert!(HistoryPage::get(&out, &cx).unwrap().line_flags);
+            }
+        }
+        assert!(!HistoryPage::from_rows(&[sample_row()], false).line_flags);
+        let mut past = Vec::new();
+        put_varint(&mut past, 1 << 11);
+        put_varint(&mut past, 0);
+        assert!(Row::decode(&past).is_err());
     }
 
     #[test]
