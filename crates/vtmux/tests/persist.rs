@@ -1149,6 +1149,7 @@ fn a_copy_mode_page_past_the_limit_is_left_out_of_the_restore() {
             ),
         "{log}"
     );
+}
 
 /// `vtmux-persist full` set to `layout` writes a `layout` checkpoint at
 /// once and leaves no history on disk: not in `manifest.prev`, not in
