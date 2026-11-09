@@ -89,3 +89,43 @@ Single runs of `/tmp` probe scripts between the commits (10 and 32 clients, 8 s,
 | flood yes | vtmux | 0.53 | 0.70 | 3.22 | 0 |
 
 The same gate at `8cddcba`, 23:44-23:54 UTC, load 13.8 to 15.9: agent panes 2.5/2.7 (base/vtmux) at 5 / 1, 3.2/3.0 at 5 / 2, 5.2/5.3 at 20 / 1, 6.3/6.1 at 20 / 2; key echo p50 0.43/0.43 ms idle, 0.55/0.55 ms next to `yes`. Within the noise in both runs.
+
+## Round 2: one read of the time and each pane's process per turn, drawings for their client
+
+The review fixes (`crate::live`, `Source::client`, the empty-frame guard), `67b8fdc` against `db95c73`, both release builds, under `flock /tmp/vtmux-stress.lock`, 01:54-02:10 UTC on 2026-11-09, load 12.6 to 9.7, median of 3.
+
+`env NO_BUILD=1 VTMUX=<67b8fdc> BASE=<db95c73> AGENT_PANES="5 20" AGENT_CLIENTS="1 2" python3 scripts/bench.py agent_panes key_echo`:
+
+| case | binary | server CPU % | terminal KB/s (sum) | sync frames/s (sum) | server wakeups/s | RSS MB |
+|---|---|---|---|---|---|---|
+| 5 panes / 1 clients | tmux | 1.9 | 15.2 | 68 | 261 | 6.1 |
+| 5 panes / 1 clients | base | 2.2 | 14.2 | 68 | 231 | 19.1 |
+| 5 panes / 1 clients | vtmux | 2.2 | 14.3 | 68 | 230 | 19.0 |
+| 5 panes / 2 clients | tmux | 2.0 | 30.4 | 135 | 259 | 6.2 |
+| 5 panes / 2 clients | base | 3.0 | 28.2 | 134 | 281 | 21.5 |
+| 5 panes / 2 clients | vtmux | 2.9 | 28.3 | 134 | 280 | 21.5 |
+| 20 panes / 1 clients | tmux | 5.2 | 15.2 | 68 | 850 | 8.0 |
+| 20 panes / 1 clients | base | 5.0 | 14.3 | 68 | 707 | 32.5 |
+| 20 panes / 1 clients | vtmux | 5.0 | 14.3 | 68 | 706 | 32.6 |
+| 20 panes / 2 clients | tmux | 5.5 | 30.5 | 135 | 851 | 8.1 |
+| 20 panes / 2 clients | base | 6.0 | 28.3 | 135 | 751 | 34.9 |
+| 20 panes / 2 clients | vtmux | 5.9 | 28.2 | 135 | 752 | 34.9 |
+
+| case | binary | p50 ms | p90 ms | max ms | lost |
+|---|---|---|---|---|---|
+| flood none | tmux | 0.27 | 0.31 | 0.39 | 0 |
+| flood none | base | 0.42 | 0.47 | 0.67 | 0 |
+| flood none | vtmux | 0.42 | 0.46 | 0.68 | 0 |
+| flood yes | tmux | 0.49 | 0.67 | 2.31 | 0 |
+| flood yes | base | 0.54 | 0.80 | 6.45 | 0 |
+| flood yes | vtmux | 0.53 | 0.76 | 4.29 | 0 |
+
+`env VTMUX=<67b8fdc> BASE=<db95c73> CLIENTS_N="1 10 32" python3 scripts/bench-micro.py clients`, server CPU in seconds per 10 s:
+
+| clients | tmux 3.8 | base | vtmux | vtmux / tmux |
+|---|---|---|---|---|
+| 1 | 0.151 | 0.230 | 0.231 | 1.5x |
+| 10 | 0.230 | 0.389 | 0.389 | 1.7x |
+| 32 | 0.482 | 0.775 | 0.785 | 1.6x |
+
+Unchanged within the noise. The benchmarks draw no pane status line, so none of their drawings reads the client or a pane's process. A config whose pane status line or border style reads a client variable (`#{client_prefix}`) now draws the window once per client, as before `perf_many_clients`; one that shows `#{pane_current_command}` still shares and reads each pane's process once per turn instead of once per client.
