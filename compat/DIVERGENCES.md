@@ -461,7 +461,7 @@ product reasons" category.
 - Evidence: reference tmux 3.8 with `terminal-features ',xterm*:usstyle:overline'` on xterm-256color, the bytes of the attach redraw (`\e[Hx\e[4mAB\e(B\e[m`, `\e[HnoneX`, `\e[58:5:9mnone \e[53mover`); task audit_client_tty_output.
 - Category: Deferred (copying it means drawing the redraw path with tmux's run grouping and its unrecorded palette colour, a wrong underline colour on the terminal)
 
-### D-049: a styled underline on a terminal without `Smulx` is a plain underline
+### D-058: a styled underline on a terminal without `Smulx` is a plain underline
 
 - Test / assertion: oracle `attach_underline_styles` (annotated: the first attach, xterm-256color without `usstyle`); `render` `underline_styles_colours_and_overline_follow_the_terminal`.
 - tmux behaviour: `tty_attributes` (tty.c:2735-2743) writes a double, curly, dotted or dashed underline as `Smulx` with its number and nothing without it: a terminal that lacks `Smulx` (xterm-256color unless `terminal-features` gives `usstyle`) shows the cell with no underline at all, so a program's spell-check squiggle or diagnostics underline disappears.

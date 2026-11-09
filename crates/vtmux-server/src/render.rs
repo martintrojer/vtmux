@@ -1032,7 +1032,7 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
         a.standout
     };
     // A double, curly, dotted or dashed underline is `Smulx` with its
-    // number; a terminal without it gets a plain one (D-049), where tmux
+    // number; a terminal without it gets a plain one (D-058), where tmux
     // writes nothing (tty.c:2735-2743).
     let styled = match wanted.underline {
         Underline::Double => 2,
@@ -1220,7 +1220,7 @@ mod tests {
             };
             String::from_utf8(Compositor::default().frame(vtmux_vt::snapshot(&pane), caps)).unwrap()
         };
-        // D-049: without `Smulx` the styled underlines are a plain one,
+        // D-058: without `Smulx` the styled underlines are a plain one,
         // where tmux writes none (tty.c:2735-2743).
         let plain = frame_of(Attrs::XTERM);
         assert!(
