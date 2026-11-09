@@ -26,7 +26,8 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Startup, `new -d` | 12.2 ms | 8.9 ms | 0.73x | |
 | Creating 400 panes, CPU | 200 ms | 380 ms | 1.9x | **Worse.** |
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
-| Search all of a 1M-line history | 1652 ms | 825 ms | 0.50x | was 3.1 s, and 10.5 s before that; 0.51x at 100k lines; *Copy mode and search* |
+| Search all of a 1M-line history | 1651 ms | 554 ms | 0.34x | was 3.1 s, and 10.5 s before that; coloured lines 0.36x, was 6.1 s; *Copy mode over a coloured history* |
+| Copy mode entry, 1M coloured lines, uncompressed | 285 ms | 335 ms | 1.18x | **Worse**; was 726 ms (2.5x); plain lines 1.19x |
 | `capture-pane -S -` of a 1M-line history | 840 ms | 385 ms | 0.46x | was 3.5 s; `-M` (copy mode) 0.42x, `-e` 0.20x; coloured lines 0.49x, `-e` 0.54x; *Capturing all of a history* |
 | Alternate screen up over a 1M-line history | 3 ms | 4.0 s | - | **Worse**, was 6.9 s; 0.4 s at 100k lines. vtmux copies the history, tmux does not; *Reading all of a history* |
 | 32 clients on one window of agent panes | 0.48 s per 10 s | 0.79 s | 1.6x | **Worse**, was 5.2x. Clients that show the window alike share its drawing and frame; *Micro-benchmarks* |
@@ -234,9 +235,32 @@ The same script, and `--styled`, whose lines have a coloured timestamp, a bold c
 - `-M` reads a line copy mode has not read from its entry copy and keeps nothing for it.
 - Other lines (wide characters, clusters, tabs, line drawing, links, or `-F`/`-H` over styles) still go through the cells, now without allocating per line. Not measured here: a history made mostly of such lines.
 - The output is byte for byte what it was: a test compares the new paths with the cells path over random content under every flag, and a probe compared the branch with main over the CLI (10 seeds x 1760 captures).
-- Seen on the way and not done: over the styled history, copy mode's search is 3.4x tmux's time (5966-6089 ms against 1746-1765 at 1M lines) and entering copy mode 2.7x. The search reads a line as text only when every cell is plain ASCII of the default style.
+- Seen on the way: over the styled history, copy mode's search was 3.4x tmux's time and entering copy mode 2.7x. Both are faster since (*Copy mode over a coloured history*, below).
 
 Raw runs: [`test-health/2026-11-09-capture-full-history.md`](test-health/2026-11-09-capture-full-history.md).
+
+### Copy mode over a coloured history
+
+The same script, plain and `--styled`. Median of 3 runs, base, branch and tmux in turn, load 3-6. `before` is main before `perf_search_styled_history`. `search-*` look for a string not in the history, so they read every line and count nothing.
+
+| history | command | tmux 3.8 | vtmux before | vtmux after | after / tmux |
+|---|---|---|---|---|---|
+| 1M styled lines | `copy-mode` | 285 ms | 726 ms | 335 ms | 1.18x |
+| | `search-backward` | 1794 ms | 6067 ms | 646 ms | 0.36x |
+| | `search-forward` | 2065 ms | 6060 ms | 498 ms | 0.24x |
+| 1M plain lines | `copy-mode` | 236 ms | 274 ms | 281 ms | 1.19x |
+| | `search-backward` | 1651 ms | 640 ms | 554 ms | 0.34x |
+| | `search-forward` | 1650 ms | 505 ms | 403 ms | 0.24x |
+| 100k styled lines | `copy-mode` / `search-backward` / `search-forward` | 30 / 177 / 177 ms | 74 / 611 / 591 ms | 33 / 66 / 52 ms | 1.10x / 0.37x / 0.29x |
+| 100k plain lines | `copy-mode` / `search-backward` / `search-forward` | 26 / 166 / 171 ms | 33 / 67 / 60 ms | 34 / 57 / 42 ms | 1.31x / 0.34x / 0.25x |
+
+- Entry: copy mode copies the pane's Ghostty pages. Ghostty copied a page row by row, and a styled row cell by cell, adding each cell's style to the new page's style set, so a coloured history took 2.5x as long to copy as a plain one. A whole page is now copied as its memory (Ghostty patch 0034), and both take what a plain one did. Entry is still **Worse** than tmux's (1.2x, the copy's page faults); on compressed history it is faster (*Copy mode and search*, above). RSS in copy mode is unchanged (1961 MB plain, 1971 MB styled, against 1961 MB before).
+- Search: a line is read as text when every cell is one character of one column, of any style, colour or link, past ASCII or not. Before, only lines of ASCII were, and the `é` at the end of each styled line sent every one through its cells. A plain pattern is looked for in the line's UTF-8 text from a cell's first byte, and a regular expression runs over it as before. Lines with wide characters, clusters, tabs or line drawing, and wrapped lines, still go through their cells.
+- Plain lines are faster too: the text of a row is read into buffers kept from row to row.
+- Counts: with the search faster, a count over a coloured history now finishes inside tmux's 200 ms (`WINDOW_COPY_SEARCH_ALL_TIMEOUT`). Over 100k styled lines, before counted `1000+` where tmux counts exactly (`status=200 bytes`: tmux 100000 in 0.19 s, before `1000+`, after 100000 in 0.05 s; `items/[0-9]+5 `: 9999, `1000+`, 9999). A pattern on every line (`INFO`) runs out of tmux's time too (`1000+` in 0.20 s), where vtmux now counts 100000 in 0.04 s.
+- The results are what they were: a unit test compares the text path with reading every line as cells over random styled content, and a probe compared the branch with main over the CLI (9 seeds x 136 searches x 5 steps: `#{search_count}`, the partial flag, the cursor, the scroll position and `#{search_match}`, emacs and vi keys); 0 differ. `capture-pane` of all of history, `-M` included, prints the same bytes as main (6 seeds x 1760 captures).
+
+Raw runs: [`test-health/2026-11-09-copy-mode-styled-history.md`](test-health/2026-11-09-copy-mode-styled-history.md).
 
 ## CPU and throughput
 
