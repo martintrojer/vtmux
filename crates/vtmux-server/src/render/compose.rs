@@ -381,6 +381,14 @@ impl ComposeCache {
         }
     }
 
+    /// The tags [`Self::copy_rows`] leaves on rows `y..y + rows`.
+    pub fn row_tags(&self, tags: &mut [u64], y: u16, rows: u16) {
+        let lines = tags.iter_mut().skip(usize::from(y)).take(usize::from(rows));
+        for (i, tag) in lines.enumerate() {
+            *tag = self.rows.get(i).map_or(BLANK_ROW, |r| r.version);
+        }
+    }
+
     /// [`Self::copy_to`] straight into rows `y..y + rows` of `screen`,
     /// which still holds an earlier frame: `tags` has, per screen row, the
     /// [`CachedRow::version`] it holds (0 when unknown, [`BLANK_ROW`] when

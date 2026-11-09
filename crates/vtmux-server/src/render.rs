@@ -338,9 +338,10 @@ pub struct WindowCache {
     /// to tell the skip from the compositor's own empty diff.
     #[cfg(test)]
     pub skipped: std::cell::Cell<u32>,
-    /// Drawings and frames this client took from another ([`share`]).
+    /// Drawings this client took from another ([`share`]), frames it drew
+    /// and found another's, and plain frames it took without drawing them.
     #[cfg(test)]
-    pub shared: std::cell::Cell<(u32, u32)>,
+    pub shared: std::cell::Cell<(u32, u32, u32)>,
 }
 
 /// The inputs of a frame with nothing over the window but the status
@@ -402,13 +403,16 @@ pub fn clear_cells(cells: &mut [vtmux_vt::Cell]) {
 
 #[derive(Clone, Debug, Default)]
 pub struct Compositor {
-    last: Option<Snapshot>,
+    /// What the terminal shows; shared with the clients that took the
+    /// same frame ([`share`]).
+    last: Option<std::rc::Rc<Snapshot>>,
     /// Per row of `last`, the composed row it was copied from
     /// ([`compose::ComposeCache::copy_rows`]); 0 for a row drawn otherwise.
     /// Two frames' rows with the same nonzero tag hold the same cells.
     last_tags: Vec<u64>,
-    /// The frame before `last`, its buffer kept for the next one.
-    spare: Option<Snapshot>,
+    /// The frame before `last`, its buffer kept for the next one (copied
+    /// first if another client still shows it).
+    spare: Option<std::rc::Rc<Snapshot>>,
     /// `spare`'s row tags, as `last_tags`.
     spare_tags: Vec<u64>,
     /// The client is not keeping up: compose nothing until it drains.
@@ -526,11 +530,11 @@ impl Compositor {
     #[cfg(test)]
     #[must_use]
     pub fn last(&self) -> Option<(&Snapshot, &[u64])> {
-        self.last.as_ref().map(|l| (l, self.last_tags.as_slice()))
+        self.last.as_deref().map(|l| (l, self.last_tags.as_slice()))
     }
     /// Keep `screen` and its row tags, unsent, as the next frame's buffer.
     pub fn recycle(&mut self, screen: Snapshot, tags: Vec<u64>) {
-        self.spare = Some(screen);
+        self.spare = Some(std::rc::Rc::new(screen));
         self.spare_tags = tags;
     }
     /// A `cols` x `rows` screen for the next frame and its row tags: empty
@@ -545,7 +549,7 @@ impl Compositor {
         keep: std::ops::Range<u16>,
     ) -> (Snapshot, Vec<u64>) {
         let mut tags = std::mem::take(&mut self.spare_tags);
-        match self.spare.take() {
+        match self.spare.take().map(std::rc::Rc::unwrap_or_clone) {
             Some(mut b) if (b.cols, b.rows) == (cols, rows) && tags.len() == usize::from(rows) => {
                 let width = usize::from(cols).max(1);
                 let lines = b.cells.chunks_mut(width).zip(tags.iter_mut());
@@ -654,7 +658,7 @@ impl Compositor {
             .as_ref()
             .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
         let Some(changed_rows) = self.changed_rows(&screen, &tags, same_size) else {
-            self.spare = Some(screen);
+            self.spare = Some(std::rc::Rc::new(screen));
             self.spare_tags = tags;
             return Vec::new();
         };
@@ -794,7 +798,7 @@ impl Compositor {
         if caps.sync {
             out.push_str("\x1b[?2026l");
         }
-        self.spare = self.last.replace(screen);
+        self.spare = self.last.replace(std::rc::Rc::new(screen));
         self.spare_tags = std::mem::replace(&mut self.last_tags, tags);
         self.sent = Some(std::time::Instant::now());
         out.into_bytes()

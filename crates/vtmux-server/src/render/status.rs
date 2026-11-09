@@ -446,11 +446,29 @@ impl StatusLine {
         s: SessionId,
         caps: Caps,
         screen: &mut Snapshot,
-        mut tags: Option<&mut [u64]>,
+        tags: Option<&mut [u64]>,
         lines: u16,
         top: bool,
     ) {
-        let cols = usize::from(screen.cols);
+        let at = self.prepare(source, ctx, s, caps, (screen.cols, screen.rows), lines, top);
+        self.paint(screen, tags, at);
+    }
+
+    /// [`Self::draw`] but the drawing into the screen ([`Self::paint`]):
+    /// the status redrawn if it needs it, its rows for a `cols` x `rows`
+    /// screen made ([`Self::tags`]). The first row they go on, if any.
+    #[expect(clippy::too_many_arguments, reason = "status_redraw's inputs")]
+    pub fn prepare<'c>(
+        &mut self,
+        source: &Source<'_>,
+        ctx: impl FnOnce() -> Ctx<'c>,
+        s: SessionId,
+        caps: Caps,
+        (cols, screen_rows): (u16, u16),
+        lines: u16,
+        top: bool,
+    ) -> Option<u16> {
+        let cols = usize::from(cols);
         let lines = usize::from(lines);
         if self.needs_redraw(cols, lines) {
             let ctx = &mut ctx();
@@ -474,14 +492,11 @@ impl StatusLine {
                 self.screen = status_rows(source, ctx, s, cols, lines);
             }
         }
-        if self.nocursor {
-            screen.cursor_visible = false;
-        }
         let over = self.message.is_some() || self.prompt.is_some();
         let rows = if over {
             &self.active
         } else if lines == 0 {
-            return;
+            return None;
         } else {
             &self.screen
         };
@@ -489,18 +504,8 @@ impl StatusLine {
         let y = if top {
             0
         } else {
-            screen.rows.saturating_sub(n)
+            screen_rows.saturating_sub(n)
         };
-        if self.prompt.is_some() {
-            // server-client.c:2220-2222: while a prompt is set the cursor
-            // goes to status_prompt_cursor, hidden or not (a message over
-            // the prompt, TTY_NOCURSOR kept after it). A column past the
-            // last one stays pending wrap (tty_cursor, tty.c:2468).
-            let (x, line) = self.prompt_cursor;
-            let row = y.saturating_add(u16::try_from(line).unwrap_or(0));
-            screen.cursor = Some((x.min(screen.cols), row.min(screen.rows - 1)));
-            screen.cursor_visible = !self.nocursor;
-        }
         let theme = source.theme(caps);
         let key = (self.drawn, over, theme, caps.clear());
         let shown = match self.shown.take() {
@@ -522,9 +527,42 @@ impl StatusLine {
                 ShownRows { key, rows, tags }
             }
         };
-        debug_assert!(tags.is_none() || lines == shown.rows.len());
+        self.shown = Some(shown);
+        Some(y)
+    }
+
+    /// The tags of the rows [`Self::prepare`] made, from its first row.
+    #[must_use]
+    pub fn tags(&self) -> &[u64] {
+        self.shown.as_ref().map_or(&[], |s| s.tags.as_slice())
+    }
+
+    /// [`Self::draw`]'s drawing: the cursor hidden while a message or
+    /// prompt says so (or on the prompt), and the rows [`Self::prepare`]
+    /// made from row `at`. A row the screen holds already (its tag in
+    /// `tags` says so) stays.
+    pub fn paint(&self, screen: &mut Snapshot, mut tags: Option<&mut [u64]>, at: Option<u16>) {
+        if self.nocursor {
+            screen.cursor_visible = false;
+        }
+        let Some(y) = at else {
+            return;
+        };
+        if self.prompt.is_some() {
+            // server-client.c:2220-2222: while a prompt is set the cursor
+            // goes to status_prompt_cursor, hidden or not (a message over
+            // the prompt, TTY_NOCURSOR kept after it). A column past the
+            // last one stays pending wrap (tty_cursor, tty.c:2468).
+            let (x, line) = self.prompt_cursor;
+            let row = y.saturating_add(u16::try_from(line).unwrap_or(0));
+            screen.cursor = Some((x.min(screen.cols), row.min(screen.rows - 1)));
+            screen.cursor_visible = !self.nocursor;
+        }
+        let Some(shown) = self.shown.as_ref() else {
+            return;
+        };
+        let cols = usize::from(screen.cols);
         for ((row, cells), &tag) in (y..screen.rows).zip(&shown.rows).zip(&shown.tags) {
-            // A row the screen already holds (its tag says so) stays.
             match tags
                 .as_deref_mut()
                 .and_then(|t| t.get_mut(usize::from(row)))
@@ -538,7 +576,6 @@ impl StatusLine {
                 }
             }
         }
-        self.shown = Some(shown);
     }
 
     /// Whether the next frame must draw the status again: asked for, or the

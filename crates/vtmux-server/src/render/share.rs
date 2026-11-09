@@ -188,6 +188,10 @@ fn same_rows(a: &Snapshot, a_tags: &[u64], b: &Snapshot, b_tags: &[u64]) -> bool
         .all(|(y, (ra, rb))| tagged(y) || ra == rb)
 }
 
+/// Another client's compositor after its frame of this turn, the cells it
+/// had forced and the frame ([`Compositor::shows_as`]).
+pub type Shown<'a> = (&'a Compositor, &'a [(u16, u16, u16)], &'a [u8]);
+
 impl Compositor {
     /// The cells the next frame writes whole ([`Self::force`]).
     #[must_use]
@@ -241,16 +245,93 @@ impl Compositor {
         shown && same_rows(screen, tags, now, now_tags)
     }
 
+    /// [`Self::writes_as`] of a plain screen not drawn yet, known by its
+    /// row tags (each a composed or status row, none 0) and its cursor:
+    /// the screen `leader`'s frame left has the same tags and cursor (and
+    /// no wrapped rows, which a plain screen has none of).
+    #[must_use]
+    pub fn shows_as(
+        &self,
+        (leader, forced, frame): Shown<'_>,
+        tags: &[u64],
+        cursor: (Option<(u16, u16)>, bool),
+    ) -> bool {
+        if self.forced != forced || self.blocked || tags.contains(&0) {
+            return false;
+        }
+        let (before, before_tags, now, now_tags) = if frame.is_empty() {
+            (
+                &leader.last,
+                &leader.last_tags,
+                &leader.spare,
+                &leader.spare_tags,
+            )
+        } else {
+            (
+                &leader.spare,
+                &leader.spare_tags,
+                &leader.last,
+                &leader.last_tags,
+            )
+        };
+        let Some(now) = now else {
+            return false;
+        };
+        let shown = match (&self.last, before) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same_rows(a, &self.last_tags, b, before_tags),
+            _ => false,
+        };
+        shown
+            && now_tags.as_slice() == tags
+            && usize::from(now.rows) == tags.len()
+            && (now.cursor, now.cursor_visible) == cursor
+            && now.wrapped.is_empty()
+    }
+
+    /// The screen the last frame left, to share with a client that takes
+    /// the frame ([`Self::take_shown`]).
+    #[must_use]
+    pub fn clone_shown(&self) -> Option<Rc<Snapshot>> {
+        self.last.clone()
+    }
+
+    /// Take the `frame` another client's compositor wrote, which left
+    /// `shown` with row `tags`, when [`Self::shows_as`] said this one would
+    /// write it: the same state afterwards as [`Self::frame_tagged`], but
+    /// the terminal's screen shared. The screen before stays as the next
+    /// frame's buffer unless another client shows it too.
+    pub fn take_shown(
+        &mut self,
+        shown: Option<Rc<Snapshot>>,
+        tags: Vec<u64>,
+        frame: &[u8],
+    ) -> Vec<u8> {
+        // An empty frame changes nothing: the terminal shows it already.
+        if frame.is_empty() {
+            return Vec::new();
+        }
+        self.forced.clear();
+        let before = std::mem::replace(&mut self.last, shown);
+        let before_tags = std::mem::replace(&mut self.last_tags, tags);
+        if let Some(before) = before.filter(|b| Rc::strong_count(b) == 1) {
+            self.spare = Some(before);
+            self.spare_tags = before_tags;
+        }
+        self.sent = Some(std::time::Instant::now());
+        frame.to_vec()
+    }
+
     /// [`Self::frame_tagged`] of `screen` when [`Self::writes_as`] said it
     /// writes `frame`: the same state afterwards, without encoding it.
     pub fn take_frame(&mut self, screen: Snapshot, tags: Vec<u64>, frame: &[u8]) -> Vec<u8> {
         if frame.is_empty() {
-            self.spare = Some(screen);
+            self.spare = Some(Rc::new(screen));
             self.spare_tags = tags;
             return Vec::new();
         }
         self.forced.clear();
-        self.spare = self.last.replace(screen);
+        self.spare = self.last.replace(Rc::new(screen));
         self.spare_tags = std::mem::replace(&mut self.last_tags, tags);
         self.sent = Some(std::time::Instant::now());
         frame.to_vec()

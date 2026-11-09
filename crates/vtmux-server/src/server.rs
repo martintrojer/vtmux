@@ -3116,6 +3116,7 @@ impl Server {
     }
 
     /// Client `id`'s frame of this turn ([`Self::render_clients`]).
+    #[expect(clippy::too_many_lines, reason = "one frame's steps")]
     fn render_client(
         &mut self,
         id: ClientId,
@@ -3191,36 +3192,53 @@ impl Server {
         let repeat = !redrawing
             && !frozen
             && self.repeats_plain_frame(id, s, caps, (cols, rows), (scene_y, area));
-        let (mut screen, mut tags, plain) =
-            self.frame_buffer(id, s, caps, (cols, rows), (scene_y, area), frozen);
-        let drawn = self.draw_window(
-            id,
-            s,
-            caps,
-            (&mut screen, &mut tags, plain),
-            (scene_y, area),
-            held.as_deref(),
-            &window_jobs,
-            repeat,
-            turn,
-        );
-        if !drawn {
-            let client = self.clients.get_mut(&id).expect("client");
-            client.compositor.recycle(screen, tags);
-            let mut frame = Vec::new();
-            self.add_outer_modes(id, &mut frame);
-            if !frame.is_empty() {
-                self.send(id, &ServerMsg::Frame(frame));
+        let plain = !frozen
+            && self
+                .plain_frame(id, s, caps, (cols, rows), (scene_y, area))
+                .is_some();
+        let drawing = self.window_drawing(id, s, caps, cols, (scene_y, area), &window_jobs, turn);
+        let cache = &self.clients[&id].window_cache;
+        if let Some(d) = &drawing {
+            if repeat && !d.composed && cache.plain.get().is_some_and(|p| p.cursor == d.cursor) {
+                #[cfg(test)]
+                cache.skipped.set(cache.skipped.get() + 1);
+                let mut frame = Vec::new();
+                self.add_outer_modes(id, &mut frame);
+                if !frame.is_empty() {
+                    self.send(id, &ServerMsg::Frame(frame));
+                }
+                self.send_passthrough(id, caps);
+                return;
             }
-            self.send_passthrough(id, caps);
-            return;
+            if let Some(mut p) = cache.plain.get() {
+                p.cursor = d.cursor;
+                cache.plain.set(Some(p));
+            }
         }
-        let status_tags = plain.then_some(tags.as_mut_slice());
-        self.draw_status(id, s, caps, (&mut screen, status_tags), lines, top, jobs);
-        // screen-redraw.c:1813: the overlay over everything else.
-        self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
         self.force_sync_flush(id, s, flushed, scene_y, area);
-        let mut frame = self.frame_shared(id, screen, tags, caps, turn);
+        let at = (scene_y, area, lines, top);
+        let shared = drawing
+            .as_ref()
+            .filter(|_| plain)
+            .and_then(|d| self.take_plain_frame(id, s, caps, (cols, rows), at, d, &jobs, turn));
+        let mut frame = if let Some(frame) = shared {
+            frame
+        } else {
+            let held = (held.as_deref(), held_popup.as_deref());
+            let drawing = drawing.as_ref();
+            self.draw_frame(
+                id,
+                s,
+                caps,
+                (cols, rows),
+                at,
+                plain,
+                held,
+                drawing,
+                jobs,
+                turn,
+            )
+        };
         self.add_outer_modes(id, &mut frame);
         if redrawing {
             let ahead = self.redraw_head(id, s);
@@ -3230,6 +3248,100 @@ impl Server {
             self.send(id, &ServerMsg::Frame(frame));
         }
         self.send_passthrough(id, caps);
+    }
+
+    /// Client `id`'s frame, drawn: its window `drawing`, status lines and
+    /// popup (`held` and `held_popup` as frozen), then the compositor's
+    /// frame of it ([`Self::frame_shared`]).
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
+    fn draw_frame(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        (cols, rows): (u16, u16),
+        (scene_y, area, lines, top): (u16, u16, u16, bool),
+        plain: bool,
+        (held, held_popup): (Option<&[vtmux_vt::Cell]>, Option<&[vtmux_vt::Cell]>),
+        drawing: Option<&WindowDrawing>,
+        jobs: crate::format_jobs::JobHandle,
+        turn: &mut crate::render::share::Turn,
+    ) -> Vec<u8> {
+        // A plain frame's window rows are the composed rows and its status
+        // rows the status line's, each tagged: the buffer keeps them.
+        let keep = if plain { 0..rows } else { 0..0 };
+        let client = self.clients.get_mut(&id).expect("client");
+        let (mut screen, mut tags) = client.compositor.buffer(cols, rows, keep);
+        let window = (&mut screen, &mut tags[..], plain);
+        self.draw_window(id, s, caps, window, (scene_y, area), held, drawing);
+        let status_tags = plain.then_some(tags.as_mut_slice());
+        self.draw_status(id, s, caps, (&mut screen, status_tags), lines, top, jobs);
+        // screen-redraw.c:1813: the overlay over everything else.
+        self.draw_popup(id, caps, &mut screen, held_popup);
+        self.frame_shared(id, screen, tags, caps, turn)
+    }
+
+    /// Client `id`'s plain frame taken from a client before it this turn
+    /// without drawing it: when the screen it would draw (the rows of
+    /// `drawing`'s composition and its status rows, by their tags, and the
+    /// cursor) is the one that client's frame left, and its terminal shows
+    /// what that client's showed ([`crate::render::Compositor::shows_as`]).
+    /// The terminal's screen is then that client's, shared.
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
+    fn take_plain_frame(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        (cols, rows): (u16, u16),
+        (y, area, lines, top): (u16, u16, u16, bool),
+        drawing: &WindowDrawing,
+        jobs: &crate::format_jobs::JobHandle,
+        turn: &crate::render::share::Turn,
+    ) -> Option<Vec<u8>> {
+        turn.frames(caps, (cols, rows)).next()?;
+        let status = self.prepare_status(id, s, caps, (cols, rows), lines, top, jobs.clone());
+        let mut tags = vec![0; usize::from(rows)];
+        let composition = &drawing.shared.composition;
+        composition.compose.borrow().row_tags(&mut tags, y, area);
+        let client = &self.clients[&id];
+        if let Some(at) = status {
+            let lines = tags.iter_mut().skip(usize::from(at));
+            for (tag, &status) in lines.zip(client.status.tags()) {
+                *tag = status;
+            }
+        }
+        let compositor = &client.compositor;
+        let same = turn.frames(caps, (cols, rows)).find(|f| {
+            self.clients.get(&ClientId(f.leader)).is_some_and(|l| {
+                let shows = (&l.compositor, f.forced.as_slice(), f.frame.as_slice());
+                compositor.shows_as(shows, &tags, drawing.cursor)
+            })
+        })?;
+        let leader = &self.clients[&ClientId(same.leader)].compositor;
+        // Debug builds draw the frame and check it is the one taken.
+        #[cfg(debug_assertions)]
+        {
+            let mut screen = crate::render::blank(None, cols, rows);
+            let mut drawn = vec![0; usize::from(rows)];
+            composition
+                .compose
+                .borrow()
+                .copy_rows(&mut screen, y, area, &mut drawn);
+            (screen.cursor, screen.cursor_visible) = drawing.cursor;
+            client.status.paint(&mut screen, Some(&mut drawn), status);
+            assert_eq!(drawn, tags, "the tags of a frame taken are its own");
+            let own = compositor.clone().frame_tagged(screen, drawn, caps);
+            assert_eq!(own, same.frame, "a frame taken is the client's own");
+        }
+        let leader = leader.clone_shown();
+        #[cfg(test)]
+        {
+            let (draws, frames, taken) = client.window_cache.shared.get();
+            client.window_cache.shared.set((draws, frames, taken + 1));
+        }
+        let client = self.clients.get_mut(&id).expect("client");
+        Some(client.compositor.take_shown(leader, tags, &same.frame))
     }
 
     /// Client `id`'s compositor's frame of `screen`: the bytes a client
@@ -3260,8 +3372,8 @@ impl Server {
             let client = self.clients.get_mut(&id).expect("client");
             #[cfg(test)]
             {
-                let (d, f) = client.window_cache.shared.get();
-                client.window_cache.shared.set((d, f + 1));
+                let (draws, frames, taken) = client.window_cache.shared.get();
+                client.window_cache.shared.set((draws, frames + 1, taken));
             }
             let frame = client.compositor.take_frame(screen, tags, frame);
             #[cfg(debug_assertions)]
@@ -3319,31 +3431,6 @@ impl Server {
             .filter_map(|p| p.output_at)
             .min()
             .map(|t| t + HIDDEN_VIEW_IDLE)
-    }
-
-    /// Client `id`'s buffer for the next frame, its row tags, and whether
-    /// the frame is plain ([`Self::plain_frame`], not frozen): then its
-    /// window rows are the composed rows alone, so the buffer keeps those
-    /// it already has ([`crate::render::Compositor::buffer`]).
-    fn frame_buffer(
-        &mut self,
-        id: ClientId,
-        s: SessionId,
-        caps: crate::render::Caps,
-        (cols, rows): (u16, u16),
-        (y, area): (u16, u16),
-        frozen: bool,
-    ) -> (vtmux_vt::Snapshot, Vec<u64>, bool) {
-        let plain = !frozen
-            && self
-                .plain_frame(id, s, caps, (cols, rows), (y, area))
-                .is_some();
-        // A plain frame's window rows are the composed rows and its status
-        // rows the status line's, each tagged: the buffer keeps them.
-        let keep = if plain { 0..rows } else { 0..0 };
-        let client = self.clients.get_mut(&id).expect("client");
-        let (screen, tags) = client.compositor.buffer(cols, rows, keep);
-        (screen, tags, plain)
     }
 
     /// Whether client `id`'s next frame has nothing over the window but the
@@ -3705,27 +3792,21 @@ impl Server {
             .set_progress_bar(bar.state.number(), bar.progress)
     }
 
-    /// Session `s`'s current window composed into rows
-    /// `y..y + rows` of `screen`, with the active pane's cursor. `held` is
-    /// what the terminal shows in those rows while pane output is frozen:
-    /// pane content cells keep it. `screen` comes with its row tags
-    /// ([`crate::render::Compositor::buffer`]) and whether the frame is
-    /// plain (nothing drawn over the window), in which case its window rows
-    /// still hold an earlier frame's and only the changed ones are copied.
+    /// Client `id`'s drawing of session `s`'s current window, on rows
+    /// `y..y + rows` of a terminal `cols` wide: another client's of this
+    /// turn when it would draw the same ([`crate::render::share`]), else
+    /// its own, offered to the clients after it. `None` without a window.
     #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
-    #[expect(clippy::too_many_lines, reason = "one pass over the window's layers")]
-    fn draw_window(
+    fn window_drawing(
         &self,
         id: ClientId,
         s: SessionId,
         caps: crate::render::Caps,
-        (screen, tags, plain): (&mut vtmux_vt::Snapshot, &mut [u64], bool),
+        cols: u16,
         (y, rows): (u16, u16),
-        held: Option<&[vtmux_vt::Cell]>,
         jobs: &crate::format_jobs::JobHandle,
-        repeat: bool,
         turn: &mut crate::render::share::Turn,
-    ) -> bool {
+    ) -> Option<WindowDrawing> {
         let source = self.render_source();
         let client = &self.clients[&id];
         let cache = &client.window_cache;
@@ -3734,7 +3815,7 @@ impl Server {
         let theme = source.theme(caps);
         let key = crate::render::share::ShareKey {
             session: s,
-            size: (screen.cols, rows),
+            size: (cols, rows),
             origin,
             caps,
             colours: client.reported.blend_colours(),
@@ -3750,8 +3831,8 @@ impl Server {
             }
             #[cfg(test)]
             {
-                let (d, f) = cache.shared.get();
-                cache.shared.set((d + 1, f));
+                let (draws, frames, taken) = cache.shared.get();
+                cache.shared.set((draws + 1, frames, taken));
             }
             d
         } else {
@@ -3762,13 +3843,8 @@ impl Server {
                 cache.seen.set(None);
                 turn.claim(&cache.composition.borrow());
             }
-            let Some((scene, mut draw)) =
-                source.window(s, screen.cols, rows, origin, caps, Some(jobs), Some(cache))
-            else {
-                // Nothing to draw: the rows are blank, as from a fresh buffer.
-                crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
-                return true;
-            };
+            let (scene, mut draw) =
+                source.window(s, cols, rows, origin, caps, Some(jobs), Some(cache))?;
             for dim in draw.panes.values_mut().filter_map(|d| d.dim.as_mut()) {
                 (dim.fg, dim.bg) = key.dim;
             }
@@ -3779,7 +3855,7 @@ impl Server {
                 &scene,
                 &draw,
                 &theme,
-                screen.cols,
+                cols,
                 rows,
             );
             let d = Rc::new(crate::render::share::SharedDraw {
@@ -3797,33 +3873,59 @@ impl Server {
             }
             d
         };
-        let (scene, draw) = (&shared.scene, &shared.draw);
+        let draw = &shared.draw;
         *cache.border_ranges.borrow_mut() = draw
             .panes
             .iter()
             .filter(|(_, d)| !d.status_ranges.is_empty())
             .map(|(p, d)| (*p, d.status_ranges.clone()))
             .collect();
-        let composition = &shared.composition;
-        let generation = composition.compose.borrow().generation();
+        let generation = shared.composition.compose.borrow().generation();
         let composed = cache.seen.replace(Some(generation)) != Some(generation);
-        let cursor = crate::render::window::cursor_of(draw, &self.model, screen.cols, view, y);
-        if repeat && !composed && cache.plain.get().is_some_and(|p| p.cursor == cursor) {
-            #[cfg(test)]
-            cache.skipped.set(cache.skipped.get() + 1);
-            return false;
-        }
+        let cursor = crate::render::window::cursor_of(draw, &self.model, cols, view, y);
+        Some(WindowDrawing {
+            shared,
+            composed,
+            cursor,
+        })
+    }
+
+    /// Client `id`'s window `drawing` in rows `y..y + rows` of `screen`,
+    /// with the active pane's cursor. `held` is what the terminal shows in
+    /// those rows while pane output is frozen: pane content cells keep it.
+    /// `screen` comes with its row tags
+    /// ([`crate::render::Compositor::buffer`]) and whether the frame is
+    /// plain (nothing drawn over the window), in which case its window rows
+    /// still hold an earlier frame's and only the changed ones are copied.
+    #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
+    fn draw_window(
+        &self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        (screen, tags, plain): (&mut vtmux_vt::Snapshot, &mut [u64], bool),
+        (y, rows): (u16, u16),
+        held: Option<&[vtmux_vt::Cell]>,
+        drawing: Option<&WindowDrawing>,
+    ) {
+        let source = self.render_source();
+        let client = &self.clients[&id];
+        let cache = &client.window_cache;
+        let origin = (client.view.ox, client.view.oy);
+        let theme = source.theme(caps);
+        let Some(drawing) = drawing else {
+            // Nothing to draw: the rows are blank, as from a fresh buffer.
+            crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
+            return;
+        };
+        let (composition, cursor) = (&drawing.shared.composition, drawing.cursor);
         if plain {
             composition
                 .compose
                 .borrow()
                 .copy_rows(screen, y, rows, tags);
-            if let Some(mut p) = cache.plain.get() {
-                p.cursor = cursor;
-                cache.plain.set(Some(p));
-            }
             (screen.cursor, screen.cursor_visible) = cursor;
-            return true;
+            return;
         }
         for tag in tags.iter_mut().skip(usize::from(y)).take(usize::from(rows)) {
             *tag = 0;
@@ -3842,13 +3944,10 @@ impl Server {
             cursor.1,
         );
         (window.cursor, window.cursor_visible) = local;
-        if let Some(mut plain) = cache.plain.get() {
-            plain.cursor = cursor;
-            cache.plain.set(Some(plain));
-        }
         if let Some(held) = held {
             for (i, (cell, shown)) in window.cells.iter_mut().zip(held).enumerate() {
-                if let Some(crate::render::scene::SceneCell::Pane { pane, .. }) = scene.cells.get(i)
+                if let Some(crate::render::scene::SceneCell::Pane { pane, .. }) =
+                    drawing.shared.scene.cells.get(i)
                     && !self.model.redraw_panes.contains(pane)
                 {
                     cell.clone_from(shown);
@@ -3871,7 +3970,6 @@ impl Server {
             )
         };
         *cache.buffer.borrow_mut() = Some(window);
-        true
     }
 
     /// Whether client `id` would draw what `shared` is, with job handle
@@ -4140,14 +4238,32 @@ impl Server {
         top: bool,
         jobs: crate::format_jobs::JobHandle,
     ) {
-        let Some(mut status) = self
+        let size = (screen.cols, screen.rows);
+        let at = self.prepare_status(id, s, caps, size, lines, top, jobs);
+        if let Some(c) = self.clients.get(&id) {
+            c.status.paint(screen, tags, at);
+        }
+    }
+
+    /// [`Self::draw_status`] but the drawing
+    /// ([`crate::render::status::StatusLine::prepare`]), for a `cols` x
+    /// `rows` terminal: the first row of the status lines, if any.
+    #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
+    fn prepare_status(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        size: (u16, u16),
+        lines: u16,
+        top: bool,
+        jobs: crate::format_jobs::JobHandle,
+    ) -> Option<u16> {
+        let mut status = self
             .clients
             .get_mut(&id)
-            .map(|c| std::mem::take(&mut c.status))
-        else {
-            return;
-        };
-        {
+            .map(|c| std::mem::take(&mut c.status))?;
+        let at = {
             let source = self.render_source();
             // status_redraw (status.c:241-244): the client's tree, FORMAT_STATUS
             // and maybe FORMAT_FORCE, format_defaults(ft, c, NULL, NULL, NULL).
@@ -4158,11 +4274,12 @@ impl Server {
                 ctx.kind = crate::format_ctx::Kind::Unknown;
                 ctx
             };
-            status.draw(&source, ctx, s, caps, screen, tags, lines, top);
-        }
+            status.prepare(&source, ctx, s, caps, size, lines, top)
+        };
         if let Some(c) = self.clients.get_mut(&id) {
             c.status = status;
         }
+        at
     }
 
     // ------------------------------------------------------ status line
@@ -6098,6 +6215,15 @@ fn open_error(e: &vtmux_core::term_features::OpenError) -> EdgeError {
     }
 }
 
+/// A client's window drawing of one turn ([`Server::window_drawing`]).
+struct WindowDrawing {
+    shared: Rc<crate::render::share::SharedDraw>,
+    /// A row was composed again since the client last drew.
+    composed: bool,
+    /// The window cursor ([`crate::render::window::cursor_of`]).
+    cursor: (Option<(u16, u16)>, bool),
+}
+
 #[cfg(test)]
 mod tests {
     use super::Server;
@@ -6791,6 +6917,9 @@ mod tests {
             feed(&mut server, q, b"\r\nmore");
             turn(&mut server, &[1]);
             turn(&mut server, &[]);
+            // Caught up, its terminal shows an older frame than the others'.
+            feed(&mut server, p, b"+");
+            turn(&mut server, &[]);
             run(&mut server, &["set", "-g", "pane-border-status", "top"]);
             run(
                 &mut server,
@@ -6899,18 +7028,20 @@ mod tests {
             );
         }
         assert!(
-            shared[0].iter().all(|&n| n == (0, 0)),
+            shared[0].iter().all(|&n| n == (0, 0, 0)),
             "nothing shared when off: {:?}",
             shared[0]
         );
         // Clients 1 and 2 (3 and 4 are another terminal and size; 0 is
-        // the first) took drawings and frames.
+        // the first) took drawings and frames, plain ones without drawing
+        // them, others (under a message) drawn and compared.
+        let took = |i: usize| shared[1][i];
         assert!(
-            shared[1][1].0 > 0 && shared[1][1].1 > 0 && shared[1][2].0 > 0 && shared[1][2].1 > 0,
+            took(1).0 > 0 && took(1).2 > 0 && took(2).0 > 0 && took(2).1 > 0 && took(2).2 > 0,
             "{:?}",
             shared[1]
         );
-        assert_eq!(shared[1][4], (0, 0), "another size draws alone");
+        assert_eq!(shared[1][4], (0, 0, 0), "another size draws alone");
         assert!(shared[1][5].0 > 0, "{:?}", shared[1]);
     }
 
