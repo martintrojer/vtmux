@@ -33,6 +33,12 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 
 ## What tmux can't do
 
+**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached ([spec](docs/specs/2026-11-06-live-upgrade.md)).
+
+**Full restores.** Opt-in `vtmux-persist full` brings sessions back after a crash or reboot with their screens and scrollback, panes dead until `respawn-pane`. `layout` keeps just the structure.
+
+**Terminal features tmux drops.** Where the Ghostty engine inside each pane implements a protocol tmux 3.8 lacks, vtmux can pass it through, opt-in per feature, tmux behaviour when off ([D28](docs/specs/2026-10-29-vtmux.md)). Coming first: desktop notifications, the kitty keyboard protocol, in-band resize.
+
 **Pane blend.** Inactive panes dim, every cell, like Ghostty's unfocused splits. You always know where you're typing, and it costs no screen space ([spec](docs/specs/2026-11-04-pane-blend.md)).
 
 ```tmux
@@ -41,12 +47,10 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25'
 %endif
 ```
 
-**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions back after a crash or reboot, with `full` their screens and scrollback too, panes dead until `respawn-pane` ([spec](docs/specs/2026-11-06-live-upgrade.md)).
-
 ## Also
 
 - **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
-- **Paper cuts, not features.** Long-standing tmux annoyances are fixed only where scripts can't tell: each fix is opt-in (a `vtmux-*` option) or invisible ([docs/PAPERCUTS.md](docs/PAPERCUTS.md)). Real tmux bugs (data loss, hangs) are fixed by default and documented in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
+- **Opt-in, never surprising.** Paper cuts and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts ([docs/PAPERCUTS.md](docs/PAPERCUTS.md)). Real tmux bugs (data loss, hangs) are fixed by default and documented in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI, no animations. Images pass through to your terminal.
 
 Compliance is checked against tmux's own regress suite and a behaviour oracle recorded from real tmux 3.8. Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
