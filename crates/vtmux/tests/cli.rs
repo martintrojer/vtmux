@@ -1661,6 +1661,7 @@ fn failed_respawn_keeps_the_pane() {
 }
 
 /// Poll `display -p -t target fmt` (max 10 s) until its output is `done`.
+#[cfg(target_os = "linux")]
 fn display_until(w: &World, target: &str, fmt: &str, done: impl Fn(&str) -> bool) -> Run {
     let start = Instant::now();
     loop {
