@@ -86,6 +86,9 @@ unpack() {
 # vtmux-ghostty-vt-sys to the one just packaged).
 echo "publish: publish --dry-run vtmux-ghostty-vt-sys $version"
 cargo publish --dry-run --manifest-path "$(manifest vtmux-ghostty-vt-sys)" --target-dir target "$@"
+# The dry run keeps no .crate where `cargo package` puts it: make it again
+# (the same files; verified just now).
+cargo package --no-verify --manifest-path "$(manifest vtmux-ghostty-vt-sys)" --target-dir target "$@"
 unpack vtmux-ghostty-vt-sys
 echo "publish: package vtmux-ghostty-vt $version"
 cargo package --manifest-path "$(manifest vtmux-ghostty-vt)" --target-dir target "${patches[@]}" "$@"
