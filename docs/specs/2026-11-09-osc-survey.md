@@ -107,3 +107,13 @@ Skip: sixel, OSC 66, DECSCA, OSC 7501/3008, XTWINOPS extensions.
 - The outer Ghostty 1.4.0 app was not probed live. Its behaviour comes from the vendored tree's app layer at the pinned commit.
 - App behaviour (nvim 2048/2027/kitty detection, Claude Code channels) comes from web sources: code.claude.com/docs/en/terminal-config, github.com/tmux/tmux/issues/3335, yazi docs image-preview.md (github.com/yazi-rs/yazi-rs.github.io), deepwiki neovim TUI, github.com/noah-qin/Corta/issues/409. Check against current releases before writing tests.
 - No repo files were edited, and no servers were started.
+
+## Deferred: OSC 7501 (program status), 2026-11-09
+
+Owner: park it until an outer client we run inside supports it.
+
+- **What it is.** Rex's Program Status Protocol: a program reports `state=idle|working|done|blocked|error`, optionally `app=` and `progress=` (`ESC ] 7501 ; state=working:app=cargo:progress=40 ESC \`), and may probe with `7501;?`. Claude Code probes at start-up.
+- **libghostty-vt implements it**, not just parses it: `osc/parsers/program_status.zig`, the `program_status` effect and the `?` query reply (`stream_terminal.zig:225-240`). So it passes D28 rule 1's "implemented by the pinned libghostty-vt" half.
+- **The outer Ghostty app ignores it** (`stream_handler.zig:387-393`); Rex consumes it. tmux 3.8 and vtmux drop it today.
+- **The non-goal is not the blocker.** "No agent integration (status detection)" forbids vtmux guessing agent state; 7501 is the program declaring its own state, which vtmux would only carry.
+- **When an outer client supports it,** the likely shape is a D32 behind `vtmux-program-status` (default off): answer `7501;?`, keep each pane's latest report, expose `#{pane_program_state}`, `#{pane_program_app}`, `#{pane_program_progress}` (plus a hook), and forward reports to clients whose terminal supports 7501, as D30 does for notifications.
