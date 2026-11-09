@@ -22,7 +22,7 @@ mise use -g zig@0.17
 cargo install --locked vtmux
 ```
 
-That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
+That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
 
 From a checkout (mise brings the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
 
@@ -30,7 +30,7 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 ## Compared with tmux 3.8
 
-Measured, not assumed: release builds against tmux 3.8 on the same host ([numbers](docs/PERFORMANCE.md)).
+Measured, not assumed: release builds against tmux 3.8 on the same host ([numbers](https://github.com/martintrojer/vtmux/blob/main/docs/PERFORMANCE.md)).
 
 | | vtmux vs tmux 3.8 |
 |---|---|
@@ -105,16 +105,16 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'
 %endif
 ```
 
-`vtmux-pane-active-blend` does the same for the active pane. All the options: [docs/PAPERCUTS.md](docs/PAPERCUTS.md).
+`vtmux-pane-active-blend` does the same for the active pane. All the options: [docs/PAPERCUTS.md](https://github.com/martintrojer/vtmux/blob/main/docs/PAPERCUTS.md).
 
 ## Also
 
 - **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
-- **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
+- **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI, no animations. Images pass through to your terminal.
 
 Compliance is checked against tmux's own regress suite and a behaviour oracle recorded from real tmux 3.8. Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
-**Status:** beta, [3.8-beta1](CHANGELOG.md). M1 (daily use) is done: every tmux 3.8 command is implemented and the author uses vtmux as their tmux every day. M2 (full 3.8 compliance, live upgrade and persistence, then hardening from daily use) is in progress. [How it works](docs/ARCHITECTURE.md).
+**Status:** beta, [3.8-beta1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md). M1 (daily use) is done: every tmux 3.8 command is implemented and the author uses vtmux as their tmux every day. M2 (full 3.8 compliance, live upgrade and persistence, then hardening from daily use) is in progress. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
 Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.
