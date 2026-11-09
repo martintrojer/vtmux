@@ -139,33 +139,87 @@ impl PaneRows {
     }
 }
 
-/// The cells a capture writes as their text alone, with nothing else of
-/// them to look at (see [`CellBits::plain`]): one codepoint or none, one
-/// column, no tab or line drawing.
+/// The cells a capture writes from their text, and their style alone, with
+/// nothing else of them to look at (see [`CellBits::plain`]): one
+/// codepoint or none, one column, no tab or line drawing.
 #[derive(Clone, Copy)]
 struct Plain {
     /// Any style and link, and a blank with only a colour, are plain too:
     /// without `-e`, `-N`, `-F` or `-H` they change nothing written.
     any_style: bool,
+    /// Any style, and a blank with only a colour, are plain, and each
+    /// cell's style is read with its text ([`StyleRow`]): `-e` or `-N`
+    /// write or count them, but without `-F` or `-H` nothing else of a
+    /// cell but its link is looked at.
+    styled: bool,
     /// Only ASCII is plain: `-F` flags a character of more than one byte
     /// (`X`, [`row_extended`]).
     ascii: bool,
 }
 
+/// The style id bits of a Ghostty cell (see [`CellBits`]).
+const STYLE_BITS: u64 = 0xffff << 26;
+
 impl Plain {
-    /// The bits of a Ghostty cell that change nothing written: the OSC 133
-    /// semantic bits, and the style and link when any are plain.
+    /// The bits of a Ghostty cell that change nothing written, or are read
+    /// apart: the OSC 133 semantic bits, the style when it is plain, and
+    /// the link when any is.
     fn ignored(self) -> u64 {
         const SEMANTIC: u64 = 0b11 << 46;
-        const STYLE_AND_LINK: u64 = (0xffff << 26) | (1 << 45);
-        SEMANTIC | if self.any_style { STYLE_AND_LINK } else { 0 }
+        const LINK: u64 = 1 << 45;
+        SEMANTIC
+            | if self.any_style { STYLE_BITS | LINK } else { 0 }
+            | if self.styled { STYLE_BITS } else { 0 }
     }
 
     fn of(opts: CaptureOpts) -> Self {
+        let looked_at = opts.flags || opts.hyperlinks;
         Self {
-            any_style: !(opts.escapes || opts.keep_spaces || opts.flags || opts.hyperlinks),
+            any_style: !(opts.escapes || opts.keep_spaces || looked_at),
+            styled: (opts.escapes || opts.keep_spaces) && !looked_at,
             ascii: opts.flags,
         }
+    }
+
+    /// Whether a line of this kind's plain cells can follow `last`, the
+    /// cell written before: a style it writes from there, but no charset
+    /// or link it would have to end (and, unless it keeps styles, no
+    /// style).
+    fn follows(self, last: &Gc, opts: CaptureOpts) -> bool {
+        !opts.escapes
+            || if self.styled {
+                !last.acs && last.link.is_none()
+            } else {
+                *last == Gc::default()
+            }
+    }
+}
+
+/// The styles of a line of plain cells (`Plain::styled`): each cell's
+/// index in `styles`, which holds each run of one style once.
+#[derive(Default)]
+struct StyleRow {
+    styles: Vec<Style>,
+    of: Vec<u16>,
+}
+
+impl StyleRow {
+    fn clear(&mut self) {
+        self.styles.clear();
+        self.of.clear();
+    }
+
+    /// Add a cell of style `style`.
+    fn push(&mut self, style: Style) {
+        if self.styles.last() != Some(&style) {
+            self.styles.push(style);
+        }
+        self.of
+            .push(u16::try_from(self.styles.len() - 1).unwrap_or(u16::MAX));
+    }
+
+    fn style(&self, x: usize) -> &Style {
+        &self.styles[usize::from(self.of[x])]
     }
 }
 
@@ -183,13 +237,14 @@ impl Source<'_> {
         last: &mut LastRow<'t>,
         raw: &mut Vec<libghostty_vt::screen::Cell>,
         out: &mut Vec<u32>,
+        styles: &mut StyleRow,
     ) -> Option<bool> {
         match self {
             Self::Pane(t, p) => {
                 let (at, walk) = p.screen_row(y)?;
                 let row_ref = row_ref_stepped(&t.term, at, walk, last.as_ref())?;
                 *last = Some((at, row_ref.clone()));
-                let wrapped = plain_cells(&row_ref, p.cols, kind, raw, out)?;
+                let wrapped = plain_cells(&row_ref, p.cols, kind, raw, out, styles)?;
                 if y < p.hsize {
                     t.note_history_read();
                 }
@@ -198,23 +253,38 @@ impl Source<'_> {
             Self::Saved(..) => None,
             Self::Mode(l, sx) => {
                 if let Some((copy, at)) = l.entry_row(y) {
-                    let wrapped = copy.plain_cells(at, kind, raw, out)?;
+                    let wrapped = copy.plain_cells(at, kind, raw, out, styles)?;
+                    if kind.styled {
+                        for _ in out.len()..*sx {
+                            styles.push(Style::default());
+                        }
+                    }
                     out.resize((*sx).max(out.len()), 0);
                     return Some(wrapped);
                 }
                 let row = l.line(y);
                 out.clear();
+                styles.clear();
                 for c in &row.cells {
                     let plain = !c.tab
                         && c.width == 1
                         && !c.acs
-                        && (kind.any_style || (!c.link && c.style == Style::default()));
+                        && (kind.any_style
+                            || (!c.link && (kind.styled || c.style == Style::default())));
+                    if kind.styled {
+                        styles.push(c.style);
+                    }
                     let mut chars = c.text.chars();
                     out.push(match (plain, chars.next(), chars.next()) {
                         (true, None, _) => 0,
                         (true, Some(c), None) if !kind.ascii || c.is_ascii() => u32::from(c),
                         _ => return None,
                     });
+                }
+                if kind.styled {
+                    for _ in out.len()..*sx {
+                        styles.push(Style::default());
+                    }
                 }
                 out.resize((*sx).max(out.len()), 0);
                 Some(row.wrapped)
@@ -360,12 +430,13 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
     let mut at = None;
     let (mut raw, mut plain, mut cells, mut links) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut styles = StyleRow::default();
     let kind = Plain::of(opts);
     for y in top..=bottom {
-        // A row of plain cells needs no sequence when the cell before had
-        // none (the default style, no charset, no link), and lists no link.
-        let plain_wrapped = if (!opts.escapes || last == Gc::default()) && plain_lines() {
-            src.plain_line(y, kind, &mut at, &mut raw, &mut plain)
+        // A row of plain cells needs no sequence but its styles' when the
+        // cell before had no charset or link, and lists no link.
+        let plain_wrapped = if kind.follows(&last, opts) && plain_lines() {
+            src.plain_line(y, kind, &mut at, &mut raw, &mut plain, &mut styles)
         } else {
             None
         };
@@ -404,7 +475,9 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
                 out.extend_from_slice(row_flags(cells, wrapped, prompt, output).as_bytes());
             }
         }
-        if plain_wrapped.is_some() {
+        if plain_wrapped.is_some() && kind.styled {
+            emit_styled(&mut out, &plain, &styles, opts, &mut last);
+        } else if plain_wrapped.is_some() {
             emit_plain(&mut out, &plain, opts);
         } else if opts.hyperlinks {
             out.extend_from_slice(&links);
@@ -983,12 +1056,13 @@ impl ScreenCopy {
         kind: Plain,
         raw: &mut Vec<libghostty_vt::screen::Cell>,
         out: &mut Vec<u32>,
+        styles: &mut StyleRow,
     ) -> Option<bool> {
         if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
             return None;
         }
         let row_ref = self.row_ref(y + self.retained - self.hsize)?;
-        plain_cells(&row_ref, self.cols, kind, raw, out)
+        plain_cells(&row_ref, self.cols, kind, raw, out, styles)
     }
 
     /// `history_size` when the copy was taken.
@@ -1426,8 +1500,10 @@ fn plain_cells(
     kind: Plain,
     raw: &mut Vec<libghostty_vt::screen::Cell>,
     out: &mut Vec<u32>,
+    styles: &mut StyleRow,
 ) -> Option<bool> {
-    let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
+    let row = row_ref.row().ok()?;
+    let wrapped = row.is_wrapped().ok()?;
     row_ref.row_cells(raw).ok()?;
     // An incomplete reflow can leave the page narrower than the screen.
     raw.truncate(cols);
@@ -1440,13 +1516,73 @@ fn plain_cells(
     if ascii {
         #[expect(clippy::cast_possible_truncation, reason = "below 0x80")]
         out.extend(raw.iter().map(|c| ((c.bits() & looked_at) >> 2) as u32));
-        return Some(wrapped);
+    } else {
+        out.resize(raw.len(), 0);
+        for (o, cell) in out.iter_mut().zip(raw.iter()) {
+            *o = CellBits(cell.bits()).plain(kind)?;
+        }
     }
-    out.resize(raw.len(), 0);
-    for (o, cell) in out.iter_mut().zip(raw.iter()) {
-        *o = CellBits(cell.bits()).plain(kind)?;
+    if kind.styled {
+        // As read_cells reads them: per-row flags let most cells skip
+        // the style lookup.
+        cell_styles(row_ref, raw, row.is_styled().unwrap_or(true), styles);
     }
     Some(wrapped)
+}
+
+/// The style of each of the plain cells `raw` of the row at `row_ref`, as
+/// [`read_cells`] gives it, in `styles`: a run of cells of one style id
+/// (and one colour, for a blank with only a colour) costs one lookup.
+fn cell_styles(
+    row_ref: &GridRef<'_>,
+    raw: &[libghostty_vt::screen::Cell],
+    row_styled: bool,
+    styles: &mut StyleRow,
+) {
+    styles.clear();
+    if raw
+        .iter()
+        .fold(0, |acc, c| acc | (c.bits() & (STYLE_BITS | 0b11)))
+        == 0
+    {
+        // No style and no colour-only blank: the usual row.
+        styles.styles.push(Style::default());
+        styles.of.resize(raw.len(), 0);
+        return;
+    }
+    let mut last: Option<(u64, Style)> = None;
+    for (x, cell) in raw.iter().enumerate() {
+        let cell = CellBits(cell.bits());
+        let colour_only = !matches!(cell.content_tag(), CellContentTag::Codepoint);
+        let key = cell.0 & (STYLE_BITS | if colour_only { (1 << 26) - 1 } else { 0 });
+        let style = match last {
+            Some((k, style)) if k == key => style,
+            _ => {
+                let mut style = if row_styled && cell.has_styling() {
+                    row_ref
+                        .with_x(u16::try_from(x).unwrap_or(u16::MAX))
+                        .style()
+                        .map(Style::from)
+                        .unwrap_or_default()
+                } else {
+                    Style::default()
+                };
+                match cell.content_tag() {
+                    CellContentTag::BgColorPalette => {
+                        style.bg = Color::Palette(cell.palette()).in_form(cell.palette_256());
+                    }
+                    CellContentTag::BgColorRgb => {
+                        let (r, g, b) = cell.rgb();
+                        style.bg = Color::Rgb(r, g, b);
+                    }
+                    CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
+                }
+                last = Some((key, style));
+                style
+            }
+        };
+        styles.push(style);
+    }
 }
 
 /// A Ghostty cell read from its bits rather than a `ghostty_cell_get` call
@@ -1546,7 +1682,7 @@ impl CellBits {
                 (!kind.ascii || c.is_ascii()).then_some(cp)
             }
             CellContentTag::BgColorPalette | CellContentTag::BgColorRgb
-                if kind.any_style && bits >> 26 == 0 =>
+                if (kind.any_style || kind.styled) && bits >> 26 == 0 =>
             {
                 Some(0)
             }
@@ -1799,8 +1935,22 @@ fn emit_plain(out: &mut Vec<u8>, cells: &[u32], opts: CaptureOpts) {
         cells.len()
     };
     let start = out.len();
-    let cells = &cells[..end.min(cells.len())];
-    let special = |c: u32| c >= 0x80 || (opts.octal && c == u32::from(b'\\'));
+    push_text(out, &cells[..end.min(cells.len())], opts.octal);
+    if !opts.join && !opts.keep_spaces {
+        // GRID_STRING_TRIM_SPACES (grid.c:1263).
+        let kept = out[start..]
+            .iter()
+            .rposition(|&b| b != b' ')
+            .map_or(start, |i| start + i + 1);
+        out.truncate(kept);
+    }
+}
+
+/// The text of plain cells (one codepoint each, 0 a blank) as
+/// [`emit_row`] writes it: a blank as a space, a backslash doubled under
+/// `-C` (`octal`).
+fn push_text(out: &mut Vec<u8>, cells: &[u32], octal: bool) {
+    let special = |c: u32| c >= 0x80 || (octal && c == u32::from(b'\\'));
     let mut rest = cells;
     loop {
         // A run of ASCII written as it is, a blank as a space.
@@ -1820,14 +1970,6 @@ fn emit_plain(out: &mut Vec<u8>, cells: &[u32], opts: CaptureOpts) {
         }
         rest = &rest[n + 1..];
     }
-    if !opts.join && !opts.keep_spaces {
-        // GRID_STRING_TRIM_SPACES (grid.c:1263).
-        let kept = out[start..]
-            .iter()
-            .rposition(|&b| b != b' ')
-            .map_or(start, |i| start + i + 1);
-        out.truncate(kept);
-    }
 }
 
 /// [`tmux_cellsize`] of a line of plain cells: every written cell (not a
@@ -1842,6 +1984,86 @@ fn plain_cellsize(cells: &[u32], used: usize) -> usize {
         }
         let mut j = i + 1;
         while j < used && cells[j] != 0 {
+            j += 1;
+        }
+        if j > size {
+            size = expanded_size(j, cells.len());
+        }
+        i = j;
+    }
+    size
+}
+
+/// [`emit_row`] for a line of plain cells with their styles
+/// ([`Plain::styled`]) after a cell with no charset or link: no cell
+/// changes the charset or a link, so a cell needs only its style's
+/// sequence.
+fn emit_styled(
+    out: &mut Vec<u8>,
+    cells: &[u32],
+    styles: &StyleRow,
+    opts: CaptureOpts,
+    last: &mut Gc,
+) {
+    let used = cells.iter().rposition(|&c| c != 0).map_or(0, |i| i + 1);
+    let end = if opts.join || opts.used_only {
+        used
+    } else if opts.escapes || opts.keep_spaces {
+        styled_cellsize(cells, styles, used)
+    } else {
+        cells.len()
+    };
+    let start = out.len();
+    let cells = &cells[..end.min(cells.len())];
+    if opts.escapes {
+        // A run of cells of one style: the first writes its sequence, the
+        // rest none (each follows a cell of its style).
+        let mut x = 0;
+        while x < cells.len() {
+            let run = styles.of[x];
+            let n = styles.of[x..cells.len()]
+                .iter()
+                .position(|&i| i != run)
+                .unwrap_or(cells.len() - x);
+            let style = styles.style(x);
+            let at = out.len();
+            sgr_code(out, &last.style, style);
+            if opts.octal && out.len() > at {
+                escape_esc(out, at);
+            }
+            last.style = *style;
+            push_text(out, &cells[x..x + n], opts.octal);
+            x += n;
+        }
+    } else {
+        push_text(out, cells, opts.octal);
+    }
+    if !opts.join && !opts.keep_spaces {
+        // GRID_STRING_TRIM_SPACES (grid.c:1263).
+        while out.len() > start && out.last() == Some(&b' ') {
+            out.pop();
+        }
+    }
+}
+
+/// [`tmux_cellsize`] of a line of plain cells with their styles: a cell is
+/// written when it has text or a background colour, and a run is written
+/// cells of one style.
+fn styled_cellsize(cells: &[u32], styles: &StyleRow, used: usize) -> usize {
+    let written = |x: usize| cells[x] != 0 || styles.style(x).bg != Color::Default;
+    let extent = (0..cells.len())
+        .rposition(written)
+        .map_or(0, |i| i + 1)
+        .max(used);
+    let mut size = 0;
+    let mut i = 0;
+    while i < extent {
+        if !written(i) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < extent && written(j) && styles.style(j) == styles.style(i) {
             j += 1;
         }
         if j > size {
@@ -2840,10 +3062,10 @@ mod tests {
     }
 
     /// Nor does one of styled text (colours, attributes, a coloured erase,
-    /// characters past ASCII) unless the capture writes or looks at the
-    /// styles (`-e`, `-N`, `-F`, `-H`).
+    /// characters past ASCII), with or without its styles (`-e`, `-N`),
+    /// unless the capture looks at more of each cell (`-F`, `-H`).
     #[test]
-    fn a_styled_history_captures_without_building_cells_unless_styles_show() {
+    fn a_styled_history_captures_without_building_cells_unless_flags_or_links() {
         let mut t = PaneTerm::new(60, 5, 5000);
         for i in 0..1500 {
             t.feed(
@@ -2868,8 +3090,8 @@ mod tests {
             let _ = capture(&t, o);
             let _ = capture_lines(&copy, 60, o);
             let built = CELL_ROWS.with(std::cell::Cell::get) - before;
-            let styles_show = o.escapes || o.keep_spaces || o.flags || o.hyperlinks;
-            assert_eq!(built == 0, !styles_show, "{built} rows built for {o:?}");
+            let more = o.flags || o.hyperlinks;
+            assert_eq!(built == 0, !more, "{built} rows built for {o:?}");
         }
     }
 }
