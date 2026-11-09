@@ -15,14 +15,29 @@ both servers. Any difference is a finding; `--minimise` cuts the stream (ddmin o
 tokens, then over bytes) to the smallest one that still differs in the same place.
 
 Servers run on private sockets under a fresh /tmp dir (`-S`, `-f /dev/null`, env
-cleared) and are killed on exit. Env: EMU_FUZZ_IGNORE (formats, `capture` or `alt`: not compared; comma-separated), VTMUX (target/debug/vtmux), VTMUX_REFERENCE_TMUX
+cleared) and are killed on exit. Env: EMU_FUZZ_IGNORE (formats, `capture` or `alt`: not
+compared; `tail`: the SGR, SO and SI codes ending a captured line are dropped, as they
+follow tmux's `cellsize`, which vtmux models (compat/DIVERGENCES.md D-027);
+comma-separated), VTMUX (target/debug/vtmux), VTMUX_REFERENCE_TMUX
 (~/.cache/vtmux/tmux-3.8/bin/tmux).
+
+`--gen round2` (round 2) picks one of the focused generators per seed (seed modulo
+their count; `--gen <name>` runs one): `charsets` (G0-G3 designations, SI/SO, SS2/SS3,
+LS2/LS3), `decsc` (DECSC/DECRC and SCP/RCP with attributes, charsets, origin mode, a
+pending wrap and links), `longline` (lines many times the width, wide and plain, with
+reflowing resizes), `margins` (DECLRMM and DECSLRM, which tmux does not have, with
+ICH/DCH/ECH/IL/DL, DECIC/DECDC, insert mode), `origin` (DECOM with scroll regions,
+cursor moves and resizes), `osc8` (links across wraps, BEL and ST), `tabs` (HTS, TBC,
+CHT, CBT, DECST8C across resizes), `widemargin` (wide characters at the right edge and
+around ICH/DCH, autowrap and insert modes), `zwj` (ZWJ sequences, VS15/VS16, flags and
+lone joiners at line ends).
 """
 import argparse
 import concurrent.futures
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -158,18 +173,249 @@ def token(r, w, h):
     return r.choice(["\x1b[?1;2c", "\x1b[>c", "\x1b]4;1;rgb:ff/00/00\x07", "\x1b[1;5;7;9m"])
 
 
-def gen_case(seed):
+# --- round 2: focused generators -------------------------------------------
+#
+# Each draws from a narrow family of sequences that the mixed generator above
+# reaches too rarely to exercise (a margin needs ?69h before CSI s, a tab stop
+# needs HTS, a G2 set needs SS2 after its designation, ...), with filler text
+# and a resize between most chunks.
+
+ZWJ_SEQS = [
+    "\U0001F468\u200d\U0001F469\u200d\U0001F467", "\u2764\ufe0f", "\U0001F44D\U0001F3FD",
+    "\U0001F1EF\U0001F1F5", "x\u200d\U0001F600", "\U0001F3F3\ufe0f\u200d\U0001F308",
+    "a\u200d", "\u200d", "\U0001F600\u200d", "\u2601\ufe0f", "\U0001F1EF", "e\u0301\u200d",
+    "\u00e9\ufe0e", "\u0915\u094d\u0937",
+]
+
+
+def plain(r, lo=1, hi=12):
+    return "".join(r.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(r.randint(lo, hi)))
+
+
+def cup(r, w, h):
+    return "\x1b[%d;%dH" % (r.randint(1, h + 1), r.randint(1, w + 1))
+
+
+def to_col(r, w, near_end=True):
+    """CHA to a column, mostly at or near the right edge."""
+    c = w - r.randint(0, 2) if near_end and r.random() < 0.7 else r.randint(1, w + 1)
+    return "\x1b[%dG" % max(1, c)
+
+
+def common(r, w, h):
+    k = r.random()
+    if k < 0.35:
+        return plain(r)
+    if k < 0.45:
+        return r.choice(["\r\n", "\n", "\r", "\b", "\t"])
+    if k < 0.6:
+        return sgr(r)
+    if k < 0.75:
+        return cup(r, w, h)
+    if k < 0.85:
+        return r.choice(WIDE) * r.randint(1, 3)
+    return text(r)
+
+
+def g_margins(r, w, h):
+    k = r.random()
+    if k < 0.1:
+        return "\x1b[?69%s" % ("h" if r.random() < 0.85 else "l")
+    if k < 0.22:
+        lft, rgt = sorted((r.randint(1, w), r.randint(1, w)))
+        return "\x1b[%d;%ds" % (lft, rgt) if r.random() < 0.85 else "\x1b[s"
+    if k < 0.3:
+        top, bot = sorted((r.randint(1, h), r.randint(1, h)))
+        return "\x1b[%d;%dr" % (top, bot)
+    if k < 0.55:
+        return "\x1b[%s%s" % (r.choice(["", "1", "2", "3", str(r.randint(1, w + 2))]),
+                              r.choice("@PXLMST"))
+    if k < 0.6:
+        return "\x1b[%d '%s" % (r.randint(0, 4), r.choice("}~"))  # DECIC / DECDC
+    if k < 0.65:
+        return r.choice(["\x1b[4h", "\x1b[4l", "\x1b[?6h", "\x1b[?6l", "\x1b[?7l", "\x1b[?7h"])
+    if k < 0.72:
+        return r.choice(["\x1bD", "\x1bM", "\x1bE", "\x1b6", "\x1b9"])
+    if k < 0.8:
+        return to_col(r, w)
+    return common(r, w, h)
+
+
+def g_origin(r, w, h):
+    k = r.random()
+    if k < 0.12:
+        return "\x1b[?6%s" % ("h" if r.random() < 0.7 else "l")
+    if k < 0.27:
+        top, bot = sorted((r.randint(1, h + 1), r.randint(1, h + 1)))
+        return "\x1b[%d;%dr" % (top, bot) if r.random() < 0.85 else "\x1b[r"
+    if k < 0.4:
+        return cup(r, w, h) if r.random() < 0.7 else "\x1b[%dd" % r.randint(1, h + 2)
+    if k < 0.55:
+        return r.choice(["\n", "\x1bD", "\x1bM", "\x1bE", "\r\n", "\x1b[%dA" % r.randint(1, h),
+                         "\x1b[%dB" % r.randint(1, h), "\x1b[%dS" % r.randint(1, 3),
+                         "\x1b[%dT" % r.randint(1, 3), "\x1b[%dL" % r.randint(1, 3),
+                         "\x1b[%dM" % r.randint(1, 3)])
+    if k < 0.6:
+        return r.choice(["\x1b7", "\x1b8", "\x1b[?1049h", "\x1b[?1049l", "\x1b[?47h", "\x1b[?47l"])
+    if k < 0.65:
+        return "\x1b[%dJ" % r.randint(0, 3)
+    return common(r, w, h)
+
+
+def g_tabs(r, w, h):
+    k = r.random()
+    if k < 0.2:
+        return to_col(r, w, near_end=False) + "\x1bH"
+    if k < 0.28:
+        return "\x1b[%sg" % r.choice(["", "0", "3", "3", "2", "5"])
+    if k < 0.5:
+        return r.choice(["\t", "\t\t", "\x1b[%sI" % r.choice(["", "2", str(r.randint(1, 30))]),
+                         "\x1b[%sZ" % r.choice(["", "2", str(r.randint(1, 30))])])
+    if k < 0.58:
+        return to_col(r, w)
+    if k < 0.63:
+        return r.choice(["\x1b[?69h", "\x1b[%d;%ds" % tuple(sorted((r.randint(1, w), r.randint(1, w)))),
+                         "\x1b[?69l", "\x1b[?5W", "\x1b[W", "\x1b[2W", "\x1b[5W"])
+    if k < 0.66:
+        return r.choice(["\x1bc", "\x1b[!p"])
+    return common(r, w, h)
+
+
+def g_charsets(r, w, h):
+    k = r.random()
+    if k < 0.25:
+        return "\x1b%s%s" % (r.choice("()*+"), r.choice("0BA0B"))
+    if k < 0.45:
+        return r.choice(["\x0e", "\x0f", "\x1bN", "\x1bO", "\x1bn", "\x1bo", "\x1b|", "\x1b}", "\x1b~"])
+    if k < 0.7:
+        return "".join(r.choice("lqkxjmtuvwn`afg~_{}|abc") for _ in range(r.randint(1, 8)))
+    if k < 0.75:
+        return r.choice(["\x1b7", "\x1b8", "\x1b[s", "\x1b[u", "\x1bc", "\x1b[!p"])
+    if k < 0.8:
+        return r.choice(LATIN) + r.choice(WIDE)
+    return common(r, w, h)
+
+
+def g_decsc(r, w, h):
+    k = r.random()
+    if k < 0.2:
+        return r.choice(["\x1b7", "\x1b8", "\x1b[s", "\x1b[u", "\x1b8", "\x1b[?1048h", "\x1b[?1048l",
+                         "\x1b[?1049h", "\x1b[?1049l"])
+    if k < 0.35:
+        return sgr(r)
+    if k < 0.45:
+        return "\x1b%s%s" % (r.choice("()"), r.choice("0B")) if r.random() < 0.7 else r.choice("\x0e\x0f")
+    if k < 0.52:
+        return r.choice(["\x1b[?6h", "\x1b[?6l", "\x1b[?7l", "\x1b[?7h",
+                         "\x1b[%d;%dr" % tuple(sorted((r.randint(1, h), r.randint(1, h))))])
+    if k < 0.6:
+        return to_col(r, w) + plain(r, 1, 3)  # leave a wrap pending
+    if k < 0.65:
+        return r.choice(["\x1b]8;;http://s/%d\x1b\\" % r.randint(0, 9), "\x1b]8;;\x1b\\"])
+    if k < 0.7:
+        return "lqkx"
+    return common(r, w, h)
+
+
+def g_widemargin(r, w, h):
+    k = r.random()
+    if k < 0.25:
+        return to_col(r, w) + r.choice(WIDE) * r.randint(1, 2)
+    if k < 0.35:
+        return r.choice(WIDE) + r.choice(COMBINING + ["\u200d", "\ufe0f"])
+    if k < 0.45:
+        return r.choice(["\x1b[?69h", "\x1b[%d;%ds" % tuple(sorted((r.randint(1, w), r.randint(1, w)))),
+                         "\x1b[?69l", "\x1b[?7l", "\x1b[?7h", "\x1b[4h", "\x1b[4l"])
+    if k < 0.6:
+        return "\x1b[%s%s" % (r.choice(["", "1", "2", "3"]), r.choice("@PXbDC"))
+    if k < 0.7:
+        return "".join(r.choice(WIDE + ["a", "b"]) for _ in range(r.randint(w // 2, w + 2)))
+    return common(r, w, h)
+
+
+def g_zwj(r, w, h):
+    k = r.random()
+    if k < 0.35:
+        return to_col(r, w) + r.choice(ZWJ_SEQS)
+    if k < 0.55:
+        return r.choice(ZWJ_SEQS)
+    if k < 0.65:
+        return plain(r, 1, 3) + r.choice(["\u200d", "\u0301", "\ufe0f"])
+    if k < 0.7:
+        return r.choice(["\x1b[?7l", "\x1b[?7h", "\x1b[4h", "\x1b[4l"])
+    return common(r, w, h)
+
+
+def g_osc8(r, w, h):
+    k = r.random()
+    if k < 0.25:
+        uri = "http://h/%d" % r.randint(0, 9)
+        params = r.choice(["", "id=%d" % r.randint(0, 3), "id=a:x=y"])
+        st = r.choice(["\x1b\\", "\x07"])
+        return "\x1b]8;%s;%s%s" % (params, uri, st)
+    if k < 0.35:
+        return "\x1b]8;;%s" % r.choice(["\x1b\\", "\x07"])
+    if k < 0.55:
+        return to_col(r, w) + plain(r, 3, 2 * w)
+    if k < 0.65:
+        return "".join(r.choice(WIDE) for _ in range(r.randint(1, w)))
+    return common(r, w, h)
+
+
+def g_longline(r, w, h):
+    k = r.random()
+    if k < 0.3:
+        n = r.randint(w, 12 * w)
+        return "".join(r.choice("abcdefghijklmnopqrstuvwxyz0123456789 ") for _ in range(n))
+    if k < 0.4:
+        return "".join(r.choice(WIDE + ["x"]) for _ in range(r.randint(w, 6 * w)))
+    if k < 0.5:
+        return sgr(r)
+    if k < 0.55:
+        return "\t" * r.randint(1, 4)
+    if k < 0.62:
+        return r.choice(["\x1b]8;;http://l/%d\x1b\\" % r.randint(0, 9), "\x1b]8;;\x1b\\"])
+    if k < 0.7:
+        return r.choice(["\r\n", "\x1b[K", "\x1b[1K", "\x1b[%dX" % r.randint(1, w)])
+    return common(r, w, h)
+
+
+GENERATORS = {
+    "margins": g_margins, "origin": g_origin, "tabs": g_tabs, "charsets": g_charsets,
+    "decsc": g_decsc, "widemargin": g_widemargin, "zwj": g_zwj, "osc8": g_osc8,
+    "longline": g_longline,
+}
+# Odd and small widths put margins, tab stops and wide characters at the edge.
+SIZES2 = [(80, 24), (20, 6), (21, 5), (9, 4), (40, 10), (13, 7), (132, 8), (33, 12), (5, 3)]
+
+
+def gen_case(seed, gen="mixed"):
     r = random.Random(seed)
-    size = r.choice(SIZES)
+    if gen == "mixed":
+        size = r.choice(SIZES)
+        w, h = size
+        chunks = []
+        for _ in range(r.randint(1, 4)):
+            toks = [token(r, w, h) for _ in range(r.randint(5, 80))]
+            resize = r.choice(SIZES) if r.random() < 0.6 else None
+            chunks.append({"tokens": toks, "resize": resize})
+            if resize:
+                w, h = resize
+        return {"seed": seed, "size": list(size), "chunks": chunks}
+    if gen == "round2":
+        names = sorted(GENERATORS)
+        gen = names[seed % len(names)]
+    g = GENERATORS[gen]
+    size = r.choice(SIZES2)
     w, h = size
     chunks = []
-    for _ in range(r.randint(1, 4)):
-        toks = [token(r, w, h) for _ in range(r.randint(5, 80))]
-        resize = r.choice(SIZES) if r.random() < 0.6 else None
+    for _ in range(r.randint(2, 5)):
+        toks = [g(r, w, h) for _ in range(r.randint(5, 60))]
+        resize = r.choice(SIZES2) if r.random() < 0.75 else None
         chunks.append({"tokens": toks, "resize": resize})
         if resize:
             w, h = resize
-    return {"seed": seed, "size": list(size), "chunks": chunks}
+    return {"seed": seed, "gen": gen, "size": list(size), "chunks": chunks}
 
 
 # --- running ---------------------------------------------------------------
@@ -236,10 +482,15 @@ def run_case(server, case, tmp, tag):
     return obs
 
 
+TAIL = re.compile(r"(?:\x1b\[[0-9;:]*m|[\x0e\x0f])+$", re.M)
+
+
 def observe(server, tag):
     t = tag + ":0.0"
     _, cap, _ = server.run("capture-pane", "-p", "-e", "-S", "-", "-t", t)
     _, alt, _ = server.run("capture-pane", "-p", "-e", "-a", "-q", "-t", t)
+    if "tail" in IGNORE:
+        cap, alt = TAIL.sub("", cap), TAIL.sub("", alt)
     _, fmt, _ = server.run("display", "-p", "-t", t, FMT)
     fmts = dict(zip(FORMATS, fmt.rstrip("\n").split("\t")))
     return {"capture": cap, "alt": alt, "formats": fmts}
@@ -353,12 +604,12 @@ def show(case):
 
 
 def worker(args):
-    seeds, do_min, outdir = args
+    seeds, do_min, outdir, gen = args
     pair = Pair()
     found = []
     try:
         for seed in seeds:
-            case = gen_case(seed)
+            case = gen_case(seed, gen)
             try:
                 d, a, b = pair.compare(case)
             except Exception as e:  # noqa: BLE001
@@ -387,6 +638,9 @@ def main():
     ap.add_argument("--minimise", action="store_true")
     ap.add_argument("--out", default="/tmp/emu-fuzz")
     ap.add_argument("--replay")
+    ap.add_argument("--gen", default="mixed",
+                    choices=["mixed", "round2"] + sorted(GENERATORS),
+                    help="mixed: round 1's generator; round2: the focused generators by seed")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.replay:
@@ -424,12 +678,13 @@ def main():
     total, found = 0, []
     t0 = time.time()
     with concurrent.futures.ProcessPoolExecutor(a.jobs) as ex:
-        for n, f in ex.map(worker, [(g, a.minimise, a.out) for g in groups]):
+        for n, f in ex.map(worker, [(g, a.minimise, a.out, a.gen) for g in groups]):
             total += n
             found += f
     print("cases %d, differing %d, %.0fs" % (total, len(found), time.time() - t0))
     for rec in sorted(found, key=lambda r: r["seed"]):
-        print(rec["seed"], rec.get("where"), rec.get("min_where"), rec.get("error", ""))
+        print(rec["seed"], rec.get("case", {}).get("gen", ""), rec.get("where"), rec.get("min_where"),
+              rec.get("error", ""))
 
 
 if __name__ == "__main__":
