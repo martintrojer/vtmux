@@ -24,7 +24,7 @@
 
 use std::fmt::Write as _;
 
-use super::{RowCell, Width, read_row, tmux_cellsize};
+use super::{PaneRows, RowCell, Width, tmux_cellsize};
 use crate::snapshot::{Color, Style, Underline};
 use crate::term::{Osc133, PaneTerm};
 
@@ -228,21 +228,20 @@ fn raw(c: &RowCell, in_size: bool) -> Raw {
 /// `capture-pane -R`: the dump, with its final newline.
 #[must_use]
 pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
-    let sy = usize::from(term.rows());
-    let sx = usize::from(term.cols());
-    let hsize = term.history_size();
+    let p = PaneRows::of(term);
+    let (sy, sx, hsize) = (p.rows, p.cols, p.hsize);
     let osc133 = term.osc133_lines();
     let mut out = format!("G {sx}x{sy} ({hsize}/{history_limit})\n");
     let mut last = None;
     for y in 0..hsize + sy {
-        let (cells, wrapped) = read_row(term, y, hsize, sx, &mut last);
+        let (cells, wrapped) = p.row(term, y, &mut last);
         // `cellused`: padding and a tab's columns are cells tmux wrote.
         let used = cells
             .iter()
             .rposition(|c| !c.empty || c.padding())
             .map_or(0, |i| i + 1);
         let size = tmux_cellsize(&cells, used).max(used);
-        let kept = super::read_row_kept(term, y, hsize, &last);
+        let kept = p.kept(term, y, &last);
         let link = kept.hyperlink || cells.iter().any(|c| c.link);
         let extended = kept.extended || super::row_extended(&cells);
         let data: Osc133 = osc133
