@@ -461,6 +461,29 @@ pub fn spawn_failed(e: &io::Error) -> String {
     format!("fork failed: {}", vtmux_core::error::strerror(e))
 }
 
+/// Hang up a pane's live process: close its master, then SIGHUP its
+/// process group, in that order (window.c `window_pane_destroy` and
+/// spawn.c:324 close the master and leave the signal to the kernel).
+///
+/// Signalled first, the process can start exiting before the master
+/// closes, so the close is the PTY's last and frees its minor while the
+/// old session leader is still tearing its controlling terminal down (XNU
+/// `kern_exit.c` `proc_exit` closes the descriptors, then revokes the
+/// terminal). A PTY made right then gets that minor (the lowest free one,
+/// `tty_ptmx.c` `ptmx_clone`): on macOS a `respawn-pane -k` got its old tty
+/// back in 1 of 5 cycles (tmux: 1 in 200), and a macOS 15 CI runner failed
+/// one with `fork failed: Device not configured` (ENXIO). Closed first, the
+/// slave stays open in the old process until it exits, so the minor stays
+/// taken; [`Server::respawn_pane`] goes further and makes the new PTY
+/// before the old master closes.
+fn hang_up(io: PaneIo, pid: i32) {
+    drop(io);
+    let _ = rustix::process::kill_process_group(
+        rustix::process::Pid::from_raw(pid).expect("pane pid is positive"),
+        rustix::process::Signal::HUP,
+    );
+}
+
 /// The client's `PATH`, if it sent one.
 #[must_use]
 pub fn client_path(env: &[(String, String)]) -> Option<&str> {
@@ -5383,16 +5406,29 @@ impl Server {
     /// longer matches the pane, which now has the new pid.
     pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
         let p = ps.pane;
-        self.hangup_pane(p);
+        // The old process is hung up once the new PTY is made: while its
+        // master is open, the new one cannot take its minor ([`hang_up`]).
+        let old = self.model.panes.get_mut(&p).and_then(|pane| {
+            let io = pane.io.take()?;
+            io.deregister(self.poll.registry());
+            Some((io, pane.pid))
+        });
         // spawn.c:343-346: output the control clients still had queued
         // from the old process goes.
         self.control_reset_pane(p);
         // spawn.c:328: the pane leaves its modes.
         self.reset_mode_all(p);
-        if !self.model.panes.contains_key(&p) {
-            return Ok(());
+        let fresh = self
+            .model
+            .panes
+            .contains_key(&p)
+            .then(|| self.spawn_pane(ps));
+        if let Some((io, pid)) = old {
+            hang_up(io, pid);
         }
-        let fresh = self.spawn_pane(ps);
+        let Some(fresh) = fresh else {
+            return Ok(());
+        };
         let extended_keys = self.model.extended_keys();
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return fresh.map(|_| ());
@@ -5519,11 +5555,8 @@ impl Server {
             // window_pane_destroy closes the master; the kernel sends the
             // session leader SIGHUP. Sending it ourselves too covers a
             // child that has not set up its controlling terminal yet.
-            let _ = rustix::process::kill_process_group(
-                rustix::process::Pid::from_raw(pane.pid).expect("pane pid is positive"),
-                rustix::process::Signal::HUP,
-            );
-            drop(io);
+            // The master closes first ([`hang_up`]).
+            hang_up(io, pane.pid);
         }
     }
 
@@ -5540,10 +5573,7 @@ impl Server {
             && let Some(io) = pane.io.take()
         {
             io.deregister(self.poll.registry());
-            let _ = rustix::process::kill_process_group(
-                rustix::process::Pid::from_raw(pane.pid).expect("pane pid is positive"),
-                rustix::process::Signal::HUP,
-            );
+            hang_up(io, pane.pid);
         }
     }
 

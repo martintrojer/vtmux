@@ -1701,6 +1701,42 @@ fn failed_respawn_keeps_the_pane() {
     });
 }
 
+/// `respawn-pane -k` makes the new PTY while the old one is still open, so
+/// the pane never gets the hung-up process's tty back. Closing the old
+/// master after signalling the process freed its minor while that session
+/// leader was still exiting (and revoking its terminal); the next PTY, the
+/// respawn's own, took it in 1 respawn of 5 on macOS, and a macOS 15 CI
+/// runner failed one with `fork failed: Device not configured`. tmux
+/// closes the master first and gets the old tty back about 1 in 200, so
+/// this is vtmux's own guarantee, not a comparison.
+#[test]
+fn respawn_kill_never_gets_the_old_tty_back() {
+    let w = World::new(&vtmux_bin());
+    let ok = |args: &[&str]| {
+        let r = w.run(args);
+        assert_eq!(r.code, 0, "{args:?}: {r:?}");
+        r.stdout
+    };
+    ok(&["new", "-d", "-s", "a", "cat", "-"]);
+    ok(&["splitw", "-d", "-t", "a", "cat", "-"]);
+    for cycle in 0..40 {
+        for pane in ["a:0.0", "a:0.1"] {
+            let tty = ["display", "-p", "-t", pane, "#{pane_tty}"];
+            let mut args = tty.to_vec();
+            args.extend([";", "respawnp", "-k", "-t", pane, "cat", "-", ";"]);
+            args.extend(tty);
+            let out = ok(&args);
+            let (old, new) = out.split_once('\n').expect("two ttys");
+            assert_ne!(
+                old,
+                new.trim_end(),
+                "cycle {cycle}: {pane} got its tty back"
+            );
+        }
+    }
+    w.wait_all_running("cat");
+}
+
 /// Poll `display -p -t target fmt` (max 10 s) until its output is `done`.
 #[cfg(target_os = "linux")]
 fn display_until(w: &World, target: &str, fmt: &str, done: impl Fn(&str) -> bool) -> Run {
