@@ -188,12 +188,12 @@ fn a_replacing_checkpoint_leaves_nothing_of_the_previous_ones() {
     let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
     assert_eq!(w.step(None, &mut crash).unwrap_err().to_string(), "crash");
     assert_eq!(load(&dir).unwrap(), (full2.clone(), MANIFEST));
-    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap(), layout);
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, layout);
 
     let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
     assert!(w.step(None, &mut ok()).unwrap());
-    assert_eq!(load_file(&dir, MANIFEST).unwrap(), layout);
-    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap(), layout);
+    assert_eq!(load_file(&dir, MANIFEST).unwrap().0, layout);
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, layout);
     assert!(on_disk(&dir).is_empty());
     assert!(!dir.join(MANIFEST_TMP).exists());
     assert!(!dir.join(MANIFEST_PREV_TMP).exists());
