@@ -1233,6 +1233,14 @@ fn mark_out(row: u64, m: &vt::Osc133) -> snap::term::FrozenMark {
     }
 }
 
+/// The primary screen's OSC 133 marks, each with its row.
+fn marks_out(marks: &[(u32, vt::Osc133)]) -> Vec<snap::term::FrozenMark> {
+    marks
+        .iter()
+        .map(|(y, m)| mark_out(u64::from(*y), m))
+        .collect()
+}
+
 fn screen_out(s: &ScreenState, visible: ScreenOut) -> snap::term::Screen {
     let c = &s.cursor;
     let screen = snap::term::Screen {
@@ -1369,29 +1377,40 @@ fn times_in(runs: &[snap::term::TimeRun], limit: usize) -> Result<Vec<i64>, Term
     Ok(out)
 }
 
+/// `term`'s state and its screens' pages: the primary's, and the
+/// alternate's unless `primary_only`.
+fn export_screens(
+    term: &PaneTerm,
+    compressed: CompressedPages,
+    primary_only: bool,
+) -> (TermState, ScreenOut, ScreenOut) {
+    let v = term.export_state_head();
+    let mut primary = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
+    let mut alternate = ScreenOut::new(v.rows);
+    let done: Result<(), std::convert::Infallible> =
+        term.export_pages(compressed, |screen, page| {
+            match screen {
+                ScreenKind::Primary => primary.page(page),
+                ScreenKind::Alternate if !primary_only => alternate.page(page),
+                ScreenKind::Alternate => {}
+            }
+            Ok(())
+        });
+    let Ok(()) = done;
+    (v, primary, alternate)
+}
+
 /// `term`'s primary screen alone, with its OSC 133 marks and the
 /// alternate screen's entry row in its rows.
 fn primary_of(
     term: &PaneTerm,
     compressed: CompressedPages,
 ) -> (snap::term::Screen, Vec<snap::term::FrozenMark>, Option<u64>) {
-    let v = term.export_state_head();
-    let mut out = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
-    let done: Result<(), std::convert::Infallible> =
-        term.export_pages(compressed, |screen, page| {
-            if screen == ScreenKind::Primary {
-                out.page(page);
-            }
-            Ok(())
-        });
-    let Ok(()) = done;
+    let (v, out, _) = export_screens(term, compressed, true);
     let p = &v.pane;
     (
         screen_out(&v.primary, out),
-        p.marks
-            .iter()
-            .map(|(y, m)| mark_out(u64::from(*y), m))
-            .collect(),
+        marks_out(&p.marks),
         p.alt_entry.map(|(y, _)| u64::from(y)),
     )
 }
@@ -1458,18 +1477,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         Form::Rows => CompressedPages::Rows,
         Form::SamePin => CompressedPages::Blob,
     };
-    let v = term.export_state_head();
-    let mut primary = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
-    let mut alternate = ScreenOut::new(v.rows);
-    let done: Result<(), std::convert::Infallible> =
-        term.export_pages(compressed, |screen, page| {
-            match screen {
-                ScreenKind::Primary => primary.page(page),
-                ScreenKind::Alternate => alternate.page(page),
-            }
-            Ok(())
-        });
-    let Ok(()) = done;
+    let (v, primary, alternate) = export_screens(term, compressed, false);
     let (g, p) = (&v.ghostty, &v.pane);
     let modes = g
         .modes
@@ -1531,15 +1539,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         server_title: p.title.clone(),
         title_stack: p.title_stack.clone(),
         pwd: g.pwd.clone(),
-        palette: p
-            .palette
-            .entries
-            .iter()
-            .map(|&(i, c)| snap::term::PaletteEntry {
-                index: i.into(),
-                rgb: rgb_out(c),
-            })
-            .collect(),
+        palette: palette_out(&p.palette.entries),
         fg: p.palette.fg.map(rgb_out),
         bg: p.palette.bg.map(rgb_out),
         cursor_colour: p.palette.cursor.map(rgb_out),
@@ -1589,11 +1589,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         scroll_on_clear: p.scroll_on_clear,
         bells: 0,
         redraw: p.redraw,
-        marks: p
-            .marks
-            .iter()
-            .map(|(y, m)| mark_out(u64::from(*y), m))
-            .collect(),
+        marks: marks_out(&p.marks),
         tmux_charset: snap::term::TmuxCharset {
             g0_acs: g0,
             g1_acs: g1,
@@ -1661,14 +1657,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             mouse_shape: g.mouse_shape.into(),
             password_input: g.password_input,
             xt_checksum: g.xt_checksum.into(),
-            palette: g
-                .palette
-                .iter()
-                .map(|&(i, c)| snap::term::PaletteEntry {
-                    index: i.into(),
-                    rgb: rgb_out(c),
-                })
-                .collect(),
+            palette: palette_out(&g.palette),
             fg: g.fg.map(rgb_out),
             bg: g.bg.map(rgb_out),
             cursor_colour: g.cursor_color.map(rgb_out),
@@ -1678,6 +1667,16 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         for_older_readers(term, compressed, &mut t);
     }
     t
+}
+
+fn palette_out(entries: &[(u8, vt::Rgb)]) -> Vec<snap::term::PaletteEntry> {
+    entries
+        .iter()
+        .map(|&(i, c)| snap::term::PaletteEntry {
+            index: i.into(),
+            rgb: rgb_out(c),
+        })
+        .collect()
 }
 
 fn palette_in(entries: &[snap::term::PaletteEntry]) -> Result<Vec<(u8, vt::Rgb)>, TermError> {
