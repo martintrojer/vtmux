@@ -4871,10 +4871,20 @@ fn focus_ring_config(w: &World) -> String {
     path.to_str().expect("utf-8").to_owned()
 }
 
+/// Write `input` to the client's stdin and close it. A client that is done
+/// without reading it (a refused `display -I`) may have gone already:
+/// the write then fails with EPIPE, which is no error of the client's.
+fn give_stdin(child: &mut std::process::Child, input: &[u8]) {
+    use std::io::Write as _;
+    match child.stdin.take().expect("piped stdin").write_all(input) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+        r => r.expect("write stdin"),
+    }
+}
+
 impl World {
     /// `run` with `input` on the client's stdin.
     fn run_stdin(&self, args: &[&str], input: &[u8]) -> Run {
-        use std::io::Write as _;
         let mut child = Command::new(&self.bin)
             .args(["-L", &self.label, "-f", "/dev/null"])
             .args(args)
@@ -4888,7 +4898,7 @@ impl World {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("spawn binary");
-        child.stdin.take().unwrap().write_all(input).unwrap();
+        give_stdin(&mut child, input);
         let out = child.wait_with_output().expect("wait");
         Run {
             stdout: self.normalise(&String::from_utf8_lossy(&out.stdout)),
@@ -4907,7 +4917,6 @@ impl World {
     /// and command number of a control guard line (server-wide counters)
     /// are blanked.
     fn run_io(&self, args: &[&[u8]], input: Option<&[u8]>) -> Run {
-        use std::io::Write as _;
         use std::os::unix::ffi::OsStrExt;
         let mut full: Vec<&std::ffi::OsStr> = ["-L", &self.label, "-f", "/dev/null"]
             .into_iter()
@@ -4931,7 +4940,7 @@ impl World {
             .spawn()
             .expect("spawn binary");
         if let Some(input) = input {
-            child.stdin.take().unwrap().write_all(input).unwrap();
+            give_stdin(&mut child, input);
         }
         let out = child.wait_with_output().expect("wait");
         let guards = |s: String| -> String {
