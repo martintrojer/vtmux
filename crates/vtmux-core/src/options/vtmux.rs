@@ -119,3 +119,34 @@ pub(super) fn default_entry(name: &str) -> Option<&'static Entry> {
         .iter()
         .find(|e| e.def.is_some_and(|d| d.name == name))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::EXTENSIONS;
+
+    /// `docs/PAPERCUTS.md`, *vtmux options*, has a row for every vtmux
+    /// option, and for none that does not exist.
+    #[test]
+    fn the_papercuts_table_lists_every_vtmux_option() {
+        let doc = include_str!("../../../../docs/PAPERCUTS.md");
+        let table = doc
+            .split("## vtmux options")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .expect("the vtmux options section");
+        let listed: Vec<&str> = table
+            .lines()
+            .filter_map(|l| l.strip_prefix("| `vtmux-"))
+            .filter_map(|l| l.split_once('`'))
+            .map(|(name, _)| name)
+            .collect();
+        let mut want: Vec<&str> = EXTENSIONS
+            .iter()
+            .map(|d| d.name.strip_prefix("vtmux-").unwrap())
+            .collect();
+        let mut got = listed;
+        want.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, want);
+    }
+}

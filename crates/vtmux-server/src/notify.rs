@@ -17,7 +17,9 @@ const OPTION: &str = "vtmux-notifications";
 
 /// A client's limit, as Ghostty limits itself (`showDesktopNotification`,
 /// Surface.zig:6612-6647): at most one a second, and one identical to the
-/// last shown at most once in 5 s. Only a notification sent counts.
+/// last shown at most once in 5 s. Only a notification delivered counts:
+/// the limit is asked when a frame's passthrough is written, never for one
+/// the blocked client's drop discards.
 #[derive(Debug, Default)]
 pub(crate) struct Limit {
     /// When the last one was sent, and its title and body hashed (Ghostty
@@ -48,23 +50,11 @@ impl Limit {
 impl Server {
     /// A notification from a pane of `window`: with the option on, to
     /// every attached client whose session holds the window, current or
-    /// not, whose terminal is Ghostty, within its [`Limit`]. Never to a
-    /// control client or a suspended one. It goes with the client's
-    /// passthrough, after this turn's frame, and like passthrough is
-    /// dropped while the client's terminal is blocked.
+    /// not (see [`Self::notify_clients`] for the rest).
     pub(crate) fn pane_notification(&mut self, window: WindowId, n: &Notification) {
-        if self.model.number_option(TreeId::Server, OPTION) == 0 {
-            return;
-        }
-        let now = Instant::now();
-        let mut osc = None;
         let ids: Vec<ClientId> = self
             .clients
             .iter()
-            // A suspended client's terminal is not ours (its passthrough
-            // is dropped): it is not sent one, so its limit is not used.
-            .filter(|(_, c)| c.control.is_none() && c.caps.is_some() && !c.suspended)
-            .filter(|(_, c)| c.term.as_ref().is_some_and(|t| is_ghostty(t.term_type())))
             .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
             .filter(|&(_, s)| {
                 self.model
@@ -74,11 +64,44 @@ impl Server {
             })
             .map(|(id, _)| id)
             .collect();
+        self.notify_clients(&ids, n);
+    }
+
+    /// A notification from the terminal of client `c`'s popup (a
+    /// `display-popup -E` agent notifies like a pane): to `c` alone, the
+    /// client the popup is drawn on, since a popup belongs to its client
+    /// and has no window.
+    pub(crate) fn popup_notification(&mut self, c: ClientId, n: &Notification) {
+        self.notify_clients(&[c], n);
+    }
+
+    /// Queue `n` for those of `ids` that can show it, with the option on:
+    /// whose terminal is Ghostty, never a control client or a suspended one.
+    /// It goes with the client's passthrough, after this turn's frame
+    /// ([`Client::take_notifications`](crate::server::Client)), and like
+    /// passthrough is dropped while the client's terminal is blocked.
+    fn notify_clients(&mut self, ids: &[ClientId], n: &Notification) {
+        if self.model.number_option(TreeId::Server, OPTION) == 0 {
+            return;
+        }
         for id in ids {
-            let client = self.clients.get_mut(&id).expect("client");
-            if client.notified.admit(now, &n.title, &n.body) {
-                let osc = osc.get_or_insert_with(|| n.osc());
-                client.passthrough.extend_from_slice(osc);
+            let Some(client) = self.clients.get_mut(id) else {
+                continue;
+            };
+            // A suspended client's terminal is not ours (its passthrough
+            // is dropped), and a control client has none.
+            if client.attached.is_some()
+                && client.control.is_none()
+                && client.caps.is_some()
+                && !client.suspended
+                && client
+                    .term
+                    .as_ref()
+                    .is_some_and(|t| is_ghostty(t.term_type()))
+            {
+                client
+                    .notifications
+                    .push((client.passthrough.len(), n.clone()));
             }
         }
     }

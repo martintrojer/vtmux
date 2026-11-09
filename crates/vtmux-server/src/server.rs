@@ -184,6 +184,11 @@ pub(crate) struct Client {
     pub(crate) passthrough: Vec<u8>,
     /// How its desktop notifications are limited (spec D30).
     pub(crate) notified: crate::notify::Limit,
+    /// Notifications waiting for this turn's passthrough write, each with
+    /// where in `passthrough` it goes (they keep their order among its
+    /// payloads). The write asks `notified` for each: one dropped with the
+    /// passthrough, as a blocked client's is, never used a slot.
+    pub(crate) notifications: Vec<(usize, vtmux_vt::Notification)>,
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
@@ -301,6 +306,7 @@ impl Client {
             window_cache: crate::render::WindowCache::default(),
             passthrough: Vec::new(),
             notified: crate::notify::Limit::default(),
+            notifications: Vec::new(),
             reattach: None,
             view: crate::view::View::default(),
             pan: None,
@@ -3076,11 +3082,9 @@ impl Server {
                 .reattach
                 .is_some_and(|r| r.deadline.is_some())
         {
-            self.clients
-                .get_mut(&id)
-                .expect("client")
-                .passthrough
-                .clear();
+            let client = self.clients.get_mut(&id).expect("client");
+            client.passthrough.clear();
+            client.notifications.clear();
             return true;
         }
         false
@@ -3174,6 +3178,7 @@ impl Server {
         if !client.compositor.ready(queued, cols, rows) {
             // tty_add drops what comes while the client is blocked.
             client.passthrough.clear();
+            client.notifications.clear();
             return;
         }
         if self.defer_frame(id, s, queued) {
@@ -3639,6 +3644,21 @@ impl Server {
         let mut raw = std::mem::take(&mut client.passthrough);
         if let Some(title) = osc_title(&raw) {
             client.terminal_title = Some(title);
+        }
+        // Delivered now, so only now does one use the limit's slot.
+        let now = Instant::now();
+        let mut shown = Vec::new();
+        let mut from = 0;
+        for (at, n) in std::mem::take(&mut client.notifications) {
+            if client.notified.admit(now, &n.title, &n.body) {
+                shown.extend_from_slice(&raw[from..at]);
+                shown.extend_from_slice(&n.osc());
+                from = at;
+            }
+        }
+        if !shown.is_empty() {
+            shown.extend_from_slice(&raw[from..]);
+            raw = shown;
         }
         if !raw.is_empty() {
             // The program may have moved the terminal's cursor.
@@ -6837,38 +6857,123 @@ mod tests {
             &mut server,
             hello(&["attach", "-t", "a"], &dir, None, ControlMode::Control),
         );
-        let take = |server: &mut super::Server| -> Vec<Vec<u8>> {
-            let mut ids: Vec<super::ClientId> = clients.iter().map(|(id, _)| *id).collect();
-            ids.push(control);
-            ids.iter()
-                .map(|id| std::mem::take(&mut server.clients.get_mut(id).unwrap().passthrough))
-                .collect()
+        // One turn: render, then whether each client was sent `osc` (the
+        // control client has no frames: it must hold nothing queued).
+        let turn = |server: &mut super::Server,
+                    clients: &mut Vec<(super::ClientId, mio::net::UnixStream)>,
+                    osc: &[u8]|
+         -> Vec<bool> {
+            server.render_clients();
+            let mut got: Vec<bool> = clients
+                .iter_mut()
+                .map(|(id, peer)| {
+                    let sent = frames(server, *id, peer);
+                    sent.windows(osc.len()).any(|w| w == osc)
+                })
+                .collect();
+            assert_eq!(server.clients[&control].notifications.len(), 0);
+            got.push(false);
+            got
         };
-        take(&mut server);
-        server.pane_input(p, b"\x1b]9;off\x07", false);
-        assert_eq!(take(&mut server), vec![Vec::<u8>::new(); 6], "off");
+        let osc = b"\x1b]777;notify;T;body\x1b\\";
+        turn(&mut server, &mut clients, osc);
+        server.pane_input(p, b"\x1b]777;notify;T;body\x1b\\", false);
+        assert_eq!(
+            turn(&mut server, &mut clients, osc),
+            [false; 6],
+            "off: dropped"
+        );
         ok(
             &mut server,
             &dir,
             &["set", "-s", "vtmux-notifications", "on"],
         );
         server.pane_input(p, b"\x1b]777;notify;T;body\x1b\\", false);
-        let osc = b"\x1b]777;notify;T;body\x1b\\".to_vec();
-        let none = Vec::new();
         assert_eq!(
-            take(&mut server),
-            [
-                osc,
-                none.clone(),
-                b"\x1b]777;notify;T;body\x1b\\".to_vec(),
-                none.clone(),
-                none.clone(),
-                none
-            ],
+            turn(&mut server, &mut clients, osc),
+            [true, false, true, false, false, false],
         );
         // Within the second: cut, for every client.
         server.pane_input(p, b"\x1b]9;again\x07", false);
-        assert_eq!(take(&mut server), vec![Vec::<u8>::new(); 6], "limited");
+        assert_eq!(
+            turn(&mut server, &mut clients, b"again"),
+            [false; 6],
+            "limited"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A ready server for the D30 limit tests: a Ghostty client attached
+    /// to its pane `p`, `vtmux-notifications` on, the first frame read.
+    fn notify_server(
+        name: &str,
+    ) -> (
+        super::Server,
+        super::PaneId,
+        (super::ClientId, mio::net::UnixStream),
+        std::path::PathBuf,
+    ) {
+        use crate::server::snapshot::tests::ok;
+        let (mut server, p, s, dir) = share_server(name);
+        let (id, mut peer) = attach_test_client(&mut server, s, &dir);
+        server
+            .on_client_input(id, b"\x1bP>|ghostty 1.2.3\x1b\\")
+            .unwrap();
+        ok(
+            &mut server,
+            &dir,
+            &["set", "-s", "vtmux-notifications", "on"],
+        );
+        server.render_clients();
+        frames(&mut server, id, &mut peer);
+        (server, p, (id, peer), dir)
+    }
+
+    /// D30: a notification dropped for a client whose terminal is blocked
+    /// (as passthrough is, `tty_add`) did not reach it, so it uses none of
+    /// its limit: the next one, right after the client catches up, goes.
+    #[test]
+    fn a_dropped_notification_uses_no_limit_slot() {
+        let (mut server, p, (id, mut peer), dir) = notify_server("notify-drop");
+        let has = |sent: &[u8], text: &[u8]| sent.windows(text.len()).any(|w| w == text);
+        // Blocked: 40x10 cells, so more than 8 screens unwritten.
+        server.clients.get_mut(&id).unwrap().unacked.sent(1 << 20);
+        server.pane_input(p, b"\x1b]9;lost\x07", false);
+        server.render_clients();
+        assert!(server.clients[&id].notifications.is_empty(), "dropped");
+        assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing sent");
+        // Caught up, within the second of the dropped one.
+        server.pane_input(p, b"\x1b]9;kept\x07", false);
+        server.render_clients();
+        let sent = frames(&mut server, id, &mut peer);
+        assert!(has(&sent, b"\x1b]9;kept\x1b\\"), "{sent:?}");
+        assert!(!has(&sent, b"lost"), "{sent:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// D30: a notification keeps its place among the passthrough payloads
+    /// of the same turn: after those of earlier reads, before those of its
+    /// own (events go ahead of a read's passthrough).
+    #[test]
+    fn a_notification_keeps_its_place_among_passthrough() {
+        let (mut server, p, (id, mut peer), dir) = notify_server("notify-order");
+        let ok = crate::server::snapshot::tests::ok;
+        ok(
+            &mut server,
+            &dir,
+            &["set", "-g", "allow-passthrough", "all"],
+        );
+        let wrap = |name: &str| format!("\x1bPtmux;\x1b\x1b]1337;{name}\x07\x1b\\");
+        server.pane_input(p, wrap("a").as_bytes(), false);
+        let both = format!("\x1b]9;n\x07{}", wrap("b"));
+        server.pane_input(p, both.as_bytes(), false);
+        server.render_clients();
+        let sent = String::from_utf8_lossy(&frames(&mut server, id, &mut peer)).into_owned();
+        let at = |t: &str| sent.find(t).unwrap_or_else(|| panic!("{t:?} in {sent:?}"));
+        assert!(
+            at("1337;a") < at("]9;n") && at("]9;n") < at("1337;b"),
+            "{sent:?}"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

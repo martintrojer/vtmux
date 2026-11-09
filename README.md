@@ -37,7 +37,7 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 
 **Full restores.** Opt-in `vtmux-persist full` brings sessions back after a crash or reboot with their screens and scrollback, panes dead until `respawn-pane`. `layout` keeps just the structure.
 
-**Terminal features tmux drops.** Where the Ghostty engine inside each pane implements a protocol tmux 3.8 lacks, vtmux can pass it through, opt-in per feature, tmux behaviour when off ([D28](docs/specs/2026-10-29-vtmux.md)). The kitty keyboard protocol, so Shift+Enter, C-i vs Tab and Esc vs Alt reach editors and agent TUIs that ask (`set -s vtmux-kitty-keys on`). Desktop notifications: `set -s vtmux-notifications on` and a build finishing in a background window pops up in Ghostty (OSC 9 and 777, no `allow-passthrough` needed). In-band resize is next.
+**Terminal features tmux drops.** Where the Ghostty engine inside each pane implements a protocol tmux 3.8 lacks, vtmux can pass it through, opt-in per feature, tmux behaviour when off ([D28](docs/specs/2026-10-29-vtmux.md)). The kitty keyboard protocol, so Shift+Enter, C-i vs Tab and Esc vs Alt reach editors and agent TUIs that ask (`set -s vtmux-kitty-keys on`). Desktop notifications: `set -s vtmux-notifications on` and a build finishing in a background window, or an agent in a popup, pops up in Ghostty (OSC 9 and 777, no `allow-passthrough` needed). In-band resize is next.
 
 **Pane blend.** Inactive panes dim, every cell, like Ghostty's unfocused splits. You always know where you're typing, and it costs no screen space ([spec](docs/specs/2026-11-04-pane-blend.md)).
 

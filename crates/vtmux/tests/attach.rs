@@ -8128,3 +8128,88 @@ fn notifications_on_skip_other_terminals() {
     let got = notify_emit(&w, &a, 0, NOTIFY);
     assert_eq!(notifications(&got), Vec::<Vec<u8>>::new());
 }
+
+/// A popup of [`notify_world`]'s client `a` runs a program that writes
+/// `bytes` then a passthrough marker (a popup's passthrough goes to its
+/// client under the global `allow-passthrough`, as does its notification,
+/// ahead of the payloads of the read it came in): the client's bytes from
+/// before it up to the marker. The popup is closed again.
+fn popup_emit(w: &World, a: &Attached, bytes: &[u8]) -> Vec<u8> {
+    let marker = "\x1b]1337;mark=popup\x07";
+    let mut payload = bytes.to_vec();
+    payload.extend_from_slice(b"\x1bPtmux;\x1b\x1b]1337;mark=popup\x07\x1b\\");
+    let file = w.home.path().join("popup-emit");
+    std::fs::write(&file, payload).unwrap();
+    let name = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
+        .trim()
+        .to_owned();
+    let start = a.bytes.lock().unwrap().len();
+    // Opening one waits for it to close (cmd-display-menu.c:703).
+    let mut opened = Command::new(&w.bin)
+        .args(w.args())
+        .args(["display-popup", "-c", &name, "-w", "20", "-h", "5"])
+        .arg(format!("cat {}; exec cat -", file.display()))
+        .env_clear()
+        .envs(w.env())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    a.wait_for(Duration::from_secs(20), |a| {
+        a.bytes.lock().unwrap()[start..]
+            .windows(marker.len())
+            .any(|x| x == marker.as_bytes())
+    });
+    let got = a.bytes.lock().unwrap()[start..].to_vec();
+    let end = got
+        .windows(marker.len())
+        .position(|x| x == marker.as_bytes())
+        .unwrap();
+    w.cli(&["display-popup", "-C", "-c", &name]);
+    opened.wait().unwrap();
+    got[..end].to_vec()
+}
+
+/// D30 off (the default): a popup's notifications reach no terminal, as
+/// from tmux 3.8, which drops them like a pane's.
+#[test]
+fn popup_notifications_off_reach_no_terminal() {
+    par::each(&bins(), |bin| {
+        let (w, a) = notify_world(bin.clone(), true);
+        let got = popup_emit(&w, &a, NOTIFY);
+        assert_eq!(
+            notifications(&got),
+            Vec::<Vec<u8>>::new(),
+            "{}",
+            bin.display()
+        );
+    });
+}
+
+/// D30 on: a popup's program (a `display-popup -E` agent) notifies like a
+/// pane: its client, a Ghostty, gets its OSC 9 and 777 within Ghostty's
+/// limits (a second apart: the two written together come down to the
+/// first), and `9;4` is not one.
+#[test]
+fn popup_notifications_on_reach_its_ghostty_client() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), true);
+    w.cli(&["set", "-s", "vtmux-notifications", "on"]);
+    let got = popup_emit(
+        &w,
+        &a,
+        b"\x1b]9;4;1;50\x07\x1b]777;notify;Pop;body\x1b\\\x1b]9;two\x07",
+    );
+    assert_eq!(
+        notifications(&got),
+        [b"\x1b]777;notify;Pop;body\x1b\\".to_vec()]
+    );
+}
+
+/// D30 on: a popup's notification goes to a Ghostty client only.
+#[test]
+fn popup_notifications_on_skip_other_terminals() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), false);
+    w.cli(&["set", "-s", "vtmux-notifications", "on"]);
+    let got = popup_emit(&w, &a, NOTIFY);
+    assert_eq!(notifications(&got), Vec::<Vec<u8>>::new());
+}

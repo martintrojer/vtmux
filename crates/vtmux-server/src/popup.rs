@@ -470,6 +470,7 @@ impl Server {
             return;
         };
         let mut closed = false;
+        let mut notifications = Vec::new();
         while let Some(io) = p.io.as_mut() {
             match io.read() {
                 ReadResult::Data(bytes) => {
@@ -477,8 +478,14 @@ impl Server {
                     p.term.set_kitty_keys(kitty_keys);
                     p.term.feed(&bytes);
                     // A popup fires no pane hooks (it has no pane), and
-                    // its terminal keeps every event until taken.
-                    let _ = p.term.take_events();
+                    // its terminal keeps every event until taken: only its
+                    // notifications (D30) are of use.
+                    notifications.extend(p.term.take_events().into_iter().filter_map(
+                        |e| match e {
+                            vtmux_vt::TermEvent::Notification(n) => Some(n),
+                            _ => None,
+                        },
+                    ));
                 }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
@@ -501,6 +508,10 @@ impl Server {
             io.write(&replies);
         }
         let done = closed.then(|| p.io.take());
+        // Ahead of the read's passthrough, as a pane's are.
+        for n in &notifications {
+            self.popup_notification(c, n);
+        }
         self.popup_passthrough(c, passthrough);
         for (clip, data) in clipboard {
             self.popup_set_clipboard(c, &clip, &data);
