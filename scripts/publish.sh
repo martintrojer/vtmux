@@ -69,7 +69,10 @@ fi
 # Outside the checkout: inside it, cargo takes the unpacked vtmux for a
 # member of this workspace.
 check=$(mktemp -d "${TMPDIR:-/tmp}/vtmux-publish.XXXXXX")
-trap 'rm -rf "$check"' EXIT
+# The patches below make cargo record them in Cargo.lock (`[[patch.unused]]`):
+# put it back as it was.
+cp Cargo.lock "$check/Cargo.lock"
+trap 'cp "$check/Cargo.lock" Cargo.lock; rm -rf "$check"' EXIT
 mkdir -p "$check/src"
 patches=()
 unpack() {
