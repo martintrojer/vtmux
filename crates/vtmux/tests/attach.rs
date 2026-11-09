@@ -8768,6 +8768,82 @@ fn hyperlinks_reach_a_terminal_with_the_feature() {
     assert!(!printf.contains("tmux6"), "{printf}");
 }
 
+/// tty-draw.c `tty_draw_line_get_empty`: a cell in a link is never empty
+/// (`gc->link == 0`), so linked spaces at the end of a row, or a row of
+/// them, are written with their link and not erased by `\e[K`, which
+/// would end it; the terminal's cells (`capture-pane -e` of the observer
+/// shows an erased cell apart from a space) are tmux's, on a terminal with
+/// the `hyperlinks` feature and on one without.
+#[test]
+fn linked_spaces_at_the_end_of_a_row_stay_linked() {
+    let lines = "\x1b]8;;http://sp/\x1b\\cd        \x1b]8;;\x1b\\\r\n\
+                 \x1b]8;;http://sp/\x1b\\            \x1b]8;;\x1b\\\r\n\
+                 ab\x1b]8;;http://sp/\x1b\\ \x1b]8;;\x1b\\";
+    let results = par::map(&bins(), 2, |bin| {
+        ["hyperlinks", "plain"]
+            .map(|case| {
+                let w = World::new(bin.clone());
+                w.cli(&[
+                    "new",
+                    "-d",
+                    "-s",
+                    "a",
+                    "-n",
+                    "w",
+                    "-x",
+                    "12",
+                    "-y",
+                    "6",
+                    "sh",
+                    "-c",
+                    "printf %s \"$0\"; printf END; exec cat -",
+                    lines,
+                ]);
+                w.cli(&["set", "-g", "status-right", "R"]);
+                let features: &[&str] = if case == "plain" {
+                    &[]
+                } else {
+                    &["-T", "hyperlinks"]
+                };
+                let a = w.attach(&[features, &["attach", "-t", "a"]].concat());
+                a.wait(|a| pane_text(a).contains("END") && status_row(a).contains("0:w"));
+                format!("{case}: {:?}\n{}", osc8(&a.text()), linked_screen(&a))
+            })
+            .join("\n")
+    });
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// A terminal that is given no links (no `hyperlinks` feature) shows none,
+/// so text a program prints again with only a new link id (a new implicit
+/// id each time, as `ls --hyperlink` or a status loop does) is not sent to
+/// it again; one that is given links is sent each new id. (vtmux only: tmux
+/// writes what the program wrote, tty.c `tty_cmd_cells`.)
+#[test]
+fn unchanged_linked_text_is_not_sent_again_to_a_terminal_without_links() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let program = "show() { printf '\\033[1;1H\\033]8;;http://l/\\033\\\\SAME-LINK-TEXT\\033]8;;\\033\\\\ #%s ' \"$1\"; }; \
+                   show n0; while read x; do show \"$x\"; done";
+    w.cli(&[
+        "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", program,
+    ]);
+    w.cli(&["set", "-g", "status-right", "R"]);
+    let with = w.attach(&["-T", "hyperlinks", "attach", "-t", "a"]);
+    let without = w.attach(&["attach", "-t", "a"]);
+    let shows = |a: &Attached, n: &str| pane_text(a).contains(&format!("SAME-LINK-TEXT #{n}"));
+    for n in ["n0", "n1", "n2", "n3", "n4"] {
+        if n != "n0" {
+            w.cli(&["send", "-t", "a", n, "Enter"]);
+        }
+        for a in [&with, &without] {
+            a.wait(|a| shows(a, n));
+        }
+    }
+    let sent = |a: &Attached| a.text().matches("SAME-LINK-TEXT").count();
+    assert_eq!(sent(&without), 1, "{:?}", without.text());
+    assert_eq!(sent(&with), 5, "{:?}", with.text());
+}
+
 /// Links in copy mode and in a popup reach the terminal as the pane's do:
 /// copy mode draws the pane's links (window-copy.c
 /// `window_copy_init` shares the pane's `hyperlinks`), here ones scrolled

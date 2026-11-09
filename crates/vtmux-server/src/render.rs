@@ -620,11 +620,19 @@ impl Compositor {
         true
     }
     /// Per row of `screen`, whether it differs from what the terminal shows
+    /// (`links`: the terminal is given links, so a cell's link is part of
+    /// what it shows, [`cells_differ`])
     /// (every row when the size changed); `None` when nothing does, the
     /// cursor included.
     /// Rows tagged alike in both are equal without a look (see
     /// `last_tags`).
-    fn changed_rows(&self, screen: &Snapshot, tags: &[u64], same_size: bool) -> Option<Vec<bool>> {
+    fn changed_rows(
+        &self,
+        screen: &Snapshot,
+        tags: &[u64],
+        same_size: bool,
+        links: bool,
+    ) -> Option<Vec<bool>> {
         let Some(last) = self.last.as_ref().filter(|_| same_size) else {
             return Some(vec![true; usize::from(screen.rows)]);
         };
@@ -636,7 +644,7 @@ impl Compositor {
             .enumerate()
             .map(|(y, (a, b))| {
                 let tag = tags.get(y).copied().unwrap_or(0);
-                !(tag != 0 && self.last_tags.get(y) == Some(&tag)) && a != b
+                !(tag != 0 && self.last_tags.get(y) == Some(&tag)) && rows_differ(a, b, links)
             })
             .collect();
         for &(y, _, _) in &self.forced {
@@ -661,7 +669,8 @@ impl Compositor {
             .last
             .as_ref()
             .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
-        let Some(changed_rows) = self.changed_rows(&screen, &tags, same_size) else {
+        let Some(changed_rows) = self.changed_rows(&screen, &tags, same_size, caps.hyperlinks)
+        else {
             self.spare = Some(std::rc::Rc::new(screen));
             self.spare_tags = tags;
             return Vec::new();
@@ -698,7 +707,10 @@ impl Compositor {
                     !same_size
                         || is_forced(x, y)
                         || after_regional == Some(x)
-                        || self.last.as_ref().and_then(|s| s.cell(x, y)) != screen.cell(x, y)
+                        || match (self.last.as_ref().and_then(|s| s.cell(x, y)), cell) {
+                            (Some(shown), new) => cells_differ(shown, new, caps.hyperlinks),
+                            (None, _) => true,
+                        }
                 };
                 let regional = lone_regional(cell);
                 let changed =
@@ -755,7 +767,10 @@ impl Compositor {
                 let run = (x..screen.cols)
                     .take_while(|&cx| {
                         screen.cell(cx, y).is_some_and(|c| {
-                            c.text.is_empty() && c.width == 1 && c.style == cell.style
+                            c.text.is_empty()
+                                && c.width == 1
+                                && c.style == cell.style
+                                && c.link.is_none()
                         })
                     })
                     .count();
@@ -775,11 +790,15 @@ impl Compositor {
                 // erased cells retain background, not foreground. Keep this
                 // observable distinction for the status gap (oracle trace).
                 let blank = cell.text.is_empty() || cell.text == " ";
+                // A cell in a link is never empty (`gc->link == 0` there):
+                // erasing it would end the link.
                 if blank
                     && cell.style == Style::default()
                     && (x..screen.cols).all(|cx| {
                         screen.cell(cx, y).is_some_and(|c| {
-                            (c.text.is_empty() || c.text == " ") && c.style == cell.style
+                            (c.text.is_empty() || c.text == " ")
+                                && c.style == cell.style
+                                && c.link.is_none()
                         })
                     })
                     && caps.bce
@@ -808,6 +827,27 @@ impl Compositor {
         out.into_bytes()
     }
 }
+/// Whether the terminal, which shows `shown`, must be written `new`. A
+/// terminal that is given no links (`links` false) shows none, so a cell
+/// that differs only in its link (a program printing the same linked text
+/// with a new id each time) is already what it shows.
+fn cells_differ(shown: &vtmux_vt::Cell, new: &vtmux_vt::Cell, links: bool) -> bool {
+    shown != new
+        && (links
+            || (&shown.text, shown.width, &shown.style, shown.acs, shown.tab)
+                != (&new.text, new.width, &new.style, new.acs, new.tab))
+}
+
+/// [`cells_differ`] for any cell of two rows.
+fn rows_differ(shown: &[vtmux_vt::Cell], new: &[vtmux_vt::Cell], links: bool) -> bool {
+    shown != new
+        && (links
+            || shown
+                .iter()
+                .zip(new)
+                .any(|(shown, new)| cells_differ(shown, new, false)))
+}
+
 /// A two-column cell whose first character a terminal draws one column
 /// wide on its own: one a joined character made two columns wide (U+FE0F,
 /// a regional indicator pair, a skin-tone modifier, one after a ZWJ on a
@@ -1278,6 +1318,77 @@ mod tests {
             link.id()
         );
         assert!(frame.contains(&want), "{frame:?}");
+    }
+
+    /// tty-draw.c `tty_draw_line_get_empty`: a cell in a link is never
+    /// empty (`gc->link == 0`), so spaces at the end of a row are written
+    /// with their link, not erased with `\e[K` (which would drop it), and
+    /// a row of only linked spaces is written whole. A terminal without
+    /// `Hls` is written the same cells (the link is in tmux's grid whatever
+    /// the terminal is).
+    #[test]
+    fn linked_spaces_at_the_end_of_a_row_keep_their_link() {
+        let mut pane = vtmux_vt::PaneTerm::new(12, 2, 0);
+        pane.feed(b"\x1b]8;;http://sp/\x1b\\cd        \x1b]8;;\x1b\\\r\n\x1b]8;;http://sp/\x1b\\");
+        pane.feed(b"            \x1b]8;;\x1b\\");
+        let screen = pane.screen().snapshot().clone();
+        let id = screen.cell(0, 0).unwrap().link.as_ref().unwrap().id();
+        let caps = Caps {
+            hyperlinks: true,
+            ..test_caps()
+        };
+        let frame = String::from_utf8(Compositor::default().frame(screen.clone(), caps)).unwrap();
+        let spaces = "        ";
+        let want = format!("\x1b]8;id={id};http://sp/\x1b\\cd{spaces}\x1b]8;;\x1b\\");
+        assert!(frame.contains(&want), "{frame:?}");
+        let id2 = screen.cell(0, 1).unwrap().link.as_ref().unwrap().id();
+        let row = format!("\x1b]8;id={id2};http://sp/\x1b\\{}", " ".repeat(12));
+        assert!(frame.contains(&row), "{frame:?}");
+        for caps in [caps, test_caps()] {
+            let frame =
+                String::from_utf8(Compositor::default().frame(screen.clone(), caps)).unwrap();
+            assert!(frame.contains(&format!("cd{spaces}")), "{frame:?}");
+            assert!(frame.contains(&" ".repeat(12)), "{frame:?}");
+        }
+    }
+
+    /// A terminal without `Hls` shows no link, so cells that differ from
+    /// what it shows only in their link are not written again (a program
+    /// that prints the same linked text with a new id each time costs it
+    /// nothing); one with `Hls` is written the new link.
+    #[test]
+    fn a_link_only_change_is_sent_to_a_terminal_with_hyperlinks_only() {
+        let mut screen = erased(8);
+        for (c, t) in screen.cells.iter_mut().zip("SAMELINK".chars()) {
+            c.text = t.to_string().as_str().into();
+        }
+        let relink = |screen: &mut Snapshot| {
+            let link = vtmux_vt::Link::fresh("http://l");
+            for c in &mut screen.cells {
+                c.link = Some(std::sync::Arc::clone(&link));
+            }
+        };
+        for hyperlinks in [false, true] {
+            let caps = Caps {
+                hyperlinks,
+                ..test_caps()
+            };
+            let mut c = Compositor::default();
+            relink(&mut screen);
+            let first = c.frame(screen.clone(), caps);
+            assert!(first.windows(8).any(|w| w == b"SAMELINK"));
+            relink(&mut screen);
+            let again = c.frame(screen.clone(), caps);
+            assert_eq!(
+                again.is_empty(),
+                !hyperlinks,
+                "{:?}",
+                String::from_utf8_lossy(&again)
+            );
+            if hyperlinks {
+                assert!(again.windows(8).any(|w| w == b"SAMELINK"));
+            }
+        }
     }
 
     /// A blank `cols` x 1 screen of erased cells (no text).

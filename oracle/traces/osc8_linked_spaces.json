@@ -1,0 +1,160 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "osc8_linked_spaces",
+  "inputs": {
+    "name": "osc8_linked_spaces",
+    "size": [
+      12,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "12",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033]8;;http://sp/\\033\\\\cd        \\033]8;;\\033\\\\\\r\\n\\033]8;;http://sp/\\033\\\\            \\033]8;;\\033\\\\\\r\\nab\\033]8;;http://sp/\\033\\\\ \\033]8;;\\033\\\\'; printf END; tmux wait-for -S p; exec cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "terminal-features[9]",
+          "xterm*:hyperlinks"
+        ]
+      },
+      {
+        "wait_for": "p"
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "terminal-features[9]",
+          ""
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "b"
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e]8;id=tmux1;http://sp/\\e\\cd        \\e]8;;\\e\\",
+          "\\e]8;id=tmux2;http://sp/\\e\\            \\e]8;;\\e\\",
+          "ab\\e]8;id=tmux3;http://sp/\\e\\ \\e]8;;\\e\\END",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m   R"
+        ],
+        "cursor": [
+          6,
+          2
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "cd",
+          "",
+          "ab END",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m   R"
+        ],
+        "cursor": [
+          6,
+          2
+        ]
+      }
+    }
+  ]
+}

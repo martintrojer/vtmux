@@ -1,0 +1,18 @@
+name = "osc8_linked_spaces"
+size = [12, 6]
+# A cell in a link is never empty (tty-draw.c tty_draw_line_get_empty:
+# gc->link == 0), so spaces inside a link at the end of a row, or a row of
+# only linked spaces, are written with their link and not erased with EL,
+# which would end it. Seen by a terminal with the hyperlinks feature and by
+# one without: the observer's capture tells an erased cell from a space.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "12", "-y", "6", "sh", "-c", '''printf '\033]8;;http://sp/\033\\cd        \033]8;;\033\\\r\n\033]8;;http://sp/\033\\            \033]8;;\033\\\r\nab\033]8;;http://sp/\033\\ \033]8;;\033\\'; printf END; tmux wait-for -S p; exec cat -'''] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "terminal-features[9]", "xterm*:hyperlinks"] },
+  { wait_for = "p" },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-g", "terminal-features[9]", ""] },
+  { attach = { session = "a", id = "b" } },
+  { screen = { id = "b" } },
+]
