@@ -1489,7 +1489,7 @@ impl PaneTerm {
 
     /// Add the rows the last piece scrolled into history to the model.
     fn account_scroll(&mut self) {
-        let retained = self.term.scrollback_rows().unwrap_or(0);
+        let retained = self.retained_rows();
         let above_pin = self
             .pin
             .as_ref()
@@ -1508,10 +1508,7 @@ impl PaneTerm {
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
             self.times.extend(std::iter::repeat_n(now, scrolled));
-            while self.times.len() > retained {
-                self.times.pop_front();
-                self.times_base += 1;
-            }
+            self.trim_times(retained);
             self.times_base = self.times_base.max(self.scrolled - self.times.len() as u64);
         }
     }
@@ -1553,28 +1550,27 @@ impl PaneTerm {
                 .get(frozen.len().checked_sub(back)?)
                 .map(HistoryRow::Frozen);
         }
-        let retained = self.term.scrollback_rows().unwrap_or(0);
+        let retained = self.retained_rows();
         retained.checked_sub(back).map(HistoryRow::Screen)
     }
 
     /// Copy the newest `hsize` primary history rows.
     fn freeze_history(&self) -> Vec<FrozenRow> {
         self.note_history_read();
-        let cols = usize::from(self.cols());
-        let hidden = self.term.scrollback_rows().unwrap_or(0) - self.hsize;
-        let mut last = None;
-        (0..self.hsize)
-            .map(|y| FrozenRow::capture(&self.term, hidden + y, cols, &mut last))
-            .collect()
+        self.freeze(self.hidden_rows(), self.hsize)
     }
 
     /// Copy the visible rows of the primary screen.
     fn freeze_visible(&self) -> Vec<FrozenRow> {
+        self.freeze(self.retained_rows(), usize::from(self.rows()))
+    }
+
+    /// Copy `n` rows of the active screen from screen row `top`.
+    fn freeze(&self, top: usize, n: usize) -> Vec<FrozenRow> {
         let cols = usize::from(self.cols());
-        let top = self.term.scrollback_rows().unwrap_or(0);
         let mut last = None;
-        (0..usize::from(self.rows()))
-            .map(|y| FrozenRow::capture(&self.term, top + y, cols, &mut last))
+        (top..top + n)
+            .map(|y| FrozenRow::capture(&self.term, y, cols, &mut last))
             .collect()
     }
 
@@ -1688,10 +1684,7 @@ impl PaneTerm {
 
     /// Rows Ghostty retains above tmux's history.
     fn hidden_rows(&self) -> usize {
-        self.term
-            .scrollback_rows()
-            .unwrap_or(0)
-            .saturating_sub(self.hsize)
+        self.retained_rows().saturating_sub(self.hsize)
     }
 
     /// The lines OSC 133 marked as a prompt's or output's start, as rows
@@ -1811,7 +1804,7 @@ impl PaneTerm {
     }
 
     fn resize_grid(&mut self, cols: u16, rows: u16) {
-        let before = self.term.scrollback_rows().unwrap_or(0);
+        let before = self.retained_rows();
         let same_width = cols.max(1) == self.cols();
         let on_primary = !self.alternate_on();
         // The oldest row tmux has (the active top when it has none): rows
@@ -1870,7 +1863,7 @@ impl PaneTerm {
             // Reflow moves rows in and out of history: tmux's history
             // starts at the row that was its oldest. (While the alternate
             // screen is up the frozen copy is not reflowed.)
-            let after = self.term.scrollback_rows().unwrap_or(0);
+            let after = self.retained_rows();
             let hidden = oldest
                 .and_then(|pin| pin.point(PointSpace::Screen).ok().flatten())
                 .and_then(|p| usize::try_from(p.y).ok())
@@ -1889,10 +1882,7 @@ impl PaneTerm {
                     let pulled = usize::try_from(self.scrolled - scrolled).unwrap_or(0);
                     self.times.truncate(self.times.len().saturating_sub(pulled));
                 }
-                while self.times.len() > after {
-                    self.times.pop_front();
-                    self.times_base += 1;
-                }
+                self.trim_times(after);
                 // The times end at the newest row: rows pulled back take
                 // their ids with them, also those without a time.
                 self.scrolled = scrolled;
@@ -2609,10 +2599,7 @@ impl PaneTerm {
             let ny = (hsize - limit).max(1).min(hsize);
             self.hsize -= ny;
             self.hscrolled = self.hscrolled.min(self.hsize);
-            while self.times.len() > self.hsize {
-                self.times.pop_front();
-                self.times_base += 1;
-            }
+            self.trim_times(self.hsize);
             if let Some(frozen) = &mut self.frozen {
                 // A copy mode may share the rows: it keeps its own.
                 let frozen = Rc::make_mut(frozen);
@@ -2635,13 +2622,17 @@ impl PaneTerm {
     /// Drop the modelled history rows (`hsize`, times) Ghostty no longer
     /// retains. Primary screen only: `scrollback_rows` reads the active one.
     fn clamp_history_to_retained(&mut self) {
-        let retained = self.term.scrollback_rows().unwrap_or(0);
+        let retained = self.retained_rows();
         self.hsize = self.hsize.min(retained);
         self.hscrolled = self.hscrolled.min(self.hsize);
-        while self.times.len() > retained {
-            self.times.pop_front();
-            self.times_base += 1;
-        }
+        self.trim_times(retained);
+    }
+
+    /// Keep the times of the newest `rows` history rows only.
+    fn trim_times(&mut self, rows: usize) {
+        let gone = self.times.len().saturating_sub(rows);
+        self.times.drain(..gone);
+        self.times_base += gone as u64;
     }
 
     /// `screen_write_start_sync` (screen-write.c:1033-1046), on `?2026h`
@@ -3298,24 +3289,10 @@ fn tmux_sgr(raw: &[u8], out: &mut String) -> bool {
                 }
                 _ => {}
             }
-        } else {
-            match n {
-                0..=5
-                | 7..=9
-                | 21..=25
-                | 27..=37
-                | 39..=47
-                | 49
-                | 53
-                | 55
-                | 59
-                | 90..=97
-                | 100..=107 => {
-                    push(format_args!("{n}"));
-                }
-                6 => push(format_args!("5")),
-                _ => {}
-            }
+        } else if n == 6 {
+            push(format_args!("5"));
+        } else if u64::try_from(n).is_ok_and(sgr_known) {
+            push(format_args!("{n}"));
         }
         i += 1;
     }
@@ -3337,19 +3314,7 @@ fn sgr_is_plain(raw: &[u8]) -> bool {
     let byte = |v: Option<Option<u64>>| matches!(v, Some(Some(0..=255)));
     while let Some(p) = params.next() {
         match p {
-            Some(
-                0..=5
-                | 7..=9
-                | 21..=25
-                | 27..=37
-                | 39..=47
-                | 49
-                | 53
-                | 55
-                | 59
-                | 90..=97
-                | 100..=107,
-            ) => {}
+            Some(n) if sgr_known(n) => {}
             Some(38 | 48 | 58) => match params.next() {
                 Some(Some(5)) if byte(params.next()) => {}
                 Some(Some(2))
@@ -3360,6 +3325,15 @@ fn sgr_is_plain(raw: &[u8]) -> bool {
         }
     }
     true
+}
+
+/// An SGR attribute both tmux and Ghostty read alike, as one parameter
+/// (`input_csi_dispatch_sgr`; 6, rapid blink, tmux reads as 5).
+fn sgr_known(n: u64) -> bool {
+    matches!(
+        n,
+        0..=5 | 7..=9 | 21..=25 | 27..=37 | 39..=47 | 49 | 53 | 55 | 59 | 90..=97 | 100..=107
+    )
 }
 
 /// `input_csi_dispatch_sgr_256_do`: out of range is the default colour
