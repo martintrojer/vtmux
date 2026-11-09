@@ -11,17 +11,21 @@
 //! one stopped or in the background included, keeps its grant (D28 rule
 //! 5); a pane with no grant does nothing here.
 //!
-//! A program in the shell's own process group (no job control, or
-//! `exec`) ends with the shell, which ends the pane, so there is nothing
-//! to track. A grant of unknown owner (a snapshot from a build that did
-//! not record it) is settled once, when the snapshot is imported
-//! ([`Pane::settle_imported_kitty_grants`]).
+//! A program in the pane's own process group (the pane's process itself:
+//! `exec`, or a shell without job control running it) is tracked like any
+//! other, and that group lives as long as the pane, so its grant ends with
+//! the pane. The limit: a shell that outlives the program in that group
+//! (`bash -c 'prog; prog2'`, `prog; exec bash`) still has the group, so a
+//! program killed there leaves its grant until a `reset`, as the pane
+//! cannot tell which process of a shared group pushed. A grant of unknown
+//! owner (a snapshot from a build that did not record it) is settled once,
+//! when the snapshot is imported ([`Pane::settle_imported_kitty_grants`]).
 
 use crate::model::Pane;
 
 impl Pane {
     /// The PTY's foreground process group.
-    fn foreground_pgid(&self) -> Option<i32> {
+    pub(crate) fn foreground_pgid(&self) -> Option<i32> {
         #[cfg(test)]
         if let Some(group) = fake::foreground(self.id) {
             return Some(group);
@@ -68,12 +72,13 @@ impl Pane {
     /// and settle the ones with none recorded (written by a build before
     /// the owner was kept, or a downgrade and back in between, where the
     /// program may have ended unseen). The program on the active screen is
-    /// the foreground process group, unless that is the shell's own: then
-    /// whatever pushed is gone. The primary screen not in use is the
-    /// shell's (its process group lives as long as the pane), and the
-    /// alternate screen not in use belongs to a program
-    /// that has left (the shell's, untracked, is left as it is). A pane
-    /// with no process has no grant.
+    /// the foreground process group, the pane's own included: a program
+    /// exec'd as the pane (how mu launches agents) is that group for as
+    /// long as the pane lives, and a running program's grant is never
+    /// dropped (D28 rule 5). The primary screen not in use is the shell's
+    /// (its process group lives as long as the pane), and the alternate
+    /// screen not in use belongs to a program that has left (the shell's,
+    /// untracked, is left as it is). A pane with no process has no grant.
     pub fn settle_imported_kitty_grants(&mut self) {
         if self.io.is_none() {
             self.kitty_owner = [None; 2];
@@ -90,13 +95,7 @@ impl Pane {
                     self.term.end_kitty_grant(true);
                 }
             } else if self.term.kitty_granted() {
-                match self.foreground_pgid() {
-                    Some(group) if group != self.pid => self.kitty_owner[screen] = Some(group),
-                    Some(_) => {
-                        self.term.end_kitty_grant(screen == 1);
-                    }
-                    None => {}
-                }
+                self.kitty_owner[screen] = self.foreground_pgid();
             }
         }
         self.end_dead_kitty_grants();
