@@ -48,6 +48,109 @@
           "-t",
           "a:"
         ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "-x",
+          "10",
+          "-y",
+          "3",
+          "sh",
+          "-c",
+          "printf '\\033]8;;http://h/\\033\\\\L\\0337\\033]8;;\\033\\\\X\\0338M'; tmux wait-for -S ready-b; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready-b"
+      },
+      {
+        "divergence": {
+          "id": "D-061",
+          "expect": {
+            "kind": "cli",
+            "stdout": "\u001b]8;;http://h/\u001b\\L\u001b]8;;http://h/\u001b\\M\u001b]8;;http://h/\u001b\\\u001b]8;;\u001b\\\n\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-061",
+          "expect": {
+            "kind": "cli",
+            "stdout": "\u001b]8;;http://h/\u001b\\L\u001b]8;;http://h/\u001b\\M\u001b]8;;http://h/\u001b\\\u001b]8;;\u001b\\\n\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-J",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "-n",
+          "w",
+          "-x",
+          "5",
+          "-y",
+          "2",
+          "sh",
+          "-c",
+          "printf '\\033]8;;http://h/\\033\\\\abcdefghijk\\033[?1049h\\033[HXY'; tmux wait-for -S ready-c; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready-c"
+      },
+      {
+        "divergence": {
+          "id": "D-061",
+          "expect": {
+            "kind": "cli",
+            "stdout": "\u001b]8;;http://h/\u001b\\abcde\u001b]8;;\u001b\\\n\u001b]8;;http://h/\u001b\\XY\u001b]8;;\u001b\\\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-S",
+          "-",
+          "-t",
+          "c:"
+        ]
       }
     ]
   },
@@ -75,6 +178,69 @@
       "observation": {
         "kind": "cli",
         "stdout": "\u001b]8;;http://a/\u001b\\AC\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;;http://h/\u001b\\LM\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;;http://h/\u001b\\LM\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;;http://h/\u001b\\abcde\u001b]8;;\u001b\\\nXY\n\n",
         "stderr": "",
         "exit": 0
       }

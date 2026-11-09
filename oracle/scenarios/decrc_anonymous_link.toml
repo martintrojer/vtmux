@@ -2,9 +2,26 @@ name = "decrc_anonymous_link"
 # DECRC restores the anonymous link DECSC saved, the same link to tmux
 # (input.c input_restore_state), so capture-pane -e writes one OSC 8 over
 # A and C; to Ghostty it is a new link, so vtmux writes it again (D-061).
+# When that cell is the last the line's capture writes, tmux's closing
+# OSC 8 repeats its sequences (grid.c grid_string_cells), so vtmux opens
+# the link once more before the close (b). Entering the alternate screen
+# keeps the pen's link (screen.c screen_alternate_on), which Ghostty ends
+# and vtmux sends again (c): tmux's capture opens no link on a line that
+# starts with the link the line before ended with, vtmux's opens the new
+# one.
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "3", "sh", "-c", "printf '\\033]8;;http://a/\\033\\\\A\\0337\\033]8;;\\033\\\\B\\0338C\\033]8;;\\033\\\\'; tmux wait-for -S ready; exec cat"] },
   { wait_for = "ready" },
   { divergence = { id = "D-061", expect = { kind = "cli", stdout = "\u001b]8;;http://a/\u001b\\A\u001b]8;;http://a/\u001b\\C\u001b]8;;\u001b\\\n\n\n", stderr = "", exit = 0 } } },
   { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "10", "-y", "3", "sh", "-c", "printf '\\033]8;;http://h/\\033\\\\L\\0337\\033]8;;\\033\\\\X\\0338M'; tmux wait-for -S ready-b; exec cat -"] },
+  { wait_for = "ready-b" },
+  { divergence = { id = "D-061", expect = { kind = "cli", stdout = "\u001b]8;;http://h/\u001b\\L\u001b]8;;http://h/\u001b\\M\u001b]8;;http://h/\u001b\\\u001b]8;;\u001b\\\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-t", "b:"] },
+  { divergence = { id = "D-061", expect = { kind = "cli", stdout = "\u001b]8;;http://h/\u001b\\L\u001b]8;;http://h/\u001b\\M\u001b]8;;http://h/\u001b\\\u001b]8;;\u001b\\\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-J", "-t", "b:"] },
+  { run = ["new", "-d", "-s", "c", "-n", "w", "-x", "5", "-y", "2", "sh", "-c", "printf '\\033]8;;http://h/\\033\\\\abcdefghijk\\033[?1049h\\033[HXY'; tmux wait-for -S ready-c; exec cat -"] },
+  { wait_for = "ready-c" },
+  { divergence = { id = "D-061", expect = { kind = "cli", stdout = "\u001b]8;;http://h/\u001b\\abcde\u001b]8;;\u001b\\\n\u001b]8;;http://h/\u001b\\XY\u001b]8;;\u001b\\\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "c:"] },
 ]
