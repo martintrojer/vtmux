@@ -2602,7 +2602,7 @@ mod tests {
     }
 
     /// A copy of a history of many pages (each copied whole, as its
-    /// memory, patch 0034) reads as the pane read when it was taken, with
+    /// memory, patch 0035) reads as the pane read when it was taken, with
     /// styles, links, clusters, wide characters and tabs, whatever the
     /// pane does after.
     #[test]
