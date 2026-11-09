@@ -5368,9 +5368,10 @@ mod tests {
     #[test]
     fn a_title_given_back_is_kept_as_it_was_read() {
         let mut t = PaneTerm::new(20, 5, 100);
-        t.set_title("a\\b\tc#(d)");
+        // No TAB: `valid_name` refuses a title with a control character.
+        t.set_title("a\\b#(d)");
         let shown = t.title();
-        assert_eq!(shown, "a\\\\b\\tc#(d)");
+        assert_eq!(shown, "a\\\\b#(d)");
         let mut back = PaneTerm::new(20, 5, 100);
         back.restore_title(&shown);
         assert_eq!(back.title(), shown);
