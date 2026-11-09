@@ -17,6 +17,8 @@ All are off until set and invisible to scripts while unset (next section). Guard
 
 | Option | Scope | Values | Default | What it does |
 |---|---|---|---|---|
+| `vtmux-inband-resize` | server | `off`, `on` | `off` | A program that sets mode 2048 (`CSI ? 2048 h`) gets every new size of its pane in-band (`CSI 48 ; rows ; cols ; height ; width t`), at once and after each resize, so it needs no `SIGWINCH` race. A grant outlives the option being turned off, and ends at `?2048l`, a reset or a respawn; a live upgrade carries it. D28, D31 |
+| `vtmux-kitty-keys` | server | `off`, `on` | `off` | A program that asks for the kitty keyboard protocol (`CSI > flags u`) is sent kitty-encoded keys, typed at the client or by `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as before, and `send-keys -l` stays text. A grant outlives the option being turned off. D28, D29 |
 | `vtmux-notifications` | server | `off`, `on` | `off` | A pane's desktop notifications (OSC 9, OSC 777) reach attached Ghostty clients, from any window, and so do those of a `display-popup -E` program (to its own client), at Ghostty's own rate limits (one a second, an identical one once in 5 s). Never a control client or another terminal. No `allow-passthrough` needed. Read at each notification. D28, D30 |
 | `vtmux-pane-active-blend` | window | `fg=<colour>[/<pct>],bg=<colour>[/<pct>]` | empty | Blends every cell of the active pane toward the colours (`/pct` 0-100, default 100). `bg`/`fg` as colours mean the outer terminal's default background/foreground |
 | `vtmux-pane-inactive-blend` | window | as above | empty | The same, for every other pane of the window. `fg=bg/25,bg=bg/25` dims like Ghostty's `unfocused-split-opacity = 0.75` |
