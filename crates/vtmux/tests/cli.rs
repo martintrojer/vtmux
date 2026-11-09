@@ -6111,11 +6111,14 @@ fn format_jobs_chained() {
                 .collect(),
             ..t
         });
-        // Still running after a second: the placeholder.
+        // Still running after a second: the placeholder. The job must
+        // outlive the 3 s and the `sh -c ""` after them, which on a loaded
+        // host took over 2 s more: a job over by then shows its empty
+        // output, `x<>`. It goes with the client (`format_lost_client`).
         runs.push(w.run(&[
             "display",
             "-p",
-            "x<#(exec sleep 5)>",
+            "x<#(exec sleep 600)>",
             ";",
             "run",
             "-d3",
@@ -6123,7 +6126,7 @@ fn format_jobs_chained() {
             ";",
             "display",
             "-p",
-            "x<#(exec sleep 5)>",
+            "x<#(exec sleep 600)>",
         ]));
         runs
     });
