@@ -1022,6 +1022,28 @@ Recorded per commit in git history; the list is kept current:
   -Dtest-filter=grid_ref` (Debug) passes. Upstream candidate: a C API
   user reading many rows has no other way to avoid the walk.
 
+- `patches/0037-wide-wrap-keeps-last-cell.patch` (`Terminal.zig` `print`,
+  `printSliceFast`): a wide character that does not fit the rest of the
+  row wraps and leaves the row's last cell as it was, its text, style
+  and link included, as tmux's `screen_write_cell` (screen-write.c: the
+  wrap comes before any cell is written); only an empty cell becomes the
+  spacer head, which is tmux's unwritten cell. Ghostty wrote a blank
+  spacer head over the cell in the pen's style and link, so `printf
+  '0123456789\033[10G\344\270\200'` on 10 columns lost the 9. The
+  batched path keeps the cell too (its mask check already means the
+  cell has the pen's style and no link or tab). Inside a right margin
+  the cell is still blanked (vtmux never sets one: tmux has no DECSLRM).
+  esctest has no case for a wide character that does not fit, so no D4
+  arbiter verdict: tmux's. The upstream test `print wide char at right
+  edge with hyperlink` now expects the spacer head without the link.
+  New test `Terminal: a wide char that wraps leaves the last cell as it
+  was (vtmux)` (both paths); Rust `capture::tests::wide_wrap_keeps_last_cell`;
+  oracle `wide_wrap_keeps_last_cell`. `zig build test-lib-vt
+  -Demit-lib-vt=true -Dapp-runtime=none` (Debug): 7047/7125 pass, 76
+  skip, the known `tabClear single` failure. Found by
+  `scripts/emu_fuzz.py --gen round2` (`widemargin`). Not an upstream
+  candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

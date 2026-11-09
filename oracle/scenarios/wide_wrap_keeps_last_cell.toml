@@ -1,0 +1,17 @@
+name = "wide_wrap_keeps_last_cell"
+# A wide character that does not fit the rest of the row wraps and leaves the
+# row's last cell as it was, its text, style and link included
+# (screen-write.c screen_write_cell); an empty last cell stays unwritten.
+# Ghostty wrote a blank spacer head over it in the pen's style. The joined
+# line (-J) and a reflow keep the cell. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'abcdefghi\\033[1mx\\033[m\\033[10G\\344\\270\\200z\\015\\012\\033]8;;http://l/\\033\\\\012345678\\033[4m9\\033[10G\\033]8;;\\033\\\\\\033[24m\\344\\270\\200y\\015\\0120123\\033[10G\\344\\270\\200w'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-J", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "a:", "-x", "15"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["resize-window", "-t", "a:", "-x", "7"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]

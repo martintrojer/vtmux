@@ -1919,6 +1919,24 @@ mod tests {
         );
     }
 
+    /// A wide character that does not fit the rest of the row wraps and
+    /// leaves the last cell as it was (screen-write.c `screen_write_cell`,
+    /// patch 0037): written text stays, an empty cell stays unwritten.
+    /// Expected: tmux 3.8's capture-pane, then `-J`.
+    #[test]
+    fn wide_wrap_keeps_last_cell() {
+        let mut t = PaneTerm::new(10, 4, 0);
+        t.feed("012345678x\x1b[10G\u{4e00}a\r\n0123\x1b[10G\u{4e00}b".as_bytes());
+        let text = String::from_utf8_lossy(&capture(&t, CaptureOpts::default())).into_owned();
+        assert_eq!(text, "012345678x\n\u{4e00}a\n0123\n\u{4e00}b\n", "{text:?}");
+        let opts = CaptureOpts {
+            join: true,
+            ..Default::default()
+        };
+        let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert_eq!(text, "012345678x\u{4e00}a\n0123\u{4e00}b\n", "{text:?}");
+    }
+
     /// tmux gives the line-drawing charset only to an ASCII character
     /// (input.c `input_print`): a character from UTF-8 printed under it is
     /// a plain one (`input_top_bit_set`). Expected: tmux 3.8's

@@ -1,0 +1,122 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index c80bc1e4f..c11092d81 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1086,7 +1086,12 @@ fn printSliceFill(
+                 var spacer = template;
+                 if (right_limit == self.cols) {
+                     cursor.page_row.wrap = true;
+-                    spacer.wide = .spacer_head;
++                    // vtmux: tmux leaves the last cell as it was
++                    // (screen_write_cell); only an empty one becomes
++                    // the spacer head. The mask check above means it
++                    // has the cursor's style and no link or tab.
++                    spacer = cells[0];
++                    if (spacer.content.codepoint.data == 0) spacer.wide = .spacer_head;
+                 }
+                 cursor.page_row.dirty = true;
+                 if (style_id != style.default_id) cursor.page_row.styled = true;
+@@ -1764,7 +1769,17 @@ pub fn print(self: *Terminal, c: u21) !void {
+                     // a page resize during printCell then it'll fail
+                     // integrity checks.
+                     self.screens.active.cursor.page_row.wrap = true;
+-                    self.writeCell(0, .spacer_head);
++                    // vtmux: tmux wraps and leaves the last cell as it
++                    // was (screen-write.c screen_write_cell), style and
++                    // link included. Only an empty cell becomes the
++                    // spacer head, the cell tmux never wrote.
++                    const last = self.screens.active.cursor.page_cell;
++                    if (last.wide == .narrow and last.tab == 0 and
++                        last.content_tag == .codepoint and
++                        last.content.codepoint.data == 0)
++                    {
++                        last.wide = .spacer_head;
++                    }
+                 } else {
+                     self.writeCell(0, .narrow);
+                 }
+@@ -6796,6 +6811,70 @@ test "Terminal: print wide char at edge creates spacer head" {
+     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
+ }
+ 
++test "Terminal: a wide char that wraps leaves the last cell as it was (vtmux)" {
++    var t = try init(testing.io, testing.allocator, .{ .cols = 5, .rows = 4 });
++    defer t.deinit(testing.allocator);
++
++    // tmux's screen_write_cell wraps a wide character that does not fit
++    // and leaves the last column alone: text, style and link.
++    try t.printString("abcd");
++    try t.screens.active.startHyperlink("http://x/", null);
++    try t.setAttribute(.{ .bold = {} });
++    try t.print('x');
++    t.setCursorPos(1, 5);
++    try t.setAttribute(.{ .unset = {} });
++    t.screens.active.endHyperlink();
++    try t.print(0x4E00);
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 4, .y = 0 } }).?;
++        try testing.expectEqual(@as(u21, 'x'), list_cell.cell.content.codepoint.data);
++        try testing.expectEqual(Cell.Wide.narrow, list_cell.cell.wide);
++        try testing.expect(list_cell.cell.hyperlink);
++        try testing.expect(list_cell.cell.style_id != 0);
++        try testing.expect(list_cell.row.wrap);
++    }
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 1 } }).?;
++        try testing.expectEqual(@as(u21, 0x4E00), list_cell.cell.content.codepoint.data);
++        try testing.expectEqual(Cell.Wide.wide, list_cell.cell.wide);
++    }
++
++    // An empty last cell becomes the spacer head.
++    t.setCursorPos(3, 1);
++    try t.setAttribute(.{ .direct_color_bg = .{ .r = 1, .g = 2, .b = 3 } });
++    try t.printString("abcd");
++    t.setCursorPos(3, 5);
++    try t.setAttribute(.{ .unset = {} });
++    try t.print(0x4E00);
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 4, .y = 2 } }).?;
++        try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
++        try testing.expectEqual(@as(u21, 0), list_cell.cell.content.codepoint.data);
++        try testing.expect(list_cell.row.wrap);
++    }
++
++    // The batched path (printSlice) does the same.
++    t.setCursorPos(4, 1);
++    try t.printSlice(&.{ 'a', 'b', 'c', 'd', 'y' });
++    t.setCursorPos(4, 5);
++    try t.printSlice(&.{ 0x4E00, 0x4E00 });
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 4, .y = 2 } }).?;
++        try testing.expectEqual(@as(u21, 'y'), list_cell.cell.content.codepoint.data);
++        try testing.expectEqual(Cell.Wide.narrow, list_cell.cell.wide);
++        try testing.expect(list_cell.row.wrap);
++    }
++    t.setCursorPos(4, 1);
++    try t.printSlice(&.{ 'a', 'b', 'c', 'd' });
++    t.setCursorPos(4, 5);
++    try t.printSlice(&.{ 0x4E00, 0x4E00 });
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 4, .y = 2 } }).?;
++        try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
++        try testing.expect(list_cell.row.wrap);
++    }
++}
++
+ test "Terminal: print wide char with 1-column width" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+@@ -9187,11 +9266,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
+     try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
+     try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
+ 
+-    // Row 0, col 9: spacer head with hyperlink
++    // Row 0, col 9: spacer head, left unwritten as tmux does (vtmux)
+     {
+         const list_cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 9, .y = 0 } }).?;
+         try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
+-        try testing.expect(list_cell.cell.hyperlink);
++        try testing.expect(!list_cell.cell.hyperlink);
+         try testing.expect(list_cell.row.wrap);
+     }
+     // Row 1, col 0: the wide char with hyperlink
