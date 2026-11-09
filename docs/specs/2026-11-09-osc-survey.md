@@ -1,5 +1,7 @@
 # vtmux: terminal protocols beyond tmux 3.8 — survey
 
+Decided 2026-11-09: D28-D31 in `docs/specs/2026-10-29-vtmux.md` (*Protocol extensions*). Where they differ from section 4's sketch, the spec wins: rule 1 requires libghostty to implement a protocol, not just parse it, so OSC 99 is out of D30; the DIVERGENCES category is `Extension (D28)`; D31 has an option.
+
 Read-only survey (spec dated 2026-10-29; latest DIVERGENCES entries 2026-11). Repo `/Users/mtrojer/hacking/vtmux` at `cfb373cb`. Sources:
 - vendored Ghostty `target/debug/build/libghostty-vt-sys-66855600964f40b8/out/ghostty-src` (commit `3bd54e025cc3`, 2026-10-31; written **G:** below)
 - tmux 3.8 source `~/.cache/vtmux/tmux-3.8-src` (**T:**)

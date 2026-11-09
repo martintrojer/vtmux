@@ -2,7 +2,8 @@
 
 vtmux follows tmux 3.8 exactly except where recorded here (spec: *Divergence
 process*). Every entry needs evidence. There is no "intentional divergence for
-product reasons" category.
+product reasons" category. Protocol extensions (spec D28) have a category of
+their own, below.
 
 ## Categories
 
@@ -10,6 +11,7 @@ product reasons" category.
 - **Do not copy tmux bug**: tmux loses data, hangs or is unsafe. Needs evidence and a regression test.
 - **Deferred**: not done yet. Must not be claimed as compatible.
 - **Spec decision**: a numbered decision in the spec (`docs/specs/2026-10-29-vtmux.md`) chose this behaviour for drop-in use. Cite the decision.
+- **Extension (D28)**: a terminal protocol tmux 3.8 drops, which the pinned libghostty-vt implements in panes and Ghostty as the outer terminal (spec *Protocol extensions*). Only a program that asks through the protocol sees it, and only with its `vtmux-*` option on. Name the decision (D29, D30, D31, ...), the option, the oracle scenario that pins tmux's behaviour with the option off, the test that pins vtmux's with it on, and what a live upgrade keeps.
 
 ## Entry template
 
@@ -20,7 +22,7 @@ product reasons" category.
 - tmux behaviour: <what tmux 3.8 does>
 - vtmux behaviour: <what vtmux does>
 - Evidence: <arbiter result, trace, or reproduction>
-- Category: Ghostty grid | Do not copy tmux bug | Deferred
+- Category: Ghostty grid | Do not copy tmux bug | Deferred | Spec decision | Extension (D28)
 - Patch: <compat/patches/NNNN-name.patch, if the regress assertion is patched>
 ```
 
