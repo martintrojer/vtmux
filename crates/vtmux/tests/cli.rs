@@ -2043,30 +2043,21 @@ fn history_limit_retention() {
             w.run(&["new", "-d", "-s", "s", "-x", "80", "-y", "24", styled]),
             w.run(&["new", "-d", "-s", "w", "-x", "500", "-y", "24", wide]),
         ];
-        w.wait_for_text("s", "DONE");
-        w.wait_for_text("w", "DONE");
-        // DONE on screen can come before the server has fed every byte to
-        // the pane under load: wait until history_size stops changing.
-        for target in ["s", "w"] {
-            let mut last = String::new();
-            let start = Instant::now();
-            loop {
-                let now = w
-                    .run(&["display", "-p", "-t", target, "#{history_size}"])
-                    .stdout;
-                if now == last || start.elapsed() > Duration::from_secs(10) {
-                    break;
-                }
-                last = now;
-                std::thread::sleep(Duration::from_millis(300));
-            }
-        }
+        // Session-qualified targets: a bare `s` names a pane by the current
+        // session's window first (cmd-find.c `cmd_find_get_pane`, then
+        // `cmd_find_get_window_with_session`'s prefix match), and while the
+        // wide pane's `sh` runs awk (no job control, so `sh` leads the
+        // foreground group) its window is `sh`. With `w` the best session,
+        // `s` was that pane, done first: its DONE ended the wait for the
+        // styled pane before it had all its output.
+        w.wait_for_text("s:", "DONE");
+        w.wait_for_text("w:", "DONE");
         let state = ["display", "-p", "-t", "", "#{history_size} #{pane_width}"];
         for (target, size) in [
-            ("s", None),
-            ("w", None),
-            ("w", Some("100")),
-            ("w", Some("500")),
+            ("s:", None),
+            ("w:", None),
+            ("w:", Some("100")),
+            ("w:", Some("500")),
         ] {
             if let Some(cols) = size {
                 runs.push(w.run(&["resize-window", "-t", target, "-x", cols]));
