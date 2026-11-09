@@ -1,0 +1,34 @@
+name = "pane_osc_colours"
+size = [40, 8]
+# The default colours a pane program sets with OSC 10 and 11 are its cells'
+# default colours (tty.c tty_window_default_style, wp->palette.fg/bg), with
+# window-style added where it sets a colour (style_add); the active pane
+# starts from them too, so an OSC colour beats window-style there unless
+# window-active-style sets one (tty_default_colours). OSC 110 and 111 reset
+# them; they outlive a respawn.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { attach = { session = "a" } },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033]10;#ff0000\\007\\033]11;blue\\007text\\033[32mG\\033[0m\\r\\n'; tmux wait-for -S p0; exec cat"] },
+  { wait_for = "p0" },
+  { screen = {} },
+  { run = ["setw", "-t", "a", "window-style", "bg=yellow,fg=green"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["setw", "-t", "a", "window-active-style", "fg=terminal"] },
+  { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf 'kept\\r\\n'; tmux wait-for -S p1; exec cat"] },
+  { wait_for = "p1" },
+  { screen = {} },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033]110\\007\\033]111\\007reset\\033[31mR\\033[0m\\r\\n'; tmux wait-for -S p2; exec cat"] },
+  { wait_for = "p2" },
+  { screen = {} },
+]

@@ -17,6 +17,7 @@ use vtmux_vt::{Color, Snapshot};
 use super::Caps;
 use super::blend::{TermColours, resolve};
 use super::compose::{BarDraw, Draw, PaneDraw, Theme, pane_status};
+use super::palette::{Dim, Palette};
 use super::scene::{Indicators, Lines, Scene, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
@@ -24,6 +25,52 @@ use crate::format_jobs::{JobHandle, TAG_PANE};
 use crate::mode::copy::Paint;
 use crate::model::Model;
 use crate::target::Found;
+
+/// What a pane shows ([`Source::pane_screen`]).
+struct PaneScreen {
+    content: Rc<Snapshot>,
+    /// [`PaneDraw::stamps`]: only for the pane's own screen.
+    stamps: Vec<u64>,
+    /// [`PaneDraw::selected`].
+    selected: Vec<bool>,
+    /// [`PaneDraw::no_palette`].
+    no_palette: Vec<bool>,
+}
+
+/// A palette as `tty_attributes` reads it (`wp->palette`, `pd->palette`):
+/// the entries the program on `term` set with OSC 4 (`palette->palette`)
+/// over `pane-colours` in `tree` (`default_palette`, colour.c
+/// `colour_palette_get`); `None` when neither has an entry.
+pub(crate) fn palette(
+    model: &Model,
+    tree: TreeId,
+    term: &vtmux_vt::PaneTerm,
+    theme: &Theme,
+) -> Option<Palette> {
+    use vtmux_core::options::{ArrayKey, OptionValue, Value};
+    let set = term.palette_entries();
+    let option = match model.options.get(tree, "pane-colours").map(|e| &e.value) {
+        Some(OptionValue::Array(items)) if !items.is_empty() => Some(items),
+        _ => None,
+    };
+    if set.is_none() && option.is_none() {
+        return None;
+    }
+    let mut p = [None; 256];
+    for (k, v) in option.into_iter().flatten() {
+        if let (ArrayKey::Index(i), Value::Colour(c)) = (k, v)
+            && let Some(slot) = usize::try_from(*i).ok().and_then(|i| p.get_mut(i))
+        {
+            *slot = Some(theme.colour(*c));
+        }
+    }
+    for (slot, c) in p.iter_mut().zip(set.into_iter().flatten()) {
+        if let Some((r, g, b)) = *c {
+            *slot = Some(Color::Rgb(r, g, b));
+        }
+    }
+    Some(Rc::new(p))
+}
 
 /// What the window drawing reads from the server.
 pub struct Source<'a> {
@@ -162,6 +209,12 @@ impl Source<'_> {
     /// `options_string_to_style` + `style_apply`: the option expanded and
     /// parsed over the default cell; an invalid style is the default.
     pub(crate) fn style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> CellStyle {
+        self.parsed_style(tree, name, ctx).cell
+    }
+
+    /// Style option `name` parsed whole (`options_string_to_style`); one
+    /// that does not parse is the default style.
+    fn parsed_style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> Style {
         let text = self.string(tree, name);
         let text = if text.contains("#{") {
             vtmux_core::format::expand_str(&text, ctx)
@@ -171,9 +224,9 @@ impl Source<'_> {
         let base = CellStyle::default();
         let mut sy = Style::new(&base);
         if sy.parse(&base, &text).is_err() {
-            return base;
+            return Style::new(&base);
         }
-        sy.cell
+        sy
     }
 
     /// `server_client_update_theme_colours` (server-client.c:1274-1310):
@@ -259,7 +312,9 @@ impl Source<'_> {
             ..Found::from_session(self.model, s)
         };
         let ctx = self.ctx(found, caps);
-        let (screen, _, _) = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
+        let screen = self
+            .pane_screen(pane, TreeId::Session(s), &ctx, caps)
+            .content;
         screen.cursor.filter(|_| screen.cursor_visible)
     }
 
@@ -332,15 +387,15 @@ impl Source<'_> {
                 rect: pane.rect,
             };
             let border = self.border_style(cache.map(|c| &c.borders), p, key, &ctx);
-            let (content, stamps, selected) =
-                self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
-            let defaults = self.pane_defaults(p, p == active, &ctx);
+            let palette = palette(self.model, TreeId::Pane(p), &pane.term, &self.theme(caps));
+            let shown = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
+            let (defaults, dim) = self.pane_defaults(pane, p == active, &ctx);
             draws.insert(
                 p,
                 PaneDraw {
-                    content,
-                    stamps,
-                    selected,
+                    content: shown.content,
+                    stamps: shown.stamps,
+                    selected: shown.selected,
                     index: self.model.pane_index(p),
                     defaults,
                     lines,
@@ -352,6 +407,9 @@ impl Source<'_> {
                         placement,
                         slider: self.model.scrollbar_slider(p),
                     }),
+                    palette,
+                    no_palette: shown.no_palette,
+                    dim,
                     blend: None,
                 },
             );
@@ -475,20 +533,40 @@ impl Source<'_> {
         style
     }
 
-    /// tty.c `tty_default_colours` (`tty_style_changed`): pane `p`'s
-    /// default fg and bg, `window-active-style`'s where it sets them and
-    /// `p` is the active pane, else `window-style`'s. tmux starts from the
-    /// pane's OSC 10/11 colours; vtmux leaves those to the terminal.
-    fn pane_defaults(&self, p: PaneId, active: bool, ctx: &Ctx<'_>) -> CellStyle {
-        let tree = TreeId::Pane(p);
-        let style = self.style(tree, "window-style", ctx);
-        let on = active.then(|| self.style(tree, "window-active-style", ctx));
-        let pick = |a: Option<Colour>, b: Colour| a.filter(|&c| c != Colour::Default).unwrap_or(b);
-        CellStyle {
-            fg: pick(on.as_ref().map(|s| s.fg), style.fg),
-            bg: pick(on.as_ref().map(|s| s.bg), style.bg),
+    /// tty.c `tty_default_colours` (`tty_style_changed`): the pane's
+    /// default fg and bg and its dim. Each style is added to the colours
+    /// the program set with OSC 10 and 11 (`tty_window_default_style`,
+    /// `style_add`); the active pane takes `window-active-style`'s colours
+    /// where they are set (an OSC colour counts) and its `dim=`, the others
+    /// `window-style`'s.
+    fn pane_defaults(
+        &self,
+        pane: &crate::model::Pane,
+        active: bool,
+        ctx: &Ctx<'_>,
+    ) -> (CellStyle, Option<Dim>) {
+        let tree = TreeId::Pane(pane.id);
+        let (fg, bg) = pane.term.default_colours();
+        let rgb =
+            |c: Option<vtmux_vt::Rgb>| c.map_or(Colour::Default, |(r, g, b)| Colour::Rgb(r, g, b));
+        let set = |c: Colour, base: Colour| if c == Colour::Default { base } else { c };
+        let add = |sy: &Style| CellStyle {
+            fg: set(sy.cell.fg, rgb(fg)),
+            bg: set(sy.cell.bg, rgb(bg)),
             ..CellStyle::default()
+        };
+        let normal = self.parsed_style(tree, "window-style", ctx);
+        if !active {
+            return (add(&normal), Dim::new(normal.dim));
         }
+        let on = self.parsed_style(tree, "window-active-style", ctx);
+        let (a, n) = (add(&on), add(&normal));
+        let colours = CellStyle {
+            fg: set(a.fg, n.fg),
+            bg: set(a.bg, n.bg),
+            ..CellStyle::default()
+        };
+        (colours, Dim::new(on.dim))
     }
 
     /// D26: each pane's blend for a client with terminal colours
@@ -523,68 +601,87 @@ impl Source<'_> {
         }
     }
 
-    /// What `pane` shows: its shown mode's screen, else its own, its row
-    /// stamps ([`PaneDraw::stamps`], only for its own) and which cells are
-    /// selected.
+    /// What `pane` shows: its shown mode's screen, else its own
+    /// ([`PaneScreen`]).
     fn pane_screen(
         &self,
         pane: &crate::model::Pane,
         tree: TreeId,
         ctx: &Ctx<'_>,
         caps: Caps,
-    ) -> (Rc<Snapshot>, Vec<u64>, Vec<bool>) {
+    ) -> PaneScreen {
+        let only = |screen: Snapshot| PaneScreen {
+            content: Rc::new(screen),
+            stamps: Vec::new(),
+            selected: Vec::new(),
+            no_palette: Vec::new(),
+        };
         if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
             let screen = self.clock_screen(pane, m, ctx, caps);
-            return (Rc::new(screen), Vec::new(), Vec::new());
+            // The time is written with GRID_FLAG_NOPALETTE
+            // (window-clock.c:273-274, 286-287); the rest is cleared.
+            let no_palette = screen.cells.iter().map(|c| !c.text.is_empty()).collect();
+            return PaneScreen {
+                no_palette,
+                ..only(screen)
+            };
         }
         if let Some(crate::mode::Mode::Panes(m)) = pane.modes.first() {
-            return (
-                Rc::new(self.panes_screen(pane, m, caps)),
-                Vec::new(),
-                Vec::new(),
-            );
+            return only(self.panes_screen(pane, m, caps));
         }
         if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
             // MODE_SYNC (screen-write.c:211-240): while the program has
             // synchronized output on, nothing new of it is drawn. The held
             // grid keeps the stamps it had, so its rows stay cached.
-            if let Some(held) = pane.term.sync_held() {
-                return (Rc::clone(&held.screen), held.stamps.to_vec(), Vec::new());
-            }
-            let view = pane.term.screen();
-            return (view.shared(), view.row_stamps().to_vec(), Vec::new());
+            let (content, stamps) = if let Some(held) = pane.term.sync_held() {
+                (Rc::clone(&held.screen), held.stamps.to_vec())
+            } else {
+                let view = pane.term.screen();
+                (view.shared(), view.row_stamps().to_vec())
+            };
+            return PaneScreen {
+                content,
+                stamps,
+                selected: Vec::new(),
+                no_palette: Vec::new(),
+            };
         }
         let top = pane.modes.first();
-        let (mut screen, selected) = match (top, top.and_then(crate::mode::Mode::as_copy)) {
-            // Copy and view mode draw alike (window_copy_write_line).
-            (_, Some(m)) => {
-                let wtree = TreeId::Window(pane.window);
-                let vi = self.model.number_option(wtree, "mode-keys") == 1;
-                let numbers = self.model.number_option(wtree, "copy-mode-line-numbers");
-                (
-                    self.copy_screen(pane, m, ctx, caps),
-                    m.selection_mask(vi, numbers),
-                )
-            }
-            (Some(m), _) if m.tree_kind().is_some() => {
-                (self.tree_screen(pane, m, caps), Vec::new())
-            }
-            (Some(crate::mode::Mode::Switch(m)), _) => {
-                (self.switch_screen(pane, m, caps), Vec::new())
-            }
-            // A mode prompt over a plain pane (a held pane drew above).
-            _ => (
-                pane.term.sync_held().map_or_else(
-                    || vtmux_vt::snapshot(&pane.term),
-                    |h| h.screen.as_ref().clone(),
+        let (mut screen, selected, no_palette) =
+            match (top, top.and_then(crate::mode::Mode::as_copy)) {
+                // Copy and view mode draw alike (window_copy_write_line).
+                (_, Some(m)) => {
+                    let wtree = TreeId::Window(pane.window);
+                    let vi = self.model.number_option(wtree, "mode-keys") == 1;
+                    let numbers = self.model.number_option(wtree, "copy-mode-line-numbers");
+                    let (screen, no_palette) = self.copy_screen(pane, m, ctx, caps);
+                    (screen, m.selection_mask(vi, numbers), no_palette)
+                }
+                (Some(m), _) if m.tree_kind().is_some() => {
+                    (self.tree_screen(pane, m, caps), Vec::new(), Vec::new())
+                }
+                (Some(crate::mode::Mode::Switch(m)), _) => {
+                    (self.switch_screen(pane, m, caps), Vec::new(), Vec::new())
+                }
+                // A mode prompt over a plain pane (a held pane drew above).
+                _ => (
+                    pane.term.sync_held().map_or_else(
+                        || vtmux_vt::snapshot(&pane.term),
+                        |h| h.screen.as_ref().clone(),
+                    ),
+                    Vec::new(),
+                    Vec::new(),
                 ),
-                Vec::new(),
-            ),
-        };
+            };
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
             self.mode_prompt(&mut screen, prompt, tree, caps);
         }
-        (Rc::new(screen), Vec::new(), selected)
+        PaneScreen {
+            content: Rc::new(screen),
+            stamps: Vec::new(),
+            selected,
+            no_palette,
+        }
     }
 
     /// Clock mode's screen (`window_clock_draw_screen`): the time now in
@@ -656,7 +753,7 @@ impl Source<'_> {
         m: &crate::mode::CopyMode,
         ctx: &Ctx<'_>,
         caps: Caps,
-    ) -> Snapshot {
+    ) -> (Snapshot, Vec<bool>) {
         // format_draw keeps what a section does not cover: those cells are
         // marked and keep the pane's.
         const KEEP: &str = "\u{0}";
@@ -702,6 +799,16 @@ impl Source<'_> {
         // The indicator goes after the line numbers, in the text's columns
         // (window-copy.c:5476-5480).
         let text = m.text_columns(line_numbers);
+        // GRID_FLAG_NOPALETTE (window-copy.c:5434-5450): the line numbers
+        // and the position indicator; the text keeps the grid cells' flags,
+        // its styles included (window_copy_update_style copies colours and
+        // attributes only).
+        let cols = usize::from(screen.cols).max(1);
+        let mut no_palette = vec![false; screen.cells.len()];
+        for row in no_palette.chunks_mut(cols) {
+            let n = text.start.min(row.len());
+            row[..n].fill(true);
+        }
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
             let format = self.string(wtree, "copy-mode-position-format");
@@ -749,12 +856,15 @@ impl Source<'_> {
                             };
                         }
                         screen.cells[at] = cell;
+                        if let Some(m) = no_palette.get_mut(at) {
+                            *m = true;
+                        }
                     }
                 }
             }
         }
         m.mark_overflow(&mut screen, line_numbers, &paint);
-        screen
+        (screen, no_palette)
     }
 
     /// `window_pane_get_pane_lines`: a floating pane's own option, else the

@@ -2538,6 +2538,13 @@ impl PaneTerm {
         (self.scan.palette.fg, self.scan.palette.bg)
     }
 
+    /// The palette entries OSC 4 set (`palette->palette`): `None` until
+    /// the first is set, and after RIS or `OSC 104` with no argument.
+    #[must_use]
+    pub fn palette_entries(&self) -> Option<&[Option<palette::Rgb>; 256]> {
+        self.scan.palette.entries()
+    }
+
     /// A history row was read out of Ghostty (see [`history_reads`]).
     pub(crate) fn note_history_read(&self) {
         self.reads.set(self.reads.get().wrapping_add(1));

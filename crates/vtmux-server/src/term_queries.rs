@@ -74,6 +74,25 @@ impl Reported {
         theme == Some(Theme::Light)
     }
 
+    /// What a default colour dims from under a window style's `dim=`
+    /// (`tty_dim_default_colour`, tty.c:2618-2636): the OSC 10 and 11
+    /// replies, else white on black for a dark `c->theme` and black on
+    /// white for a light one, else the default (no dim).
+    #[must_use]
+    pub fn dim_defaults(&self) -> (vtmux_vt::Color, vtmux_vt::Color) {
+        use vtmux_vt::Color;
+        let by_theme = |dark: u8, light: u8| match self.theme {
+            Some(Theme::Dark) => Color::Palette(dark),
+            Some(Theme::Light) => Color::Palette(light),
+            None => Color::Default,
+        };
+        let rgb = |(r, g, b): Rgb| Color::Rgb(r, g, b);
+        (
+            self.fg.map_or_else(|| by_theme(7, 0), rgb),
+            self.bg.map_or_else(|| by_theme(0, 7), rgb),
+        )
+    }
+
     /// The colours the pane blend (D26) mixes from.
     #[must_use]
     pub fn blend_colours(&self) -> crate::render::blend::TermColours {

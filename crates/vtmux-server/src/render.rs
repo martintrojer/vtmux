@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 pub mod blend;
 pub mod compose;
 pub mod menu;
+pub mod palette;
 pub mod panes;
 pub mod popup;
 pub mod scene;

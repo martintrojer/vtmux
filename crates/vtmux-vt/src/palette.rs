@@ -152,6 +152,10 @@ impl Palette {
         }
     }
 
+    pub(crate) fn entries(&self) -> Option<&[Option<Rgb>; 256]> {
+        self.entries.as_deref()
+    }
+
     /// Take `state`, keeping the colour name check.
     pub(crate) fn restore(&mut self, state: &PaletteState) {
         self.entries = (!state.entries.is_empty()).then(|| {

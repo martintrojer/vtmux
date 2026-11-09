@@ -3639,6 +3639,10 @@ impl Server {
         };
         let theme = source.theme(caps);
         if let Some(c) = self.clients.get(&id) {
+            let (fg, bg) = c.reported.dim_defaults();
+            for dim in draw.panes.values_mut().filter_map(|d| d.dim.as_mut()) {
+                (dim.fg, dim.bg) = (fg, bg);
+            }
             source.blend(s, &mut draw, &c.reported.blend_colours(), caps, &theme);
         }
         if let Some(c) = cache {
@@ -3754,6 +3758,17 @@ impl Server {
             return;
         };
         let content = vtmux_vt::snapshot(&p.term);
+        let theme = source.theme(caps);
+        // pd->palette takes pane-colours from the global window options
+        // (popup.c:625-626). tmux reads them once, as the popup opens;
+        // vtmux at each draw, so a change shows in an open popup
+        // (compat/DIVERGENCES.md D-053).
+        let palette = crate::render::window::palette(
+            &self.model,
+            vtmux_core::options::TreeId::GlobalWindow,
+            &p.term,
+            &theme,
+        );
         let draw = crate::render::popup::PopupDraw {
             px: p.px,
             py: p.py,
@@ -3764,6 +3779,7 @@ impl Server {
             defaults: &defaults,
             title: &p.title,
             content: &content,
+            palette: palette.as_deref(),
             redrawn: p.redrawn,
         };
         // popup_draw_cb clears overlay_check while it draws (popup.c:229-231):
@@ -3776,7 +3792,7 @@ impl Server {
         if let Some(held) = held {
             crate::render::popup::keep(&draw, held, screen);
         } else {
-            crate::render::popup::draw(&draw, &source.theme(caps), clear, screen);
+            crate::render::popup::draw(&draw, &theme, clear, screen);
         }
         // server_client_reset_state: an open prompt keeps the cursor
         // (server-client.c:2220-2222); the popup's screen still gives the

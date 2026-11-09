@@ -16,6 +16,7 @@ use vtmux_core::styled;
 use vtmux_vt::{Cell, CellText, Color, Snapshot, Style, Underline};
 
 use super::blend::PaneBlend;
+use super::palette::{Dim, Palette};
 use super::scene::{Junction, Lines, Scene, SceneCell, glyph};
 
 /// A client's ten `theme*` colours (`c->theme_colours`,
@@ -160,6 +161,15 @@ pub struct PaneDraw {
     pub selected: Vec<bool>,
     /// Its scrollbar, when one is drawn.
     pub scrollbar: Option<BarDraw>,
+    /// Its palette (`wp->palette`, [`super::palette`]), `None` when no
+    /// entry is set or the pane shows clock mode, whose cells all have
+    /// `GRID_FLAG_NOPALETTE`.
+    pub palette: Option<Palette>,
+    /// Per content cell, row-major: `GRID_FLAG_NOPALETTE` (copy mode's
+    /// line numbers and position indicator). Empty when none is.
+    pub no_palette: Vec<bool>,
+    /// `dim=` of its window style (`style_ctx.dim`).
+    pub dim: Option<Dim>,
     /// D26: how its content cells are blended, if at all.
     pub blend: Option<PaneBlend>,
 }
@@ -403,6 +413,9 @@ struct PaneKey {
     status: Vec<styled::Cell>,
     selected: Vec<bool>,
     scrollbar: Option<BarDraw>,
+    palette: Option<Palette>,
+    no_palette: Vec<bool>,
+    dim: Option<Dim>,
     blend: Option<PaneBlend>,
 }
 
@@ -437,6 +450,9 @@ impl DrawKey {
                     status: p.status.clone(),
                     selected: p.selected.clone(),
                     scrollbar: p.scrollbar.clone(),
+                    palette: p.palette.clone(),
+                    no_palette: p.no_palette.clone(),
+                    dim: p.dim,
                     blend: p.blend,
                 })
                 .collect(),
@@ -577,21 +593,43 @@ fn compose_row(
                     _ => false,
                 };
             let cells = &mut line[usize::from(x)..usize::from(end)];
-            let keep = selected_span(d, scene, x, end, y);
-            let written = draw_pane_span(scene.get(x, y), d, theme, cells, wrapped, &keep);
-            // D26: the pane blend goes over the span as drawn (after the
-            // window style).
-            if let SceneCell::Pane { pane, .. } = scene.get(x, y)
-                && let Some(blend) = d.panes.get(pane).and_then(|p| p.blend.as_ref())
-            {
-                blend.apply(cells);
-            }
+            let written = draw_span(scene, d, theme, cells, (x, end, y), wrapped);
             ended_written = full && written;
             x = end;
         }
         put_isolates(scene, d, line, y, width);
     }
     ended_written
+}
+
+/// The span `x..end` of row `y` (`cells`) as [`draw_pane_span`] draws it,
+/// then for a pane's content the palette and dim (`tty_attributes`) and
+/// the pane blend (D26, after the window style). Returns whether it ended
+/// written.
+fn draw_span(
+    scene: &Scene,
+    d: &Draw,
+    theme: &Theme,
+    cells: &mut [Cell],
+    (x, end, y): (u16, u16, u16),
+    wrapped: bool,
+) -> bool {
+    let keep = selected_span(d, scene, x, end, y);
+    let pane = match scene.get(x, y) {
+        SceneCell::Pane { pane, .. } => d.panes.get(pane),
+        _ => None,
+    };
+    let mut marks = pane.map_or_else(Vec::new, |p| cell_mask(&p.no_palette, p, scene, x, end, y));
+    let written = draw_pane_span(scene.get(x, y), d, theme, cells, wrapped, &keep, &mut marks);
+    if let Some(p) = pane {
+        if p.palette.is_some() || p.dim.is_some() {
+            super::palette::apply(cells, p.palette.as_deref(), &marks, p.dim);
+        }
+        if let Some(blend) = p.blend.as_ref() {
+            blend.apply(cells);
+        }
+    }
+    written
 }
 
 /// `REDRAW_END_ISOLATE` and `REDRAW_START_ISOLATE` (screen-redraw.c:
@@ -651,7 +689,9 @@ fn put_isolates(scene: &Scene, d: &Draw, line: &mut [Cell], y: u16, width: u16) 
 /// which `tty_attributes` puts in for a default fg or bg. Which cells are
 /// empty is decided on the grid's own colours: a blank cell (no text)
 /// stands for tmux's cells past the line's end, empty whatever the
-/// defaults (tty-draw.c:243-246). Returns whether the span ended written.
+/// defaults (tty-draw.c:243-246). Cells marked in `no_palette`
+/// (`GRID_FLAG_NOPALETTE`) keep their own default colours
+/// (tty.c `tty_attributes`). Returns whether the span ended written.
 fn draw_pane_span(
     cell: &SceneCell,
     d: &Draw,
@@ -659,6 +699,7 @@ fn draw_pane_span(
     cells: &mut [Cell],
     wrapped: bool,
     keep: &[bool],
+    no_palette: &mut [bool],
 ) -> bool {
     let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
     let defaults = match cell {
@@ -675,9 +716,20 @@ fn draw_pane_span(
         Clear::FakeBce if defaults.is_some_and(|s| s.bg != Color::Default) => Clear::Spaces,
         c => c,
     };
-    let written = draw_line_keeping(cells, &bgs, Color::Default, clear, wrapped, keep);
+    let written = draw_line_keeping(
+        cells,
+        &bgs,
+        Color::Default,
+        clear,
+        wrapped,
+        keep,
+        no_palette,
+    );
     if let Some(defaults) = defaults {
-        for c in cells.iter_mut() {
+        for (i, c) in cells.iter_mut().enumerate() {
+            if no_palette.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             // Erased cells keep only their background.
             if c.style.fg == Color::Default && !c.text.is_empty() {
                 c.style.fg = defaults.fg;
@@ -705,27 +757,36 @@ fn pane_row(content: &Snapshot, px: u32, py: u32, n: usize) -> &[Cell] {
     content.cells.get(at..at + n).unwrap_or(&[])
 }
 
-/// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`];
-/// empty when none can be (the span's pane has no selection).
-fn selected_span(d: &Draw, scene: &Scene, x: u16, end: u16, y: u16) -> Vec<bool> {
-    let selecting = match scene.get(x, y) {
-        SceneCell::Pane { pane, .. } => d.panes.get(pane).is_some_and(|p| !p.selected.is_empty()),
-        _ => false,
-    };
-    if !selecting {
+/// `mask` (one of a [`PaneDraw`]'s per-content-cell masks) for the cells
+/// of the span `x..end` of row `y`, all in pane `p`; empty when `mask` is.
+fn cell_mask(mask: &[bool], p: &PaneDraw, scene: &Scene, x: u16, end: u16, y: u16) -> Vec<bool> {
+    if mask.is_empty() {
         return Vec::new();
     }
+    let cols = usize::from(p.content.cols);
     (x..end)
         .map(|x| match scene.get(x, y) {
-            SceneCell::Pane { pane, px, py } => d.panes.get(pane).is_some_and(|p| {
-                let cols = usize::from(p.content.cols);
+            SceneCell::Pane { px, py, .. } => {
                 let at =
                     usize::try_from(*py).unwrap_or(0) * cols + usize::try_from(*px).unwrap_or(0);
-                p.selected.get(at).copied().unwrap_or(false)
-            }),
+                mask.get(at).copied().unwrap_or(false)
+            }
             _ => false,
         })
         .collect()
+}
+
+/// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`];
+/// empty when none can be (the span's pane has no selection).
+fn selected_span(d: &Draw, scene: &Scene, x: u16, end: u16, y: u16) -> Vec<bool> {
+    match scene.get(x, y) {
+        SceneCell::Pane { pane, .. } => d
+            .panes
+            .get(pane)
+            .map(|p| cell_mask(&p.selected, p, scene, x, end, y))
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 /// What makes cells one `tty_draw_line` span: the same pane's content or
@@ -791,12 +852,15 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
     clear: Clear,
     wrapped: bool,
 ) -> bool {
-    draw_line_keeping(cells, bgs, default, clear, wrapped, &[])
+    draw_line_keeping(cells, bgs, default, clear, wrapped, &[], &mut [])
 }
 
 /// [`draw_line_by`] where the cells `keep` marks are never empty: a
 /// selected cell is always written (`tty_draw_line_get_empty`,
-/// tty-draw.c:105-106).
+/// tty-draw.c:105-106). An empty run is drawn with its last cell's
+/// attributes and flags (`tty_attributes(tty, &last, ...)`, tty-draw.c
+/// 303-307), so its cells take that cell's `flags` (one per cell, or
+/// none).
 fn draw_line_keeping<T: PartialEq + Clone>(
     cells: &mut [Cell],
     bgs: &[T],
@@ -804,6 +868,7 @@ fn draw_line_keeping<T: PartialEq + Clone>(
     clear: Clear,
     mut wrapped: bool,
     keep: &[bool],
+    flags: &mut [bool],
 ) -> bool {
     let empty = |cells: &[Cell], i: usize, last: &T| {
         !keep.get(i).copied().unwrap_or(false) && is_empty(&cells[i], &bgs[i], last)
@@ -859,6 +924,9 @@ fn draw_line_keeping<T: PartialEq + Clone>(
             }
         };
         cells[start..i].fill(cell);
+        if let Some(&f) = flags.get(i - 1) {
+            flags[start..i].fill(f);
+        }
     }
     written
 }
@@ -1088,6 +1156,9 @@ mod tests {
                                 status_ranges: Vec::new(),
                                 selected: Vec::new(),
                                 scrollbar: None,
+                                palette: None,
+                                no_palette: Vec::new(),
+                                dim: None,
                                 blend: None,
                             },
                         )

@@ -77,9 +77,13 @@ pub struct PopupDraw<'a> {
     pub lines: BoxLines,
     /// `popup-border-style` (and `-S`), colours only (`border_cell`).
     pub border: &'a CellStyle,
-    /// `popup-style` (and `-s`), colours only (`pd->defaults`): what the
-    /// content's default colours become.
+    /// `popup-style` (and `-s`), colours only (`pd->defaults`), where it
+    /// sets them, else the colours the popup's program set with OSC 10 and
+    /// 11 (popup.c:248-251): what the content's default colours become.
     pub defaults: &'a CellStyle,
+    /// The popup's palette (`pd->palette`), for its content only: the
+    /// border is drawn with `GRID_FLAG_NOPALETTE` (`screen_write_box`).
+    pub palette: Option<&'a [Option<Color>; 256]>,
     /// The title, already expanded at the command (`-T`).
     pub title: &'a str,
     pub content: &'a Snapshot,
@@ -111,6 +115,7 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
         if c.style.bg == Color::Default {
             c.style.bg = bg;
         }
+        super::palette::apply(std::slice::from_mut(&mut c), p.palette, &[], None);
         (c, raw)
     };
     let inner = |x: usize, y: usize| {
@@ -337,6 +342,7 @@ mod tests {
             defaults: &style,
             title: "T",
             content: &content,
+            palette: None,
             redrawn: false,
         };
         draw(&p, &Theme::default(), Clear::Bce, &mut screen);

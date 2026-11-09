@@ -1,0 +1,50 @@
+name = "window_style_dim"
+size = [40, 8]
+# dim=N in window-style and window-active-style (style.c style_parse):
+# every colour of the pane's cells moves N percent toward black as it is
+# drawn (tty.c tty_attributes, colour.c colour_dim), after the default
+# colours and the palette; the active pane takes window-active-style's dim,
+# the others window-style's. A default colour dims from the client
+# terminal's OSC 10 and 11 replies, else white on black for a dark theme
+# report and black on white for a light one, else not at all
+# (tty_dim_default_colour); 100 is black.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { attach = { session = "a" } },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033[31mR\\033[91mB\\033[38;5;100mI\\033[38;2;200;100;50mT\\033[44mK\\033[0mN\\033[7mV\\033[0m\\033[1;31mb\\033[0m'; tmux wait-for -S p0; exec cat"] },
+  { wait_for = "p0" },
+  { run = ["setw", "-g", "window-style", "dim=50"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["setw", "-g", "window-style", "dim=100%,bg=red"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["setw", "-g", "window-style", "dim=30,fg=colour100"] },
+  { run = ["setw", "-g", "window-active-style", "dim=10"] },
+  { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-p", "-t", "%0", "pane-colours[9]", "blue"] },
+  { run = ["set", "-p", "-t", "%0", "pane-colours[4]", "#ff00ff"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b[?997;2n" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b[?997;1n" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b]10;rgb:ffff/ffff/ffff\u001b\\\u001b]11;rgb:2020/2020/2020\u001b\\" },
+  { settle = { react = true } },
+  { run = ["setw", "-g", "window-style", "dim=50"] },
+  { run = ["setw", "-g", "window-active-style", "dim=20"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["selectp", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

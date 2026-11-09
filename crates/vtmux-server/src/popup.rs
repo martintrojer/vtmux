@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use mio::Token;
+use vtmux_core::colour::Colour;
 use vtmux_core::ids::SessionId;
 use vtmux_core::keys::Key;
 use vtmux_core::options::TreeId;
@@ -797,10 +798,17 @@ impl Server {
         colours_over(&mut defaults, p.style.as_deref());
         let mut border = source.style(tree, "popup-border-style", &ctx);
         colours_over(&mut border, p.border_style.as_deref());
+        // popup.c:248-251: a default colour is the one the program set
+        // with OSC 10 or 11.
+        let (fg, bg) = p.term.default_colours();
+        let osc = |colour: Colour, set: Option<vtmux_vt::Rgb>| match set {
+            Some(rgb) if colour == Colour::Default => Colour::Rgb(rgb.0, rgb.1, rgb.2),
+            _ => colour,
+        };
         Some((
             CellStyle {
-                fg: defaults.fg,
-                bg: defaults.bg,
+                fg: osc(defaults.fg, fg),
+                bg: osc(defaults.bg, bg),
                 ..CellStyle::default()
             },
             CellStyle {

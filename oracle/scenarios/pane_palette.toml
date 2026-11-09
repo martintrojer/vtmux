@@ -1,0 +1,69 @@
+name = "pane_palette"
+size = [40, 10]
+# A pane's palette recolours its cells as they are drawn (tty.c
+# tty_attributes, tty_check_fg, tty_check_bg): the entries its program set
+# with OSC 4 over the pane's pane-colours (colour.c colour_palette_get), for
+# every form of a palette colour (30-37, 90-97, 38;5;N), the default colours
+# window-style gives included. An entry that is itself a palette colour is
+# looked up again, bold 0-7 takes the bright entry when the plain one is not
+# set. OSC 104 unsets entries; the palette outlives a respawn (spawn.c keeps
+# wp->palette). Copy mode's line numbers and position indicator, and the
+# clock's digits, are drawn with GRID_FLAG_NOPALETTE: neither the palette nor
+# window-style's colours (an empty run takes its last cell's, tty-draw.c).
+# A popup's palette takes the global pane-colours (popup.c:625-626) and its
+# program's OSC 4, its default colours its program's OSC 10 and 11 where
+# popup-style sets none (popup.c:248-251); its border is not recoloured.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "status-left", "s"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { attach = { session = "a" } },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033[31mR\\033[1;32mG\\033[0;91mB\\033[38;5;100mI\\033[41mK\\033[0mN\\033[1;33mY\\033[0m\\r\\nline2\\r\\n'; tmux wait-for -S p0; exec cat"] },
+  { wait_for = "p0" },
+  { run = ["set", "-p", "-t", "%0", "pane-colours", "colour196,#00ff00,blue,green,red"] },
+  { run = ["set", "-p", "-t", "%0", "pane-colours[9]", "magenta"] },
+  { run = ["set", "-p", "-t", "%0", "pane-colours[11]", "#ffff00"] },
+  { run = ["set", "-p", "-t", "%0", "pane-colours[100]", "colour33"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["setw", "-t", "a", "window-style", "fg=red,bg=colour1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["setw", "-g", "mode-style", "fg=black,bg=yellow"] },
+  { run = ["setw", "-g", "copy-mode-position-style", "fg=red,bg=green"] },
+  { run = ["setw", "-g", "copy-mode-line-numbers", "relative"] },
+  { run = ["setw", "-g", "copy-mode-line-number-style", "fg=blue"] },
+  { run = ["copy-mode", "-t", "%0"] },
+  { run = ["send", "-t", "%0", "-X", "begin-selection"] },
+  { run = ["send", "-t", "%0", "-X", "cursor-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send", "-t", "%0", "-X", "cancel"] },
+  { run = ["clock-mode", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { settle = {} },
+  { run = ["setw", "-t", "a", "-u", "window-style"] },
+  { run = ["set", "-p", "-t", "%0", "-u", "pane-colours"] },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033]4;1;#00ff00\\007\\033]4;9;rgb:00/00/ff\\033\\\\\\033]4;100;red\\007\\033[31mR\\033[91mB\\033[38;5;100mI\\033[38;5;1mJ\\033[0mN\\r\\n'; tmux wait-for -S p1; exec cat"] },
+  { wait_for = "p1" },
+  { screen = {} },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033]104;1\\007\\033[31mR\\033[91mB\\033[0m\\r\\n'; tmux wait-for -S p2; exec cat"] },
+  { wait_for = "p2" },
+  { screen = {} },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "printf '\\033]104\\007\\033[31mR\\033[91mB\\033[38;5;100mI\\033[0m\\r\\n'; tmux wait-for -S p3; exec cat"] },
+  { wait_for = "p3" },
+  { screen = {} },
+  { run = ["setw", "-g", "pane-colours[1]", "#00ff00"] },
+  { run = ["setw", "-g", "pane-colours[3]", "blue"] },
+  { run = ["bind", "a", "display-popup", "-w", "20", "-h", "5", "-x", "1", "-y", "5", "-s", "fg=yellow", "printf 'P\\033[31mR\\033]4;2;#ff00ff\\007\\033[32mG\\033[0m\\033]11;#0000ff\\007X'; tmux wait-for -S up; exec cat"] },
+  { keys = "\u0002a" },
+  { wait_for = "up" },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

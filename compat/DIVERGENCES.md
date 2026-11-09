@@ -476,3 +476,11 @@ product reasons" category.
 - vtmux behaviour: the popup's terminal cannot tell which spaces tmux would have skipped, so every space the job wrote is drawn as written, in `popup-style`'s colours. Only blank cells differ, and only in their foreground colour, so nothing visible changes; the next full draw (`refresh-client`, a resize) matches tmux.
 - Evidence: reference tmux 3.8 and vtmux on the scenario above: row 1 (28 spaces with DECAWM reset) is ` \e[39m` + 27 blanks in tmux, 28 blanks in `\e[37m` in vtmux; the same spaces with autowrap on (row 3) match. Found by audit_plugins (fzf `--height` in a `display-popup`).
 - Category: Deferred
+
+### D-059: two corners of a pane's palette
+
+- Test / assertion: none fails; oracle `pane_palette` covers the palette (`pane-colours`, OSC 4 and 104, copy mode, clock mode, a popup) without these two cases. Found with a probe scenario: `pane-colours` `colour196,#00ff00,blue,green,red` on a pane in copy mode with the default `mode-style` (`bg=themeyellow`), the selection's background drew green in tmux, blue in vtmux.
+- tmux behaviour: `tty_attributes` (tty.c:2652-2668) looks a cell's colours up in the pane's palette, then maps theme colours (`tty_map_theme_colour`), then `tty_check_fg`/`_bg` look them up again. A theme colour is not a palette colour at the first lookup (`colour_palette_get` returns -1 for it), so a style's theme colour is looked up once, after it became a palette colour; a palette colour is looked up twice. A popup takes `pane-colours` from the global window options once, when it opens (`popup_display`, popup.c:625-626).
+- vtmux behaviour: theme colours are resolved when a style is parsed into cells, so a theme colour in a mode's style (copy-mode selection, marks, current line) is looked up twice like any palette colour: it differs only when the entry it maps to is a palette colour with an entry of its own (`yellow` to `green`, `green` to `blue` above). A popup reads the global `pane-colours` at every draw, so a change shows in a popup that is already open.
+- Evidence: the probe above against reference tmux 3.8 (selection row `\e[38;5;196m\e[42m` in tmux, `\e[38;5;196m\e[44m` in vtmux); popup.c:625-626.
+- Category: Deferred.
