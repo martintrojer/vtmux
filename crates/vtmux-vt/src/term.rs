@@ -716,6 +716,11 @@ impl PaneTerm {
                     self.sync.hold = None;
                 }
                 let alternate = self.alternate_on();
+                // `?1049l` gives the pen the copy `screen_alternate_on` took,
+                // if the alternate screen ever saved the cursor.
+                let restores_pen = e == ScanEvent::AltMode(b'l')
+                    && self.scan.alt_cursor
+                    && self.alternate_saved().is_some();
                 // The size an ending alternate screen leaves the pane at.
                 let size = (alternate && e == ScanEvent::AltMode(b'l'))
                     .then(|| (self.cols(), self.rows()));
@@ -810,8 +815,11 @@ impl PaneTerm {
                 {
                     self.redraw = true;
                 }
+                if let ScanEvent::AltMode(set) = e {
+                    self.alternate_links(set, alternate, restores_pen);
+                }
                 if self.scan.take_resync() {
-                    self.sync_charset();
+                    self.sync_pen();
                 }
                 if e == ScanEvent::Reset {
                     keep_clustering(&mut self.term);
@@ -829,6 +837,23 @@ impl PaneTerm {
         self.term.vt_write(b"\x18");
         if end != 0x07 {
             self.feed_piece(&[end]);
+        }
+    }
+
+    /// The pen's link over a screen switch sequence ([`PenLinks`]): entering
+    /// the alternate screen copies it, `?1049l` may restore the copy, and a
+    /// switch ends Ghostty's link.
+    fn alternate_links(&mut self, set: u8, was_alternate: bool, restores_pen: bool) {
+        let switched = self.alternate_on() != was_alternate;
+        let links = &mut self.scan.links;
+        if set == b'h' && !was_alternate {
+            links.alternate.clone_from(&links.pen);
+        }
+        if restores_pen {
+            links.pen.clone_from(&links.alternate);
+        }
+        if switched {
+            links.ghostty = None;
         }
     }
 
@@ -1089,7 +1114,7 @@ impl PaneTerm {
         self.feed_piece(b"\x1b[H");
         keep_clustering(&mut self.term);
         if self.scan.take_resync() {
-            self.sync_charset();
+            self.sync_pen();
         }
         self.redraw = true;
     }
@@ -1205,6 +1230,15 @@ impl PaneTerm {
     /// print. `CSI 1 " q` first so the most recent protection mode is DEC
     /// and ED/EL/ECH ignore the bit (Ghostty `setProtectedMode`); only
     /// DECSED/DECSEL read it, and tmux implements neither.
+    /// Give Ghostty's cursor tmux's charset mark and link after a sequence
+    /// that may have parted them.
+    fn sync_pen(&mut self) {
+        self.sync_charset();
+        if let Some(osc) = self.scan.links.resync() {
+            self.term.vt_write(&osc);
+        }
+    }
+
     fn sync_charset(&mut self) {
         self.term.vt_write(b"\x1b[1\"q");
         if !self.scan.charset.acs() {
@@ -2769,6 +2803,66 @@ struct AltModeScanner {
     line_marks: bool,
     /// The count of the ECH ([`ScanEvent::EraseChars`]) that just ended.
     ech: u64,
+    /// tmux's pen link and its copies ([`PenLinks`]).
+    links: PenLinks,
+    /// The OSC 8 being collected passed the input buffer's size: tmux
+    /// discards it (`INPUT_DISCARD`, `input_exit_osc`).
+    osc8_discard: bool,
+}
+
+/// The hyperlink in tmux's pen (`ictx->cell.cell.link`) and the copies tmux
+/// keeps of the pen, each as the OSC 8 payload (`params;uri`) that set it;
+/// `None` is no link. DECRC and RCP restore DECSC's copy
+/// (`input_restore_state`), `?1049l` the copy the last alternate screen
+/// entry took (`screen_alternate_on`, `screen_alternate_off`), RIS clears
+/// both (`input_reset_cell`); a screen switch keeps the pen. Ghostty's link
+/// is in its cursor: DECSC does not save it and a screen switch ends it, so
+/// where the two part, vtmux gives Ghostty tmux's link again
+/// ([`PaneTerm::feed`]).
+#[derive(Debug, Default)]
+struct PenLinks {
+    pen: Option<Rc<[u8]>>,
+    /// `ictx->old_cell`.
+    saved: Option<Rc<[u8]>>,
+    /// `s->saved_cell`.
+    alternate: Option<Rc<[u8]>>,
+    /// The link Ghostty's cursor has.
+    ghostty: Option<Rc<[u8]>>,
+}
+
+impl PenLinks {
+    fn state(&self) -> PenLinkState {
+        let out = |l: &Option<Rc<[u8]>>| l.as_deref().map(<[u8]>::to_vec);
+        PenLinkState {
+            pen: out(&self.pen),
+            saved: out(&self.saved),
+            alternate: out(&self.alternate),
+            emulator: out(&self.ghostty),
+        }
+    }
+
+    fn from_state(s: &PenLinkState) -> Self {
+        let link = |l: &Option<Vec<u8>>| l.as_deref().map(Rc::from);
+        Self {
+            pen: link(&s.pen),
+            saved: link(&s.saved),
+            alternate: link(&s.alternate),
+            ghostty: link(&s.emulator),
+        }
+    }
+
+    /// The OSC 8 that gives Ghostty tmux's link, if Ghostty's differs; it
+    /// then has it.
+    fn resync(&mut self) -> Option<Vec<u8>> {
+        if self.ghostty == self.pen {
+            return None;
+        }
+        self.ghostty.clone_from(&self.pen);
+        let mut osc = b"\x1b]8;".to_vec();
+        osc.extend_from_slice(self.pen.as_deref().unwrap_or(b";"));
+        osc.extend_from_slice(b"\x1b\\");
+        Some(osc)
+    }
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -3518,24 +3612,40 @@ impl AltModeScanner {
                     ScanState::Ground
                 };
                 let osc = self.osc.take().unwrap_or_default();
+                let discard = std::mem::take(&mut self.osc8_discard);
                 let event = if let Some(payload) = osc.strip_prefix(b"133;") {
                     self.osc133 = Some(payload.to_vec());
                     Some(ScanEvent::Osc133)
-                } else if osc.strip_prefix(b"8;").is_some_and(|p| !hyperlink_ok(p)) {
-                    Some(ScanEvent::Drop)
+                } else if let Some(p) = osc.strip_prefix(b"8;") {
+                    if discard || !hyperlink_ok(p) {
+                        Some(ScanEvent::Drop)
+                    } else {
+                        // input_osc_8: an empty URI ends the link.
+                        let uri = p
+                            .iter()
+                            .position(|&c| c == b';')
+                            .map_or(&[][..], |n| &p[n + 1..]);
+                        let link = (!uri.is_empty()).then(|| Rc::from(p));
+                        self.links.pen.clone_from(&link);
+                        self.links.ghostty = link;
+                        None
+                    }
                 } else {
                     None
                 };
                 ControlFlow::Break(event)
             }
-            // `input_input` collects 0x20-0xff. An OSC 8 is kept through
-            // its parameters, to the `;` before the URI.
-            0x20..
-                if osc.len() < 32
-                    || (osc.starts_with(b"8;")
-                        && !(osc.len() > 2 && osc.ends_with(b";"))
-                        && osc.len() < self.osc_cap) =>
-            {
+            // `input_input` collects 0x20-0xff; an OSC 8 whole, to the
+            // input buffer's size.
+            0x20.. if osc.starts_with(b"8;") => {
+                if osc.len() >= self.osc_cap {
+                    self.osc8_discard = true;
+                } else {
+                    osc.push(b);
+                }
+                ControlFlow::Continue(())
+            }
+            0x20.. if osc.len() < 32 => {
                 osc.push(b);
                 ControlFlow::Continue(())
             }
@@ -3813,6 +3923,16 @@ impl AltModeScanner {
 
     fn charset_op(&mut self, op: CharsetOp) {
         self.charset.apply(op);
+        let links = &mut self.links;
+        match op {
+            CharsetOp::Save => links.saved.clone_from(&links.pen),
+            CharsetOp::Restore => links.pen.clone_from(&links.saved),
+            CharsetOp::Reset => {
+                links.pen = None;
+                links.saved = None;
+            }
+            CharsetOp::G0(_) | CharsetOp::G1(_) | CharsetOp::Shift(_) => {}
+        }
         self.resync = true;
     }
 
@@ -6542,6 +6662,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The pen's link goes with tmux's saved cell: DECRC and RCP restore
+    /// DECSC's, `?1049l` the alternate screen's, RIS clears both, and a
+    /// screen switch keeps it ([`PenLinks`]). Expected: tmux 3.8's
+    /// capture-pane -e (oracle `decrc_restores_link`).
+    #[test]
+    fn decrc_restores_the_link() {
+        let capture = |t: &PaneTerm| {
+            let opts = crate::capture::CaptureOpts {
+                escapes: true,
+                ..Default::default()
+            };
+            String::from_utf8_lossy(&crate::capture::capture(t, opts)).into_owned()
+        };
+        let mut t = PaneTerm::new(20, 4, 0);
+        t.feed(b"\x1b]8;id=x;http://a/\x1b\\A\x1b7\x1b]8;;\x1b\\B\x1b8C\x1b]8;;\x1b\\\r\n");
+        t.feed(b"\x1b[s\x1b]8;;http://c/\x07P\x1b[u\x1b[CQ\r\n");
+        t.feed(b"\x1b]8;id=y;http://d/\x1b\\R\x1b[?1049hS");
+        assert_eq!(
+            capture(&t),
+            "\n\n \x1b]8;id=y;http://d/\x1b\\S\x1b]8;;\x1b\\\n\n"
+        );
+        t.feed(b"\x1b]8;;\x1b\\T\x1b[?1049lU\x1b]8;;\x1b\\");
+        assert_eq!(
+            capture(&t),
+            "\x1b]8;id=x;http://a/\x1b\\AC\x1b]8;;\x1b\\\n\x1b]8;;http://c/\x1b\\P\x1b]8;;\x1b\\Q\n\x1b]8;id=y;http://d/\x1b\\RU\x1b]8;;\x1b\\\n\n"
+        );
+        let mut t = PaneTerm::new(20, 4, 0);
+        t.feed(b"\x1b]8;;http://a/\x1b\\A\x1bcB");
+        assert_eq!(capture(&t), "B\n\n\n\n");
     }
 
     /// DECSC's slot is tmux's input context's (input.c `input_save_state`):

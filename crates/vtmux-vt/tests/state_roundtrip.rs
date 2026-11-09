@@ -150,6 +150,22 @@ fn pending_wrap_and_saved_cursor() {
     round_trip(&mut a, CompressedPages::Rows, b"!\x1b8!", "pending wrap");
 }
 
+/// tmux's pen link and its saved copies (DECSC's, the alternate screen's)
+/// come across, so DECRC and `?1049l` restore them after an import as
+/// without it.
+#[test]
+fn pen_links_and_their_saved_copies() {
+    let bytes =
+        b"\x1b]8;id=a;http://x/\x1b\\A\x1b7\x1b]8;;\x1b\\B\x1b[?1049h\x1b]8;;http://y/\x07C";
+    let mut a = pane(20, 4, 10, bytes);
+    round_trip(
+        &mut a,
+        CompressedPages::Rows,
+        b"D\x1b8E\x1b[?1049lF\x1b8G",
+        "links",
+    );
+}
+
 #[test]
 fn alternate_screen_keeps_primary_history() {
     let mut bytes = Vec::new();

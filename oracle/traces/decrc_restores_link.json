@@ -1,0 +1,137 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "decrc_restores_link",
+  "inputs": {
+    "name": "decrc_restores_link",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033]8;id=x;http://a/\\033\\\\A\\0337\\033]8;;\\033\\\\B\\0338C\\033]8;;\\033\\\\\\015\\012\\0337\\033]8;;http://b/\\033\\\\X\\0338\\033[2CY\\015\\012\\033[s\\033]8;;http://c/\\033\\\\P\\033[u\\033[CQ\\015\\012\\033]8;id=y;http://d/\\033\\\\R\\033[?1049hS'; tmux wait-for -S p1; tmux wait-for go; printf '\\033]8;;\\033\\\\T\\033[?1049lU\\033]8;;\\033\\\\'; tmux wait-for -S p2; exec cat"
+        ]
+      },
+      {
+        "wait_for": "p1"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-a",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "p2"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n\n\n \u001b]8;id=y;http://d/\u001b\\S\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;id=x;http://a/\u001b\\AC\u001b]8;;\u001b\\\n\u001b]8;;http://b/\u001b\\X\u001b]8;;\u001b\\ Y\n\u001b]8;;http://c/\u001b\\P\u001b]8;;\u001b\\Q\n\u001b]8;id=y;http://d/\u001b\\R\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;id=x;http://a/\u001b\\AC\u001b]8;;\u001b\\\n\u001b]8;;http://b/\u001b\\X\u001b]8;;\u001b\\ Y\n\u001b]8;;http://c/\u001b\\P\u001b]8;;\u001b\\Q\n\u001b]8;id=y;http://d/\u001b\\RU\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

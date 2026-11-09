@@ -45,7 +45,7 @@ use libghostty_vt::vtmux as gv;
 
 use super::{
     Charset, CursorState, ExtendedKeys, HeldScreen, KeyMode, MouseModes, Osc133, PaneTerm,
-    ScanState,
+    PenLinks, ScanState,
 };
 use crate::capture::FrozenRow;
 use crate::palette::PaletteState;
@@ -379,6 +379,19 @@ pub struct PaneState {
     pub scroll_on_clear: bool,
     /// Synchronized output held: the screen held and the time left.
     pub sync: Option<(Snapshot, std::time::Duration)>,
+    /// tmux's pen link and its copies.
+    pub links: PenLinkState,
+}
+
+/// tmux's pen hyperlink, DECSC's and the alternate screen's copies of it,
+/// and the link Ghostty's cursor has, each as the OSC 8 payload
+/// (`params;uri`) that set it (`PenLinks`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PenLinkState {
+    pub pen: Option<Vec<u8>>,
+    pub saved: Option<Vec<u8>>,
+    pub alternate: Option<Vec<u8>>,
+    pub emulator: Option<Vec<u8>>,
 }
 
 /// A row of history copied out of Ghostty (`FrozenRow`).
@@ -1258,6 +1271,7 @@ impl PaneTerm {
                     .saturating_duration_since(std::time::Instant::now());
                 ((*held.screen).clone(), left)
             }),
+            links: self.scan.links.state(),
         }
     }
 
@@ -1337,6 +1351,7 @@ impl PaneTerm {
         // Before the continuation is fed: its bytes clear it again as they
         // did, and set it never (it holds no printed character).
         self.scan.last_print = p.last_print;
+        self.scan.links = PenLinks::from_state(&p.links);
         self.scan.palette.restore(&p.palette);
         self.scan.progress = p.progress_bar;
         {

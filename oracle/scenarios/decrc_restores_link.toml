@@ -1,0 +1,16 @@
+name = "decrc_restores_link"
+# The hyperlink is part of the cell tmux's DECSC and SCP save and DECRC and
+# RCP restore (input.c input_save_state, input_restore_state: the whole
+# ictx->cell), and of the cell the alternate screen keeps and ?1049l
+# restores (screen.c screen_alternate_on, screen_alternate_off); a screen
+# switch keeps the pen's link. Ghostty saves no link with the cursor and
+# ends it on a screen switch. Found by scripts/emu_fuzz.py (decsc).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '\\033]8;id=x;http://a/\\033\\\\A\\0337\\033]8;;\\033\\\\B\\0338C\\033]8;;\\033\\\\\\015\\012\\0337\\033]8;;http://b/\\033\\\\X\\0338\\033[2CY\\015\\012\\033[s\\033]8;;http://c/\\033\\\\P\\033[u\\033[CQ\\015\\012\\033]8;id=y;http://d/\\033\\\\R\\033[?1049hS'; tmux wait-for -S p1; tmux wait-for go; printf '\\033]8;;\\033\\\\T\\033[?1049lU\\033]8;;\\033\\\\'; tmux wait-for -S p2; exec cat"] },
+  { wait_for = "p1" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-a", "-t", "a:"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "p2" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]

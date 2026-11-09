@@ -305,6 +305,23 @@ fn rep_and_a_narrowed_alternate_screen() {
     }
 }
 
+/// tmux's pen link and its copies (`pen_links`) cross a snapshot, so
+/// DECRC and `?1049l` restore them after a restore as without it.
+#[test]
+fn pen_links_cross_a_snapshot() {
+    let bytes =
+        b"\x1b]8;id=a;http://x/\x1b\\A\x1b7\x1b]8;;\x1b\\B\x1b[?1049h\x1b]8;;http://y/\x07C";
+    for form in [Form::Rows, Form::SamePin] {
+        let mut a = pane(20, 4, 10, bytes);
+        round_trip(
+            &mut a,
+            form,
+            b"D\x1b8E\x1b[?1049lF\x1b8G",
+            &format!("{form:?} links"),
+        );
+    }
+}
+
 #[test]
 fn alternate_screen_sync_hold_and_raw_links() {
     let mut bytes = Vec::new();

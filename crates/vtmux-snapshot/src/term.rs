@@ -93,6 +93,23 @@ record! {
 }
 
 record! {
+    /// tmux's pen hyperlink and the copies of the pen it keeps, each as the
+    /// OSC 8 payload (`params;uri`) that set it, and the link the
+    /// emulator's cursor has ([`TermState::pen_links`]). A reader without
+    /// it keeps the emulator's link from [`Cursor`] and restores no link on
+    /// DECRC or `?1049l`, as builds before it did.
+    pub struct PenLinks {
+        /// `ictx->cell.cell.link`.
+        1 => opt pen: Option<Vec<u8>>,
+        /// DECSC's copy (`ictx->old_cell`).
+        2 => opt saved: Option<Vec<u8>>,
+        /// The last alternate screen entry's copy (`s->saved_cell`).
+        3 => opt alternate: Option<Vec<u8>>,
+        4 => opt emulator: Option<Vec<u8>>,
+    }
+}
+
+record! {
     /// The primary screen while the alternate screen leaves it at the size
     /// it had (tmux resizes it when it comes back), when that is not the
     /// terminal's ([`TermState::sized_primary`]).
@@ -495,6 +512,8 @@ record! {
         /// ordinary session, and a reader that skips it shows it hidden at
         /// 0 until the program sets it again.
         40 => one progress_bar: ProgressBar,
+        /// Written when any of them has a link.
+        41 => opt pen_links: Option<PenLinks>,
     }
 }
 
@@ -721,6 +740,21 @@ pub(crate) mod tests {
         // A writer always lists the layout, even with nothing moved.
         t.alternate_saved_layout = Some(AltSaveLayout::default());
         round_trip(&t);
+    }
+
+    /// tmux's pen link and its copies, added after the golden file was
+    /// written.
+    #[test]
+    fn pen_links_field() {
+        let mut t = sample_term();
+        t.pen_links = Some(PenLinks {
+            pen: Some(b"id=a;http://x/".to_vec()),
+            saved: None,
+            alternate: Some(b";http://y/".to_vec()),
+            emulator: Some(b"id=a;http://x/".to_vec()),
+        });
+        round_trip(&t);
+        round_trip(t.pen_links.as_ref().unwrap());
     }
 
     /// Every field added after the golden file was written, set.

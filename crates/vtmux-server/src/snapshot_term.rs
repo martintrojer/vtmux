@@ -1535,6 +1535,12 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             state: p.progress_bar.state.number().into(),
             progress: p.progress_bar.progress.into(),
         },
+        pen_links: (p.links != vt::PenLinkState::default()).then(|| snap::term::PenLinks {
+            pen: p.links.pen.clone(),
+            saved: p.links.saved.clone(),
+            alternate: p.links.alternate.clone(),
+            emulator: p.links.emulator.clone(),
+        }),
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1829,6 +1835,16 @@ pub fn term_from_snapshot_with(
         input_buffer_size: usize_of(t.input_buffer_size, "input-buffer-size")?,
         scroll_on_clear: t.scroll_on_clear,
         sync: t.sync.as_ref().map(sync_in).transpose()?,
+        links: t
+            .pen_links
+            .as_ref()
+            .map(|l| vt::PenLinkState {
+                pen: l.pen.clone(),
+                saved: l.saved.clone(),
+                alternate: l.alternate.clone(),
+                emulator: l.emulator.clone(),
+            })
+            .unwrap_or_default(),
     };
     let mut primary = screen_in(primary_screen)?;
     if let Some(layout) = &t.alternate_saved_layout
