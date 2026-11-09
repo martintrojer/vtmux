@@ -2,19 +2,11 @@
 
 vtmux's version is the tmux release it is tested against ([D25](docs/specs/2026-10-29-vtmux.md)): `3.8-beta1` is the first beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints `vtmux 3.8-beta1`.
 
-## Unreleased
-
-**Kitty keyboard protocol (opt-in).** `set -s vtmux-kitty-keys on` and programs that ask for it (neovim, helix, agent TUIs) get kitty-encoded keys: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Key tables and the prefix work as before; programs that don't ask see tmux. Off by default: byte for byte tmux 3.8. A granted program that is killed no longer leaves the shell sending `CSI 99;5u` for C-c: the grant ends with the program (also across a live upgrade). A program that is the pane's own process (how mu launches agents) keeps its grant across an upgrade from any build; one killed while sharing a surviving shell's process group (`prog; exec bash`) keeps it until `reset`.
-
-**Smaller and faster build.** The release binary is built with whole-program LTO: 9.8 MB stripped (was 10.7), 7-18% less server CPU for agent panes, many clients and key echo. ([numbers](docs/PERFORMANCE.md#binary-size-and-build-profile))
-
-**Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients, from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself. Off, tmux 3.8's behaviour (dropped). ([D30](docs/specs/2026-10-29-vtmux.md))
-
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
-**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 290 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 167 of tmux's own 174 regress tests (4 expected failures, each recorded, 1 skipped).
+**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 415 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
 
 **Ghostty's emulator.** Each pane is a [libghostty-vt](https://github.com/ghostty-org/ghostty) terminal, with tmux's quirks kept where scripts can see them.
 
@@ -26,6 +18,12 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 **Pane blend.** `vtmux-pane-inactive-blend` dims inactive panes like Ghostty's unfocused splits.
 
+**Kitty keyboard protocol (opt-in).** `set -s vtmux-kitty-keys on` and programs that ask for it (neovim, helix, agent TUIs) get kitty-encoded keys: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Key tables and the prefix work as before; programs that don't ask see tmux. Off by default: byte for byte tmux 3.8. A granted program that is killed no longer leaves the shell sending `CSI 99;5u` for C-c: the grant ends with the program (also across a live upgrade). A program that is the pane's own process (how mu launches agents) keeps its grant across an upgrade from any build; one killed while sharing a surviving shell's process group (`prog; exec bash`) keeps it until `reset`.
+
+**Built for speed.** Whole-program LTO: 7-18% less server CPU for agent panes, many clients and key echo. ([numbers](docs/PERFORMANCE.md#binary-size-and-build-profile))
+
+**Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients, from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself. Off, tmux 3.8's behaviour (dropped). ([D30](docs/specs/2026-10-29-vtmux.md))
+
 **In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Live upgrades keep the grant, and a downgrade that would drop it is refused. Off, vtmux is tmux byte for byte ([D31](docs/specs/2026-10-29-vtmux.md)).
 
 **Lean where it counts** ([numbers and method](docs/PERFORMANCE.md)):
@@ -33,6 +31,6 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 - 1M lines of scrollback settle at 103 MB vs tmux's 622 MB; 20 panes streaming at a 100k limit at 217 MB vs 1.25 GB.
 - Pane output at 0.37-0.62x tmux's server CPU; 8 attached clients at 0.06-0.19x; an idle server with a real config at 0.28x.
 
-**What it costs:** an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.33 ms vs 0.21 ms; searching all of a 1M-line history is 3-5x slower; busy agent TUIs cost 0.85-1.3x tmux's CPU.
+**What it costs:** an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.33 ms vs 0.21 ms; busy agent TUIs cost 0.85-1.3x tmux's CPU.
 
 Real tmux bugs fixed by default are in [compat/DIVERGENCES.md](compat/DIVERGENCES.md); opt-in paper-cut fixes in [docs/PAPERCUTS.md](docs/PAPERCUTS.md).
