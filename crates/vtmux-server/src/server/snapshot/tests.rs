@@ -1321,6 +1321,9 @@ fn an_ordinary_attached_client_requires_no_feature() {
     a.render_clients();
     let drawn = a.to_snapshot(snap::Meta::default());
     assert_eq!(drawn.panes[0].term.as_ref().unwrap().drawn_links.len(), 1);
+    // And the counter that numbers them (`Server::link_number`).
+    let kept = drawn.panes[0].term.as_ref().unwrap().drawn_links[0].number;
+    assert!(drawn.server.link_number > kept);
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
@@ -1368,6 +1371,28 @@ fn the_reattach_wait_counts_from_the_rebuild() {
         "{:?} left",
         deadline.saturating_duration_since(Instant::now())
     );
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The OSC 8 id counter goes through a snapshot (tmux's one
+/// `hyperlinks_next_external_id`): the snapshot holds a number past every
+/// link made so far, status line and popup links included (a pane's own
+/// are also kept with its terminal), and the server rebuilt from one
+/// numbers on from it, so a link drawn after a live upgrade never takes a
+/// number still on screen.
+#[test]
+fn the_link_counter_crosses_a_snapshot() {
+    let dir = temp_dir("linkno");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let made = vtmux_vt::Link::fresh("http://made-before").number();
+    let mut s = a.to_snapshot(snap::Meta::default());
+    assert!(s.server.link_number > made, "{}", s.server.link_number);
+    let far = s.server.link_number + 10_000;
+    s.server.link_number = far;
+    let b = from_snapshot(&dir, &s).unwrap();
+    assert!(vtmux_vt::Link::fresh("http://after").number() >= far);
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }

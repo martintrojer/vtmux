@@ -839,6 +839,17 @@ fn the_persist_hold_round_trips_and_defaults_to_free() {
     assert_eq!(golden.server.persist_hold, 0);
 }
 
+/// `Server::link_number` came within v1: it round trips, and a stream
+/// without it (the golden file's) has none.
+#[test]
+fn the_link_number_round_trips_and_defaults_to_none() {
+    let mut s = sample();
+    s.server.link_number = 77;
+    assert_eq!(decode(&encode(&s)).unwrap().server.link_number, 77);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert_eq!(golden.server.link_number, 0);
+}
+
 /// A selection's `clipx` (the line numbers' gutter) came within v1: it
 /// round trips, and a stream without it decodes with no gutter.
 #[test]

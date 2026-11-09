@@ -960,6 +960,7 @@ impl Server {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             persist_hold: self.persist.kept.hold(),
+            link_number: vtmux_vt::link::next_link_number(),
             server_options: tree((0, 0)),
             session_options: tree((1, 0)),
             window_options: tree((2, 0)),
@@ -1508,6 +1509,7 @@ impl Server {
         server.global_env = env_in(&s.environment);
         server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
         server.persist.kept = super::persist::Kept::from_hold(s.persist_hold);
+        vtmux_vt::link::restore_link_number(s.link_number);
 
         // Options: every tree, then the hook bookkeeping.
         let mut trees = vec![

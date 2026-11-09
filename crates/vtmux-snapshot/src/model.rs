@@ -275,6 +275,13 @@ record! {
         /// a v1 reader without it holds nothing back, as builds before it
         /// did. Always 0 in a checkpoint.
         36 => one persist_hold: u32,
+        /// The next OSC 8 external id's number (`hyperlinks_next_external_id`,
+        /// the server's one counter): links drawn after a live upgrade, in
+        /// a status line or popup, never take a number one still on screen
+        /// has. Added within v1, 0 in the golden sample: a reader without
+        /// it numbers on from the highest number a pane kept, so a link
+        /// that is not a pane's may be given a number that was in use.
+        37 => one link_number: u64,
     }
 }
 
@@ -1142,6 +1149,7 @@ pub(crate) mod tests {
             // Added within v1, so out of the sample the golden file pins.
             start_binary: String::new(),
             persist_hold: 0,
+            link_number: 0,
         }
     }
 
