@@ -80,6 +80,28 @@ impl World {
     fn attach(&self, args: &[&str]) -> Attached {
         self.attach_sized(args, 40, 10)
     }
+    /// Poll until the server is gone: `ls` fails to connect. tmux's
+    /// exiting server still accepts and at once closes a connection
+    /// (server.c `server_accept` while `server_exit`), which the client
+    /// reports as `server exited unexpectedly`; a command run then would
+    /// meet the same fate, so that is not gone yet.
+    fn wait_gone(&self) {
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            let ls = self.cli(&["ls"]);
+            if !ls.status.success()
+                && !String::from_utf8_lossy(&ls.stderr).contains("server exited unexpectedly")
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < end,
+                "server did not exit ({})",
+                self.bin.display()
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
     fn attach_sized(&self, args: &[&str], cols: u16, rows: u16) -> Attached {
         self.attach_env(args, cols, rows, &[])
     }
@@ -4334,8 +4356,10 @@ fn config_causes_show_in_view_mode_once_attached() {
         seen.push(shown(&a));
         a.keys(b"\x02d");
         a.exited(0);
-        // Started detached: the causes wait for the attach.
+        // Started detached: the causes wait for the attach. On a fresh
+        // server: tmux's may still be exiting, and would drop the `new`.
         assert!(w.cli(&["kill-server"]).status.success());
+        w.wait_gone();
         let out = w.cli(&["-f", &conf, "new", "-d", "-s", "b", "-n", "w", "cat", "-"]);
         assert!(
             out.status.success(),
