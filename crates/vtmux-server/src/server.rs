@@ -7196,6 +7196,52 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A pane's `dim=` mixes towards the colours the client's terminal
+    /// reported, or its theme's when it reported none
+    /// (`tty_dim_default_colour`): clients alike but for the theme a
+    /// terminal reports (dark and unknown draw the same otherwise) do not
+    /// share a drawing, and each shows its own mix.
+    #[test]
+    fn clients_of_another_dim_default_do_not_share_a_drawing() {
+        let (mut server, p, s, dir) = share_server("dim");
+        for words in [
+            &["set", "-g", "status", "off"][..],
+            &["set", "-g", "window-active-style", "dim=50"],
+        ] {
+            run_words(&mut server, &dir, words);
+        }
+        let mut clients: Vec<_> = (0..3)
+            .map(|_| attach_test_client(&mut server, s, &dir))
+            .collect();
+        let ids: Vec<_> = clients.iter().map(|(id, _)| *id).collect();
+        server.clients.get_mut(&ids[1]).unwrap().reported.theme =
+            Some(vtmux_core::colour::Theme::Dark);
+        server.model.panes.get_mut(&p).unwrap().term.feed(b"x");
+        for _ in 0..3 {
+            server.render_clients();
+            for (id, peer) in &mut clients {
+                frames(&mut server, *id, peer);
+            }
+        }
+        let fg = |i: usize| {
+            let (last, _) = server.clients[&ids[i]].compositor.last().unwrap();
+            last.cells[0].style.fg
+        };
+        assert_ne!(
+            fg(0),
+            fg(1),
+            "dark and unknown theme dim from other colours"
+        );
+        assert_eq!(fg(0), fg(2), "alike clients show alike");
+        let taken: Vec<_> = ids
+            .iter()
+            .map(|id| server.clients[id].window_cache.shared.get().0)
+            .collect();
+        assert_eq!(taken[1], 0, "the dark client took no drawing: {taken:?}");
+        assert!(taken[2] > 0, "the alike client did: {taken:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// The plain-frame skip (a turn where no composed row or the cursor
     /// changed sends nothing) does not swallow a change: a turn that only
     /// moves the pane's cursor still sends a frame, and it is a cursor

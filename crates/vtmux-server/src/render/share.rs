@@ -324,6 +324,7 @@ mod tests {
             overlay: false,
             no_am: false,
             light_theme: false,
+            attrs: super::super::Attrs::XTERM,
             isolates: false,
         }
     }
