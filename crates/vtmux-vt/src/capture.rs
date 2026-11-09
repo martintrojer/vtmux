@@ -90,17 +90,36 @@ pub trait Lines {
     /// OSC 133 marked line `y` as a prompt's start, or with `output` as
     /// command output's start.
     fn starts(&self, y: usize, output: bool) -> bool;
+    /// Where line `y` still reads from a copy of the pane's grid taken at
+    /// this grid's width (copy mode's entry copy, for a line it has not
+    /// read): the copy and its row. A capture reads a row of plain cells
+    /// from there without building or keeping the line's [`Row`].
+    fn entry_row(&self, _y: usize) -> Option<(&ScreenCopy, usize)> {
+        None
+    }
 }
 
 /// Where a capture reads (cmd-capture-pane.c:265-291).
 enum Source<'a> {
-    /// The pane's grid, history included.
-    Pane(&'a PaneTerm),
+    /// The pane's grid, history included, and its sizes.
+    Pane(&'a PaneTerm, PaneRows),
     /// `-a`: the primary screen saved under the alternate one, no history,
     /// read `sx` columns wide (the pane's width now).
     Saved(Rc<Vec<FrozenRow>>, usize),
     /// `-M`: a mode's screen, `sx` columns.
     Mode(&'a dyn Lines, usize),
+}
+
+/// A pane's sizes, which hold while a capture borrows it: `hsize`, `sy`,
+/// `sx`, the history rows Ghostty retains, and whether the alternate screen
+/// is up.
+#[derive(Clone, Copy)]
+struct PaneRows {
+    hsize: usize,
+    rows: usize,
+    cols: usize,
+    retained: usize,
+    alternate: bool,
 }
 
 /// One line of a capture: its cells, wrap flag, history time and OSC 133
@@ -114,10 +133,87 @@ struct Line {
 }
 
 impl Source<'_> {
+    /// Line `y` as one byte per cell when every cell of it is plain
+    /// ([`CellBits::plain`]); its cells as [`Source::line`] reads them, 0
+    /// for a blank, and whether it wraps. `None` when a cell is anything
+    /// else, or the line is not read from a Ghostty row or a [`Row`]: the
+    /// line then has to be read with [`Source::line`]. Builds no cells: a
+    /// capture of a long history of plain text reads every line.
+    fn plain_line<'t>(
+        &'t self,
+        y: usize,
+        last: &mut LastRow<'t>,
+        raw: &mut Vec<libghostty_vt::screen::Cell>,
+        out: &mut Vec<u8>,
+    ) -> Option<bool> {
+        match self {
+            Self::Pane(t, p) => {
+                if p.alternate && y < p.hsize {
+                    return None;
+                }
+                let at = y + p.retained - p.hsize;
+                let walk = at
+                    .checked_sub(p.retained)
+                    .map_or(at, |active| active + p.rows);
+                let row_ref = row_ref_stepped(&t.term, at, walk, last.as_ref())?;
+                *last = Some((at, row_ref.clone()));
+                let wrapped = plain_cells(&row_ref, p.cols, raw, out)?;
+                if y < p.hsize {
+                    t.note_history_read();
+                }
+                Some(wrapped)
+            }
+            Self::Saved(..) => None,
+            Self::Mode(l, sx) => {
+                if let Some((copy, at)) = l.entry_row(y) {
+                    let wrapped = copy.plain_cells(at, raw, out)?;
+                    out.resize((*sx).max(out.len()), 0);
+                    return Some(wrapped);
+                }
+                let row = l.line(y);
+                out.clear();
+                for c in &row.cells {
+                    let plain =
+                        !c.tab && c.width == 1 && !c.acs && !c.link && c.style == Style::default();
+                    out.push(match c.text.as_bytes() {
+                        [] if plain => 0,
+                        &[b] if plain && b.is_ascii() => b,
+                        _ => return None,
+                    });
+                }
+                out.resize((*sx).max(out.len()), 0);
+                Some(row.wrapped)
+            }
+        }
+    }
+
+    /// Line `y`'s history time and OSC 133 prompt and output marks, as
+    /// `-I` and `-F` need them.
+    fn line_meta(
+        &self,
+        y: usize,
+        marks: &[(usize, LineMark)],
+        opts: CaptureOpts,
+    ) -> (i64, bool, bool) {
+        let marked = |m: LineMark| marks.iter().any(|&(my, mm)| my == y && mm == m);
+        match self {
+            Self::Pane(t, p) => {
+                let time = if opts.times && y < p.hsize {
+                    t.history_time(t.history_id(y))
+                } else {
+                    0
+                };
+                (time, marked(LineMark::Prompt), marked(LineMark::Output))
+            }
+            Self::Saved(..) => (0, false, false),
+            Self::Mode(l, _) => (l.time(y), l.starts(y, false), l.starts(y, true)),
+        }
+    }
+
     /// `hsize` and `sy`.
     fn size(&self) -> (usize, usize) {
         match self {
-            Self::Pane(t) => (t.history_size(), usize::from(t.rows())),
+            Self::Pane(_, p) => (p.hsize, p.rows),
             Self::Saved(rows, _) => (0, rows.len()),
             Self::Mode(l, _) => (l.history_size(), l.screen_rows()),
         }
@@ -128,7 +224,7 @@ impl Source<'_> {
     fn line<'t>(&'t self, y: usize, marks: &[(usize, LineMark)], last: &mut LastRow<'t>) -> Line {
         let marked = |m: LineMark| marks.iter().any(|&(my, mm)| my == y && mm == m);
         let (cells, wrapped, time, prompt, output) = match self {
-            Self::Pane(t) => {
+            Self::Pane(t, _) => {
                 let hsize = t.history_size();
                 let (cells, wrapped) = read_row(t, y, hsize, usize::from(t.cols()), last);
                 let time = if y < hsize {
@@ -191,7 +287,14 @@ pub fn capture_alternate(term: &PaneTerm, opts: CaptureOpts) -> Option<Vec<u8>> 
 /// `-p` strips its final newline.
 #[must_use]
 pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
-    capture_from(&Source::Pane(term), opts)
+    let rows = PaneRows {
+        hsize: term.history_size(),
+        rows: usize::from(term.rows()),
+        cols: usize::from(term.cols()),
+        retained: term.term.scrollback_rows().unwrap_or(0),
+        alternate: term.alternate_on(),
+    };
+    capture_from(&Source::Pane(term, rows), opts)
 }
 
 /// `capture-pane -M` over a mode's screen, `sx` the pane's width.
@@ -210,7 +313,7 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
         std::mem::swap(&mut top, &mut bottom);
     }
     let marks = match src {
-        Source::Pane(t) if opts.flags => t.line_marks(),
+        Source::Pane(t, _) if opts.flags => t.line_marks(),
         _ => Vec::new(),
     };
     let mut out = Vec::new();
@@ -219,7 +322,36 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
     let mut last = Gc::default();
     let mut seen: Vec<LinkKey> = Vec::new();
     let mut at = None;
+    let (mut raw, mut plain) = (Vec::new(), Vec::new());
     for y in top..=bottom {
+        // A row of plain cells needs no sequence when the cell before had
+        // none (the default style, no charset, no link), and lists no link.
+        if (!opts.escapes || last == Gc::default())
+            && plain_lines()
+            && let Some(wrapped) = src.plain_line(y, &mut at, &mut raw, &mut plain)
+        {
+            #[cfg(test)]
+            tests::PLAIN_ROWS.with(|n| n.set(n.get() + 1));
+            if opts.hyperlinks {
+                continue;
+            }
+            let (time, prompt, output) = src.line_meta(y, &marks, opts);
+            if opts.numbers {
+                let n = i64::try_from(y).unwrap_or(0) - i64::try_from(hsize).unwrap_or(0);
+                out.extend_from_slice(format!("{n} ").as_bytes());
+            }
+            if opts.times {
+                out.extend_from_slice(format!("{time} ").as_bytes());
+            }
+            if opts.flags {
+                out.extend_from_slice(row_flags(&[], wrapped, prompt, output).as_bytes());
+            }
+            emit_plain(&mut out, &plain, opts);
+            if !opts.join || !wrapped {
+                out.push(b'\n');
+            }
+            continue;
+        }
         let line = src.line(y, &marks, &mut at);
         let mut text = Vec::new();
         if opts.hyperlinks {
@@ -250,6 +382,15 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Whether a capture writes lines of plain cells without building their
+/// cells; tests turn it off to compare with the general path.
+fn plain_lines() -> bool {
+    #[cfg(test)]
+    return !tests::CELLS_ONLY.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    true
 }
 
 /// A hyperlink as tmux tells them apart (`hyperlinks_put`): one URI and
@@ -801,6 +942,20 @@ impl ScreenCopy {
         hyperlink_at(self.term.as_ref()?, y + self.retained - self.hsize, x)
     }
 
+    /// Row `y` as [`Source::plain_line`] reads a pane's.
+    fn plain_cells(
+        &self,
+        y: usize,
+        raw: &mut Vec<libghostty_vt::screen::Cell>,
+        out: &mut Vec<u8>,
+    ) -> Option<bool> {
+        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
+            return None;
+        }
+        let row_ref = self.row_ref(y + self.retained - self.hsize)?;
+        plain_cells(&row_ref, self.cols, raw, out)
+    }
+
     /// `history_size` when the copy was taken.
     #[must_use]
     pub fn history_size(&self) -> usize {
@@ -1039,12 +1194,22 @@ fn row_ref_near<'t>(
     y: usize,
     last: Option<&(usize, GridRef<'t>)>,
 ) -> Option<GridRef<'t>> {
+    // The rows the lookup's walk crosses: the history above a history
+    // row, the screen and the screen rows above an active row.
+    let walk = y
+        .checked_sub(term.scrollback_rows().unwrap_or(0))
+        .map_or(y, |active| active + usize::from(term.rows().unwrap_or(0)));
+    row_ref_stepped(term, y, walk, last)
+}
+
+/// [`row_ref_near`], `walk` the rows a lookup of row `y` crosses.
+fn row_ref_stepped<'t>(
+    term: &'t Terminal<'_, '_>,
+    y: usize,
+    walk: usize,
+    last: Option<&(usize, GridRef<'t>)>,
+) -> Option<GridRef<'t>> {
     if let Some((from, from_ref)) = last {
-        // The rows the lookup's walk crosses: the history above a history
-        // row, the screen and the screen rows above an active row.
-        let walk = y
-            .checked_sub(term.scrollback_rows().unwrap_or(0))
-            .map_or(y, |active| active + usize::from(term.rows().unwrap_or(0)));
         let rows = y.abs_diff(*from);
         if rows <= walk {
             #[cfg(test)]
@@ -1106,6 +1271,8 @@ fn read_screen_cells(
 
 /// [`read_screen_cells`] of the row `row_ref` is on.
 fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCell>, bool) {
+    #[cfg(test)]
+    tests::CELL_ROWS.with(|n| n.set(n.get() + 1));
     let (wrapped, styled, linked) = row_ref.row().map_or((false, true, true), |row| {
         (
             row.is_wrapped().unwrap_or(false),
@@ -1190,6 +1357,29 @@ fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCe
     (cells, wrapped)
 }
 
+/// The cells of the row at `row_ref`, `cols` at most, as one byte each
+/// ([`CellBits::plain`]) in `out`, and whether the row wraps; `None` when
+/// a cell is not plain or the row does not read.
+fn plain_cells(
+    row_ref: &GridRef<'_>,
+    cols: usize,
+    raw: &mut Vec<libghostty_vt::screen::Cell>,
+    out: &mut Vec<u8>,
+) -> Option<bool> {
+    let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
+    row_ref.row_cells(raw).ok()?;
+    // An incomplete reflow can leave the page narrower than the screen.
+    raw.truncate(cols);
+    out.clear();
+    let mut plain = true;
+    out.extend(raw.iter().map(|cell| {
+        let b = CellBits(cell.bits()).plain();
+        plain &= b.is_some();
+        b.unwrap_or(0)
+    }));
+    plain.then_some(wrapped)
+}
+
 /// A Ghostty cell read from its bits rather than a `ghostty_cell_get` call
 /// per field. `page.zig`'s `Cell` is a `packed struct(u64)`, fields from
 /// the least significant bit: `content_tag` (2 bits), `content` (24: a
@@ -1263,6 +1453,19 @@ impl CellBits {
 
     fn tab(self) -> u8 {
         self.byte(48)
+    }
+
+    /// The cell as one byte when [`read_cells`] makes it a narrow cell of
+    /// the default style, no charset, link or tab, and at most one ASCII
+    /// byte of text: its codepoint, 0 for none (a blank). `None` for any
+    /// other cell. The OSC 133 semantic bits are ignored, as `read_cells`
+    /// ignores them.
+    fn plain(self) -> Option<u8> {
+        const SEMANTIC: u64 = 0b11 << 46;
+        // The codepoint tag (0) and a codepoint below 0x80, nothing else.
+        let bits = self.0 & !SEMANTIC;
+        (bits < 0x80 << 2 && bits.trailing_zeros() >= 2)
+            .then(|| u8::try_from(bits >> 2).expect("below 0x80"))
     }
 
     /// The cell as a search sees it when that is one ASCII byte: a blank
@@ -1497,6 +1700,78 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
     out.extend_from_slice(&line);
 }
 
+/// [`emit_row`] for a line of plain cells (one byte each, 0 a blank: see
+/// [`Source::plain_line`]) when the cell written before had no sequence
+/// (the default style, no charset, no link): no cell needs one, so the
+/// line is its characters.
+fn emit_plain(out: &mut Vec<u8>, cells: &[u8], opts: CaptureOpts) {
+    let used = cells.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    let end = if opts.join || opts.used_only {
+        used
+    } else if opts.escapes || opts.keep_spaces {
+        plain_cellsize(cells, used)
+    } else {
+        cells.len()
+    };
+    let start = out.len();
+    let cells = &cells[..end.min(cells.len())];
+    if opts.octal {
+        for &b in cells {
+            match b {
+                0 => out.push(b' '),
+                b'\\' => out.extend_from_slice(b"\\\\"),
+                b => out.push(b),
+            }
+        }
+    } else {
+        out.extend(cells.iter().map(|&b| if b == 0 { b' ' } else { b }));
+    }
+    if !opts.join && !opts.keep_spaces {
+        // GRID_STRING_TRIM_SPACES (grid.c:1263).
+        let kept = out[start..]
+            .iter()
+            .rposition(|&b| b != b' ')
+            .map_or(start, |i| start + i + 1);
+        out.truncate(kept);
+    }
+}
+
+/// [`tmux_cellsize`] of a line of plain cells: every written cell (not a
+/// blank) has the same style, so each run of them is one flush.
+fn plain_cellsize(cells: &[u8], used: usize) -> usize {
+    let mut size = 0;
+    let mut i = 0;
+    while i < used {
+        if cells[i] == 0 {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < used && cells[j] != 0 {
+            j += 1;
+        }
+        if j > size {
+            size = expanded_size(j, cells.len());
+        }
+        i = j;
+    }
+    size
+}
+
+/// The size `grid_expand_line` grows a line `width` wide to for a flush
+/// that ends at cell `j` (grid.c:564-589).
+fn expanded_size(j: usize, width: usize) -> usize {
+    if j < width / 4 {
+        width / 4
+    } else if j < width / 2 {
+        width / 2
+    } else if width > j {
+        width
+    } else {
+        j
+    }
+}
+
 /// `grid_string_cells_add_hyperlink` (grid.c:1035-1060): OSC 8 with `id=`
 /// when there is one; ST is `ESC \` (`\033\\` under `-C`).
 /// A link's URI or id as tmux keeps it: `utf8_stravis` with
@@ -1596,15 +1871,7 @@ fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
             j += 1;
         }
         if j > size {
-            size = if j < width / 4 {
-                width / 4
-            } else if j < width / 2 {
-                width / 2
-            } else if width > j {
-                width
-            } else {
-                j
-            };
+            size = expanded_size(j, width);
         }
         i = j;
     }
@@ -1750,6 +2017,12 @@ mod tests {
         pub(super) static LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         /// Rows [`row_ref_near`] stepped to from the last instead.
         pub(super) static STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Lines a capture wrote from [`Source::plain_line`].
+        pub(super) static PLAIN_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Rows [`read_cells`] built cells for.
+        pub(super) static CELL_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// Captures read every line as cells ([`plain_lines`] off).
+        pub(super) static CELLS_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     fn lookups() -> usize {
@@ -2223,5 +2496,241 @@ mod tests {
             "\x1b[38;2;1;2;3mA\x1b[48;5;200mB\x1b[39m\x1b[49m\n"
         );
         assert_eq!(cap(20, 1, b"\x1b[4:3mA", o), "\x1b[4:3mA\x1b[0m\n");
+    }
+
+    /// A small deterministic generator (xorshift64*) for random content.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// Random output for a pane `cols` wide: plain text and spaces, most
+    /// lines, between lines of every kind a capture writes differently:
+    /// styles left on across lines, coloured erases, wide characters,
+    /// clusters, tabs, links, line drawing, backslashes, gaps written out
+    /// of order, erased cells, lines that wrap and empty lines.
+    fn random_output(rng: &mut Rng, lines: usize, cols: u64) -> Vec<u8> {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        for i in 0..lines {
+            let pieces = rng.below(4);
+            for _ in 0..pieces {
+                let _ = match rng.below(24) {
+                    0 => write!(out, "\x1b[3{}m", rng.below(8)),
+                    1 => write!(out, "\x1b[1;4{}m", rng.below(8)),
+                    2 => write!(out, "\x1b[38;5;{}m", rng.below(256)),
+                    3 => write!(out, "\x1b[48;2;{};2;3m", rng.below(256)),
+                    4 => write!(out, "\x1b[m"),
+                    5 => write!(out, "\x1b[4{}m\x1b[K\x1b[m", rng.below(8)),
+                    6 => write!(out, "\u{4e2d}\u{6587}"),
+                    7 => write!(out, "e\u{301}\u{1f600}"),
+                    8 => write!(out, "a\tb"),
+                    9 => write!(
+                        out,
+                        "\x1b]8;id=x{};http://h/{i}\x1b\\ln\x1b]8;;\x1b\\",
+                        rng.below(3)
+                    ),
+                    10 => write!(out, "\x1b(0qx\x1b(B"),
+                    11 => write!(out, "a\\b"),
+                    12 => write!(out, "\x1b[{}G#", 1 + rng.below(cols)),
+                    13 => write!(out, "\x1b[{}X", 1 + rng.below(5)),
+                    14 => write!(
+                        out,
+                        "{:x<1$}",
+                        "",
+                        usize::try_from(cols + rng.below(cols)).unwrap()
+                    ),
+                    15 => write!(out, "\x1b[4:3m~\x1b[59m"),
+                    16..=18 => write!(out, "{:1$}", "", usize::try_from(rng.below(6)).unwrap()),
+                    _ => write!(out, "w{} ", rng.below(1000)),
+                };
+            }
+            if rng.below(8) == 0 {
+                // A line of plain text after a style left on.
+                out.push_str("plain text");
+            }
+            out.push_str(if rng.below(5) == 0 { "  \r\n" } else { "\r\n" });
+        }
+        out.into_bytes()
+    }
+
+    /// Every combination of the flags a line of plain cells is written
+    /// differently under, and a few ranges.
+    fn capture_opts() -> Vec<CaptureOpts> {
+        let mut all = Vec::new();
+        for bits in 0..32u32 {
+            for extra in 0..5 {
+                for (start, end) in [
+                    (LineRef::Start, LineRef::End),
+                    (LineRef::Line(-7), LineRef::Line(2)),
+                ] {
+                    all.push(CaptureOpts {
+                        escapes: bits & 1 != 0,
+                        join: bits & 2 != 0,
+                        octal: bits & 4 != 0,
+                        keep_spaces: bits & 8 != 0,
+                        used_only: bits & 16 != 0,
+                        numbers: extra == 1,
+                        times: extra == 2,
+                        flags: extra == 3,
+                        hyperlinks: extra == 4,
+                        start,
+                        end,
+                    });
+                }
+            }
+        }
+        all
+    }
+
+    /// `f` with lines of plain cells read as cells, as every line was
+    /// before captures wrote them straight from Ghostty's cells.
+    fn cells_only<R>(f: impl FnOnce() -> R) -> R {
+        CELLS_ONLY.with(|c| c.set(true));
+        let r = f();
+        CELLS_ONLY.with(|c| c.set(false));
+        r
+    }
+
+    /// Copy mode's grid as `capture-pane -M` reads it: the copy's rows,
+    /// each still the entry copy's (`entry`) or read as a [`Row`].
+    struct CopyLines {
+        copy: ScreenCopy,
+        rows: Vec<Row>,
+        sy: usize,
+        entry: bool,
+    }
+
+    impl Lines for CopyLines {
+        fn history_size(&self) -> usize {
+            self.copy.history_size()
+        }
+
+        fn screen_rows(&self) -> usize {
+            self.sy
+        }
+
+        fn line(&self, y: usize) -> &Row {
+            &self.rows[y]
+        }
+
+        fn time(&self, y: usize) -> i64 {
+            self.copy.history_time(y)
+        }
+
+        fn starts(&self, y: usize, output: bool) -> bool {
+            let mark = if output {
+                LineMark::Output
+            } else {
+                LineMark::Prompt
+            };
+            self.copy.line_marks().contains(&(y, mark))
+        }
+
+        fn entry_row(&self, y: usize) -> Option<(&ScreenCopy, usize)> {
+            self.entry.then_some((&self.copy, y))
+        }
+    }
+
+    /// Lines of plain cells written straight from Ghostty's cells (or a
+    /// copy mode row's) capture byte for byte as the general path writes
+    /// them, under every flag, over random content: resident and
+    /// compressed history, the alternate screen (`-a` and the primary
+    /// history it hides), and copy mode's grid (`-M`).
+    #[test]
+    fn plain_lines_capture_as_cells_do() {
+        let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+        let opts = capture_opts();
+        let (mut plain, mut cells) = (0, 0);
+        for round in 0..4 {
+            let cols = 12 + rng.below(30);
+            let mut t = PaneTerm::new(u16::try_from(cols).unwrap(), 6, 2000);
+            // Round 2's history spans pages, and full ones compress.
+            let lines = if round == 2 { 8000 } else { 300 + round * 200 };
+            t.feed(&random_output(&mut rng, lines, cols));
+            if round == 2 {
+                t.compress_all();
+                assert!(t.compressed_pages() > 0);
+            }
+            if round == 3 {
+                t.feed(b"\x1b[?1049h");
+                t.feed(&random_output(&mut rng, 3, cols));
+            }
+            let copy = t.copy_screen();
+            let n = copy.history_size() + 6;
+            let lines = |entry| CopyLines {
+                rows: (0..n).map(|y| copy.used_row(y)).collect(),
+                copy: t.copy_screen(),
+                sy: 6,
+                entry,
+            };
+            let (entry, kept) = (lines(true), lines(false));
+            let sx = usize::try_from(cols).unwrap();
+            for &o in &opts {
+                let want = cells_only(|| capture(&t, o));
+                let (p, c) = (
+                    PLAIN_ROWS.with(std::cell::Cell::get),
+                    CELL_ROWS.with(std::cell::Cell::get),
+                );
+                assert_eq!(capture(&t, o), want, "round {round} {o:?}");
+                plain += PLAIN_ROWS.with(std::cell::Cell::get) - p;
+                cells += CELL_ROWS.with(std::cell::Cell::get) - c;
+                assert_eq!(
+                    capture_alternate(&t, o),
+                    cells_only(|| capture_alternate(&t, o)),
+                    "round {round} -a {o:?}"
+                );
+                let want = cells_only(|| capture_lines(&kept, sx, o));
+                assert_eq!(capture_lines(&kept, sx, o), want, "round {round} -M {o:?}");
+                assert_eq!(
+                    capture_lines(&entry, sx, o),
+                    want,
+                    "round {round} -M entry {o:?}"
+                );
+            }
+        }
+        // Both paths ran.
+        assert!(
+            plain > 5_000 && cells > 5_000,
+            "{plain} plain, {cells} as cells"
+        );
+    }
+
+    /// A capture of a long history of plain text builds no cells for its
+    /// lines: every line used to be read into cells with their text,
+    /// style and link, which made `capture-pane -S -` of a 1M-line
+    /// history several times slower than tmux. Copy mode's (`-M`) unread
+    /// lines too.
+    #[test]
+    fn a_plain_history_captures_without_building_cells() {
+        let mut t = PaneTerm::new(60, 5, 5000);
+        for i in 0..1500 {
+            t.feed(format!("2026-11-01 INFO worker[{i}] handled  \\ request\r\n").as_bytes());
+        }
+        let copy = CopyLines {
+            rows: Vec::new(),
+            copy: t.copy_screen(),
+            sy: 5,
+            entry: true,
+        };
+        let before = CELL_ROWS.with(std::cell::Cell::get);
+        for o in capture_opts()
+            .into_iter()
+            .filter(|o| o.start == LineRef::Start)
+        {
+            let _ = capture(&t, o);
+            let _ = capture_lines(&copy, 60, o);
+        }
+        assert_eq!(CELL_ROWS.with(std::cell::Cell::get), before);
     }
 }

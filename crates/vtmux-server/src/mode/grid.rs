@@ -36,6 +36,15 @@ impl vtmux_vt::Lines for Grid {
     fn starts(&self, y: usize, output: bool) -> bool {
         Grid::starts(self, y, output)
     }
+
+    /// A line still unread is the entry copy's row, while the copy is as
+    /// wide as the grid (as [`Grid::ascii_text`] reads it): a capture of
+    /// all of history then keeps no row for each line.
+    fn entry_row(&self, y: usize) -> Option<(&ScreenCopy, usize)> {
+        let line = self.lines.get(y)?;
+        let (src, source) = (line.src?, self.source.as_deref()?);
+        (line.row.get().is_none() && source.cols() == self.sx).then_some((source, src))
+    }
 }
 
 /// One line of the copy.
@@ -840,5 +849,32 @@ pub(super) mod tests {
         for (y, row) in want.iter().enumerate() {
             assert_eq!(g.row(y), row, "line {y}");
         }
+    }
+
+    /// `capture-pane -M` of all of a copy writes an unread line of plain
+    /// text from the entry copy, keeping no row for it (a 1M-line history
+    /// kept a row of cells per line, and took 6x tmux's time), and writes
+    /// what it writes once every line is read.
+    #[test]
+    fn capture_of_the_copy_keeps_no_lines() {
+        let mut t = PaneTerm::new(40, 5, 5000);
+        for i in 0..3000 {
+            let red = if i % 10 == 0 { "\x1b[31mred\x1b[m" } else { "" };
+            t.feed(format!("line {i} \\ {red}\r\n").as_bytes());
+        }
+        let (g, _, _) = Grid::clone_of(&t, 40, 5, false);
+        let opts = vtmux_vt::CaptureOpts {
+            start: vtmux_vt::LineRef::Start,
+            end: vtmux_vt::LineRef::End,
+            ..vtmux_vt::CaptureOpts::default()
+        };
+        let captured = vtmux_vt::capture_lines(&g, 40, opts);
+        assert!(g.kept_lines() <= 300, "{} lines kept", g.kept_lines());
+        for y in 0..=g.last() {
+            let _ = g.row(y);
+        }
+        assert_eq!(g.kept_lines(), g.last() + 1);
+        assert_eq!(vtmux_vt::capture_lines(&g, 40, opts), captured);
+        assert_eq!(captured, vtmux_vt::capture(&t, opts));
     }
 }
