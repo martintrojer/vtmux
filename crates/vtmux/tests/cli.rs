@@ -6801,6 +6801,13 @@ fn program_output_reaches_the_grid_as_in_tmux() {
                 "lnm",
                 r"stty -opost; printf 'a\033[20h\nb\033[4;20hX\rY\033[4l\033[20l\r\n'",
             ),
+            // DECSTBM reads its first two parameters with a minimum of 1:
+            // a bottom of 0 sets no region and leaves the cursor, a third
+            // parameter is ignored (input.c:1620-1625).
+            (
+                "decstbm",
+                r"seq 1 4; printf '\033[4;3H\033[;0rA\033[2;0rB\033[2;3;9rC\033[3;1H\nD'",
+            ),
         ];
         let state = "#{cursor_x},#{cursor_y} #{history_size} #{alternate_on} [#{pane_title}]";
         let mut runs = vec![w.run(&["new", "-d", "-s", "a", "-x", "26", "-y", "5", "cat"])];

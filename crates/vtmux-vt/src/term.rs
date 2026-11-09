@@ -3707,9 +3707,44 @@ impl AltModeScanner {
         Some(ScanEvent::EraseChars)
     }
 
+    /// DECSTBM (input.c:1620-1625): tmux reads the first two parameters
+    /// with `input_get(ictx, i, 1, ...)`, so an explicit 0 is 1, where
+    /// Ghostty takes a bottom of 0 for the last row and ignores the
+    /// sequence with more than two. Ghostty is given the region tmux sets,
+    /// or nothing when tmux sets none (`screen_write_scrollregion` refuses
+    /// a region of one line or less, and `CSI n;0 r` is always one).
+    fn decstbm(&mut self) -> Option<ScanEvent> {
+        if self.private || self.gt || self.csi_ignored || self.intermediate.is_some() {
+            return None;
+        }
+        let params = parse_params(&self.params)?;
+        let bottom_zero = params.get(1) == Some(&Param::Num(0));
+        if !bottom_zero && params.len() <= 2 {
+            return None;
+        }
+        let get = |i: usize| match params.get(i) {
+            None | Some(Param::Missing) => Some(None),
+            Some(Param::Num(n)) => Some(Some(*n)),
+            Some(Param::Text) => None,
+        };
+        let (Some(top), Some(bottom)) = (get(0), get(1)) else {
+            return Some(ScanEvent::Drop);
+        };
+        if bottom_zero {
+            return Some(ScanEvent::Drop);
+        }
+        // Ghostty gets the first two parameters, then the final byte.
+        let num = |n: Option<u64>| n.map(|n| n.to_string()).unwrap_or_default();
+        self.rewrite = Some(format!("\x1b[{};{}", num(top), num(bottom)).into_bytes());
+        Some(ScanEvent::Rewrite)
+    }
+
     #[allow(clippy::too_many_lines)] // one arm per CSI final byte
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
-        if let Some(e) = self.csi_tmux_lacks(b) {
+        if let Some(e) = self
+            .csi_tmux_lacks(b)
+            .or_else(|| if b == b'r' { self.decstbm() } else { None })
+        {
             return Some(e);
         }
         if self.query_tmux_ignores(b) {
