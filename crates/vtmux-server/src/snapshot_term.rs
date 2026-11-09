@@ -71,12 +71,6 @@ pub fn has_very_visible_cursor(t: &snap::TermState) -> bool {
     t.cursor_style.very_visible
 }
 
-/// The terminal's progress bar is set ([`snap::PROGRESS_BAR_FEATURE`]).
-#[must_use]
-pub fn has_progress_bar(t: &snap::TermState) -> bool {
-    t.progress_bar != snap::term::ProgressBar::default()
-}
-
 /// Whether `t` holds a page in Ghostty's form (the stream then requires
 /// [`ghostty_pages_requirement`]).
 #[must_use]

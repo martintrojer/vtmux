@@ -1204,6 +1204,16 @@ fn an_ordinary_attached_client_requires_no_feature() {
         b"\x1b[?62;22c\x1b[>84;0;0c\x1bP>|xterm(390)\x1b\\\x1b]11;rgb:1010/2020/3030\x1b\\",
     )
     .unwrap();
+    // A program's progress bar, shown and then hidden with its progress
+    // left over, is state an ordinary session holds.
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;3;\x1b\\", false);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;1;50\x1b\\", false);
+    let shown = a.to_snapshot(snap::Meta::default());
+    assert_eq!(
+        shown.panes[0].term.as_ref().unwrap().progress_bar.progress,
+        50
+    );
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;0\x1b\\", false);
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
@@ -1896,20 +1906,17 @@ fn a_title_restored_without_its_terminal_is_not_escaped_again() {
 }
 
 /// The OSC 9;4 progress bar is terminal state a live upgrade carries
-/// (`#{pane_pb_state}`, `#{pane_pb_progress}`), required by name only
-/// while some pane's is set.
+/// (`#{pane_pb_state}`, `#{pane_pb_progress}`), never required by name: a
+/// program sets one in an ordinary session, so requiring it would refuse
+/// every downgrade and strand persistence (spec, *Required and ignorable
+/// fields*).
 #[test]
 fn the_progress_bar_survives_a_rebuild() {
     let dir = temp_dir("progress");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    let required = |s: &Server| {
-        s.to_snapshot(snap::Meta::default())
-            .meta
-            .requires
-            .contains(&snap::PROGRESS_BAR_FEATURE.to_owned())
-    };
-    assert!(!required(&a));
+    let required = |s: &Server| s.to_snapshot(snap::Meta::default()).meta.requires;
+    assert_eq!(required(&a), Vec::<String>::new());
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;2;64\x1b\\", false);
     let bar = [
         "display",
@@ -1920,9 +1927,18 @@ fn the_progress_bar_survives_a_rebuild() {
     ];
     let before = run(&mut a, &dir, &bar);
     assert!(before.contains("\nerror|64\n"), "{before:?}");
-    assert!(required(&a));
+    assert_eq!(required(&a), Vec::<String>::new());
     let mut b = rebuild(&a, &dir, "b");
     assert_eq!(run(&mut b, &dir, &bar), before);
+    // Hidden with its progress left over (`9;4;1;50` then `9;4;0`) is
+    // carried too, and requires nothing.
+    b.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;0\x1b\\", false);
+    let hidden = run(&mut b, &dir, &bar);
+    assert!(hidden.contains("\nhidden|64\n"), "{hidden:?}");
+    assert_eq!(required(&b), Vec::<String>::new());
+    let mut c = rebuild(&b, &dir, "c");
+    assert_eq!(run(&mut c, &dir, &bar), hidden);
+    drop(c);
     drop(b);
     drop(a);
     let _ = std::fs::remove_dir_all(dir);

@@ -112,7 +112,6 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 /// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
     CURSOR_VERY_VISIBLE_FEATURE,
-    PROGRESS_BAR_FEATURE,
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
     TERMINAL_TITLE_FEATURE,
@@ -122,12 +121,6 @@ pub const KNOWN_FEATURES: &[&str] = &[
 /// ([`term::CursorStyle::very_visible`]), listed when some terminal's is
 /// set.
 pub const CURSOR_VERY_VISIBLE_FEATURE: &str = "cursor-very-visible";
-
-/// The [`Meta::requires`] name of a pane terminal's OSC 9;4 progress bar
-/// ([`term::TermState::progress_bar`]), listed when some terminal's is not
-/// hidden at 0: a reader without it would show `#{pane_pb_state}` and
-/// `#{pane_pb_progress}` reset.
-pub const PROGRESS_BAR_FEATURE: &str = "pane-progress-bar";
 
 /// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
 /// ([`Pane::scrollbar_visible`] and the fields after it), listed when

@@ -491,8 +491,9 @@ record! {
         38 => opt alternate_saved: Option<AltSaved>,
         /// Always written beside [`TermState::alternate_saved`].
         39 => opt alternate_saved_layout: Option<AltSaveLayout>,
-        /// The progress bar; written under
-        /// [`crate::PROGRESS_BAR_FEATURE`] when not hidden at 0.
+        /// The progress bar. Not required: a program sets one in an
+        /// ordinary session, and a reader that skips it shows it hidden at
+        /// 0 until the program sets it again.
         40 => one progress_bar: ProgressBar,
     }
 }
