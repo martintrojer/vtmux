@@ -8,8 +8,6 @@ vtmux's version is the tmux release it is tested against ([D25](docs/specs/2026-
 
 **Smaller and faster build.** The release binary is built with whole-program LTO: 9.8 MB stripped (was 10.7), 7-18% less server CPU for agent panes, many clients and key echo. ([numbers](docs/PERFORMANCE.md#binary-size-and-build-profile))
 
-**Kitty keyboard protocol (opt-in).** `set -s vtmux-kitty-keys on` and programs that ask for it (neovim, helix, agent TUIs) get kitty-encoded keys: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Key tables and the prefix work as before; programs that don't ask see tmux. Off by default: byte for byte tmux 3.8.
-
 **Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients, from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself. Off, tmux 3.8's behaviour (dropped). ([D30](docs/specs/2026-10-29-vtmux.md))
 
 ## 3.8-beta1
