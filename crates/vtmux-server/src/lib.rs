@@ -32,7 +32,6 @@ pub mod notify;
 pub mod open_prompt;
 pub mod outer_cursor;
 pub mod pane_io;
-pub mod pane_kitty;
 pub mod paste;
 pub mod persist;
 pub mod pipe;

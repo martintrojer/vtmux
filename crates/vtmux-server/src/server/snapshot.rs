@@ -1213,8 +1213,6 @@ impl Server {
                     status: p.status.map(status_out),
                     dead_time: p.dead_time,
                     output_generation: p.output_generation,
-                    kitty_owner_primary: p.kitty_owner[0],
-                    kitty_owner_alternate: p.kitty_owner[1],
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -1921,7 +1919,6 @@ impl Server {
             close_on_cancel: x.close_on_cancel,
             requests: crate::term_queries::PaneRequests::default(),
             output_generation: x.output_generation,
-            kitty_owner: [x.kitty_owner_primary, x.kitty_owner_alternate],
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,
@@ -1935,7 +1932,6 @@ impl Server {
         if x.term.is_some() && !salvaged.is_some_and(|s| s.contains(&snap::Part::PaneTerm(x.id))) {
             pane.compress.restored(&pane.term, now);
         }
-        pane.settle_imported_kitty_grants();
         Ok(pane)
     }
 

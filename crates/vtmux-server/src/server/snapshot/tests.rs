@@ -8,7 +8,6 @@ use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use vtmux_core::ids::PaneId;
 use vtmux_core::protocol::{
     ClientFlags, ControlMode, Hello, PROTOCOL_VERSION, ServerMsg, TtyInfo, decode,
 };
@@ -610,9 +609,6 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
             .get_mut(&vtmux_core::ids::PaneId(p))
             .unwrap();
         pane.term.feed(bytes);
-        // As `Server::pane_input` goes on: whoever pushed kitty flags owns
-        // them.
-        pane.note_kitty_grants();
         let _ = pane.term.take_events();
     }
     // What OSC 133 said of a finished command (a running one's duration
@@ -1322,14 +1318,6 @@ fn an_ordinary_attached_client_requires_no_feature() {
         b"\x1b]8;;http://x\x1b\\L\x1b]8;;\x1b\\",
         false,
     );
-    // A kitty keyboard grant (D29) with the process group that pushed it.
-    ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
-    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[>1u", false);
-    assert!(
-        a.to_snapshot(snap::Meta::default()).panes[0]
-            .kitty_owner_primary
-            .is_some()
-    );
     a.render_clients();
     let drawn = a.to_snapshot(snap::Meta::default());
     assert_eq!(drawn.panes[0].term.as_ref().unwrap().drawn_links.len(), 1);
@@ -1352,185 +1340,6 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert!(!s.panes[0].term.as_ref().unwrap().inband_resize);
     assert_eq!(s.meta.requires, Vec::<String>::new());
     drop(a);
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// A server with session `s` (pane %0, `cat -`) whose option
-/// `vtmux-kitty-keys` is on, and the pane's foreground process group as
-/// `foreground` says (a fake one, alive until killed).
-fn kitty_server(dir: &Path, foreground: i32) -> Server {
-    let mut a = server(dir);
-    ok(&mut a, dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    ok(&mut a, dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
-    crate::pane_kitty::fake::set_foreground(PaneId(0), foreground);
-    a
-}
-
-/// What a key sent to %0 is encoded with, and its stack as exported.
-fn kitty_of(server: &mut Server) -> (u8, [u8; 8]) {
-    let kitty = server.model.key_modes_now(PaneId(0)).unwrap().kitty;
-    let state = server.model.panes[&PaneId(0)].term.export_state();
-    (kitty, state.primary.kitty_flags)
-}
-
-/// `a` rebuilt from its snapshot as `edit` leaves it.
-fn rebuild_with(a: &Server, dir: &Path, edit: impl FnOnce(&mut snap::Snapshot)) -> Server {
-    let mut taken = a.to_snapshot(snap::Meta::default());
-    edit(&mut taken);
-    let decoded = snap::decode(&snap::encode(&taken)).unwrap();
-    decoded.check().unwrap();
-    let (l, _) = listener(dir, "b");
-    Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| adopt(a, r)).unwrap()
-}
-
-/// D29: the grant ends with the process group that pushed it. A program
-/// killed without popping its flags leaves the shell encoded as kitty
-/// (C-c as `CSI 99;5u`) until a `reset`; the group in the PTY's foreground
-/// when the flags went non-zero is remembered, and the stack is emptied
-/// once it has no process, before the next key is encoded and the next
-/// output parsed. A running program keeps its grant, whatever the option
-/// says (D28 rule 5), and so does one a pop emptied then granted again.
-#[test]
-fn a_grant_ends_with_the_process_group_that_pushed_it() {
-    use crate::pane_kitty::fake;
-    let dir = temp_dir("kittyowner");
-    let (a_group, b_group) = (fake::FAKE_BASE + 1, fake::FAKE_BASE + 2);
-    let mut a = kitty_server(&dir, a_group);
-    let p = PaneId(0);
-    a.pane_input(p, b"\x1b[>1u", false);
-    assert_eq!(a.model.panes[&p].kitty_owner, [Some(a_group), None]);
-    ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "off"]);
-    assert_eq!(kitty_of(&mut a).0, 1, "alive");
-    // Popped: no owner, and the next program's push is its own.
-    a.pane_input(p, b"\x1b[<u", false);
-    assert_eq!(a.model.panes[&p].kitty_owner, [None; 2]);
-    ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
-    fake::set_foreground(p, b_group);
-    a.pane_input(p, b"\x1b[>1u", false);
-    assert_eq!(a.model.panes[&p].kitty_owner, [Some(b_group), None]);
-    // Killed: the stack is gone before the key is encoded.
-    fake::kill(b_group);
-    assert_eq!(kitty_of(&mut a).0, 0);
-    assert_eq!(a.model.panes[&p].kitty_owner, [None; 2]);
-    assert_eq!(kitty_of(&mut a).1, [0; 8]);
-    // Output after a kill sees no stack: a push while the option is off
-    // is dropped, which a stale grant would let through.
-    ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
-    fake::set_foreground(p, fake::FAKE_BASE + 3);
-    a.pane_input(p, b"\x1b[>1u", false);
-    fake::kill(fake::FAKE_BASE + 3);
-    ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "off"]);
-    a.pane_input(p, b"\x1b[>8u", false);
-    assert_eq!(a.model.panes[&p].term.kitty_keys(), 0, "no stale push");
-    fake::clear();
-    drop(a);
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// The owner of each screen is its own: a program on the alternate screen
-/// that is killed ends only that screen's grant, whichever screen is in
-/// use, and the shell's keeps going.
-#[test]
-fn the_alternate_screens_grant_ends_alone() {
-    use crate::pane_kitty::fake;
-    let dir = temp_dir("kittyalt");
-    let (shell, editor) = (fake::FAKE_BASE + 1, fake::FAKE_BASE + 2);
-    let mut a = kitty_server(&dir, shell);
-    let p = PaneId(0);
-    a.pane_input(p, b"\x1b[>1u", false);
-    fake::set_foreground(p, editor);
-    a.pane_input(p, b"\x1b[?1049h\x1b[>4u", false);
-    assert_eq!(a.model.panes[&p].kitty_owner, [Some(shell), Some(editor)]);
-    fake::kill(editor);
-    // Still in the alternate screen: its stack goes, the shell's stays.
-    assert_eq!(kitty_of(&mut a).0, 0);
-    assert_eq!(a.model.panes[&p].kitty_owner, [Some(shell), None]);
-    a.pane_input(p, b"\x1b[?1049l", false);
-    assert_eq!(kitty_of(&mut a).0, 1, "the shell's own");
-    // The same with the screen not in use when the program ends.
-    fake::set_foreground(p, fake::FAKE_BASE + 3);
-    a.pane_input(p, b"\x1b[?1049h\x1b[>4u\x1b[?1049l", false);
-    assert_eq!(a.model.panes[&p].kitty_owner[1], Some(fake::FAKE_BASE + 3));
-    fake::kill(fake::FAKE_BASE + 3);
-    assert_eq!(kitty_of(&mut a).0, 1);
-    a.pane_input(p, b"\x1b[?1049h", false);
-    assert_eq!(a.model.panes[&p].term.kitty_keys(), 0, "no stale stack");
-    fake::clear();
-    drop(a);
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// D29 across a live upgrade: the owner is in the snapshot, so a running
-/// program keeps its grant (rule 5) and one gone meanwhile loses it on
-/// import.
-#[test]
-fn a_grant_and_its_owner_cross_a_rebuild() {
-    use crate::pane_kitty::fake;
-    let dir = temp_dir("kittyresume");
-    let group = fake::FAKE_BASE + 1;
-    let mut a = kitty_server(&dir, group);
-    a.pane_input(PaneId(0), b"\x1b[>1u", false);
-    let mut b = rebuild_with(&a, &dir, |_| {});
-    assert_eq!(b.model.panes[&PaneId(0)].kitty_owner, [Some(group), None]);
-    assert_eq!(kitty_of(&mut b).0, 1);
-    drop(b);
-    fake::kill(group);
-    let mut b = rebuild_with(&a, &dir, |_| {});
-    assert_eq!(kitty_of(&mut b), (0, [0; 8]), "gone by the import");
-    assert_eq!(b.model.panes[&PaneId(0)].kitty_owner, [None; 2]);
-    fake::clear();
-    drop((a, b));
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// A snapshot that names no owner (a build before it, or a downgrade and
-/// back, where the program may have ended unseen) is settled on import:
-/// a program other than the shell in the foreground is taken as the
-/// pusher, the shell in the foreground means it has gone; the primary
-/// screen not in use is the shell's, the alternate one's is gone.
-#[test]
-fn a_grant_with_no_recorded_owner_is_settled_on_import() {
-    use crate::pane_kitty::fake;
-    let dir = temp_dir("kittysettle");
-    let program = fake::FAKE_BASE + 1;
-    let mut a = kitty_server(&dir, program);
-    let p = PaneId(0);
-    let shell = a.model.panes[&p].pid;
-    a.pane_input(p, b"\x1b[>1u", false);
-    let unnamed = |s: &mut snap::Snapshot| {
-        s.panes[0].kitty_owner_primary = None;
-        s.panes[0].kitty_owner_alternate = None;
-    };
-    // A program in the foreground: its grant stays, and is its own now.
-    let mut b = rebuild_with(&a, &dir, unnamed);
-    assert_eq!(kitty_of(&mut b).0, 1);
-    assert_eq!(b.model.panes[&p].kitty_owner, [Some(program), None]);
-    fake::kill(program);
-    assert_eq!(kitty_of(&mut b).0, 0, "and ends with it");
-    drop(b);
-    // The shell in the foreground: nothing else can have pushed.
-    fake::clear();
-    fake::set_foreground(p, shell);
-    let mut b = rebuild_with(&a, &dir, unnamed);
-    assert_eq!(kitty_of(&mut b), (0, [0; 8]), "stale");
-    drop(b);
-    // The alternate screen's program in front, the shell's grant behind.
-    fake::set_foreground(p, program);
-    a.pane_input(p, b"\x1b[?1049h\x1b[>4u", false);
-    let mut b = rebuild_with(&a, &dir, unnamed);
-    assert_eq!(kitty_of(&mut b).0, 4);
-    assert_eq!(b.model.panes[&p].kitty_owner, [None, Some(program)]);
-    b.pane_input(p, b"\x1b[?1049l", false);
-    assert_eq!(kitty_of(&mut b).0, 1, "the shell's");
-    drop(b);
-    // The alternate screen left with its stack: gone. The shell's stays.
-    a.pane_input(p, b"\x1b[?1049l", false);
-    let mut b = rebuild_with(&a, &dir, unnamed);
-    assert_eq!(kitty_of(&mut b).0, 1);
-    b.pane_input(p, b"\x1b[?1049h", false);
-    assert_eq!(b.model.panes[&p].term.kitty_keys(), 0, "its stack is gone");
-    fake::clear();
-    drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
 

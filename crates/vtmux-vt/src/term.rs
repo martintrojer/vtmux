@@ -431,10 +431,6 @@ pub struct PaneTerm {
     /// ([`PaneTerm::reset_kitty_keys`]) and Ghostty has it still: emptied
     /// as that screen comes up, and exported empty.
     kitty_stale: bool,
-    /// A screen's kitty keyboard flags went from 0 to non-zero in the last
-    /// feed (primary, alternate): a program was granted
-    /// ([`PaneTerm::take_kitty_grants`]).
-    kitty_new: [bool; 2],
     /// The links cells of this pane are drawn with (tmux's
     /// `s->hyperlinks`), shared with its grid's copies.
     pub(crate) links: Rc<RefCell<crate::link::Links>>,
@@ -628,7 +624,6 @@ impl PaneTerm {
             sync: SyncHold::default(),
             kitty_option: false,
             kitty_stale: false,
-            kitty_new: [false; 2],
             links: Rc::default(),
         };
         pane.retain();
@@ -855,11 +850,7 @@ impl PaneTerm {
                     // is granted; otherwise it is dropped as tmux drops it
                     // (no `u` entry with a prefix, input.c:347).
                     ScanEvent::Kitty if self.kitty_option || self.kitty_granted() => {
-                        let before = self.kitty_granted();
                         self.feed_piece(&bytes[i..=i]);
-                        if !before && self.kitty_granted() {
-                            self.kitty_new[usize::from(self.alternate_on())] = true;
-                        }
                     }
                     ScanEvent::Kitty => self.term.vt_write(b"\x18"),
                     // OSC 133 only marks the line in tmux (input.c
@@ -1199,35 +1190,8 @@ impl PaneTerm {
     /// the option was on (nothing else reaches the stack, so its flags are
     /// non-zero exactly while it is granted), and they stay its own until
     /// its stack is back to 0, whatever the option says.
-    #[must_use]
-    pub fn kitty_granted(&self) -> bool {
+    fn kitty_granted(&self) -> bool {
         self.kitty_flags() != 0
-    }
-
-    /// The screens (primary, alternate) whose program was granted since
-    /// the last call: its flags went from 0 to non-zero by a push or set.
-    /// The server notes which process group that was, to end the grant
-    /// with it ([`PaneTerm::end_kitty_grant`]).
-    pub fn take_kitty_grants(&mut self) -> [bool; 2] {
-        std::mem::take(&mut self.kitty_new)
-    }
-
-    /// End one screen's grant: empty its kitty keyboard stack, because the
-    /// process group that pushed it is gone (a killed program never pops).
-    /// The screen not in use is emptied when it comes up, as for
-    /// [`PaneTerm::reset_kitty_keys`]. `false` when it cannot be done now,
-    /// the parser being inside a sequence or character that the cancel
-    /// would cut: the caller asks again.
-    pub fn end_kitty_grant(&mut self, alternate: bool) -> bool {
-        if alternate != self.alternate_on() {
-            self.kitty_stale = true;
-            return true;
-        }
-        if self.scan.state != ScanState::Ground || self.scan.utf8.started() {
-            return false;
-        }
-        self.term.vt_write(KITTY_EMPTY);
-        true
     }
 
     /// Empty both screens' kitty keyboard stacks, ending any grant: a
@@ -5299,56 +5263,6 @@ mod tests {
         t.feed(b"\x1b[>5u");
         let back = PaneTerm::import_state(&t.export_state()).unwrap();
         assert_eq!(back.kitty_keys(), 5);
-    }
-
-    /// D29: the screen a push granted is named once
-    /// ([`PaneTerm::take_kitty_grants`]); a second push, a pop that leaves
-    /// flags and a refused push (option off, not granted) name none.
-    #[test]
-    fn kitty_keyboard_grants_are_noted() {
-        let mut t = PaneTerm::new(20, 5, 100);
-        t.feed(b"\x1b[>1u");
-        assert_eq!(t.take_kitty_grants(), [false; 2], "refused while off");
-        t.set_kitty_keys(true);
-        t.feed(b"\x1b[>1u");
-        assert_eq!(t.take_kitty_grants(), [true, false]);
-        assert_eq!(t.take_kitty_grants(), [false; 2], "taken");
-        t.feed(b"\x1b[>4u\x1b[<u");
-        assert_eq!(t.take_kitty_grants(), [false; 2], "already granted");
-        t.feed(b"\x1b[?1049h\x1b[>8u");
-        assert_eq!(t.take_kitty_grants(), [false, true]);
-        t.feed(b"\x1b[<u\x1b[=1;1u");
-        assert_eq!(t.take_kitty_grants(), [false, true], "a set from 0 grants");
-    }
-
-    /// D29: ending one screen's grant empties that screen's stack only,
-    /// at once for the screen in use and when the other comes up, and not
-    /// in the middle of a sequence or character, which the cancel would
-    /// cut.
-    #[test]
-    fn ending_a_kitty_grant_empties_that_screen_only() {
-        let mut t = PaneTerm::new(20, 5, 100);
-        t.set_kitty_keys(true);
-        t.feed(b"\x1b[>1u\x1b[?1049h\x1b[>4u");
-        assert_eq!(t.kitty_keys(), 4);
-        // The primary screen's, not in use: its stack is exported empty.
-        assert!(t.end_kitty_grant(false));
-        assert_eq!(t.kitty_keys(), 4, "the alternate screen keeps its own");
-        assert_eq!(t.export_state().primary.kitty_flags, [0; 8]);
-        t.feed(b"\x1b[?1049l");
-        assert_eq!(t.kitty_keys(), 0);
-        // The screen in use, but not inside a sequence or a character.
-        t.feed(b"\x1b[>1u\x1b[3");
-        assert_eq!(t.kitty_keys(), 1);
-        assert!(!t.end_kitty_grant(false), "inside a CSI");
-        assert_eq!(t.kitty_keys(), 1);
-        t.feed(b"1mx\xe4\xb8");
-        assert!(!t.end_kitty_grant(false), "inside a character");
-        t.feed(b"\x96");
-        assert!(t.end_kitty_grant(false));
-        assert_eq!(t.kitty_keys(), 0);
-        // `x` and a width 2 character: nothing of the CSI printed.
-        assert_eq!(t.cursor(), (3, 0), "no output was cut");
     }
 
     /// D31 with `vtmux-inband-resize` off: mode 2048 is tmux's, unknown

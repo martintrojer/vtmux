@@ -460,31 +460,6 @@ pub fn resize(master: impl std::os::fd::AsFd, cols: u16, rows: u16) -> io::Resul
     Ok(())
 }
 
-/// The PTY's foreground process group (`tcgetpgrp`), `None` when it has
-/// none.
-#[must_use]
-pub fn foreground_pgid(master: impl std::os::fd::AsFd) -> Option<i32> {
-    Some(
-        rustix::termios::tcgetpgrp(master)
-            .ok()?
-            .as_raw_nonzero()
-            .get(),
-    )
-}
-
-/// Whether process group `pgid` still has a process, one not yet reaped
-/// included (`kill(-pgid, 0)`: another user's group answers `EPERM`).
-#[must_use]
-pub fn group_alive(pgid: i32) -> bool {
-    let Some(leader) = Pid::from_raw(pgid) else {
-        return false;
-    };
-    match rustix::process::test_kill_process_group(leader) {
-        Ok(()) => true,
-        Err(e) => e != rustix::io::Errno::SRCH,
-    }
-}
-
 /// `osdep_get_name` (osdep-linux.c:30-61): argv[0] of the PTY's foreground
 /// process group, from /proc.
 #[cfg(not(target_os = "macos"))]
