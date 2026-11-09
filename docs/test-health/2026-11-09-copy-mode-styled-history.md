@@ -2,7 +2,7 @@
 
 Task `perf_search_styled_history`. Host: the devserver of *Method* in `PERFORMANCE.md` (CentOS Stream 9, 96 cpus), shared with other agents; load 3-6 during the runs below. Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `636664b` (`/tmp/w146/vtmux-base`), `after` the branch at `5594f05` (`/tmp/w146/vtmux-after`).
 
-Commits: `8b0656e` (libghostty-vt: a clone copies a whole page as its memory, Ghostty patch 0034), `5594f05` (copy: search reads lines of styled characters past ASCII as text).
+Commits: `8b0656e` (libghostty-vt: a clone copies a whole page as its memory, Ghostty patch 0035), `5594f05` (copy: search reads lines of styled characters past ASCII as text).
 
 ## The cause
 
@@ -12,7 +12,7 @@ The search: `ScreenCopy::ascii_text` read a row as text only when every cell was
 
 What changed:
 
-- Patch 0034: a resident page the clone takes whole goes as a copy of its memory: the row headers and cells whole, the style set, the grapheme space and the hyperlink and string space only when they hold anything (the new page is zero, which is an empty set). A plain `cloneBuf` of the whole page committed memory the source never touched (RSS in copy mode over 1M lines 1961 -> 2022 MB); skipping zero memory pages kept the RSS but read that memory, a zero-page fault each, and made the first entry 20-30 ms slower. With the sets copied by what they hold: 1961 MB plain, 1971 MB styled, and no slower first entry.
+- Patch 0035: a resident page the clone takes whole goes as a copy of its memory: the row headers and cells whole, the style set, the grapheme space and the hyperlink and string space only when they hold anything (the new page is zero, which is an empty set). A plain `cloneBuf` of the whole page committed memory the source never touched (RSS in copy mode over 1M lines 1961 -> 2022 MB); skipping zero memory pages kept the RSS but read that memory, a zero-page fault each, and made the first entry 20-30 ms slower. With the sets copied by what they hold: 1961 MB plain, 1971 MB styled, and no slower first entry.
 - `ScreenCopy::text` reads a row as text when every cell is one character of one column or a blank, of any style (`CellBits::plain`, as capture's plain lines). The search uses the text for such a line whether ASCII or not: a plain pattern of such characters is matched in the UTF-8 text from a cell's first byte, a regular expression runs over the text (the same buffer `window_copy_search_lr_regex` builds from the cells), and a line whose cells cannot hold the pattern is passed unread.
 - `plain_codepoints`, shared by capture's plain lines and `text`, takes a row of codepoints past ASCII in two branch-free passes. The first version of `text` called `CellBits::plain` from a second place, and `capture-pane -S -` over 1M styled lines went 413-446 -> 438-471 ms: `perf annotate` showed capture's per-cell loop (`plain_cells`) as the same instructions at other addresses, its back edge now 27% of the function's samples. With the shared function it is 414-435 again.
 
