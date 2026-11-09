@@ -420,7 +420,7 @@ fn full_set_to_layout_writes_a_layout_checkpoint_and_prunes() {
     assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
     assert!(server.checkpoint().is_some());
     let chunks = state.join(crate::persist::CHUNKS);
-    let full = |name| crate::persist::load_file(&state, name).unwrap();
+    let full = |name| crate::persist::load_file(&state, name).unwrap().0;
     assert_ne!(full(MANIFEST_PREV).pages().len(), 0);
     assert!(std::fs::read_dir(&chunks).unwrap().count() > 0);
 
