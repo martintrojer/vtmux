@@ -1,0 +1,119 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "inband_resize_off",
+  "inputs": {
+    "name": "inband_resize_off",
+    "size": [
+      60,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "60",
+          "-y",
+          "12",
+          "sh",
+          "-c",
+          "stty raw -echo min 1 time 20; q() { printf \"$1\"; dd bs=1 count=$2 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033[?2048$p' 11; printf '\\033[?2048h'; tmux wait-for -S set; q '' 1; q '\\033[?2048$p' 11; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "set"
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "50",
+          "-y",
+          "10"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "Z"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[?2048;0$y\nZ\n^[[?2048;0$y\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

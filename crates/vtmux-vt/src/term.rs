@@ -184,6 +184,46 @@ fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
 const CELL_WIDTH_PX: u32 = 16;
 const CELL_HEIGHT_PX: u32 = 32;
 
+/// In-band resize, mode 2048 (spec D31, an extension under D28): whether
+/// the server offers it (`vtmux-inband-resize`, read at every feed) and
+/// whether the pane's program holds it. A program is granted when it sets
+/// `?2048h` while it is offered, and keeps the grant until `?2048l`, RIS
+/// or a respawn, whatever the option says later (D28 rule 5). tmux 3.8
+/// knows no mode 2048 (`input_csi_dispatch_sm_private`, input.c:2022), so
+/// the sequence never reaches Ghostty: vtmux keeps the mode itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct InbandResize {
+    offered: bool,
+    granted: bool,
+}
+
+impl InbandResize {
+    /// DECRQM `?2048`: 1 when granted, 2 when offered, else tmux's 0 (its
+    /// table has no 2048, input.c:1651-1722).
+    fn decrqm(self) -> u8 {
+        if self.granted {
+            1
+        } else if self.offered {
+            2
+        } else {
+            0
+        }
+    }
+}
+
+/// A mode 2048 report for a pane of `cols` x `rows`: Ghostty's
+/// `size_report.encode(.mode_2048)` (size_report.zig:49-58), with the cell
+/// size of tmux's XTWINOPS replies (D-014), as [`PaneTerm::size_report`].
+fn inband_report(cols: u16, rows: u16) -> Vec<u8> {
+    let (x, y) = (u32::from(cols), u32::from(rows));
+    format!(
+        "\x1b[48;{y};{x};{};{}t",
+        y * CELL_HEIGHT_PX,
+        x * CELL_WIDTH_PX
+    )
+    .into_bytes()
+}
+
 /// Bytes in one pooled Ghostty page (`PagePool.item_size`, PageList.zig):
 /// the standard page layout rounded up to Zig's `std.heap.page_size_min`
 /// (`Page.layout`, page.zig), 4 KiB on Linux and x86-64 macOS, 16 KiB on
@@ -328,6 +368,8 @@ pub struct PaneTerm {
     cursor: Rc<StdCell<CursorState>>,
     /// tmux's `MODE_MOUSE_*` bits, shared with the scanner and the reply hook.
     mouse: Rc<StdCell<MouseModes>>,
+    /// Mode 2048 ([`InbandResize`]), shared with the reply hook for DECRQM.
+    inband: Rc<StdCell<InbandResize>>,
     /// The newest `hsize` history rows, copied when the alternate screen was
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
@@ -465,13 +507,20 @@ impl PaneTerm {
         let mouse = Rc::new(StdCell::new(MouseModes::default()));
         let mouse_seen = Rc::clone(&mouse);
         let mouse_scan = Rc::clone(&mouse);
+        let inband = Rc::new(StdCell::new(InbandResize::default()));
+        let inband_seen = Rc::clone(&inband);
         let events = Rc::new(RefCell::new(Events::default()));
         let belled = Rc::clone(&events);
         let notified = Rc::clone(&events);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
-                if let Some(reply) = tmux_reply(term, cursor_seen.get(), mouse_seen.get(), data) {
+                let modes = SeenModes {
+                    cursor: cursor_seen.get(),
+                    mouse: mouse_seen.get(),
+                    inband: inband_seen.get(),
+                };
+                if let Some(reply) = tmux_reply(term, modes, data) {
                     push_bytes(&mut sink.borrow_mut(), &reply);
                 }
             })
@@ -545,6 +594,7 @@ impl PaneTerm {
             pin: None,
             cursor,
             mouse,
+            inband,
             scan: AltModeScanner {
                 cursor: cursor_scan,
                 mouse: mouse_scan,
@@ -729,6 +779,9 @@ impl PaneTerm {
                     self.term.vt_write(b"\x18");
                     self.term.vt_write(&start);
                 }
+                for set in std::mem::take(&mut self.scan.inband) {
+                    self.inband_mode(set);
+                }
                 match self.scan.sync.take() {
                     Some(true) => self.start_sync(),
                     // input.c:1981: screen_write_end_sync; the clients
@@ -740,6 +793,9 @@ impl PaneTerm {
                 // (screen-write.c:430), and the pane is redrawn whole.
                 if e == ScanEvent::Reset {
                     self.sync.hold = None;
+                    // Ghostty's own RIS resets mode 2048 with the rest
+                    // (`Terminal.fullReset`): the program let it go.
+                    self.end_inband_resize();
                 }
                 let alternate = self.alternate_on();
                 // `?1049l` gives the pen the copy `screen_alternate_on` took,
@@ -2138,6 +2194,60 @@ impl PaneTerm {
         std::mem::take(&mut self.events.borrow_mut().list)
     }
 
+    /// `vtmux-inband-resize` (D31): whether a `?2048h` from now on grants
+    /// mode 2048, and what DECRQM says of it. A grant already held stays
+    /// either way (D28 rule 5).
+    pub fn set_inband_resize(&mut self, offered: bool) {
+        let mut m = self.inband.get();
+        m.offered = offered;
+        self.inband.set(m);
+    }
+
+    /// The program holds mode 2048 (D31): every size change of the pane is
+    /// reported to it ([`Self::inband_resize_report`]).
+    #[must_use]
+    pub fn inband_resize_granted(&self) -> bool {
+        self.inband.get().granted
+    }
+
+    /// The mode 2048 report a granted program gets once its pty is set to
+    /// `cols` x `rows`, or `None` when it is not granted.
+    #[must_use]
+    pub fn inband_resize_report(&self, cols: u16, rows: u16) -> Option<Vec<u8>> {
+        self.inband_resize_granted()
+            .then(|| inband_report(cols, rows))
+    }
+
+    /// The program's grant of mode 2048 ends: a respawn (the program is
+    /// gone) or RIS.
+    pub fn end_inband_resize(&mut self) {
+        self.set_inband_granted(false);
+    }
+
+    pub(crate) fn set_inband_granted(&mut self, granted: bool) {
+        let mut m = self.inband.get();
+        m.granted = granted;
+        self.inband.set(m);
+    }
+
+    /// `?2048h` or `?2048l` from the program. A set while offered grants
+    /// the mode; a set while granted reports the size at once, as Ghostty
+    /// does on every set (`setMode`, stream_terminal.zig:2051-2054,
+    /// `reportMode2048` :1881-1890), after the replies to what came before.
+    fn inband_mode(&mut self, set: bool) {
+        let mut m = self.inband.get();
+        if !set {
+            m.granted = false;
+        } else if m.offered {
+            m.granted = true;
+        }
+        self.inband.set(m);
+        if set && m.granted {
+            let report = inband_report(self.cols(), self.rows());
+            push_bytes(&mut self.scan.answers, &report);
+        }
+    }
+
     /// `CSI 22 t` (`push`) or `CSI 23 t` (input.c:2187-2212). A push keeps
     /// the title on a stack of at most ten (`screen_push_title`); a pop
     /// restores the newest, if any (`screen_pop_title`), and reports the
@@ -2848,6 +2958,9 @@ struct AltModeScanner {
     /// The private mode sequence just ended set (`true`) or reset
     /// synchronized output (`?2026`); [`PaneTerm::feed`] takes it.
     sync: Option<bool>,
+    /// The sets (`true`) and resets of mode 2048 in the private mode
+    /// sequence just ended, in order; [`PaneTerm::feed`] takes them.
+    inband: Vec<bool>,
     /// The title stack operations and size reports of the XTWINOPS that
     /// just ended, in order.
     title_ops: Vec<WinOp>,
@@ -4292,6 +4405,7 @@ impl AltModeScanner {
                 Param::Num(2026) => self.sync = Some(set),
                 Param::Num(3) => self.deccolm = true,
                 Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(set)),
+                Param::Num(2048) => self.inband.push(set),
                 Param::Num(n) => m.apply(n, set),
                 _ => {}
             }
@@ -4589,7 +4703,8 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// - DSR 5 -> `ESC[0n` (input.c:1727-1729), identical
 /// - CPR -> `ESC[row;colR` from tmux's cursor, ignoring origin mode
 ///   (input.c:1730-1732)
-/// - DECRQM -> tmux's mode table (input.c:1638-1722)
+/// - DECRQM -> tmux's mode table (input.c:1638-1722), plus mode 2048
+///   while offered or granted ([`InbandResize`], D31)
 /// - DECRQSS: answered by [`PaneTerm::answer_decrqss`] from the DCS parser
 ///   (Ghostty's own SGR/DECSTBM/DECSLRM replies are dropped here)
 /// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890): produced by the
@@ -4598,21 +4713,17 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 ///
 /// Dropped, tmux does not answer: DA3, DECXCPR `CSI ? 6 n` and DSR ?998
 /// (tmux's private DSR knows only 996, input.c:1631-1637), mode 2033/2048
-/// reports, kitty keyboard `CSI ? u`, XTWINOPS
+/// reports (a granted pane's 2048 reports are vtmux's own, D31: `?2048`
+/// never reaches Ghostty), kitty keyboard `CSI ? u`, XTWINOPS
 /// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
 /// 7501: the colour and clipboard queries are [`Reply`]s from tmux's own
 /// palette model, `palette.rs`), XTGETTCAP, Kitty graphics and Glyph
 /// Protocol APC. DSR ?996 is [`Reply::Theme`], from the colour-scheme
 /// effect.
-fn tmux_reply(
-    term: &Terminal<'_, '_>,
-    cursor: CursorState,
-    mouse: MouseModes,
-    data: &[u8],
-) -> Option<Vec<u8>> {
+fn tmux_reply(term: &Terminal<'_, '_>, modes: SeenModes, data: &[u8]) -> Option<Vec<u8>> {
     if let Some(body) = data.strip_prefix(b"\x1b[") {
         if let Some(params) = body.strip_suffix(b"$y") {
-            return decrqm_reply(term, cursor, mouse, params);
+            return decrqm_reply(term, modes, params);
         }
         return match body.last()? {
             b'c' if body.starts_with(b"?") => Some(b"\x1b[?1;2c".to_vec()),
@@ -4641,14 +4752,22 @@ fn tmux_reply(
     data.starts_with(b"\x1bP>|").then(|| data.to_vec())
 }
 
-/// DECRQM reply from tmux's table. `params` is the Ghostty reply between
-/// `ESC[` and `$y`: `[?]mode;state`.
-fn decrqm_reply(
-    term: &Terminal<'_, '_>,
+/// The mode state tmux keeps beside Ghostty, as the reply hook reads it.
+#[derive(Clone, Copy)]
+struct SeenModes {
     cursor: CursorState,
     mouse: MouseModes,
-    params: &[u8],
-) -> Option<Vec<u8>> {
+    inband: InbandResize,
+}
+
+/// DECRQM reply from tmux's table. `params` is the Ghostty reply between
+/// `ESC[` and `$y`: `[?]mode;state`.
+fn decrqm_reply(term: &Terminal<'_, '_>, modes: SeenModes, params: &[u8]) -> Option<Vec<u8>> {
+    let SeenModes {
+        cursor,
+        mouse,
+        inband,
+    } = modes;
     let (private, rest) = match params.strip_prefix(b"?") {
         Some(rest) => (true, rest),
         None => (false, params),
@@ -4687,6 +4806,8 @@ fn decrqm_reply(
             2004 => on(Mode::BRACKETED_PASTE),
             2026 => on(Mode::SYNC_OUTPUT),
             2031 => on(Mode::COLOR_SCHEME_REPORT),
+            // D31, vtmux's own: tmux's 0 unless offered or granted.
+            2048 => inband.decrqm(),
             _ => 0,
         }
     } else if mode == 4 {
@@ -5116,6 +5237,61 @@ mod tests {
         t.feed(b"\x1b[>5u");
         let back = PaneTerm::import_state(&t.export_state()).unwrap();
         assert_eq!(back.kitty_keys(), 5);
+    }
+
+    /// D31 with `vtmux-inband-resize` off: mode 2048 is tmux's, unknown
+    /// (DECRQM 0, input.c:1651-1722; the set ignored, input.c:2022). A set
+    /// while off grants nothing when the option is turned on later.
+    #[test]
+    fn inband_resize_off_is_tmux() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"\x1b[?2048$p\x1b[?2048h\x1b[?2048$p");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;0$y\x1b[?2048;0$y");
+        t.set_inband_resize(true);
+        t.feed(b"\x1b[?2048$p");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;2$y");
+        assert!(!t.inband_resize_granted());
+        assert_eq!(t.inband_resize_report(30, 6), None);
+    }
+
+    /// D31 with it on: DECRQM 2, then a set grants and reports at once
+    /// (Ghostty's `reportMode2048`), in order with the other replies, and
+    /// DECRQM says 1. The grant outlives the option (D28 rule 5) and ends
+    /// at `?2048l`, RIS or a respawn.
+    #[test]
+    fn inband_resize_grant() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_inband_resize(true);
+        t.feed(b"\x1b[?2048$p\x1b[5n\x1b[?2048h\x1b[?2048$p");
+        assert_eq!(
+            t.take_replies(),
+            b"\x1b[?2048;2$y\x1b[0n\x1b[48;5;20;160;320t\x1b[?2048;1$y"
+        );
+        assert_eq!(t.cursor(), (0, 0), "nothing printed");
+        assert_eq!(
+            t.inband_resize_report(30, 6).unwrap(),
+            b"\x1b[48;6;30;192;480t"
+        );
+        // Turned off: the program keeps it, and a set reports again.
+        t.set_inband_resize(false);
+        t.feed(b"\x1b[?2048$p\x1b[?2048h");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;1$y\x1b[48;5;20;160;320t");
+        t.feed(b"\x1b[?2048l\x1b[?2048$p\x1b[?2048h");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;0$y");
+        assert_eq!(t.inband_resize_report(30, 6), None);
+        // Among modes tmux knows, which still apply.
+        t.set_inband_resize(true);
+        t.feed(b"\x1b[?25l\x1b[?25;2048h\x1b[?25$p");
+        assert_eq!(t.take_replies(), b"\x1b[48;5;20;160;320t\x1b[?25;1$y");
+        // RIS ends it.
+        t.feed(b"\x1bc\x1b[?2048$p");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;2$y");
+        // So does a respawn.
+        t.feed(b"\x1b[?2048h");
+        assert!(t.inband_resize_granted());
+        t.end_inband_resize();
+        t.feed(b"\x1b[?2048$p");
+        assert_eq!(t.take_replies(), b"\x1b[48;5;20;160;320t\x1b[?2048;2$y");
     }
 
     /// tmux's private DSR answers only 996 (input.c:1631-1637); Ghostty

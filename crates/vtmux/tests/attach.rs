@@ -8213,3 +8213,312 @@ fn popup_notifications_on_skip_other_terminals() {
     let got = popup_emit(&w, &a, NOTIFY);
     assert_eq!(notifications(&got), Vec::<Vec<u8>>::new());
 }
+
+/// D31 (spec, *Protocol extensions*): a pane program for the in-band resize
+/// tests, and what it reads. The program puts its tty in raw mode, logs
+/// everything it reads (mode 2048 reports and the test's markers) to a file
+/// with a background `cat`, sets `?2048h` if asked, then prints `S`.
+struct InbandLog<'a> {
+    w: &'a World,
+    log: PathBuf,
+    /// What the log must hold by now.
+    want: String,
+    marks: usize,
+}
+
+impl<'a> InbandLog<'a> {
+    fn new(w: &'a World) -> Self {
+        Self {
+            w,
+            log: w.home.path().join("inband.log"),
+            want: String::new(),
+            marks: 0,
+        }
+    }
+
+    /// The program's script: `set` sets mode 2048; `lower` waits for
+    /// `wait-for -S lower`, then resets it and prints `L` (a pane waiting
+    /// on `wait-for` holds a live upgrade back, so only where asked).
+    fn program(&self, set: bool, lower: bool) -> String {
+        let mode = if set { "\\033[?2048h" } else { "" };
+        let lower = if lower {
+            "tmux wait-for lower </dev/null && printf '\\033[?2048lL'; "
+        } else {
+            ""
+        };
+        format!(
+            "stty raw -echo; exec 3<&0; cat <&3 >>'{}' & printf '{mode}S'; {lower}wait",
+            self.log.display()
+        )
+    }
+
+    /// `pane`'s plain text once it holds `has`.
+    fn shows(&self, pane: &str, has: &str) {
+        let end = Instant::now() + Duration::from_secs(20);
+        loop {
+            let text = cli_ok(self.w, &["capture-pane", "-p", "-t", pane]);
+            if text.contains(has) {
+                return;
+            }
+            assert!(
+                Instant::now() < end,
+                "{pane} never showed {has:?}: {text:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// `pane`'s size, columns and rows.
+    fn size(&self, pane: &str) -> (u16, u16) {
+        let out = cli_ok(
+            self.w,
+            &["display", "-p", "-t", pane, "#{pane_width} #{pane_height}"],
+        );
+        let (x, y) = out.split_once(' ').unwrap();
+        (x.parse().unwrap(), y.parse().unwrap())
+    }
+
+    /// The size `pane`'s program reads from its tty (`TIOCGWINSZ`).
+    fn tty_size(&self, pane: &str) -> (u16, u16) {
+        let tty = cli_ok(self.w, &["display", "-p", "-t", pane, "#{pane_tty}"]);
+        let fd = rustix::fs::open(
+            tty.as_str(),
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        let ws = rustix::termios::tcgetwinsize(&fd).unwrap();
+        (ws.ws_col, ws.ws_row)
+    }
+
+    /// The report of a pane of `cols` x `rows`: `CSI 48 ; rows ; cols ;
+    /// height ; width t`, tmux's 16x32 pixel cells (D-014).
+    fn report((cols, rows): (u16, u16)) -> String {
+        let (x, y) = (u32::from(cols), u32::from(rows));
+        format!("\x1b[48;{y};{x};{};{}t", y * 32, x * 16)
+    }
+
+    /// A marker typed into `pane` after everything before it, then the
+    /// log must be exactly what it should be: each report once, in order.
+    fn mark(&mut self, pane: &str) {
+        self.marks += 1;
+        let m = format!("<{}>", self.marks);
+        cli_ok(self.w, &["send-keys", "-t", pane, "-l", &m]);
+        self.want.push_str(&m);
+        let end = Instant::now() + Duration::from_secs(20);
+        loop {
+            let got =
+                String::from_utf8_lossy(&std::fs::read(&self.log).unwrap_or_default()).into_owned();
+            if got == self.want {
+                return;
+            }
+            assert!(Instant::now() < end, "log {got:?}, want {:?}", self.want);
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The program in `pane` has started; `granted`: it was sent a report
+    /// of the pane's size at its `?2048h`.
+    fn started(&mut self, pane: &str, granted: bool) {
+        self.shows(pane, "S");
+        if granted {
+            self.want.push_str(&Self::report(self.size(pane)));
+        }
+        self.mark(pane);
+    }
+
+    /// `f` changes `pane`'s size. Once its tty has the new size the
+    /// program has had its report, if `reported`, and the marker follows.
+    fn change(&mut self, pane: &str, reported: bool, what: &str, f: impl FnOnce()) {
+        let before = self.size(pane);
+        f();
+        let after = self.size(pane);
+        assert_ne!(before, after, "{what} changes {pane}'s size");
+        let end = Instant::now() + Duration::from_secs(20);
+        while self.tty_size(pane) != after {
+            assert!(Instant::now() < end, "{what}: {pane}'s tty never {after:?}");
+            thread::sleep(Duration::from_millis(10));
+        }
+        if reported {
+            self.want.push_str(&Self::report(after));
+        }
+        self.mark(pane);
+    }
+}
+
+/// Wait until window `a:w` is `size` (`WxH`): a client's resize reaches the
+/// server on its own time.
+fn window_is(w: &World, size: &str) {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let got = cli_ok(
+            w,
+            &[
+                "display",
+                "-p",
+                "-t",
+                "a:w",
+                "#{window_width}x#{window_height}",
+            ],
+        );
+        if got == size {
+            return;
+        }
+        assert!(Instant::now() < end, "window {got}, want {size}");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// D31 on: a program that sets `?2048h` gets a report at once, then one
+/// after every size change of its pane, once its pty has the size: a
+/// layout change, zoom, a client attaching and resizing, a swap, break and
+/// join across sizes, `resize-window`. A respawn ends the grant: the new
+/// program gets none until it sets the mode itself. Each path is checked
+/// on its own, so one that misses its report fails here. vtmux only.
+#[test]
+fn inband_resize_reports_every_size_change() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut l = InbandLog::new(&w);
+    cli_ok(
+        &w,
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "20", "cat", "-",
+        ],
+    );
+    cli_ok(&w, &["set", "-s", "vtmux-inband-resize", "on"]);
+    cli_ok(
+        &w,
+        &[
+            "split-window",
+            "-d",
+            "-t",
+            "%0",
+            "sh",
+            "-c",
+            &l.program(true, false),
+        ],
+    );
+    l.started("%1", true);
+    l.change("%1", true, "a layout", || {
+        cli_ok(&w, &["select-layout", "-t", "a:w", "even-horizontal"]);
+    });
+    l.change("%1", true, "zoom", || {
+        cli_ok(&w, &["resize-pane", "-Z", "-t", "%1"]);
+    });
+    l.change("%1", true, "unzoom", || {
+        cli_ok(&w, &["resize-pane", "-Z", "-t", "%1"]);
+    });
+    let mut client = None;
+    l.change("%1", true, "an attach", || {
+        client = Some(w.attach_sized(&["attach", "-t", "a"], 70, 22));
+        window_is(&w, "70x21");
+    });
+    let mut client = client.unwrap();
+    l.change("%1", true, "a client resize", || {
+        client.resize(64, 18);
+        window_is(&w, "64x17");
+    });
+    l.change("%1", true, "resize-pane", || {
+        cli_ok(&w, &["resize-pane", "-t", "%0", "-x", "10"]);
+    });
+    l.change("%1", true, "a swap", || {
+        cli_ok(&w, &["swap-pane", "-d", "-s", "%1", "-t", "%0"]);
+    });
+    l.change("%1", true, "a break", || {
+        cli_ok(&w, &["break-pane", "-d", "-s", "%1"]);
+    });
+    l.change("%1", true, "a join", || {
+        cli_ok(&w, &["join-pane", "-d", "-s", "%1", "-t", "%0"]);
+    });
+    l.change("%1", true, "resize-window", || {
+        cli_ok(&w, &["resize-window", "-t", "a:w", "-x", "50", "-y", "15"]);
+    });
+    // A respawn: the new program is not granted until it sets the mode.
+    let program = l.program(false, false);
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%1", "sh", "-c", &program],
+    );
+    l.started("%1", false);
+    l.change("%1", false, "resize-window after a respawn", || {
+        cli_ok(&w, &["resize-window", "-t", "a:w", "-x", "56", "-y", "14"]);
+    });
+    let program = l.program(true, false);
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%1", "sh", "-c", &program],
+    );
+    l.started("%1", true);
+    l.change("%1", true, "resize-window after a granted respawn", || {
+        cli_ok(&w, &["resize-window", "-t", "a:w", "-x", "50", "-y", "15"]);
+    });
+}
+
+/// D31's grant follows the program, not the option (D28 rule 5): a set
+/// while the option is off stays ungranted after it is turned on; a
+/// granted program keeps its reports after it is turned off, until it
+/// resets the mode. With the option off nothing is reported, as in tmux.
+#[test]
+fn inband_resize_grant_follows_the_program() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut l = InbandLog::new(&w);
+    let program = l.program(true, true);
+    cli_ok(
+        &w,
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "20", "sh", "-c", &program,
+        ],
+    );
+    l.started("%0", false);
+    let resize = |x: &str, y: &str| {
+        cli_ok(&w, &["resize-window", "-t", "a:w", "-x", x, "-y", y]);
+    };
+    l.change("%0", false, "option off", || resize("50", "15"));
+    cli_ok(&w, &["set", "-s", "vtmux-inband-resize", "on"]);
+    l.change("%0", false, "set while off", || resize("40", "12"));
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%0", "sh", "-c", &program],
+    );
+    l.started("%0", true);
+    l.change("%0", true, "granted", || resize("50", "15"));
+    cli_ok(&w, &["set", "-s", "vtmux-inband-resize", "off"]);
+    l.change("%0", true, "granted, option off", || resize("40", "12"));
+    cli_ok(&w, &["wait-for", "-S", "lower"]);
+    l.shows("%0", "SL");
+    l.change("%0", false, "after ?2048l", || resize("50", "15"));
+}
+
+/// D31 across a live upgrade: the grant is carried, and a client resized
+/// while the server moves onto its binary is reported once, at its new
+/// size, whether the old image, the re-attach or the new image sees it
+/// (spec D31, *Live upgrade*).
+#[test]
+fn inband_resize_carries_across_an_upgrade() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut l = InbandLog::new(&w);
+    cli_ok(&w, &["new", "-d", "-s", "a", "-n", "w", "cat", "-"]);
+    cli_ok(&w, &["set", "-g", "status-right", "R"]);
+    cli_ok(&w, &["set", "-s", "vtmux-inband-resize", "on"]);
+    let mut client = w.attach_sized(&["attach", "-t", "a"], 60, 20);
+    window_is(&w, "60x19");
+    let program = l.program(true, false);
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%0", "sh", "-c", &program],
+    );
+    l.started("%0", true);
+    l.change("%0", true, "a client resized across an upgrade", || {
+        thread::scope(|s| {
+            let up = s.spawn(|| w.cli(&["vtmux-upgrade"]));
+            client.resize(50, 16);
+            let up = up.join().unwrap();
+            assert!(up.status.success(), "{up:?}");
+        });
+        window_is(&w, "50x15");
+    });
+    l.change("%0", true, "a client resized after an upgrade", || {
+        client.resize(56, 18);
+        window_is(&w, "56x17");
+    });
+}

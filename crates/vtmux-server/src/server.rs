@@ -5469,8 +5469,10 @@ impl Server {
         // grid_clear_lines: an erase, never into history (scroll-on-clear
         // is for the program's clears).
         pane.term.set_scroll_on_clear(false);
-        // input_free: the old program's requests go.
+        // input_free: the old program's requests go, and its grant of
+        // mode 2048 (D31) with it.
         pane.requests.clear();
+        pane.term.end_inband_resize();
         // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM
         // home it too, so they come before), then screen_alternate_off(s,
         // NULL, 0): no cursor restored, but its resize back to the pane's
@@ -5636,6 +5638,10 @@ impl Server {
         let kitty_keys = self.model.kitty_keys();
         let scroll_on_clear = self.model.number_option(TreeId::Pane(p), "scroll-on-clear") != 0;
         let allow_set_title = self.model.number_option(TreeId::Pane(p), "allow-set-title") != 0;
+        let inband_resize = self
+            .model
+            .number_option(TreeId::Server, "vtmux-inband-resize")
+            != 0;
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
@@ -5643,6 +5649,7 @@ impl Server {
         pane.term.set_cursor_style_option(cursor_style);
         pane.term.set_scroll_on_clear(scroll_on_clear);
         pane.term.set_allow_set_title(allow_set_title);
+        pane.term.set_inband_resize(inband_resize);
         let before = (pane.term.title(), pane.term.pwd());
         let alternate = pane.term.alternate_on();
         pane.term
@@ -5671,9 +5678,8 @@ impl Server {
         let redraw = pane.term.take_redraw();
         let answers = pane.term.take_answers();
         let toggled_alternate = alternate != pane.term.alternate_on();
-        if entered_alternate {
-            pane.flush_resizes();
-        }
+        // A mode 2048 report (D31) may have gone to the program.
+        let reported = entered_alternate && pane.flush_resizes();
         // input_parse_buffer -> window_update_activity on every
         // non-empty read (input.c:1053): W/t sorts and lsw -O
         // activity order by it.
@@ -5725,6 +5731,9 @@ impl Server {
         // nowhere).
         if !answers.is_empty() {
             self.pane_answers(p, answers);
+        }
+        if reported {
+            self.pane_output_queued(p);
         }
         self.control_output(p, bytes);
         self.pipe_write(p, bytes);

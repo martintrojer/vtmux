@@ -514,6 +514,10 @@ record! {
         40 => one progress_bar: ProgressBar,
         /// Written when any of them has a link.
         41 => opt pen_links: Option<PenLinks>,
+        /// The program holds mode 2048, in-band resize (D31). Not
+        /// required: a reader that skips it ends the grant, and that build
+        /// sends no reports, as tmux.
+        42 => one inband_resize: bool,
     }
 }
 

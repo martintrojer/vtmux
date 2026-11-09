@@ -1609,6 +1609,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             alternate: p.links.alternate.clone(),
             emulator: p.links.emulator.clone(),
         }),
+        inband_resize: p.inband_resize,
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1913,6 +1914,7 @@ pub fn term_from_snapshot_with(
                 emulator: l.emulator.clone(),
             })
             .unwrap_or_default(),
+        inband_resize: t.inband_resize,
     };
     let mut primary = screen_in(primary_screen)?;
     if let Some(layout) = &t.alternate_saved_layout

@@ -2293,12 +2293,14 @@ impl Pane {
     /// unless they end where they started: then the one before the last is
     /// sent and the last stays queued for 10 ms later, so the program still
     /// sees a change and redraws.
-    pub fn send_resizes(&mut self, now: Instant) {
+    ///
+    /// Whether a mode 2048 report went to the program ([`Self::send_size`]).
+    pub fn send_resizes(&mut self, now: Instant) -> bool {
         if self.io.is_none() || self.resizes.is_empty() {
-            return;
+            return false;
         }
         if self.resize_timer.is_some_and(|t| t > now) {
-            return;
+            return false;
         }
         let first = self.resizes[0];
         let last = self.resizes[self.resizes.len() - 1];
@@ -2316,19 +2318,20 @@ impl Pane {
             delay = std::time::Duration::from_millis(10);
             to
         };
-        self.send_size(to);
         self.resize_timer = Some(now + delay);
+        self.send_size(to)
     }
 
     /// `screen_write_alternateon` (screen-write.c:3157-3166): entering the
     /// alternate screen sends the pane's size at once if any was queued.
-    pub fn flush_resizes(&mut self) {
+    /// Whether a mode 2048 report went to the program.
+    pub fn flush_resizes(&mut self) -> bool {
         if self.resizes.is_empty() {
-            return;
+            return false;
         }
         self.resizes.clear();
         self.resize_timer = None;
-        self.send_size((self.rect.sx, self.rect.sy));
+        self.send_size((self.rect.sx, self.rect.sy))
     }
 
     /// When the queue next wants a turn of the loop.
@@ -2341,11 +2344,25 @@ impl Pane {
     }
 
     /// `window_pane_send_resize`: `TIOCSWINSZ`; the kernel sends the
-    /// foreground process group SIGWINCH when the size differs.
-    fn send_size(&self, (sx, sy): (u32, u32)) {
-        if let Some(io) = &self.io {
-            let _ = io.resize(clamp16(sx), clamp16(sy));
-        }
+    /// foreground process group SIGWINCH when the size differs. A program
+    /// granted mode 2048 (D31) is sent its report then too, once the pty
+    /// has the size, so the two always agree; whether one went.
+    fn send_size(&mut self, (sx, sy): (u32, u32)) -> bool {
+        let Some(io) = &mut self.io else {
+            return false;
+        };
+        let size = (clamp16(sx), clamp16(sy));
+        // As SIGWINCH: only a size the pty did not have already.
+        let report = self
+            .term
+            .inband_resize_report(size.0, size.1)
+            .filter(|_| io.size().ok() != Some(size));
+        let _ = io.resize(size.0, size.1);
+        let Some(report) = report else {
+            return false;
+        };
+        io.write(&report);
+        true
     }
 }
 

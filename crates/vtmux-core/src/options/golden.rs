@@ -492,6 +492,37 @@ fn vtmux_options_hidden_until_set() {
     assert_eq!(listing(&mut sim, &["show", "-gv", NAME]), "\n");
 }
 
+/// `vtmux-inband-resize` (D31): a server flag, `off` until set, hidden
+/// from listings until set like every vtmux option (D28 rule 4).
+#[test]
+fn vtmux_inband_resize_is_a_hidden_server_flag() {
+    const NAME: &str = "vtmux-inband-resize";
+    let mut sim = Sim::new();
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+    for c in [
+        &["show", "-sv", NAME][..],
+        &["set", "-s", NAME, "on"],
+        &["show", "-s", NAME],
+        &["set", "-s", NAME],
+        &["show", "-sv", NAME],
+        &["set", "-s", NAME, "maybe"],
+        &["set", "-su", NAME],
+        &["show", "-s", NAME],
+        &["set", "-s", "vtmux-inband", "on"],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        format!(
+            "off\n{NAME} on\noff\nbad value: maybe\n{NAME} off\ninvalid option: vtmux-inband\n"
+        )
+    );
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+}
+
 /// `vtmux-persist` (D27, decision 17): a server option, `off` until set,
 /// `layout` or `full`, hidden from listings until set like every vtmux
 /// option.

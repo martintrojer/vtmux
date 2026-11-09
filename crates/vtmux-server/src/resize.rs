@@ -421,8 +421,15 @@ impl Server {
     /// 1932-1937), after the clients are drawn.
     pub(crate) fn send_pane_resizes(&mut self) {
         let now = Instant::now();
-        for pane in self.model.panes.values_mut() {
-            pane.send_resizes(now);
+        let mut reported = Vec::new();
+        for (&id, pane) in &mut self.model.panes {
+            if pane.send_resizes(now) {
+                reported.push(id);
+            }
+        }
+        // A mode 2048 report (D31) that did not all go waits for WRITABLE.
+        for p in reported {
+            self.pane_output_queued(p);
         }
     }
 

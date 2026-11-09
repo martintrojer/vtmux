@@ -16,7 +16,19 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 6] = [
+pub(super) static EXTENSIONS: [OptionDef; 7] = [
+    // D31: in-band resize, mode 2048 (a D28 protocol extension).
+    OptionDef {
+        name: "vtmux-inband-resize",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Report pane size changes in-band to programs that set mode 2048."),
+        unit: None,
+    },
     // D29: the kitty keyboard protocol, pane side (spec, *Protocol
     // extensions (D28)*).
     OptionDef {

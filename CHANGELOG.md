@@ -24,6 +24,8 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 **Pane blend.** `vtmux-pane-inactive-blend` dims inactive panes like Ghostty's unfocused splits.
 
+**In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Off, vtmux is tmux byte for byte ([D31](docs/specs/2026-10-29-vtmux.md)).
+
 **Lean where it counts** ([numbers and method](docs/PERFORMANCE.md)):
 
 - 1M lines of scrollback settle at 103 MB vs tmux's 622 MB; 20 panes streaming at a 100k limit at 217 MB vs 1.25 GB.

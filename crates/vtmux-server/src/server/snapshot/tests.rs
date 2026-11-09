@@ -1038,6 +1038,84 @@ fn queued_pane_sizes_reach_the_program_after_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// What pane `p`'s terminal echoes back (its `cat -` reads in canonical
+/// mode with echo on, so a report written to it comes back with ESC as
+/// `^[`), until it holds `want` (at most 20 s).
+fn echoed(server: &mut Server, p: u32, want: &str) -> String {
+    let pane = server
+        .model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(p))
+        .unwrap();
+    let io = pane.io.as_mut().unwrap();
+    let end = Instant::now() + Duration::from_secs(20);
+    let mut got = String::new();
+    while !got.contains(want) {
+        match io.read() {
+            crate::pane_io::ReadResult::Data(d) => got.push_str(&String::from_utf8_lossy(&d)),
+            crate::pane_io::ReadResult::WouldBlock => {
+                assert!(Instant::now() < end, "no {want:?} in {got:?}");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            crate::pane_io::ReadResult::Closed => panic!("closed: {got:?}"),
+        }
+    }
+    got
+}
+
+/// D31: a program's grant of mode 2048 is carried (an ignorable field, so
+/// an ordinary session that has one still requires nothing), and a size
+/// queued when the snapshot was taken is reported to it once the rebuilt
+/// server sends it (spec D31, *Live upgrade*).
+#[test]
+fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
+    let dir = temp_dir("inband");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048h", false);
+    echoed(&mut a, 0, "^[[48;24;80;768;1280t");
+    ok(&mut a, &dir, &["split-window", "-h", "-t", "s", "cat", "-"]);
+    assert_eq!(pty_size(&a, 0), (80, 24), "the new size is still queued");
+    let s = a.to_snapshot(snap::Meta {
+        purpose: snap::Purpose::Upgrade,
+        ..snap::Meta::default()
+    });
+    let granted: Vec<bool> = s
+        .panes
+        .iter()
+        .map(|p| p.term.as_ref().unwrap().inband_resize)
+        .collect();
+    assert_eq!(granted, [true, false]);
+    assert_eq!(s.meta.requires, Vec::<String>::new());
+    let mut b = rebuild(&a, &dir, "b");
+    assert!(
+        b.model.panes[&vtmux_core::ids::PaneId(0)]
+            .term
+            .inband_resize_granted()
+    );
+    b.send_pane_resizes();
+    assert_eq!(pty_size(&b, 0), (40, 24));
+    echoed(&mut b, 0, "^[[48;24;40;768;640t");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// `terminal-features` and `terminal-overrides` are read when a client's
 /// terminal opens (`tty_term_create`, tty-term.c:457, 619), never applied
 /// to a client already attached: the rebuilt client keeps the features it
@@ -1214,6 +1292,9 @@ fn an_ordinary_attached_client_requires_no_feature() {
         50
     );
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;0\x1b\\", false);
+    // A program granted in-band resize (D31) is ordinary too.
+    ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048h", false);
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
@@ -1227,6 +1308,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let q = c.queries.as_ref().expect("its queries are carried");
     assert!(q.da && q.da2 && q.xtversion, "{q:?}");
     assert!(c.terminal_title.is_some(), "set-titles set one");
+    assert!(s.panes[0].term.as_ref().unwrap().inband_resize);
     assert_eq!(s.meta.requires, Vec::<String>::new());
     drop(a);
     let _ = std::fs::remove_dir_all(dir);

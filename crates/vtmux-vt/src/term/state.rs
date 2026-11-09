@@ -387,6 +387,8 @@ pub struct PaneState {
     pub sync: Option<(Snapshot, std::time::Duration)>,
     /// tmux's pen link and its copies.
     pub links: PenLinkState,
+    /// The program holds mode 2048, in-band resize (D31).
+    pub inband_resize: bool,
 }
 
 /// tmux's pen hyperlink, DECSC's and the alternate screen's copies of it,
@@ -1295,6 +1297,7 @@ impl PaneTerm {
                 ((*held.screen).clone(), left)
             }),
             links: self.scan.links.state(),
+            inband_resize: self.inband_resize_granted(),
         }
     }
 
@@ -1377,6 +1380,7 @@ impl PaneTerm {
         self.scan.links = PenLinks::from_state(&p.links);
         self.scan.palette.restore(&p.palette);
         self.scan.progress = p.progress_bar;
+        self.set_inband_granted(p.inband_resize);
         {
             let titles = &mut self.titles;
             titles.server.clone_from(&p.title);

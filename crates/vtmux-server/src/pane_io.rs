@@ -146,6 +146,12 @@ impl PaneIo {
         crate::sys::pty::resize(&self.master, cols, rows)
     }
 
+    /// The size the pty has now (`TIOCGWINSZ`): columns and rows.
+    pub fn size(&self) -> io::Result<(u16, u16)> {
+        let ws = rustix::termios::tcgetwinsize(&self.master)?;
+        Ok((ws.ws_col, ws.ws_row))
+    }
+
     /// Bytes waiting to be read (`FIONREAD`, window.c
     /// `window_pane_destroy_ready`).
     #[must_use]
