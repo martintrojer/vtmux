@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reading all of a long history: copy-mode search, capture-pane, jumps.
 
-usage: bench-history-read.py <binary> <label> <lines> [<lines> ...]
+usage: bench-history-read.py [--styled] <binary> <label> <lines> [<lines> ...]
 
 For each line count: one server (private -S socket, -f /dev/null), one 120x40
 pane with history-limit lines+1000 that cats <lines> log lines of about 100
@@ -17,6 +17,9 @@ characters (a file cached under $TMPDIR), one attached 120x40 client in a pty
                    the client's redraw of the jump is in the time
   capture_M        capture-pane -p -M -S -       (copy mode's copy)
   alt-on           ?1049h written by the pane until #{alternate_on} is 1
+
+--styled: each log line has colours and attributes (a timestamp, a level,
+a status) and a character past ASCII, as coloured logs do.
 
 One line per line count on stdout. Works for tmux and vtmux alike. Results:
 docs/PERFORMANCE.md, *Copy mode and search*.
@@ -37,16 +40,28 @@ import time
 ABSENT = "zzznotfound"
 
 
+STYLED = False
+
+
 def lines_file(n):
-    path = os.path.join(tempfile.gettempdir(), f"vtmux-bench-lines-{n}.txt")
+    kind = "styled" if STYLED else "lines"
+    path = os.path.join(tempfile.gettempdir(), f"vtmux-bench-{kind}-{n}.txt")
     if not os.path.exists(path):
-        with open(path + ".tmp", "w") as f:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
             for i in range(n):
-                f.write(
-                    "2026-11-01T12:00:00Z INFO worker[%d] handled request id=%08x "
-                    "path=/api/v1/items/%d status=200 bytes=4096 xx\n"
-                    % (i % 64, i * 2654435761 % (1 << 32), i)
-                )
+                if STYLED:
+                    f.write(
+                        "\x1b[32m2026-11-01T12:00:00Z\x1b[0m \x1b[1;34mINFO\x1b[0m worker[%d] "
+                        "handled request id=%08x path=/api/v1/items/%d "
+                        "\x1b[38;5;208mstatus=200\x1b[0m bytes=4096 \u00e9\n"
+                        % (i % 64, i * 2654435761 % (1 << 32), i)
+                    )
+                else:
+                    f.write(
+                        "2026-11-01T12:00:00Z INFO worker[%d] handled request id=%08x "
+                        "path=/api/v1/items/%d status=200 bytes=4096 xx\n"
+                        % (i % 64, i * 2654435761 % (1 << 32), i)
+                    )
         os.rename(path + ".tmp", path)
     return path
 
@@ -142,10 +157,15 @@ def run(binary, label, n):
 
 
 def main():
-    if len(sys.argv) < 4:
+    global STYLED
+    argv = sys.argv[1:]
+    if argv[:1] == ["--styled"]:
+        STYLED = True
+        argv = argv[1:]
+    if len(argv) < 3:
         raise SystemExit(__doc__)
-    binary, label = sys.argv[1], sys.argv[2]
-    for n in map(int, sys.argv[3:]):
+    binary, label = argv[0], argv[1]
+    for n in map(int, argv[2:]):
         run(binary, label, n)
 
 

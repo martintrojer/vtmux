@@ -27,7 +27,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Creating 400 panes, CPU | 200 ms | 380 ms | 1.9x | **Worse.** |
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
 | Search all of a 1M-line history | 1652 ms | 825 ms | 0.50x | was 3.1 s, and 10.5 s before that; 0.51x at 100k lines; *Copy mode and search* |
-| `capture-pane -S -` of a 1M-line history | 888 ms | 3622 ms | 4.1x | **Worse**, was 6.4 s; *Reading all of a history* |
+| `capture-pane -S -` of a 1M-line history | 840 ms | 385 ms | 0.46x | was 3.5 s; `-M` (copy mode) 0.42x, `-e` 0.20x; coloured lines 0.49x, `-e` 0.54x; *Capturing all of a history* |
 | Alternate screen up over a 1M-line history | 3 ms | 4.0 s | - | **Worse**, was 6.9 s; 0.4 s at 100k lines. vtmux copies the history, tmux does not; *Reading all of a history* |
 | 32 clients on one window of agent panes | 0.48 s per 10 s | 0.79 s | 1.6x | **Worse**, was 5.2x. Clients that show the window alike share its drawing and frame; *Micro-benchmarks* |
 | 100 agent panes, one client | 3.37 s per 10 s | 2.71 s | 0.80x | RSS 100 MB against 17.8 MB, **Worse** |
@@ -209,10 +209,34 @@ A probe script, not the `copymode` mode above: one 120x40 pane, N log lines of a
 - The search is linear now: 90, 262 and 825 ms at 100k, 300k and 1M lines (tmux 176, 539, 1652). Before it was 105, 502 and 3218 ms.
 - Before, every reader of all the rows looked each row up with a walk of Ghostty's page list from the oldest page, so it was quadratic: the search, `capture-pane -S -` with any flags, `-M` and `-R`, `#{history_bytes}`, the alternate screen coming up and view mode. Ghostty patch 0033 (`ghostty_grid_ref_down` / `_up`) steps from one row to the next instead.
 - Jumps were never quadratic: a redraw reads one screen of rows. They take 2-3 ms at 1M lines, as tmux's.
-- The captures and the alternate screen lost the walk but are still **Worse**. What remains is per row: each row is turned into cells with their text, style and link (`read_cells`) and then written out. `-M` also keeps every row it reads in the copy.
+- The captures and the alternate screen lost the walk but were still **Worse**. What remained was per row: each row was turned into cells with their text, style and link (`read_cells`) and then written out, and `-M` kept every row it read in the copy. The captures are faster than tmux's since (*Capturing all of a history*, below).
 - The alternate screen is the worst. vtmux copies the whole primary history when it comes up, because Ghostty can read only the active screen and tmux goes on showing that history; tmux saves only the visible rows (`screen_alternate_on`, screen.c:700-721). A program that switches to the alternate screen (vim, less) in a pane with 1M lines of history holds the server for 4 s, with 100k lines 0.4 s; with the default `history-limit` of 2000, 10-11 ms against tmux's 3 ms (the time includes the polling client). Avoiding the copy needs a way to read the primary screen's pages while the alternate screen is up.
 
 Raw runs: [`test-health/2026-11-08-search-1m.md`](test-health/2026-11-08-search-1m.md).
+
+### Capturing all of a history
+
+The same script, and `--styled`, whose lines have a coloured timestamp, a bold coloured level, a 256-colour status and an `é`. Median of 3 runs, base, branch and tmux in turn, load 12-13. `before` is main before `perf_capture_full_history`. The time includes sending the capture to the client, about 100 MB at 1M lines.
+
+| history | command | tmux 3.8 | vtmux before | vtmux after | after / tmux |
+|---|---|---|---|---|---|
+| 1M plain lines | `capture-pane -p -S -` | 840 ms | 3526 ms | 385 ms | 0.46x |
+| | `capture-pane -p -e -S -` | 4601 ms | 13255 ms | 931 ms | 0.20x |
+| | `capture-pane -p -M -S -` (copy mode) | 883 ms | 7411 ms | 371 ms | 0.42x |
+| 1M styled lines | `capture-pane -p -S -` | 896 ms | 4161 ms | 440 ms | 0.49x |
+| | `capture-pane -p -e -S -` | 5594 ms | 15020 ms | 3026 ms | 0.54x |
+| | `capture-pane -p -M -S -` (copy mode) | 838 ms | 8054 ms | 444 ms | 0.53x |
+| 100k plain lines | `-S -` / `-e -S -` / `-M -S -` | 87 / 448 / 83 ms | 356 / 1341 / 755 ms | 44 / 99 / 42 ms | 0.51x / 0.22x / 0.51x |
+| 100k styled lines | `-S -` / `-e -S -` / `-M -S -` | 90 / 544 / 83 ms | 415 / 1517 / 809 ms | 48 / 303 / 42 ms | 0.53x / 0.56x / 0.51x |
+
+- Before, every line was built into cells with their text, style and link (`read_cells`, about 64 bytes a cell) and written out through two more buffers. `-M` built a row for every line of copy mode's copy, kept it, and converted it back.
+- Now a line of plain cells (one character or none, one column, no tab, line drawing or link) is written straight from Ghostty's cell bits. Without `-e`, `-N`, `-F` and `-H`, styles and links write nothing, so a coloured line is plain too. Under `-e` or `-N` a line is read with its styles, one lookup per run of one style.
+- `-M` reads a line copy mode has not read from its entry copy and keeps nothing for it.
+- Other lines (wide characters, clusters, tabs, line drawing, links, or `-F`/`-H` over styles) still go through the cells, now without allocating per line. Not measured here: a history made mostly of such lines.
+- The output is byte for byte what it was: a test compares the new paths with the cells path over random content under every flag, and a probe compared the branch with main over the CLI (10 seeds x 1760 captures).
+- Seen on the way and not done: over the styled history, copy mode's search is 3.4x tmux's time (5966-6089 ms against 1746-1765 at 1M lines) and entering copy mode 2.7x. The search reads a line as text only when every cell is plain ASCII of the default style.
+
+Raw runs: [`test-health/2026-11-09-capture-full-history.md`](test-health/2026-11-09-capture-full-history.md).
 
 ## CPU and throughput
 
@@ -585,7 +609,7 @@ Times for the `bench-history-memory.sh` and `bench-hidden-panes.py` rows are the
 | `bench-history-memory.sh session` | *Big scrollback*, a session | 22:31-22:35 for two runs |
 | `bench-history-memory.sh copymode spec big` | *Copy mode and search* | 22:35-22:45 |
 | `bench-hidden-panes.py <binary> <label>` | *Hidden panes* | 22:45-22:47 for 4 x tmux and vtmux |
-| `bench-history-read.py <binary> <label> 100000 1000000` | *Reading all of a history* | about 1.5 min for vtmux, 30 s for tmux |
+| `bench-history-read.py [--styled] <binary> <label> 100000 1000000` | *Reading all of a history*, *Capturing all of a history* | about 1.5 min for vtmux, 30 s for tmux |
 
 - The exact command lines of the refresh are in [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf-refresh.md).
 - Other env: `RUNS`, `OUT`, `NO_BUILD=1`, `VTMUX`, `RENDER_FRAMES` (3000), `MANY_MB` (20), `AGENT_PANES`, `AGENT_CLIENTS`, `AGENT_SECS`, `VTMUX_REFERENCE_TMUX`, `HISTORY_SCENARIOS`. They are documented at the top of the script.
