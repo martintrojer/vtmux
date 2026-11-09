@@ -1887,10 +1887,12 @@ fn a_title_restored_without_its_terminal_is_not_escaped_again() {
     let dir = temp_dir("title");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    ok(&mut a, &dir, &["select-pane", "-t", "s", "-T", "a\\b\tc"]);
+    // No TAB: tmux's `select-pane -T` refuses a title with a control
+    // character (pane_title_sources), and shows the rest as it was given.
+    ok(&mut a, &dir, &["select-pane", "-t", "s", "-T", "a\\b#c"]);
     let title = ["display", "-p", "-t", "s", "#{pane_title}"];
     let before = run(&mut a, &dir, &title);
-    assert!(before.contains("\na\\\\b\\tc\n"), "{before:?}");
+    assert!(before.contains("\na\\\\b#c\n"), "{before:?}");
     let mut taken = a.to_snapshot(snap::Meta::default());
     for p in &mut taken.panes {
         p.term = None;
