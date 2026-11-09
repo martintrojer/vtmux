@@ -35,6 +35,8 @@ stage=target/dist/$name
 rm -rf "$stage" "$stage.tar.gz" "$stage.tar.gz.sha256"
 mkdir -p "$stage/licenses"
 cp "$bin" "$stage/vtmux"
+# The release profile strips already (Cargo.toml); this keeps the tarball
+# stripped under a CARGO_PROFILE_RELEASE_STRIP override.
 strip "$stage/vtmux"
 # Stripping a Mach-O breaks its ad-hoc signature, and arm64 macOS kills an
 # unsigned binary at exec: sign it again.

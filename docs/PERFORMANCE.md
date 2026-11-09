@@ -37,6 +37,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 598 ms compressed; 751 ms not yet compressed | - | Meets decision 13's 1 s (was 1705 ms and refused). **Misses** it onto a binary of another Ghostty patch stack: 9.9-10.4 s |
 | Hidden panes, `C-b n` to the last byte | 5.1-5.2 ms | 2.5-2.6 ms | - | |
 | Owner's config, idle server CPU over 60 s | 171 ms | 47 ms | 0.28x | the cost of answering a status poller |
+| Release binary, stripped | 1.3 MB | 9.8 MB | 7.7x | **Worse.** Ghostty is linked in, tmux links libevent and ncurses; was 10.7 MB before LTO, *Binary size and build profile* |
 
 Where the numbers come from, and how they are measured: *Method*, at the end.
 
@@ -533,6 +534,31 @@ With this config the idle server is not idle, and the cause is outside it. vtmux
 - The 20 runs overlap for the two binaries (94 to 119 ms and 86 to 117 ms).
 
 Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf-refresh.md), *owner_idle* and *owner_startup*.
+
+## Binary size and build profile
+
+The release profile (`Cargo.toml`) is whole-program LTO in one codegen unit, stripped: `lto = "fat"`, `codegen-units = 1`, `strip = true`. Against cargo's default, same commit:
+
+| | default | vtmux's profile | |
+|---|---|---|---|
+| `target/release/vtmux` | 13.1 MB | 9.8 MB | -26% (now stripped by cargo) |
+| stripped, as shipped | 10.7 MB | 9.8 MB | -9% |
+| gzipped, in the tarball | 4.41 MB | 4.28 MB | -3% |
+| server CPU, agent panes (5-20 panes, 1-2 clients) | | | -13% to -14% |
+| server CPU, 50 and 100 agent panes | | | -17%, -18% |
+| server CPU, 16 and 32 clients, heavy status line | | | -6% to -7% |
+| key echo p50, other pane idle / next to `yes` | 0.43 / 0.54 ms | 0.38 / 0.45 ms | -12% / -17% |
+| output CPU, no client, 100 MB plain / SGR | 1.03 / 1.64 s | 1.05 / 1.71 s | flat: Ghostty's parser, which LTO doesn't touch |
+| live upgrade, 10 x 100k, fresh / idle | 950 / 774 ms | 943 / 804 ms | flat (noise) |
+| RSS | | | about 1 MB lower |
+| build after touching `vtmux-core` | 108 s | 118 s | +10 s |
+
+- tmux 3.8 is 1.3 MB stripped, plus the libevent and ncurses it links. vtmux carries Ghostty statically (1.35 MB of its text) and 6.5 MB of Rust text.
+- `panic = "abort"` would save 0.67 MB more, but a live upgrade catches a panic in its rebuild to switch back (`server/resume.rs` `guarded`), and the restore catches a panicking decode. Abort would take every pane down with it, so panics unwind.
+- No `opt-level = "s"`/`"z"` (they would also build Ghostty `ReleaseSmall`) and no debug info (cargo's `DEBUG=true` would build Ghostty in Zig `Debug`). Ghostty stays `ReleaseFast`: its text is byte-identical under both profiles.
+- Rows elsewhere on this page dated before 2026-11-09 were measured with the default profile, so the render-bound ones are now a little pessimistic.
+
+Raw runs, every candidate's size and build time: [`test-health/2026-11-09-release-profile.md`](test-health/2026-11-09-release-profile.md).
 
 ## Method
 

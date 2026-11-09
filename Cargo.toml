@@ -25,6 +25,20 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 module_name_repetitions = "allow"
 
+# The shipped binary (docs/PERFORMANCE.md, *Binary size and build profile*):
+# whole-program LTO in one codegen unit is 9% smaller stripped and 7-18% less
+# server CPU on render-bound work, for about 10 s more build. LTO covers the
+# Rust crates only; libghostty-vt's Zig archive links as native code, still
+# ReleaseFast (its build script reads DEBUG and OPT_LEVEL, which this leaves
+# alone: debug info here would set DEBUG=true and build ghostty in Debug).
+# panic stays unwind: a live upgrade's resume and the persistence restore
+# catch a panic to switch back or refuse (server/resume.rs `guarded`,
+# server/restore.rs), where abort would close every pane's PTY.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
 # libghostty-vt-sys builds ghostty in Zig Debug mode when DEBUG is set, and
 # that parses ~5 KB/s: too slow for any PTY test that floods a pane. The
 # override gives its build script DEBUG=false, OPT_LEVEL=3 -> ReleaseFast.
