@@ -90,7 +90,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-env-changed=DEBUG");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
-    println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
+    // vtmux: relative to this package. Upstream's `crates/libghostty-vt-sys/`
+    // prefix (its repo layout) named a file that never exists here, so
+    // cargo reran the script and rebuilt everything above it every time.
+    println!("cargo:rerun-if-changed=build.rs");
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to

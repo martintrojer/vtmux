@@ -46,6 +46,11 @@ Recorded per commit in git history; the list is kept current:
   (name order, `git apply`) to the fetched ghostty; the source stamp
   records the commit and the patch contents. Not applied to a
   `GHOSTTY_SOURCE_DIR` tree.
+- `libghostty-vt-sys/build.rs`: `rerun-if-changed=build.rs`, not
+  upstream's `crates/libghostty-vt-sys/build.rs` (a path of its repo
+  layout): cargo counts a missing file as changed, so every cargo
+  command reran the script and rebuilt `libghostty-vt-sys` and every
+  crate above it, `target/debug/vtmux` included.
 - `patches/0001-keep-one-free-page-resident.patch` (`PageList.zig`
   `destroyNodeExt`, `keepWarm`): a freed pool page is zeroed in place
   instead of decommitted while no other free page is resident. With a
