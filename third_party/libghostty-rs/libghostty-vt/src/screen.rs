@@ -115,24 +115,30 @@ impl GridRef<'_> {
     /// Every cell of this reference's row, in one call (the reference's x
     /// is ignored). (vtmux: `ghostty_grid_ref_row_cells`, patch 0005.)
     pub fn row_cells(&self, out: &mut Vec<Cell>) -> Result<()> {
+        // vtmux: written straight into `out`'s spare capacity, which a
+        // caller reading row after row keeps, so a row costs no allocation.
         out.clear();
-        let mut buf: Vec<ffi::Cell> = vec![0; 256];
+        out.reserve(256);
         loop {
             let mut len = 0;
             let result = unsafe {
                 ffi::ghostty_grid_ref_row_cells(
                     std::ptr::from_ref(&self.inner),
-                    buf.as_mut_ptr(),
-                    buf.len(),
+                    out.as_mut_ptr().cast::<ffi::Cell>(),
+                    out.capacity(),
                     &raw mut len,
                 )
             };
             match result {
                 ffi::Result::SUCCESS => {
-                    out.extend(buf[..len].iter().map(|&c| Cell(c)));
+                    assert!(len <= out.capacity(), "ghostty wrote past the buffer");
+                    // SAFETY: ghostty wrote `len` cells from the start of
+                    // the buffer (`Cell` is `repr(transparent)` over
+                    // `ffi::Cell`, a plain integer), within its capacity.
+                    unsafe { out.set_len(len) };
                     return Ok(());
                 }
-                ffi::Result::OUT_OF_SPACE if len > buf.len() => buf.resize(len, 0),
+                ffi::Result::OUT_OF_SPACE if len > out.capacity() => out.reserve(len),
                 other => return from_result(other),
             }
         }
@@ -441,6 +447,7 @@ impl Row {
 /// The internal layout is opaque and must be queried via its methods.
 /// Obtain cell values from terminal query APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Cell(pub(crate) ffi::Cell);
 
 impl Cell {
