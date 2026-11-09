@@ -367,6 +367,28 @@ mod tests {
         assert!(d.contains("\t\tC 2,1 data=(1,1,!) flags=PADDING[4]"), "{d}");
     }
 
+    /// tmux writes a wide or non-ASCII character and a tab one cell at a
+    /// time, its padding first (`screen_write_cell`), so the line grows in
+    /// smaller steps than for collected ASCII (`grid_expand_line`; values
+    /// from tmux 3.8).
+    #[test]
+    fn cells_written_alone_grow_the_line_a_cell_at_a_time() {
+        let line = |cols, bytes: &str| {
+            dump(cols, 3, bytes.as_bytes())
+                .lines()
+                .nth(1)
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(line(8, "\u{e9}a"), "\tL 0 (0) flags=EXTENDED[2] 2/2");
+        assert_eq!(
+            line(8, "\u{3042}\u{3042}"),
+            "\tL 0 (0) flags=EXTENDED[2] 4/4"
+        );
+        assert_eq!(line(20, "a\tbc"), "\tL 0 (0) flags=EXTENDED[2] 10/10");
+        assert_eq!(line(8, "abcd"), "\tL 0 (0) flags=NONE[0] 4/8");
+    }
+
     /// A cell erased to an RGB background is an extended one in tmux and
     /// keeps no `CLEARED` (grid.c `grid_clear_cell`).
     #[test]

@@ -1,0 +1,156 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "capture_grid_cells_alone",
+  "inputs": {
+    "name": "capture_grid_cells_alone",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "8",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '\\303\\251a\\n\\343\\201\\202\\343\\201\\202\\nabcd\\n\\033[48;2;1;2;3m\\033[K\\033[mab'; tmux wait-for -S a; exec cat"
+        ]
+      },
+      {
+        "wait_for": "a"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-x",
+          "20",
+          "-y",
+          "2",
+          "sh",
+          "-c",
+          "printf 'a\\tbc\\n\\033[44m\\303\\251\\033[m'; tmux wait-for -S b; exec cat"
+        ]
+      },
+      {
+        "wait_for": "b"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pR",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pe",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pR",
+          "-t",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-peN",
+          "-t",
+          "b"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "G 8x4 (0/2000)\n\tL 0 (0) flags=EXTENDED[2] 2/2\n\t\tC 0,0 data=(1,2,é) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,1 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,3 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 1 (1) flags=EXTENDED[2] 4/4\n\t\tC 1,0 data=(2,3,あ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,1 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,2 data=(2,3,あ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,3 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 2 (2) flags=NONE[0] 4/8\n\t\tC 2,0 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,1 data=(1,1,b) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,2 data=(1,1,c) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,3 data=(1,1,d) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,5 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,6 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,7 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 3 (3) flags=EXTENDED[2] 2/8\n\t\tC 3,0 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,1 data=(1,1,b) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n\t\tC 3,3 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n\t\tC 3,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n\t\tC 3,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n\t\tC 3,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n\t\tC 3,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203] us=default[8] link=NONE linkid=NONE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "éa\nああ\nabcd\nab\u001b[48;2;1;2;3m\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "G 20x2 (0/2000)\n\tL 0 (0) flags=EXTENDED[2] 10/10\n\t\tC 0,0 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,1 data=(7,7,       ) flags=TAB[80] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,2 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,3 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,4 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,5 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,6 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,7 data=(1,1,!) flags=PADDING[4] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,8 data=(1,1,b) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,9 data=(1,1,c) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 1 (1) flags=EXTENDED[2] 1/5\n\t\tC 1,0 data=(1,2,é) flags=NONE[0] attr=NONE[0] fg=default[8] bg=blue[4] us=default[8] link=NONE linkid=NONE\n\t\tC 1,1 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,2 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,3 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,4 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\tbc\n\u001b[44mé\u001b[49m    \n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

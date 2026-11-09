@@ -2051,7 +2051,8 @@ fn push_text(out: &mut Vec<u8>, cells: &[u32], octal: bool) {
 }
 
 /// [`tmux_cellsize`] of a line of plain cells: every written cell (not a
-/// blank) has the same style, so each run of them is one flush.
+/// blank) has the same style, so each run of ASCII is one flush, and a
+/// character past ASCII is written alone.
 fn plain_cellsize(cells: &[u32], used: usize) -> usize {
     let mut size = 0;
     let mut i = 0;
@@ -2061,7 +2062,7 @@ fn plain_cellsize(cells: &[u32], used: usize) -> usize {
             continue;
         }
         let mut j = i + 1;
-        while j < used && cells[j] != 0 {
+        while j < used && cells[j] != 0 && cells[i] < 0x80 && cells[j] < 0x80 {
             j += 1;
         }
         if j > size {
@@ -2129,6 +2130,8 @@ fn emit_styled(
 /// cells of one style.
 fn styled_cellsize(cells: &[u32], styles: &StyleRow, used: usize) -> usize {
     let written = |x: usize| cells[x] != 0 || styles.style(x).bg != Color::Default;
+    // screen_write_collect_add: a character past ASCII is written alone.
+    let ascii = |x: usize| cells[x] < 0x80;
     let extent = (0..cells.len())
         .rposition(written)
         .map_or(0, |i| i + 1)
@@ -2141,7 +2144,12 @@ fn styled_cellsize(cells: &[u32], styles: &StyleRow, used: usize) -> usize {
             continue;
         }
         let mut j = i + 1;
-        while j < extent && written(j) && styles.style(j) == styles.style(i) {
+        while j < extent
+            && written(j)
+            && styles.style(j) == styles.style(i)
+            && ascii(i)
+            && ascii(j)
+        {
             j += 1;
         }
         if j > size {
@@ -2232,41 +2240,70 @@ fn escape_esc(line: &mut Vec<u8>, at: usize) {
 /// How many cells tmux has allocated for a row, which decides how many
 /// trailing blank cells can carry an SGR reset under `-e` without `-N`.
 ///
-/// tmux grows a line with `grid_expand_line` (grid.c:564-589) once per run of
-/// same-attribute text that `screen_write` flushes (`grid_set_cells`,
-/// grid.c:690-715): to a quarter of the width if the run ends below it, to a
-/// half if below that, else to the full width. Reproduced by treating each
-/// maximal run of written cells with equal style as one flush. Approximation: it does not
-/// know about rows that were written and later erased or rewritten out of
-/// order, which keep their old allocation in tmux.
+/// tmux grows a line with `grid_expand_line` (grid.c:564-589): to a quarter
+/// of the width if the write ends below it, to a half if below that, else
+/// to the full width, and not at all if the line already reaches the end.
+/// Plain ASCII is collected and written a run at a time
+/// (`screen_write_collect_add`, `grid_set_cells`), anything else one cell
+/// at a time (`screen_write_cell`: a wide or non-ASCII character, a tab, a
+/// line-drawing character), its padding first (`grid_view_set_padding`).
+/// Reproduced by treating each maximal run of collectable cells with equal
+/// style, charset and link as one write, and every other cell as its own.
+/// Approximation: it does not know about rows that were written and later
+/// erased or rewritten out of order, which keep their old allocation in
+/// tmux, nor where tmux ended a run early (an escape sequence that changes
+/// nothing, the end of a read).
 fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
     let width = cells.len();
     // A wide character's padding and a tab's columns are written with it.
     let written = |c: &RowCell| !c.empty || c.style.bg != Color::Default || c.padding();
+    // screen_write_collect_add: one column, one byte, no tab, no charset.
+    let alone = |c: &RowCell| c.acs || c.tab != 0 || c.wide == Width::Double || c.data().len() > 1;
     let extent = cells
         .iter()
         .rposition(written)
         .map_or(0, |i| i + 1)
         .max(used);
     let mut size = 0;
+    let mut expand = |end: usize| {
+        if end > size {
+            size = expanded_size(end, width);
+        }
+    };
     let mut i = 0;
     while i < extent {
         if !written(&cells[i]) {
             i += 1;
             continue;
         }
+        if alone(&cells[i]) {
+            // The padding cells, then the character (screen_write_cell).
+            let mut j = i + 1;
+            if cells[i].wide == Width::Double {
+                if cells.get(j).is_some_and(|c| c.wide == Width::SpacerTail) {
+                    j += 1;
+                }
+            } else if matches!(cells[i].tab, 1..=32) {
+                while cells.get(j).is_some_and(|c| c.tab == TAB_CONTINUATION) {
+                    j += 1;
+                }
+            }
+            for end in i + 2..=j {
+                expand(end);
+            }
+            expand(i + 1);
+            i = j;
+            continue;
+        }
         // A run is what one grid_set_cells writes: same style, charset
         // and link.
-        let same = |a: &RowCell, b: &RowCell| {
-            b.spacer() || (a.style == b.style && a.acs == b.acs && a.target == b.target)
-        };
+        let same =
+            |a: &RowCell, b: &RowCell| a.style == b.style && a.acs == b.acs && a.target == b.target;
         let mut j = i + 1;
-        while j < extent && written(&cells[j]) && same(&cells[j], &cells[i]) {
+        while j < extent && written(&cells[j]) && !alone(&cells[j]) && same(&cells[j], &cells[i]) {
             j += 1;
         }
-        if j > size {
-            size = expanded_size(j, width);
-        }
+        expand(j);
         i = j;
     }
     size

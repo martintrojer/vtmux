@@ -1,0 +1,21 @@
+name = "capture_grid_cells_alone"
+size = [40, 10]
+# tmux writes a character that is not plain ASCII (wide, accented, a tab)
+# one cell at a time, its padding first (screen-write.c screen_write_cell),
+# where plain ASCII is collected and written a run at a time
+# (screen_write_collect_add), and grid_expand_line grows the line to a
+# quarter, a half or all of the width for each write that passes it: so
+# an 8-column line of "éa" holds 2 cells, "abcd" 8. A cell erased to an
+# RGB background is an extended cell, which keeps no CLEARED flag
+# (grid.c grid_clear_cell). capture-pane -R shows the allocation and the
+# flags, -e the trailing reset it bounds (D-027).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "8", "-y", "4", "sh", "-c", "printf '\\303\\251a\\n\\343\\201\\202\\343\\201\\202\\nabcd\\n\\033[48;2;1;2;3m\\033[K\\033[mab'; tmux wait-for -S a; exec cat"] },
+  { wait_for = "a" },
+  { run = ["new", "-d", "-s", "b", "-x", "20", "-y", "2", "sh", "-c", "printf 'a\\tbc\\n\\033[44m\\303\\251\\033[m'; tmux wait-for -S b; exec cat"] },
+  { wait_for = "b" },
+  { run = ["capturep", "-pR", "-t", "a"] },
+  { run = ["capturep", "-pe", "-t", "a"] },
+  { run = ["capturep", "-pR", "-t", "b"] },
+  { run = ["capturep", "-peN", "-t", "b"] },
+]
