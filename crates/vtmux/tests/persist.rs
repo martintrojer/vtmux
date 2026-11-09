@@ -1170,7 +1170,7 @@ fn full_set_to_layout_leaves_no_history_on_disk() {
     wait_until("both manifests hold history", || {
         [persist::MANIFEST, persist::MANIFEST_PREV]
             .iter()
-            .all(|m| persist::load_file(&w.state(), m).is_ok_and(|s| !s.pages().is_empty()))
+            .all(|m| persist::load_file(&w.state(), m).is_ok_and(|(s, _)| !s.pages().is_empty()))
     });
     assert_ne!(files(&w.state().join(persist::CHUNKS)).len(), 0);
 
@@ -1178,7 +1178,7 @@ fn full_set_to_layout_leaves_no_history_on_disk() {
     wait_until("a layout checkpoint, and no history left", || {
         let dir = w.state();
         [persist::MANIFEST, persist::MANIFEST_PREV].iter().all(|m| {
-            persist::load_file(&dir, m).is_ok_and(|s| {
+            persist::load_file(&dir, m).is_ok_and(|(s, _)| {
                 s.meta.purpose == snap::Purpose::CheckpointLayout && s.pages().is_empty()
             })
         }) && files(&dir.join(persist::CHUNKS)).is_empty()
