@@ -54,7 +54,10 @@ use crate::sys::upgrade as sys;
 ///   resort's rebuild that keeps terminal state ([`salvage`]), so the one
 ///   without any runs;
 /// - `panic`: the first restore panics in the image an upgrade execs;
-/// - `check`: the rebuild fails in the dry run, and only there.
+/// - `check`: the rebuild fails in the dry run, and only there;
+/// - `lacks <feature>`: the dry run reads as a build that lacks that
+///   [`snap::Meta::requires`] name (a build before it, a downgrade), and
+///   refuses a stream that requires it with that build's error.
 const FAIL_HOOK: &str = "VTMUX_TEST_RESUME_FAIL";
 
 fn hook() -> Option<String> {
@@ -113,6 +116,11 @@ pub fn check_snapshot(fd: RawFd) -> Result<(), String> {
 /// fresh socket of this process's own.
 fn check_bytes(bytes: &[u8]) -> Result<(), String> {
     let s = decode_unchecked(bytes)?;
+    if let Some(name) = hook().as_deref().and_then(|h| h.strip_prefix("lacks "))
+        && s.meta.requires.iter().any(|r| r == name)
+    {
+        return Err(snap::Error::Unsupported(name.to_owned()).to_string());
+    }
     check(&s).map_err(|e| match leave_hint(&s) {
         Some(hint) => format!("{e}: {hint}"),
         None => e,
@@ -771,7 +779,8 @@ impl Server {
     /// gets is taken now, with everything since in it (the one checked is
     /// what the binary was shown it can read). One that requires a
     /// feature the checked one did not (its first history page in
-    /// Ghostty's form, an auto-hide scrollbar shown) gets a dry run of its
+    /// Ghostty's form, an auto-hide scrollbar shown, a program granted
+    /// mode 2048) gets a dry run of its
     /// own instead ([`Exec::Again`]), up to [`CHECK_ROUNDS`] in all: the
     /// binary was never shown it reads that. Then `execve(binary)` with
     /// the descriptors the snapshot names kept open. Returns only if the
@@ -934,9 +943,10 @@ pub(crate) struct Passed {
 
 /// How many dry runs an upgrade may take, when the snapshot after each
 /// requires a feature the one before did not ([`Server::exec_upgrade`]).
-/// There are two such features (Ghostty's history pages, the auto-hide
-/// scrollbar), so three is one more than ever needed.
-pub(crate) const CHECK_ROUNDS: u8 = 3;
+/// There are four such features (Ghostty's history pages, a very visible
+/// cursor, the auto-hide scrollbar, a mode 2048 grant), so five is one
+/// more than ever needed.
+pub(crate) const CHECK_ROUNDS: u8 = 5;
 
 /// What [`Server::exec_upgrade`] came to, when the exec did not happen.
 #[derive(Debug)]

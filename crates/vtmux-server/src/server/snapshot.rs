@@ -1263,27 +1263,27 @@ impl Server {
             .collect();
 
         vtmux_vt::PATCH_STACK.clone_into(&mut meta.ghostty_patches);
-        let need = ghostty_pages_requirement();
-        let mut terms = panes.iter().filter_map(|p| p.term.as_ref()).chain(
-            clients
-                .iter()
-                .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
-        );
-        if !meta.requires.contains(&need) && terms.any(crate::snapshot_term::has_ghostty_pages) {
-            meta.requires.push(need);
-        }
-        let visible = snap::CURSOR_VERY_VISIBLE_FEATURE.to_string();
-        if panes
-            .iter()
-            .filter_map(|p| p.term.as_ref())
-            .chain(
+        let terms = || {
+            panes.iter().filter_map(|p| p.term.as_ref()).chain(
                 clients
                     .iter()
                     .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
             )
-            .any(crate::snapshot_term::has_very_visible_cursor)
-        {
+        };
+        let need = ghostty_pages_requirement();
+        if !meta.requires.contains(&need) && terms().any(crate::snapshot_term::has_ghostty_pages) {
+            meta.requires.push(need);
+        }
+        let visible = snap::CURSOR_VERY_VISIBLE_FEATURE.to_string();
+        if terms().any(crate::snapshot_term::has_very_visible_cursor) {
             meta.requires.push(visible);
+        }
+        // A program granted mode 2048 (D31) stopped handling SIGWINCH: a
+        // build that drops the grant would leave it drawing at the old
+        // size, so a reader must keep it (`snap::INBAND_RESIZE_FEATURE`).
+        let inband = snap::INBAND_RESIZE_FEATURE.to_string();
+        if !meta.requires.contains(&inband) && terms().any(|t| t.inband_resize) {
+            meta.requires.push(inband);
         }
         let bar = snap::SCROLLBAR_FEATURE.to_string();
         if !meta.requires.contains(&bar)

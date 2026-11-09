@@ -1063,10 +1063,12 @@ fn echoed(server: &mut Server, p: u32, want: &str) -> String {
     got
 }
 
-/// D31: a program's grant of mode 2048 is carried (an ignorable field, so
-/// an ordinary session that has one still requires nothing), and a size
-/// queued when the snapshot was taken is reported to it once the rebuilt
-/// server sends it (spec D31, *Live upgrade*).
+/// D31: a program's grant of mode 2048 is carried, and required
+/// ([`snap::INBAND_RESIZE_FEATURE`]: a build that dropped it would leave
+/// the program drawing at its old size), and a size queued when the
+/// snapshot was taken is reported to it once the rebuilt server sends it
+/// (spec D31, *Live upgrade*). Once the program lets the mode go, nothing
+/// is required.
 #[test]
 fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     let dir = temp_dir("inband");
@@ -1102,7 +1104,7 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
         .map(|p| p.term.as_ref().unwrap().inband_resize)
         .collect();
     assert_eq!(granted, [true, false]);
-    assert_eq!(s.meta.requires, Vec::<String>::new());
+    assert_eq!(s.meta.requires, [snap::INBAND_RESIZE_FEATURE]);
     let mut b = rebuild(&a, &dir, "b");
     assert!(
         b.model.panes[&vtmux_core::ids::PaneId(0)]
@@ -1112,6 +1114,17 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     b.send_pane_resizes();
     assert_eq!(pty_size(&b, 0), (40, 24));
     echoed(&mut b, 0, "^[[48;24;40;768;640t");
+    b.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048l", false);
+    let s = b.to_snapshot(snap::Meta {
+        purpose: snap::Purpose::Upgrade,
+        ..snap::Meta::default()
+    });
+    assert!(
+        s.panes
+            .iter()
+            .all(|p| !p.term.as_ref().unwrap().inband_resize)
+    );
+    assert_eq!(s.meta.requires, Vec::<String>::new());
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1292,9 +1305,13 @@ fn an_ordinary_attached_client_requires_no_feature() {
         50
     );
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;0\x1b\\", false);
-    // A program granted in-band resize (D31) is ordinary too.
-    ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
+    // A program that asks for in-band resize (D31) is ordinary too, and
+    // so is the option turned on: a set while it was off is no grant
+    // (a grant is required,
+    // `a_mode_2048_grant_and_a_queued_report_survive_a_rebuild`).
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048h", false);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048$p", false);
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
@@ -1308,7 +1325,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let q = c.queries.as_ref().expect("its queries are carried");
     assert!(q.da && q.da2 && q.xtversion, "{q:?}");
     assert!(c.terminal_title.is_some(), "set-titles set one");
-    assert!(s.panes[0].term.as_ref().unwrap().inband_resize);
+    assert!(!s.panes[0].term.as_ref().unwrap().inband_resize);
     assert_eq!(s.meta.requires, Vec::<String>::new());
     drop(a);
     let _ = std::fs::remove_dir_all(dir);

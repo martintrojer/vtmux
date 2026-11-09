@@ -504,8 +504,14 @@ impl Server {
             p.scrollbar_visible = false;
             p.scrollbar_hover = false;
             p.scrollbar_hide_in_ms = None;
+            // Nor does it hold a mode 2048 grant (D31): its program is gone.
+            if let Some(t) = &mut p.term {
+                t.inband_resize = false;
+            }
         }
-        s.meta.requires.retain(|r| r != snap::SCROLLBAR_FEATURE);
+        s.meta
+            .requires
+            .retain(|r| r != snap::SCROLLBAR_FEATURE && r != snap::INBAND_RESIZE_FEATURE);
         if mode == Mode::Layout {
             // Copied screen text, and titles programs set.
             s.server.buffers.clear();

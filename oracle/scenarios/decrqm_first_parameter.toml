@@ -1,0 +1,12 @@
+name = "decrqm_first_parameter"
+size = [60, 12]
+# DECRQM with two parameters: tmux reads only the first
+# (`input_get(ictx, 0, 0, 0)`, input.c:1638-1722) and answers for it, so
+# `CSI ?25;1004$p` is `?25;1$y`. No mode first (missing, 0): no reply, so
+# the DSR after them is the next thing read. The pane program reads from a
+# raw tty with dd and prints what it read through `cat -v`, a line each.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "60", "-y", "12", "sh", "-c", "stty raw -echo min 1 time 20; q() { printf \"$1\"; dd bs=1 count=$2 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033[?25;1004$p' 9; q '\\033[?1004;25$p' 11; q '\\033[4;2$p' 7; q '\\033[?;25$p\\033[?0;25$p\\033[5n' 4; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+]

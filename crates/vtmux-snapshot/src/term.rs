@@ -514,9 +514,11 @@ record! {
         40 => one progress_bar: ProgressBar,
         /// Written when any of them has a link.
         41 => opt pen_links: Option<PenLinks>,
-        /// The program holds mode 2048, in-band resize (D31). Not
-        /// required: a reader that skips it ends the grant, and that build
-        /// sends no reports, as tmux.
+        /// The program holds mode 2048, in-band resize (D31). Written
+        /// under [`crate::INBAND_RESIZE_FEATURE`] when set: a reader that
+        /// skipped it would end the grant and send no reports, and the
+        /// program, which stopped handling `SIGWINCH` once granted, would
+        /// draw at the old size.
         42 => one inband_resize: bool,
     }
 }

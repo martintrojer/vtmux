@@ -8252,6 +8252,16 @@ impl<'a> InbandLog<'a> {
         )
     }
 
+    /// A granted program that resets mode 2048 and prints `L` at SIGUSR1
+    /// (no `wait-for`, which would hold a live upgrade back).
+    fn program_lowered_by_usr1(&self) -> String {
+        format!(
+            "stty raw -echo; trap \"printf '\\033[?2048lL'\" USR1; exec 3<&0; \
+             cat <&3 >>'{}' & printf '\\033[?2048hS'; while :; do wait; done",
+            self.log.display()
+        )
+    }
+
     /// `pane`'s plain text once it holds `has`.
     fn shows(&self, pane: &str, has: &str) {
         let end = Instant::now() + Duration::from_secs(20);
@@ -8521,4 +8531,86 @@ fn inband_resize_carries_across_an_upgrade() {
         client.resize(56, 18);
         window_is(&w, "56x17");
     });
+}
+
+/// D31 and a downgrade (orchestrator, `d31_inband_resize` round 2): a
+/// granted program stopped handling `SIGWINCH` (neovim), so a binary that
+/// can't keep the grant would leave it drawing at its old size. The
+/// snapshot then requires `inband-resize-grant`, and an upgrade onto a
+/// build that lacks it (the dry run reads as one, `VTMUX_TEST_RESUME_FAIL`
+/// `lacks ...`) is refused, saying why; the program keeps its reports. Once
+/// the program resets the mode, or exits, the same upgrade goes through.
+#[test]
+fn inband_resize_grant_refuses_a_downgrade_until_released() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut l = InbandLog::new(&w);
+    let older = w.home.path().join("vtmux-older");
+    std::fs::write(
+        &older,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n--vtmux-check-snapshot) \
+             VTMUX_TEST_RESUME_FAIL='lacks inband-resize-grant'; \
+             export VTMUX_TEST_RESUME_FAIL;;\nesac\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_vtmux")
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&older, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let older = older.to_str().unwrap();
+    let program = l.program_lowered_by_usr1();
+    cli_ok(
+        &w,
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "20", "cat", "-",
+        ],
+    );
+    cli_ok(&w, &["set", "-s", "vtmux-inband-resize", "on"]);
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%0", "sh", "-c", &program],
+    );
+    l.started("%0", true);
+    let pid = cli_ok(&w, &["display", "-p", "#{pid}"]);
+    let resize = |x: &str, y: &str| {
+        cli_ok(&w, &["resize-window", "-t", "a:w", "-x", x, "-y", y]);
+    };
+    let refused = |w: &World| {
+        let up = w.cli(&["vtmux-upgrade", "-b", older]);
+        let err = String::from_utf8_lossy(&up.stderr).into_owned();
+        assert_eq!(up.status.code(), Some(1), "{up:?}");
+        assert!(
+            err.starts_with("a program relies on in-band resize in %0: ")
+                && err.contains("once it turns mode 2048 off or exits")
+                && err.contains("snapshot requires `inband-resize-grant`"),
+            "{err:?}"
+        );
+        assert_eq!(cli_ok(w, &["display", "-p", "#{pid}"]), pid);
+    };
+    refused(&w);
+    l.change("%0", true, "granted, after the refusal", || {
+        resize("50", "15");
+    });
+    // The program resets the mode: nothing is required any more.
+    let sh = cli_ok(&w, &["display", "-p", "-t", "%0", "#{pane_pid}"]);
+    let sh = rustix::process::Pid::from_raw(sh.parse().unwrap()).unwrap();
+    rustix::process::kill_process(sh, rustix::process::Signal::USR1).unwrap();
+    l.shows("%0", "SL");
+    let up = w.cli(&["vtmux-upgrade", "-b", older]);
+    assert!(up.status.success(), "{up:?}");
+    l.change("%0", false, "after ?2048l and the upgrade", || {
+        resize("40", "12");
+    });
+    // Granted again, then the program exits: the upgrade goes through.
+    cli_ok(
+        &w,
+        &["respawn-pane", "-k", "-t", "%0", "sh", "-c", &program],
+    );
+    l.started("%0", true);
+    refused(&w);
+    cli_ok(&w, &["respawn-pane", "-k", "-t", "%0", "cat", "-"]);
+    let up = w.cli(&["vtmux-upgrade", "-b", older]);
+    assert!(up.status.success(), "{up:?}");
 }

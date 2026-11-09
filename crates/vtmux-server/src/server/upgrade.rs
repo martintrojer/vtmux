@@ -535,10 +535,42 @@ impl Server {
             }
             Err(message) => {
                 self.upgrade_tokens_void();
+                let message = self.dry_run_refusal(&p.binary, message);
                 self.upgrade_refuse(p.requester, &message);
                 false
             }
         }
+    }
+
+    /// A dry run's refusal, as the requester hears it. A binary that
+    /// can't read a mode 2048 grant (D31; a build before it, a downgrade)
+    /// would end it, and the program holding it stopped handling
+    /// `SIGWINCH` (neovim), so it would draw at the old size: the
+    /// snapshot requires [`snap::INBAND_RESIZE_FEATURE`], and the refusal
+    /// says which panes and what to do.
+    fn dry_run_refusal(&self, binary: &Path, message: String) -> String {
+        let lacks = snap::Error::Unsupported(snap::INBAND_RESIZE_FEATURE.into()).to_string();
+        if !message.contains(&lacks) {
+            return message;
+        }
+        let panes: Vec<String> = self
+            .model
+            .panes
+            .values()
+            .filter(|p| p.term.inband_resize_granted())
+            .map(|p| format!("%{}", p.id.0))
+            .collect();
+        let held = if panes.is_empty() {
+            String::new()
+        } else {
+            format!(" in {}", panes.join(", "))
+        };
+        format!(
+            "a program relies on in-band resize{held}: {} can't keep it, so the program \
+             would draw at its old size; once it turns mode 2048 off or exits, run \
+             vtmux-upgrade again ({message})",
+            binary.display()
+        )
     }
 
     /// Who asked, as the snapshot names them.

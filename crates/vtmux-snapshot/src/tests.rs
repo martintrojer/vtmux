@@ -130,6 +130,27 @@ fn an_auto_hide_scrollbar_round_trips() {
     );
 }
 
+/// A mode 2048 grant (D31), added within v1 under
+/// [`INBAND_RESIZE_FEATURE`], round-trips and this build reads it; the
+/// golden stream has none.
+#[test]
+fn a_mode_2048_grant_round_trips_under_its_feature() {
+    let mut s = sample();
+    s.meta.requires = vec![INBAND_RESIZE_FEATURE.into()];
+    s.panes[0].term.as_mut().unwrap().inband_resize = true;
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back, s);
+    assert!(Features::default().understands(INBAND_RESIZE_FEATURE));
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(
+        golden
+            .panes
+            .iter()
+            .filter_map(|p| p.term.as_ref())
+            .all(|t| !t.inband_resize)
+    );
+}
+
 /// A pane's output generation and OSC 133 command state, added within v1
 /// as ignorable fields (an older reader starts them afresh), round-trip;
 /// the golden stream has none.

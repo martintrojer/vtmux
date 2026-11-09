@@ -4277,6 +4277,27 @@ impl AltModeScanner {
         Some(ScanEvent::Rewrite)
     }
 
+    /// DECRQM with more than one parameter: tmux reads only the first
+    /// (`input_get(ictx, 0, 0, 0)`, input.c:1638-1722) and answers for it,
+    /// where Ghostty answers nothing. Ghostty is given the first, and the
+    /// reply hook maps its answer to tmux's ([`decrqm_reply`]); with no
+    /// mode there (missing, a string, 0) tmux answers nothing (`if (m >
+    /// 0)`). One parameter goes to Ghostty as it is.
+    fn decrqm(&mut self) -> Option<ScanEvent> {
+        let params = parse_params(&self.params)?;
+        if params.len() <= 1 {
+            return None;
+        }
+        match params[0] {
+            Param::Num(n) if n > 0 => {
+                let q = if self.private { "?" } else { "" };
+                self.rewrite = Some(format!("\x1b[{q}{n}$").into_bytes());
+                Some(ScanEvent::Rewrite)
+            }
+            _ => Some(ScanEvent::Drop),
+        }
+    }
+
     #[allow(clippy::too_many_lines)] // one arm per CSI final byte
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
         if b == b'u' && self.kitty {
@@ -4290,6 +4311,12 @@ impl AltModeScanner {
         }
         if self.query_tmux_ignores(b) {
             return Some(ScanEvent::Drop);
+        }
+        if b == b'p'
+            && self.intermediate == Some(b'$')
+            && let Some(e) = self.decrqm()
+        {
+            return Some(e);
         }
         if self.gt {
             if self.intermediate.is_none() && !self.csi_ignored && matches!(b, b'm' | b'n') {
@@ -5029,6 +5056,27 @@ mod tests {
             mouse_after(b"\x1b[?100\xa02h").tracking,
             MouseTracking::Button
         );
+    }
+
+    /// DECRQM with more parameters answers for the first, as tmux's
+    /// `input_get(ictx, 0, 0, 0)` (input.c:1638-1722): `CSI ?25;1004$p` is
+    /// `?25;1$y`. No mode first (missing, 0, a string): no reply.
+    #[test]
+    fn decrqm_reads_only_the_first_parameter() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(b"\x1b[?25;1004$p\x1b[?1004;25$p\x1b[4;2$p\x1b[4h\x1b[4;1$p");
+        assert_eq!(
+            t.take_replies(),
+            b"\x1b[?25;1$y\x1b[?1004;2$y\x1b[4;2$y\x1b[4;1$y"
+        );
+        t.feed(b"\x1b[?;25$p\x1b[?0;25$p\x1b[?1:2;25$p\x1b[5n");
+        assert_eq!(t.take_replies(), b"\x1b[0n");
+        t.feed(b"\x1b[?2048;25$p");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;0$y");
+        t.set_inband_resize(true);
+        t.feed(b"\x1b[?2048;25$pX");
+        assert_eq!(t.take_replies(), b"\x1b[?2048;2$y");
+        assert_eq!(captured(&t), "X");
     }
 
     #[test]

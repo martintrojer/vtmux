@@ -208,11 +208,15 @@ fn captured(t: &vtmux_vt::PaneTerm) -> Vec<u8> {
 /// chunks: what comes back from disk is the same screen and history
 /// (`capture-pane -e -S -`), the same cursor. Compressed history goes in
 /// the vtmux row format, never in Ghostty's (decision 23: only an
-/// upgrade stream carries that).
+/// upgrade stream carries that). A mode 2048 grant (D31) does not go: a
+/// restored pane is dead, its program gone, so nothing is required.
 #[test]
 fn a_full_checkpoint_carries_every_pane_s_terminal() {
     let (mut server, dir) = server("ckpt-term");
     let pane = server.model.panes.get_mut(&PaneId(1)).unwrap();
+    pane.term.set_inband_resize(true);
+    pane.term.feed(b"\x1b[?2048h");
+    assert!(pane.term.inband_resize_granted());
     for n in 0..300 {
         pane.term.feed(
             format!(
@@ -237,6 +241,7 @@ fn a_full_checkpoint_carries_every_pane_s_terminal() {
             .as_ref()
             .unwrap_or_else(|| panic!("%{id}: no terminal"));
         assert!(!crate::snapshot_term::has_ghostty_pages(t), "%{id}");
+        assert!(!t.inband_resize, "%{id}");
         let restored =
             crate::snapshot_term::term_from_snapshot(t, &back.meta.ghostty_patches).unwrap();
         let live = &server.model.panes[&PaneId(id)].term;

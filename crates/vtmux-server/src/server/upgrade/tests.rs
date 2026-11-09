@@ -1428,8 +1428,9 @@ fn the_server_serves_while_the_dry_run_runs_and_the_exec_gets_what_changed() {
 /// one did not gets a dry run of its own: the binary was never shown it
 /// reads that. Here a pane's first history pages in Ghostty's form (a
 /// pane printing through the dry run, `control_clients_stream_on_...`
-/// found it), then an auto-hide scrollbar shown: three dry runs, one
-/// exec of the last snapshot, one notice.
+/// found it), then an auto-hide scrollbar shown, then a program granted
+/// mode 2048 (D31): four dry runs, one exec of the last snapshot, one
+/// notice.
 #[test]
 fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
     use crate::snapshot_term::ghostty_pages_requirement;
@@ -1448,8 +1449,13 @@ fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
     server.model.panes.get_mut(&p).unwrap().sb.visible = true;
     release(&dir, 2);
     started(&mut server, &dir, 3);
-    assert!(execs().is_empty() && notices(&mut server, f, &mut f_peer).is_empty());
+    let term = &mut server.model.panes.get_mut(&p).unwrap().term;
+    term.set_inband_resize(true);
+    term.feed(b"\x1b[?2048h");
     release(&dir, 3);
+    started(&mut server, &dir, 4);
+    assert!(execs().is_empty() && notices(&mut server, f, &mut f_peer).is_empty());
+    release(&dir, 4);
     turns(&mut server, Instant::now());
     let binary = dir.join("gated");
     assert_eq!(
@@ -1466,13 +1472,16 @@ fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
         s.meta.requires.contains(&ghostty_pages_requirement())
             && s.meta
                 .requires
-                .contains(&snap::SCROLLBAR_FEATURE.to_string()),
+                .contains(&snap::SCROLLBAR_FEATURE.to_string())
+            && s.meta
+                .requires
+                .contains(&snap::INBAND_RESIZE_FEATURE.to_string()),
         "{:?}",
         s.meta.requires
     );
     assert_eq!(
         std::fs::read_to_string(dir.join("runs")).unwrap(),
-        "x\nx\nx\n"
+        "x\nx\nx\nx\n"
     );
     assert_eq!(notices(&mut server, f, &mut f_peer).len(), 1);
     std::fs::remove_dir_all(dir).unwrap();
