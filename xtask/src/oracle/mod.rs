@@ -196,13 +196,88 @@ fn build_vtmux(root: &Path) -> Result<PathBuf> {
     Ok(fs::canonicalize(root.join("target/debug/vtmux"))?)
 }
 
-/// Run `f` over `scenarios` on a small pool, keeping input order.
-fn parallel<T: Send>(scenarios: &[Scenario], f: impl Fn(&Scenario) -> T + Sync) -> Vec<T> {
-    let queue: Mutex<VecDeque<usize>> = Mutex::new((0..scenarios.len()).collect());
-    let results: Mutex<Vec<Option<T>>> = Mutex::new(scenarios.iter().map(|_| None).collect());
-    let workers = thread::available_parallelism()
-        .map_or(2, usize::from)
-        .clamp(1, 6);
+/// Scenarios run at once: one per CPU up to 6 (what the pool always had),
+/// and on a bigger host one per 6 CPUs, up to 16. A scenario mostly waits
+/// (for quiet, for a pane program), but its settles take 150 ms without
+/// output as "done", so the pool stays well under the host's CPUs.
+fn pool_size(cpus: usize) -> usize {
+    (cpus / 6).max(cpus.min(6)).clamp(1, 16)
+}
+
+/// How long each scenario took in the last run of a mode, to start the
+/// longest first next time: in name order a long scenario near the end
+/// (`status_msg_*`) runs on alone at the end of the run. A missing or
+/// unreadable file only loses the order.
+struct Durations {
+    path: PathBuf,
+    last: BTreeMap<String, f64>,
+}
+
+impl Durations {
+    /// `mode` is the run's name in the summary (`replay --upgrade-every 3`).
+    fn load(root: &Path, mode: &str) -> Self {
+        let slug: String = mode
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let path = root
+            .join("target/oracle-durations")
+            .join(format!("{slug}.tsv"));
+        let last = fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| {
+                let (secs, name) = l.split_once('\t')?;
+                Some((name.to_owned(), secs.parse().ok()?))
+            })
+            .collect();
+        Self { path, last }
+    }
+
+    /// Indices of `scenarios`, the longest last time first; one with no
+    /// time (new) counts as longest. Ties keep name order.
+    fn order(&self, scenarios: &[Scenario]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..scenarios.len()).collect();
+        let key = |i: &usize| {
+            self.last
+                .get(&scenarios[*i].name)
+                .copied()
+                .unwrap_or(f64::MAX)
+        };
+        order.sort_by(|a, b| key(b).total_cmp(&key(a)));
+        order
+    }
+
+    /// Keep this run's times (merged over the last run's, so an `--only`
+    /// run keeps the others). Written whole and renamed into place.
+    fn save(mut self, scenarios: &[Scenario], took: &[f64]) {
+        for (sc, secs) in scenarios.iter().zip(took) {
+            self.last.insert(sc.name.clone(), *secs);
+        }
+        let mut text = String::new();
+        for (name, secs) in &self.last {
+            let _ = writeln!(text, "{secs:.2}\t{name}");
+        }
+        let tmp = self
+            .path
+            .with_extension(format!("tmp.{}", std::process::id()));
+        let _ = fs::create_dir_all(self.path.parent().unwrap_or(Path::new(".")))
+            .and_then(|()| fs::write(&tmp, text))
+            .and_then(|()| fs::rename(&tmp, &self.path));
+    }
+}
+
+/// Run `f` over `scenarios` on the pool, in `order`, results (and seconds
+/// taken) in input order.
+fn parallel<T: Send>(
+    scenarios: &[Scenario],
+    order: Vec<usize>,
+    f: impl Fn(&Scenario) -> T + Sync,
+) -> Vec<(T, f64)> {
+    let queue: Mutex<VecDeque<usize>> = Mutex::new(order.into());
+    let results: Mutex<Vec<Option<(T, f64)>>> =
+        Mutex::new(scenarios.iter().map(|_| None).collect());
+    let workers = pool_size(thread::available_parallelism().map_or(2, usize::from));
     thread::scope(|s| {
         for _ in 0..workers {
             s.spawn(|| {
@@ -212,8 +287,9 @@ fn parallel<T: Send>(scenarios: &[Scenario], f: impl Fn(&Scenario) -> T + Sync) 
                 loop {
                     let next = queue.lock().unwrap().pop_front();
                     let Some(i) = next else { break };
+                    let start = std::time::Instant::now();
                     let r = f(&scenarios[i]);
-                    results.lock().unwrap()[i] = Some(r);
+                    results.lock().unwrap()[i] = Some((r, start.elapsed().as_secs_f64()));
                 }
             });
         }
@@ -239,6 +315,21 @@ fn lint(root: &Path) -> Result<ExitCode> {
     } else {
         ExitCode::from(1)
     })
+}
+
+/// [`parallel`], longest first by the last run of `mode`, whose times it
+/// then keeps; results without the times.
+fn timed<T: Send>(
+    root: &Path,
+    mode: &str,
+    scenarios: &[Scenario],
+    f: impl Fn(&Scenario) -> T + Sync,
+) -> (Vec<T>, Vec<f64>) {
+    let durations = Durations::load(root, mode);
+    let ran = parallel(scenarios, durations.order(scenarios), f);
+    let (results, took): (Vec<T>, Vec<f64>) = ran.into_iter().unzip();
+    durations.save(scenarios, &took);
+    (results, took)
 }
 
 fn run_inner() -> Result<ExitCode> {
@@ -277,7 +368,8 @@ fn run_inner() -> Result<ExitCode> {
         Mode::Record => record(&root, &scenarios),
         Mode::Replay => {
             let bin = build_vtmux(&root)?;
-            let results = parallel(&scenarios, |sc| {
+            let mode = what("replay");
+            let (results, took) = timed(&root, &mode, &scenarios, |sc| {
                 let trace = read_trace(&root, sc)?;
                 let (opts, why) = vtmux_for(sc);
                 let got = runner::run(&bin, sc, opts)?;
@@ -286,7 +378,7 @@ fn run_inner() -> Result<ExitCode> {
                 outcome.no_upgrades = why;
                 Ok::<_, String>(outcome)
             });
-            Ok(report(&scenarios, results, &what("replay")))
+            Ok(report(&scenarios, results, &took, &mode))
         }
         Mode::Live => {
             let ref_bin = ref_tmux::reference_tmux()?;
@@ -295,7 +387,12 @@ fn run_inner() -> Result<ExitCode> {
             } else {
                 build_vtmux(&root)?
             };
-            let results = parallel(&scenarios, |sc| {
+            let mode = what(if opts.self_check {
+                "live --self"
+            } else {
+                "live"
+            });
+            let (results, took) = timed(&root, &mode, &scenarios, |sc| {
                 let want = runner::run(&ref_bin, sc, reference)?;
                 let (other_opts, why) = if opts.self_check {
                     (reference, None)
@@ -307,15 +404,7 @@ fn run_inner() -> Result<ExitCode> {
                 outcome.no_upgrades = why;
                 Ok::<_, String>(outcome)
             });
-            Ok(report(
-                &scenarios,
-                results,
-                &what(if opts.self_check {
-                    "live --self"
-                } else {
-                    "live"
-                }),
-            ))
+            Ok(report(&scenarios, results, &took, &mode))
         }
     }
 }
@@ -410,7 +499,7 @@ fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
     let reference = ref_tmux::reference_tmux()?;
     let dir = root.join("oracle/traces");
     fs::create_dir_all(&dir)?;
-    let runs = parallel(scenarios, |sc| {
+    let (runs, _) = timed(root, "record", scenarios, |sc| {
         runner::run(&reference, sc, runner::Opts::default())
     });
     let mut bad = 0;
@@ -611,10 +700,11 @@ fn render(o: &Observation) -> String {
 fn report(
     scenarios: &[Scenario],
     results: Vec<std::result::Result<Outcome, String>>,
+    took: &[f64],
     what: &str,
 ) -> ExitCode {
     let mut failed = 0;
-    for (sc, res) in scenarios.iter().zip(results) {
+    for ((sc, res), secs) in scenarios.iter().zip(results).zip(took) {
         match res {
             Ok(o) if o.mismatches.is_empty() => {
                 let mut note = if o.diverged.is_empty() {
@@ -625,11 +715,11 @@ fn report(
                 if let Some(why) = &o.no_upgrades {
                     let _ = write!(note, " (no upgrades inserted, {SKIP_FILE}: {why})");
                 }
-                println!("ok    {}{note}", sc.name);
+                println!("ok    {} ({secs:.1}s){note}", sc.name);
             }
             Ok(o) => {
                 failed += 1;
-                println!("FAIL  {}", sc.name);
+                println!("FAIL  {} ({secs:.1}s)", sc.name);
                 for m in o.mismatches {
                     println!("  step {} ({}):", m.step, describe(&sc.steps, m.step));
                     for l in m.diff.lines() {
@@ -639,7 +729,7 @@ fn report(
             }
             Err(e) => {
                 failed += 1;
-                println!("ERROR {}: {e}", sc.name);
+                println!("ERROR {} ({secs:.1}s): {e}", sc.name);
             }
         }
     }
@@ -681,6 +771,40 @@ mod tests {
             },
             divergence: None,
         }
+    }
+
+    #[test]
+    fn the_pool_grows_only_past_six_cpus_a_scenario() {
+        let sizes: Vec<usize> = [0, 1, 4, 6, 12, 36, 48, 96, 400]
+            .into_iter()
+            .map(pool_size)
+            .collect();
+        assert_eq!(sizes, [1, 1, 4, 6, 6, 6, 8, 16, 16]);
+    }
+
+    #[test]
+    fn the_longest_last_time_go_first_and_new_ones_before_them() {
+        let dir =
+            std::env::temp_dir().join(format!("vtmux-oracle-durations-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let sc = |name: &str| Scenario {
+            name: name.into(),
+            size: [80, 24],
+            steps: Vec::new(),
+        };
+        let all = [sc("a"), sc("b"), sc("c"), sc("d")];
+        let none = Durations::load(&dir, "replay --upgrade-every 3");
+        assert_eq!(none.order(&all), [0, 1, 2, 3], "no times: name order");
+        // An `--only` run keeps the other scenarios' times.
+        none.save(&all[..2], &[1.0, 5.0]);
+        Durations::load(&dir, "replay --upgrade-every 3").save(&all[2..], &[3.0, 1.0]);
+        let last = Durations::load(&dir, "replay --upgrade-every 3");
+        assert_eq!(last.order(&all), [1, 2, 0, 3], "ties keep name order");
+        let new = [sc("a"), sc("b"), sc("new")];
+        assert_eq!(last.order(&new), [2, 1, 0]);
+        // Each mode has its own times.
+        assert_eq!(Durations::load(&dir, "replay").order(&all), [0, 1, 2, 3]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

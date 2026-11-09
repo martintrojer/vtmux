@@ -11,6 +11,10 @@ cargo xtask oracle replay --upgrade-every <n>  replay, vtmux upgraded onto itsel
 cargo xtask oracle lint                      the scenario guards below, no binary run (cargo test -p xtask runs them too)
 ```
 
+Scenarios run on a pool: one per CPU up to 6, and on a bigger host one per 6 CPUs, at most 16. Each run
+keeps how long every scenario took (`target/oracle-durations/<mode>.tsv`) and the next run of that mode starts
+the slowest first, so a long one is not left running alone at the end; each `ok` line shows the seconds.
+
 `--only` takes globs separated by commas (`a_*,b`). `replay` exits 1 on any mismatch not covered by a `divergence` annotation and prints a unified diff per
 mismatching step. Traces are rewritten only by `record`, on a deliberate reference bump or a new/changed
 scenario; never edit one by hand. `replay` refuses a trace whose stored scenario differs from the `.toml`.
