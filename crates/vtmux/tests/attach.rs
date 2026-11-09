@@ -145,6 +145,8 @@ impl World {
         let pause = Arc::clone(&paused);
         let rate = Arc::new(AtomicUsize::new(0));
         let limit = Arc::clone(&rate);
+        let eof = Arc::new(AtomicBool::new(false));
+        let at_eof = Arc::clone(&eof);
         thread::spawn(move || {
             let mut buf = [0; 8192];
             loop {
@@ -171,6 +173,7 @@ impl World {
                     thread::sleep(Duration::from_millis(20));
                 }
             }
+            at_eof.store(true, Ordering::Release);
         });
         let writer = pair.master.take_writer().unwrap();
         Attached {
@@ -180,6 +183,7 @@ impl World {
             bytes,
             paused,
             rate,
+            eof,
             size: (cols, rows),
         }
     }
@@ -200,6 +204,9 @@ struct Attached {
     paused: Arc<AtomicBool>,
     /// Bytes per second the terminal drains; 0 is unlimited.
     rate: Arc<AtomicUsize>,
+    /// The reader has seen the terminal close: every byte the client
+    /// wrote is in `bytes`.
+    eof: Arc<AtomicBool>,
     size: (u16, u16),
 }
 impl Attached {
@@ -264,25 +271,38 @@ impl Attached {
     fn alive(&mut self) -> bool {
         self.child.try_wait().unwrap().is_none()
     }
-    fn exited(&mut self, code: u32) {
+    /// Wait (at most 5 s) for the client to exit: its exit code. What it
+    /// wrote last may still be in the terminal ([`Self::exited`] reads it).
+    fn reaped(&mut self) -> u32 {
         let end = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(s) = self.child.try_wait().unwrap() {
-                let text = self.text();
-                let tail: String = text
-                    .chars()
-                    .rev()
-                    .take(400)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
-                assert_eq!(s.exit_code(), code, "client output tail: {tail:?}");
-                break;
+                return s.exit_code();
             }
-            assert!(Instant::now() < end);
+            assert!(Instant::now() < end, "client still running");
             thread::sleep(Duration::from_millis(10));
         }
+    }
+    fn exited(&mut self, code: u32) {
+        let status = self.reaped();
+        // What the client wrote last (its teardown, `[detached]`) may still
+        // be in the terminal: read it to the end (a slow terminal takes a
+        // while), unless a stalled terminal holds it there.
+        let end = Instant::now() + Duration::from_secs(10);
+        while !self.eof.load(Ordering::Acquire) && !self.paused.load(Ordering::Relaxed) {
+            assert!(Instant::now() < end, "terminal never closed");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let text = self.text();
+        let tail: String = text
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert_eq!(status, code, "client output tail: {tail:?}");
     }
 }
 impl Drop for Attached {
@@ -1063,8 +1083,9 @@ fn detach_after_stall_is_not_behind_a_backlog() {
         a.paused.store(false, Ordering::Relaxed);
         let start = Instant::now();
         a.keys(b"\x02d");
-        a.exited(0);
+        a.reaped();
         let took = start.elapsed();
+        a.exited(0);
         let drained = a.bytes.lock().unwrap().len() - before;
         assert!(took < Duration::from_secs(1), "detach took {took:?}");
         assert!(drained < 8 << 20, "drained {drained} bytes after detach");
@@ -1089,8 +1110,9 @@ fn slow_terminal_detaches_promptly() {
             assert!(a.alive());
             let start = Instant::now();
             a.keys(b"\x02d");
-            a.exited(0);
+            a.reaped();
             let took = start.elapsed();
+            a.exited(0);
             // The reference takes under 0.1 s (tty_close frees what the
             // terminal has not taken); 3 s leaves room for a loaded CI
             // runner. The bug this pins took 5.9 s and more.
