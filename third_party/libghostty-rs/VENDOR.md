@@ -1163,6 +1163,41 @@ Recorded per commit in git history; the list is kept current:
   known `tabClear single` in each, and `-Dtest-filter=vtmux` 156/156.
   Not an upstream candidate (tmux's model).
 
+- `patches/0035-clone-whole-page-memory.patch` (`PageList.zig` `clone`,
+  new `cloneWholePage`): a resident page `PageList.clone` copies whole
+  (every row of it) goes as a copy of its memory, as `Page.cloneBuf`
+  does: the new page has the source's capacity, so its layout, and a
+  page keeps everything as offsets into its memory. Upstream cloned it
+  row by row (`Page.cloneFrom`), and a row with managed memory cell by
+  cell, adding each styled cell's style to the new page's set
+  (`clonePartialRowFrom`, `StyleSet.addWithId`): copy-mode entry
+  (`ghostty_terminal_clone_screen`, patch 0005) over 1M styled lines took
+  701-727 ms against 290-325 ms for plain ones (tmux 276-282). Now both
+  270-303 ms. The new page comes zeroed but for its row headers
+  (`createPageExt`, `initBuf`), and zero memory is an empty set or
+  allocator (`initAssumeZeroed`): the row headers and cells are copied
+  whole, the style set, the grapheme allocator and map, and the string
+  allocator with the hyperlink set and map each only when it holds
+  anything (else the copy keeps the fresh page's, empty). Memory a page
+  never touched is not committed, and reading it to copy it faults in a
+  zero page: a plain `cloneBuf` made copy mode's RSS over 1M lines 61 MB
+  bigger (2022 against 1961 MB), and one that skipped zero memory pages
+  made the first entry 20-30 ms slower. Now 1961 MB plain, 1971 MB
+  styled (the style set's whole region is copied). A partial page (the
+  clone's first or last, cut by `top`/`bot`) and a compressed page
+  (patch 0005) go as before. Test: new `PageList clone copies whole pages
+  with their styles and graphemes (vtmux)` (several pages of styled rows
+  and graphemes: every cell, style and cluster reads back the same, each
+  page is byte for byte its source's, which the row-by-row clone fails,
+  and changing the source changes nothing in the copy); `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none -Dtest-filter="PageList
+  clone"` (Debug) passes, and the whole `test-lib-vt` gives what it gives
+  without the patch (7047/7127 pass, 76 skip; the same two fail,
+  `Terminal: tabClear single` and `kitty.graphics_image` "temporary file
+  outside directory prefix is rejected", and the same one leak, in both
+  test binaries). Rust: `capture::tests::a_copy_of_whole_pages_reads_as_the_pane_did`
+  (links included). Upstream candidate: any full-page clone gains.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

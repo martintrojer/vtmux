@@ -1,0 +1,180 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index f2dc09530..311c9991d 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1185,15 +1185,28 @@ pub fn clone(
+         const src_page = chunk.node.page();
+         assert(node.capacity().rows >= chunk.end - chunk.start);
+         defer dst_page.assertIntegrity();
+-        dst_page.size.rows = chunk.end - chunk.start;
+-        dst_page.size.cols = chunk.node.cols();
+-        try dst_page.cloneFrom(
+-            src_page,
+-            chunk.start,
+-            chunk.end,
+-        );
++        if (chunk.start == 0 and chunk.end == chunk.node.rows() and
++            dst_page.memory.len == src_page.memory.len)
++        {
++            // vtmux: a whole page goes as a copy of its memory (the new
++            // page has the source's capacity, so its layout): a page keeps
++            // everything as offsets into it (`Page.cloneBuf`). Cloning it
++            // row by row adds every styled cell's style to the new page's
++            // set one cell at a time, which made a copy of a styled history
++            // 2.5x the time of a plain one. See `cloneWholePage`.
++            const fresh = dst_page.*;
++            node.data = .{ .resident = cloneWholePage(src_page, &fresh) };
++        } else {
++            dst_page.size.rows = chunk.end - chunk.start;
++            dst_page.size.cols = chunk.node.cols();
++            try dst_page.cloneFrom(
++                src_page,
++                chunk.start,
++                chunk.end,
++            );
+ 
+-        dst_page.dirty = src_page.dirty;
++            dst_page.dirty = src_page.dirty;
++        }
+ 
+         total_rows += node.rows();
+ 
+@@ -1263,6 +1276,48 @@ pub fn clone(
+     return result;
+ }
+ 
++/// vtmux: `src.cloneBuf(dst.memory)` for `dst`, a new page of `src`'s
++/// capacity as `initBuf` leaves it: its memory zero (pool items and page
++/// allocations come zeroed, see `createPageExt`) but for the row headers.
++/// The row headers and cells are copied whole; each set or allocator of
++/// the metadata block only when it holds anything, else the copy keeps
++/// `dst`'s, empty: a page's memory never touched is not committed, and
++/// reading it to copy it faulted in a zero page each time (a plain
++/// `cloneBuf`, or one that skipped zero memory pages, took copy mode's
++/// entry over 1M lines 20-30 ms longer the first time).
++fn cloneWholePage(src: *const Page, dst: *const Page) Page {
++    const len = src.memory.len;
++    assert(dst.memory.len == len);
++    const l = Page.layout(src.capacity);
++    var result = src.*;
++    result.memory = dst.memory;
++    const copy = struct {
++        fn range(to: []u8, from: []const u8, start: usize, end: usize) void {
++            @memcpy(to[start..end], from[start..end]);
++        }
++    }.range;
++    copy(result.memory, src.memory, 0, l.styles_start);
++    if (src.styles.count() > 0) {
++        copy(result.memory, src.memory, l.styles_start, l.grapheme_alloc_start);
++    } else {
++        result.styles = dst.styles;
++    }
++    if (src.graphemeCount() > 0) {
++        copy(result.memory, src.memory, l.grapheme_alloc_start, l.string_alloc_start);
++    } else {
++        result.grapheme_alloc = dst.grapheme_alloc;
++        result.grapheme_map = dst.grapheme_map;
++    }
++    if (src.hyperlinkCount() > 0 or src.hyperlink_set.count() > 0) {
++        copy(result.memory, src.memory, l.string_alloc_start, len);
++    } else {
++        result.string_alloc = dst.string_alloc;
++        result.hyperlink_set = dst.hyperlink_set;
++        result.hyperlink_map = dst.hyperlink_map;
++    }
++    return result;
++}
++
+ /// vtmux: a compressed node with a copy of `src`'s encoding over fresh
+ /// backing memory of the same kind (pool item or heap), left untouched: the
+ /// node's first page access decodes into it (`Node.restore`).
+@@ -15941,6 +15996,89 @@ test "PageList clone full dirty" {
+     try testing.expect(s2.isDirty(.{ .active = .{ .x = 0, .y = 23 } }));
+ }
+ 
++test "PageList clone copies whole pages with their styles and graphemes (vtmux)" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 80, .rows = 24 });
++    defer s.deinit();
++    try s.growColdPagesForTest(3);
++    const total = s.totalRows();
++
++    // Every row: a cell of one of three styles, a grapheme cluster in
++    // every hundredth (a page holds few), the rest plain.
++    for (0..total) |y| {
++        const p = s.pin(.{ .screen = .{ .y = @intCast(y) } }).?;
++        const page = p.node.page();
++        const rac = p.rowAndCell();
++        rac.cell.* = .init(@intCast('a' + y % 26));
++        const style: stylepkg.Style = .{ .flags = .{
++            .bold = y % 3 == 0,
++            .italic = y % 3 == 1,
++            .underline = if (y % 3 == 2) .double else .none,
++        } };
++        const id = try page.styles.add(page.memory, style);
++        rac.cell.style_id = id;
++        rac.row.styled = true;
++        if (y % 100 == 0) {
++            const next = p.right(1).rowAndCell();
++            next.cell.* = .init('e');
++            try page.appendGrapheme(rac.row, next.cell, 0x301);
++        }
++    }
++
++    var s2 = try s.clone(alloc, .{ .top = .{ .screen = .{} } });
++    defer s2.deinit();
++    try testing.expectEqual(total, s2.totalRows());
++
++    const check = struct {
++        fn rows(a: *const PageList, b: *const PageList, n: usize) !void {
++            for (0..n) |y| {
++                const pa = a.pin(.{ .screen = .{ .y = @intCast(y) } }).?;
++                const pb = b.pin(.{ .screen = .{ .y = @intCast(y) } }).?;
++                try testing.expect(pa.node.page().memory.ptr != pb.node.page().memory.ptr);
++                for (0..2) |x| {
++                    const ca = pa.right(x).rowAndCell().cell;
++                    const cb = pb.right(x).rowAndCell().cell;
++                    try testing.expectEqual(ca.content.codepoint, cb.content.codepoint);
++                    try testing.expectEqual(ca.hasGrapheme(), cb.hasGrapheme());
++                    if (ca.hasGrapheme()) try testing.expectEqualSlices(
++                        u21,
++                        pa.node.page().lookupGrapheme(ca).?,
++                        pb.node.page().lookupGrapheme(cb).?,
++                    );
++                    try testing.expectEqual(ca.style_id == 0, cb.style_id == 0);
++                    if (ca.style_id == 0) continue;
++                    const sa = pa.node.page().styles.get(pa.node.page().memory, ca.style_id);
++                    const sb = pb.node.page().styles.get(pb.node.page().memory, cb.style_id);
++                    try testing.expect(sa.eql(sb.*));
++                }
++            }
++        }
++    };
++    try check.rows(&s, &s2, total);
++    var n = s2.pages.first;
++    while (n) |node| : (n = node.next) node.page().assertIntegrity();
++
++    // Every page is whole, so each is copied byte for byte (cloned row by
++    // row, the style sets differ).
++    var a = s.pages.first;
++    var b = s2.pages.first;
++    while (a) |na| : ({
++        a = na.next;
++        b = b.?.next;
++    }) try testing.expectEqualSlices(u8, na.page().memory, b.?.page().memory);
++    try testing.expect(b == null);
++
++    // The copy is its own: changing the source changes nothing in it.
++    const first = s.pin(.{ .screen = .{} }).?.rowAndCell();
++    first.cell.content.codepoint.data = 'Z';
++    try testing.expectEqual(
++        @as(u21, 'a'),
++        s2.pin(.{ .screen = .{} }).?.rowAndCell().cell.content.codepoint.data,
++    );
++}
++
+ test "PageList resize (no reflow) more rows" {
+     const testing = std.testing;
+     const alloc = testing.allocator;

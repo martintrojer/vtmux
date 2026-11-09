@@ -2601,6 +2601,25 @@ mod tests {
         }
     }
 
+    /// A copy of a history of many pages (each copied whole, as its
+    /// memory, patch 0034) reads as the pane read when it was taken, with
+    /// styles, links, clusters, wide characters and tabs, whatever the
+    /// pane does after.
+    #[test]
+    fn a_copy_of_whole_pages_reads_as_the_pane_did() {
+        let mut t = long_history();
+        let n = t.history_size() + 5;
+        let want: Vec<Row> = (0..n).map(|y| t.row(y)).collect();
+        let links: Vec<Option<String>> = (0..n).map(|y| t.hyperlink(0, y)).collect();
+        let copy = t.copy_screen();
+        t.feed(b"\x1b[3J\x1b[2J\x1b[H\x1b[1;31mgone\x1b]8;;http://x/\x1b\\x\r\n");
+        for y in 0..n {
+            assert_eq!(copy.row(y), want[y], "row {y}");
+            assert_eq!(copy.hyperlink(0, y), links[y], "row {y}");
+        }
+        assert!(links.iter().flatten().count() > 2000);
+    }
+
     /// The column a wide character that did not fit left at the end of a
     /// line is a default blank inside tmux's `cellsize` (its line grew to
     /// the whole width): `-N` keeps it, `-e` resets the pen on it, whatever
