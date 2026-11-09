@@ -390,6 +390,31 @@ fn a_client_of_another_version_asks_with_the_frozen_request() {
     let binary = std::fs::canonicalize(dir.path()).unwrap().join("new/vtmux");
     assert_eq!(server.join().unwrap(), ClientMsg::UpgradeRequest { binary });
 
+    // The upgrade took effect short of a part (decision 7): the frozen
+    // frame has no field for it, so it is `ok` false and the lossy prefix,
+    // and exits 2; a failure that says anything else exits 1.
+    for (message, want) in [
+        ("live upgrade took effect without %1's copy mode: why", 2),
+        (
+            "live upgrade took effect without the panes' terminal state: why",
+            2,
+        ),
+        ("live upgrade failed: why; switched back to /bin/vtmux", 1),
+    ] {
+        std::fs::remove_file(&socket).unwrap();
+        let lossy = ServerMsg::UpgradeResult {
+            ok: false,
+            message: message.into(),
+        };
+        let server = fake_server(&socket, Some(lossy));
+        let (err, code) = client(dir.path(), &socket, &["vtmux-upgrade"]);
+        assert_eq!(
+            (err.as_str(), code),
+            (format!("{message}\n").as_str(), want)
+        );
+        server.join().unwrap();
+    }
+
     // A server from before the handshake drops the request: the mismatch
     // is all the client can say.
     std::fs::remove_file(&socket).unwrap();

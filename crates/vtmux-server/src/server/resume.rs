@@ -37,8 +37,10 @@ use std::path::{Path, PathBuf};
 
 use mio::unix::SourceFd;
 use mio::{Interest, Token};
+use vtmux_core::protocol::UPGRADE_LOSSY_PREFIX;
 use vtmux_snapshot as snap;
 
+use super::upgrade::Failure;
 use super::{Server, ServerConfig};
 use crate::snapshot_term::Form;
 use crate::sys::upgrade as sys;
@@ -371,13 +373,15 @@ fn serve_salvaged(
         Rebuilt::Without(_) => why.to_owned(),
     };
     let what = rebuilt.text(took_effect);
-    let message = if took_effect {
-        format!("live upgrade took effect {what}: {why}")
+    let (message, failure) = if took_effect {
+        let m = format!("{UPGRADE_LOSSY_PREFIX}{what}: {why}");
+        (m.clone(), Failure::Lossy(m))
     } else {
-        format!("live upgrade failed: {why}; {what}")
+        let m = format!("live upgrade failed: {why}; {what}");
+        (m.clone(), Failure::Failed(m))
     };
-    server.add_message(message.clone());
-    answer(Some(&mut server), requester, handshake, Err(message));
+    server.add_message(message);
+    answer(Some(&mut server), requester, handshake, Err(failure));
     sys::release_free_memory();
     run(server)
 }
@@ -462,7 +466,7 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
                 Some(note) => {
                     let message = format!("live upgrade failed: {note}; switched back to {me}");
                     server.add_message(message.clone());
-                    Err(message)
+                    Err(Failure::Failed(message))
                 }
                 None => Ok(()),
             };
@@ -545,7 +549,9 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) ->
         None,
         requester.as_ref(),
         handshake.take(),
-        Err(format!("live upgrade failed: {why}; no session restored")),
+        Err(Failure::Failed(format!(
+            "live upgrade failed: {why}; no session restored"
+        ))),
     );
     let held = kept
         .into_iter()
@@ -583,7 +589,7 @@ fn answer(
     server: Option<&mut Server>,
     requester: Option<&snap::Requester>,
     handshake: Option<OwnedFd>,
-    outcome: Result<(), String>,
+    outcome: Result<(), Failure>,
 ) {
     let Some(requester) = requester else {
         return;

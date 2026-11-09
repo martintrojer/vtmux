@@ -15,6 +15,7 @@ use vtmux_snapshot as snap;
 
 use super::super::snapshot::tests as st;
 use super::super::{ClientId, Server};
+use super::Failure;
 
 /// One call of the exec the recorder stood in for.
 struct Exec {
@@ -633,10 +634,20 @@ fn a_carried_requester_is_answered_by_the_image_that_serves() {
     for (outcome, want) in [
         (Ok(String::new()), vec!["exit 0".to_owned()]),
         (
-            Err("live upgrade failed: why".to_owned()),
+            Err(Failure::Failed("live upgrade failed: why".to_owned())),
             vec![
                 "err live upgrade failed: why\n".to_owned(),
                 "exit 1".to_owned(),
+            ],
+        ),
+        // Took effect short of a part (decision 7): its own status.
+        (
+            Err(Failure::Lossy(
+                "live upgrade took effect without %1's copy mode: why".to_owned(),
+            )),
+            vec![
+                "err live upgrade took effect without %1's copy mode: why\n".to_owned(),
+                "exit 2".to_owned(),
             ],
         ),
     ] {
@@ -664,7 +675,10 @@ fn a_carried_requester_is_answered_by_the_image_that_serves() {
         .unwrap()
         .inbuf
         .extend_from_slice(b"display -p held\n");
-    server.upgrade_answer(control, Err("live upgrade failed: why".to_owned()));
+    server.upgrade_answer(
+        control,
+        Err(Failure::Failed("live upgrade failed: why".to_owned())),
+    );
     server.cmdq_process();
     let out: Vec<u8> = st::messages(&mut server, control, &mut peer)
         .into_iter()
@@ -682,7 +696,10 @@ fn a_carried_requester_is_answered_by_the_image_that_serves() {
     assert!(out.contains("\nheld\n%end "), "{out}");
 
     let (term, _term_peer) = st::attach(&mut server, &dir, "a", &[]);
-    server.upgrade_answer(term, Err("live upgrade failed: why".to_owned()));
+    server.upgrade_answer(
+        term,
+        Err(Failure::Failed("live upgrade failed: why".to_owned())),
+    );
     let shown = "/dev/vtmux-test-tty message: live upgrade failed: why";
     let logged = server.messages_newest_first().next().unwrap().text.clone();
     assert_eq!(logged, shown);

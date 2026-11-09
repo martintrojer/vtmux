@@ -145,6 +145,14 @@ pub const REATTACH_TOKEN_ENV: &str = "VTMUX_REATTACH_TOKEN";
 /// brackets.
 pub const UPGRADED_DETACH: &str = "server upgraded: re-attach";
 
+/// How a [`ServerMsg::UpgradeResult`] with `ok` false begins when the
+/// upgrade took effect short of some part (live-upgrade spec, decision 7):
+/// the frame is frozen, so it has no field for "lossy but successful", and
+/// the requester (`vtmux-upgrade` exits 2 then, not 1) tells it by this
+/// prefix. A failed upgrade (the old image still runs) says `live upgrade
+/// failed` instead.
+pub const UPGRADE_LOSSY_PREFIX: &str = "live upgrade took effect ";
+
 /// The shortest and longest [`ServerMsg::UpgradeNotice`] token (module
 /// docs, *Frozen frames*).
 pub const UPGRADE_TOKEN_LEN: std::ops::RangeInclusive<usize> = 16..=64;
@@ -435,7 +443,9 @@ pub enum ServerMsg {
     },
     /// Frozen (module docs): the answer to [`ClientMsg::UpgradeRequest`],
     /// the last frame on that connection. `message` is what the requester
-    /// prints: the reason when `ok` is false, warnings when it is true.
+    /// prints: the reason when `ok` is false, warnings when it is true. An
+    /// upgrade that took effect short of a part is `ok` false with a
+    /// message starting [`UPGRADE_LOSSY_PREFIX`].
     UpgradeResult {
         ok: bool,
         message: String,

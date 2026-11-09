@@ -600,7 +600,10 @@ fn upgrade_relay(
     if !message.is_empty() {
         write_err(message.as_bytes());
     }
-    ExitCode::from(u8::from(!ok))
+    // The frozen frame has no "took effect short of a part": that is
+    // `ok` false with the lossy prefix (decision 7), exit 2, not 1.
+    let lossy = !ok && message.starts_with(protocol::UPGRADE_LOSSY_PREFIX);
+    ExitCode::from(if lossy { 2 } else { u8::from(!ok) })
 }
 
 /// client.c:343-361: `-CC` puts stdin's terminal in raw mode, after the

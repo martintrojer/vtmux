@@ -5,6 +5,11 @@
 //! [`crate::server::upgrade`]'s; the command waits there
 //! (`CMD_RETURN_WAIT`) and is continued with the reason if the upgrade is
 //! refused.
+//!
+//! Exit status of the command line (decision 7): 0 the upgrade took effect
+//! whole; 1 it did not (refused, a failed dry run or `execve`, switched
+//! back); 2 it took effect short of a part (a copy mode, the panes'
+//! terminal state: `live upgrade took effect without ...` on stderr).
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;

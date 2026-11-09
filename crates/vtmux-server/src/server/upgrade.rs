@@ -193,6 +193,34 @@ enum Stage {
     Passed(Passed),
 }
 
+/// Why an upgrade's answer is not a plain success, which decides the exit
+/// status of a command client (live-upgrade spec, decision 7): 1 when it
+/// did not happen, 2 when it did, short of a part.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Failure {
+    /// Not upgraded: the old image still runs (or was switched back to),
+    /// or nothing serves a session.
+    Failed(String),
+    /// The new image serves, without a part that did not read (a copy
+    /// mode, the panes' terminal state).
+    Lossy(String),
+}
+
+impl Failure {
+    pub(crate) fn message(&self) -> &str {
+        let (Self::Failed(m) | Self::Lossy(m)) = self;
+        m
+    }
+
+    /// The command client's exit status.
+    fn code(&self) -> i32 {
+        match self {
+            Self::Failed(_) => 1,
+            Self::Lossy(_) => 2,
+        }
+    }
+}
+
 /// How the upgrade went, held by the image that serves after the exec for
 /// its requester until every client told to re-attach has, or has been
 /// given up on ([`Server::upgrade_answer_due`]), so the answer names the
@@ -202,8 +230,9 @@ pub(crate) struct LaterAnswer {
     pub(crate) requester: snap::Requester,
     /// The frozen handshake's connection, kept across the exec.
     pub(crate) handshake: Option<OwnedFd>,
-    /// `Ok` once the new image serves; `Err` with why when it does not.
-    pub(crate) outcome: Result<(), String>,
+    /// `Ok` once the new image serves; `Err` with why when it does not, or
+    /// serves short of a part.
+    pub(crate) outcome: Result<(), Failure>,
 }
 
 /// The server's upgrade state.
@@ -759,28 +788,27 @@ impl Server {
     /// on; an attached client gets why as a status message. A success
     /// carries the warnings (`Ok` with their lines, empty without), told
     /// the same way but as no error.
-    pub(crate) fn upgrade_answer(&mut self, id: ClientId, outcome: Result<String, String>) {
+    pub(crate) fn upgrade_answer(&mut self, id: ClientId, outcome: Result<String, Failure>) {
         let Some(c) = self.clients.get(&id) else {
             return;
         };
         let (control, attached) = (c.control.is_some(), c.attached.is_some());
         if control {
             match outcome {
-                Err(message) => self.control_error_line(id, &message),
+                Err(failure) => self.control_error_line(id, failure.message()),
                 Ok(warnings) if !warnings.is_empty() => self.control_plain_line(id, &warnings),
                 Ok(_) => {}
             }
             self.control_read(id);
         } else if attached {
-            if let Err(message) | Ok(message) = outcome
-                && !message.is_empty()
-            {
+            let message = outcome.unwrap_or_else(|f| f.message().to_owned());
+            if !message.is_empty() {
                 self.status_message_set(id, message);
             }
         } else {
             let (code, message) = match outcome {
                 Ok(warnings) => (0, warnings),
-                Err(message) => (1, message),
+                Err(failure) => (failure.code(), failure.message().to_owned()),
             };
             if !message.is_empty() {
                 let mut line = message.into_bytes();
@@ -1180,10 +1208,10 @@ impl Server {
 /// `fd`, written at once, the connection closed after: the requester is
 /// waiting for this one small frame, so the socket has room; a requester
 /// that went is no matter.
-pub(crate) fn write_result(fd: OwnedFd, outcome: Result<String, String>) {
+pub(crate) fn write_result(fd: OwnedFd, outcome: Result<String, Failure>) {
     let (ok, message) = match outcome {
         Ok(warnings) => (true, warnings),
-        Err(m) => (false, m),
+        Err(f) => (false, f.message().to_owned()),
     };
     let mut stream = std::os::unix::net::UnixStream::from(fd);
     let _ = vtmux_core::protocol::write_msg(&mut stream, &ServerMsg::UpgradeResult { ok, message });

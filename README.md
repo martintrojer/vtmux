@@ -17,7 +17,7 @@ Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtm
 
 As `tmux` it is tmux to every script and plugin (`tmux -V` prints `tmux 3.8`). As `vtmux` it runs next to your tmux: own sockets, `vtmux -V` prints `vtmux 3.8-beta1`.
 
-**Upgrade without losing a session:** `mise upgrade vtmux`, then `tmux vtmux-upgrade -b "$(mise which vtmux)"`. The running server moves onto the new binary; panes and clients stay. See the [changelog](CHANGELOG.md).
+**Upgrade without losing a session:** `mise upgrade vtmux`, then `tmux vtmux-upgrade -b "$(mise which vtmux)"`. The running server moves onto the new binary; panes and clients stay. Exit status: 0 upgraded, 1 not upgraded, 2 upgraded without a part that did not read (stderr says which). See the [changelog](CHANGELOG.md).
 
 ## Compared with tmux 3.8
 

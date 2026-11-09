@@ -913,6 +913,28 @@ fn a_resume_that_fails_switches_back() {
     );
 }
 
+/// [`a_resume_that_fails_switches_back`] asked for by `vtmux-upgrade` on
+/// the command line: not upgraded, so exit 1 (decision 7), the message on
+/// stderr; a lossy upgrade exits 2 and a clean one 0.
+#[test]
+fn a_switched_back_upgrade_exits_1() {
+    let world = World::new();
+    world.populate(&[("VTMUX_TEST_RESUME_FAIL", "1")]);
+    let out = world
+        .run_within(&["vtmux-upgrade"], Duration::from_secs(60))
+        .expect("vtmux-upgrade answered");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty(), "{out:?}");
+    assert!(
+        err.starts_with(&format!(
+            "live upgrade failed: {BIN}: test hook; switched back to "
+        )),
+        "{err}"
+    );
+    assert!(world.server_args().contains("--vtmux-switched-back"));
+}
+
 /// When the image switched back to fails too, the panes are still served:
 /// rebuilt without terminal state rather than lost, and the log says so.
 #[test]
@@ -953,7 +975,17 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
 /// no session at all).
 #[test]
 fn a_copy_mode_page_past_the_limit_costs_only_that_copy_mode() {
-    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")], false);
+    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")], false, false);
+}
+
+/// [`a_copy_mode_page_past_the_limit_costs_only_that_copy_mode`] asked for
+/// by `vtmux-upgrade` on the command line (decision 7): the upgrade took
+/// effect, short of the copy mode, so it exits 2, its message on stderr;
+/// where a failed upgrade (the old image still runs) exits 1 and a clean
+/// one 0.
+#[test]
+fn a_lossy_upgrade_exits_2_where_a_failed_one_exits_1() {
+    copy_mode_past_the_limit(&bin(), &[("VTMUX_TEST_COPY_ONE_PAGE", "1")], false, true);
 }
 
 /// [`a_copy_mode_page_past_the_limit_costs_only_that_copy_mode`] when the
@@ -970,6 +1002,7 @@ fn a_copy_mode_page_past_the_limit_keeps_the_sessions_when_nothing_else_rebuilds
             ("VTMUX_TEST_RESUME_FAIL", "always"),
         ],
         true,
+        false,
     );
 }
 
@@ -984,7 +1017,7 @@ fn a_server_from_before_8c94c6e_keeps_its_sessions_through_the_copy_mode_race() 
     let old = PathBuf::from(
         std::env::var_os("VTMUX_ONE_PAGE_COPY_BINARY").expect("VTMUX_ONE_PAGE_COPY_BINARY is set"),
     );
-    copy_mode_past_the_limit(&old, &[], false);
+    copy_mode_past_the_limit(&old, &[], false, false);
 }
 
 /// [`a_copy_mode_page_past_the_limit_keeps_the_sessions_when_nothing_else_rebuilds`]
@@ -997,13 +1030,15 @@ fn a_server_from_before_8c94c6e_keeps_its_sessions_when_nothing_else_rebuilds() 
     let old = PathBuf::from(
         std::env::var_os("VTMUX_ONE_PAGE_COPY_BINARY").expect("VTMUX_ONE_PAGE_COPY_BINARY is set"),
     );
-    copy_mode_past_the_limit(&old, &[("VTMUX_TEST_RESUME_FAIL", "always")], true);
+    copy_mode_past_the_limit(&old, &[("VTMUX_TEST_RESUME_FAIL", "always")], true, false);
 }
 
 /// The copy mode tests above, on a server started from `server` with
 /// `server_env`, upgraded onto this build. With `bare`, the test hook
-/// fails every rebuild that keeps terminal state.
-fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bool) {
+/// fails every rebuild that keeps terminal state. With `cli`, the upgrade
+/// is asked for by the `vtmux-upgrade` command and its exit status and
+/// stderr are checked (2, the message), not the frozen handshake's answer.
+fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bool, cli: bool) {
     let world = World::new();
     world.populate_from(server, server_env);
     world.run(&["set", "-g", "history-limit", "100000"]);
@@ -1059,7 +1094,6 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bo
     )
     .unwrap();
     set_executable(&wrapper);
-    let message = failed(world.upgrade(&wrapper));
     // The new image serves: the answer says the upgrade took effect, and
     // without what.
     let without = if bare {
@@ -1068,6 +1102,19 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bo
         format!("{pane}'s copy mode")
     };
     let took_effect = format!("live upgrade took effect without {without}: {BIN}: ");
+    let message = if cli {
+        let out = world
+            .run_within(
+                &["vtmux-upgrade", "-b", wrapper.to_str().unwrap()],
+                Duration::from_secs(60),
+            )
+            .expect("vtmux-upgrade answered");
+        assert_eq!(out.status.code(), Some(2), "{out:?}");
+        assert!(out.stdout.is_empty(), "{out:?}");
+        String::from_utf8_lossy(&out.stderr).trim_end().to_owned()
+    } else {
+        failed(world.upgrade(&wrapper))
+    };
     assert!(
         message.starts_with(&took_effect)
             && message.contains(&format!("in {pane}'s copy mode"))
