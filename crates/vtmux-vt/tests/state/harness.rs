@@ -173,7 +173,12 @@ pub fn flat_rows(screen: &vtmux_vt::ScreenState) -> Vec<String> {
 
 /// [`exported`] without the page structure: what two terminals that took
 /// the same input since an import share, whatever their allocators did.
-pub fn exported_flat(t: &PaneTerm) -> String {
+pub type Flat = (TermState, Vec<String>, Option<Vec<String>>);
+
+/// [`Flat`] of `t`. Compare these, and format them ([`flat_text`]) only to
+/// show a difference: the pretty `Debug` of a long history is most of a
+/// round trip's time in a debug build.
+pub fn exported_flat(t: &PaneTerm) -> Flat {
     let mut s = exported(t);
     s.pane.times.clear();
     let primary = flat_rows(&s.primary);
@@ -182,6 +187,11 @@ pub fn exported_flat(t: &PaneTerm) -> String {
     if let Some(alt) = s.alternate.as_mut() {
         alt.pages.clear();
     }
+    (s, primary, alternate)
+}
+
+/// A [`Flat`] as text, one field a line, to find where two differ.
+pub fn flat_text((s, primary, alternate): &Flat) -> String {
     format!("{s:#?}\n{primary:#?}\n{alternate:#?}")
 }
 

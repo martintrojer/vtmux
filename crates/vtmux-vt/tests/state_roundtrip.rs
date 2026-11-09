@@ -10,7 +10,7 @@
 #[path = "state/harness.rs"]
 mod harness;
 
-use harness::{Fuzz, PROBE, exported, exported_flat, fuzz_seeds, observe, unescape};
+use harness::{Fuzz, PROBE, exported, exported_flat, flat_text, fuzz_seeds, observe, unescape};
 use vtmux_vt::{CompressedPages, Compression, PageState, PaneTerm, StateError};
 
 fn assert_same(a: &PaneTerm, b: &PaneTerm, ctx: &str) {
@@ -40,7 +40,11 @@ fn assert_alike(a: &PaneTerm, b: &PaneTerm, ctx: &str, exact: bool) {
         }
         (format!("{sa:#?}"), format!("{sb:#?}"))
     } else {
-        (exported_flat(a), exported_flat(b))
+        let (fa, fb) = (exported_flat(a), exported_flat(b));
+        if fa == fb {
+            return;
+        }
+        (flat_text(&fa), flat_text(&fb))
     };
     if da != db {
         let line = da

@@ -13,7 +13,9 @@ mod harness;
 
 use std::collections::HashMap;
 
-use harness::{Fuzz, PROBE, exported, exported_flat, fuzz_seeds, observe, oracle_programs};
+use harness::{
+    Fuzz, PROBE, exported, exported_flat, flat_text, fuzz_seeds, observe, oracle_programs,
+};
 use vtmux_server::snapshot_term::{
     Form, TermError, ghostty_pages_requirement, has_ghostty_pages, reader_features,
     term_from_snapshot, term_from_snapshot_with, term_to_snapshot,
@@ -77,9 +79,16 @@ fn through_stream(t: snap::TermState, form: Form) -> snap::TermState {
 /// with the page structure flattened (the import rebuilds page tables);
 /// `times`: history row times too, equal right after an import.
 fn assert_alike(a: &PaneTerm, b: &PaneTerm, ctx: &str, times: bool) {
+    // Formatted only when they differ, to show where.
+    let (fa, fb) = (exported_flat(a), exported_flat(b));
+    let (flat_a, flat_b) = if fa == fb {
+        (String::new(), String::new())
+    } else {
+        (flat_text(&fa), flat_text(&fb))
+    };
     let pairs = [
         (observe(a, times), observe(b, times), "observations"),
-        (exported_flat(a), exported_flat(b), "re-exported states"),
+        (flat_a, flat_b, "re-exported states"),
         (
             format!("{:?}", exported(a).pane.times),
             format!("{:?}", exported(b).pane.times),

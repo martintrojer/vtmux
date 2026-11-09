@@ -42,3 +42,9 @@ opt-level = 3
 # The backreference long-text test takes ~8 s in a debug build, ~1 s optimised.
 [profile.dev.package.vtmux-core]
 opt-level = 2
+
+# The terminal-state round trips (vtmux-vt's state_roundtrip, vtmux-server's
+# snapshot_term) capture and export every pane of the oracle corpus many
+# times: 21 s and 27 s in a debug build, 7 s and 17 s at opt-level 1.
+[profile.dev.package.vtmux-vt]
+opt-level = 1
