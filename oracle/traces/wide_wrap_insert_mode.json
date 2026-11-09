@@ -1,0 +1,90 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "wide_wrap_insert_mode",
+  "inputs": {
+    "name": "wide_wrap_insert_mode",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "11",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '\\033[4h\\033]8;;http://l/\\033\\\\abcdefghij\\033[1mk\\033[m\\033]8;;\\033\\\\\\033[11G\\033[44m\\344\\270\\200\\033[m\\033[4l\\r\\nABCDEFGHIJK\\033[11G\\033[4h\\343\\201\\202\\033[4l'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:",
+          "#{cursor_x},#{cursor_y},#{insert_flag}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;;http://l/\u001b\\abcdefghij\u001b]8;;\u001b\\\n\u001b[44m一\u001b[49m\nABCDEFGHIJ\nあ\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "2,3,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

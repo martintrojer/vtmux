@@ -1,0 +1,13 @@
+name = "wide_wrap_insert_mode"
+# In insert mode tmux makes room for a wide character before it wraps
+# (screen-write.c screen_write_cell, grid_view_insert_cells): at the last
+# column that clears the cell, text, style and link, to the default cell,
+# whatever the pen's background. Patch 0037 kept the cell as it does
+# without insert mode. Found by review of scripts/emu_fuzz.py round 2.
+# (-J is left out: tmux prints the cleared cell as a space, D-027.)
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "11", "-y", "4", "sh", "-c", "printf '\\033[4h\\033]8;;http://l/\\033\\\\abcdefghij\\033[1mk\\033[m\\033]8;;\\033\\\\\\033[11G\\033[44m\\344\\270\\200\\033[m\\033[4l\\r\\nABCDEFGHIJK\\033[11G\\033[4h\\343\\201\\202\\033[4l'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y},#{insert_flag}"] },
+]

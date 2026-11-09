@@ -1033,12 +1033,25 @@ Recorded per commit in git history; the list is kept current:
   batched path keeps the cell too (its mask check already means the
   cell has the pen's style and no link or tab). Inside a right margin
   the cell is still blanked (vtmux never sets one: tmux has no DECSLRM).
+  Two cells still become the default spacer head: in insert mode tmux
+  makes room before it wraps (`grid_view_insert_cells` at the last
+  column clears the cell to the default one, whatever the pen), so the
+  cell is cleared, text, style and link; and a blank with only a
+  background, which is mostly the fill of a line a wrap scrolled in
+  (Ghostty fills it with the pen's background, tmux's wrap linefeed
+  with the default, bg 8), so `capture-pane -e` ends the background
+  before it as tmux does and the next line opens it again. A wide
+  character's tail in the last column stays in insert mode too (tmux
+  keeps the character and clears its padding cell, which only `-J`
+  shows, as a space).
   esctest has no case for a wide character that does not fit, so no D4
   arbiter verdict: tmux's. The upstream test `print wide char at right
   edge with hyperlink` now expects the spacer head without the link.
   New test `Terminal: a wide char that wraps leaves the last cell as it
-  was (vtmux)` (both paths); Rust `capture::tests::wide_wrap_keeps_last_cell`;
-  oracle `wide_wrap_keeps_last_cell`. `zig build test-lib-vt
+  was (vtmux)` (both paths, insert mode, a background blank); Rust
+  `capture::tests::wide_wrap_keeps_last_cell`; oracle
+  `wide_wrap_keeps_last_cell`, `wide_wrap_insert_mode`,
+  `wide_wrap_scrolled_fill`. `zig build test-lib-vt
   -Demit-lib-vt=true -Dapp-runtime=none` (Debug): 7047/7125 pass, 76
   skip, the known `tabClear single` failure. Found by
   `scripts/emu_fuzz.py --gen round2` (`widemargin`). Not an upstream

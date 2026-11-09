@@ -1937,6 +1937,32 @@ mod tests {
         assert_eq!(text, "012345678x\u{4e00}a\n0123\u{4e00}b\n", "{text:?}");
     }
 
+    /// In insert mode tmux makes room before a wide character wraps, which
+    /// clears the last cell (`screen_write_cell`, `grid_view_insert_cells`);
+    /// a blank with only the pen's background, as a wrap scrolls in, is
+    /// tmux's default cell (`screen_write_linefeed` with bg 8). Expected:
+    /// tmux 3.8's capture-pane -e (oracle `wide_wrap_insert_mode`,
+    /// `wide_wrap_scrolled_fill`).
+    #[test]
+    fn wide_wrap_clears_last_cell() {
+        let opts = CaptureOpts {
+            escapes: true,
+            ..Default::default()
+        };
+        let mut t = PaneTerm::new(11, 2, 0);
+        t.feed("\x1b[4habcdefghij\x1b[1mk\x1b[m\x1b[11G\x1b[44m\u{4e00}\x1b[m".as_bytes());
+        let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert_eq!(text, "abcdefghij\n\x1b[44m\u{4e00}\x1b[49m\n", "{text:?}");
+        // The last two lines are ones a wrap scrolled in.
+        let mut t = PaneTerm::new(5, 2, 100);
+        t.feed("\x1b[41mab\u{4e00}\u{4e00}\u{4e00}\u{4e00}\u{4e00}\u{4e00}\x1b[mxyz".as_bytes());
+        let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert_eq!(
+            text, "\x1b[41m\u{4e00}\u{4e00}\x1b[49m\n\x1b[41m\u{4e00}\x1b[49mxyz\n",
+            "{text:?}"
+        );
+    }
+
     /// tmux gives the line-drawing charset only to an ASCII character
     /// (input.c `input_print`): a character from UTF-8 printed under it is
     /// a plain one (`input_top_bit_set`). Expected: tmux 3.8's

@@ -1,0 +1,116 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "wide_wrap_scrolled_fill",
+  "inputs": {
+    "name": "wide_wrap_scrolled_fill",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "5",
+          "-y",
+          "2",
+          "sh",
+          "-c",
+          "printf '\\033[41mab\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\033[mxyz'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-N",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[41mab一\u001b[49m\n\u001b[41m一一\u001b[49m\n\u001b[41m一一\u001b[49m\n\u001b[41m一\u001b[49mxyz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[41mab一\u001b[49m \n\u001b[41m一一\u001b[49m \n\u001b[41m一一\u001b[49m \n\u001b[41m一\u001b[49mxyz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[41mab一一一一一一\u001b[49mxyz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

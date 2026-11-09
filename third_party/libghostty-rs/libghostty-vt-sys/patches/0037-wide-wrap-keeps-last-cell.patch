@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index c80bc1e4f..c11092d81 100644
+index c80bc1e4f..15223de4e 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -1086,7 +1086,12 @@ fn printSliceFill(
@@ -16,7 +16,7 @@ index c80bc1e4f..c11092d81 100644
                  }
                  cursor.page_row.dirty = true;
                  if (style_id != style.default_id) cursor.page_row.styled = true;
-@@ -1764,7 +1769,17 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1764,7 +1769,41 @@ pub fn print(self: *Terminal, c: u21) !void {
                      // a page resize during printCell then it'll fail
                      // integrity checks.
                      self.screens.active.cursor.page_row.wrap = true;
@@ -26,16 +26,40 @@ index c80bc1e4f..c11092d81 100644
 +                    // link included. Only an empty cell becomes the
 +                    // spacer head, the cell tmux never wrote.
 +                    const last = self.screens.active.cursor.page_cell;
++                    // In insert mode tmux first makes room at the last
++                    // column, which clears it to the default cell
++                    // (screen_write_cell, grid_view_insert_cells). A
++                    // wide character's tail stays: tmux keeps the
++                    // character and clears only its padding cell.
++                    if (self.modes.get(.insert) and last.wide == .narrow) {
++                        if (last.tab != 0) self.clearTabAtCursor();
++                        self.screens.active.clearCells(
++                            self.screens.active.cursor.page_pin.node.page(),
++                            self.screens.active.cursor.page_row,
++                            @as([*]Cell, @ptrCast(last))[0..1],
++                        );
++                        last.* = .{};
++                    }
 +                    if (last.wide == .narrow and last.tab == 0 and
 +                        last.content_tag == .codepoint and
 +                        last.content.codepoint.data == 0)
 +                    {
 +                        last.wide = .spacer_head;
++                    } else if (last.wide == .narrow and last.tab == 0 and
++                        (last.content_tag == .bg_color_palette or
++                            last.content_tag == .bg_color_rgb))
++                    {
++                        // A blank with only a background is mostly the
++                        // fill of a line a wrap scrolled in, which
++                        // tmux's wrap leaves default (screen_write_cell:
++                        // screen_write_linefeed with bg 8) and Ghostty
++                        // fills with the pen's: the default spacer head.
++                        last.* = .{ .wide = .spacer_head };
 +                    }
                  } else {
                      self.writeCell(0, .narrow);
                  }
-@@ -6796,6 +6811,70 @@ test "Terminal: print wide char at edge creates spacer head" {
+@@ -6796,6 +6835,110 @@ test "Terminal: print wide char at edge creates spacer head" {
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
  }
  
@@ -101,12 +125,52 @@ index c80bc1e4f..c11092d81 100644
 +        try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
 +        try testing.expect(list_cell.row.wrap);
 +    }
++
++    // In insert mode tmux makes room first, which clears the last cell
++    // to the default one, link and style included.
++    t.setCursorPos(4, 1);
++    try t.screens.active.startHyperlink("http://x/", null);
++    try t.setAttribute(.{ .bold = {} });
++    try t.printString("abcdz");
++    t.screens.active.endHyperlink();
++    try t.setAttribute(.{ .direct_color_bg = .{ .r = 1, .g = 2, .b = 3 } });
++    t.modes.set(.insert, true);
++    t.setCursorPos(4, 5);
++    try t.print(0x4E00);
++    t.modes.set(.insert, false);
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 4, .y = 2 } }).?;
++        try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
++        try testing.expectEqual(@as(u21, 0), list_cell.cell.content.codepoint.data);
++        try testing.expect(!list_cell.cell.hyperlink);
++        try testing.expectEqual(style.default_id, list_cell.cell.style_id);
++        try testing.expect(list_cell.row.wrap);
++        const before = t.screens.active.pages.getCell(.{ .active = .{ .x = 3, .y = 2 } }).?;
++        try testing.expectEqual(@as(u21, 'd'), before.cell.content.codepoint.data);
++    }
++
++    // A blank with only a background, as a wrap scrolls in under a
++    // coloured pen, becomes the default spacer head: tmux's wrap
++    // scrolls in a default line.
++    try t.setAttribute(.{ .unset = {} });
++    t.setCursorPos(4, 1);
++    try t.printString("abcd");
++    try t.setAttribute(.{ .direct_color_bg = .{ .r = 1, .g = 2, .b = 3 } });
++    t.eraseLine(.right, false);
++    try t.print(0x4E00);
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 4, .y = 2 } }).?;
++        try testing.expectEqual(Cell.Wide.spacer_head, list_cell.cell.wide);
++        try testing.expectEqual(Cell.ContentTag.codepoint, list_cell.cell.content_tag);
++        try testing.expectEqual(@as(u21, 0), list_cell.cell.content.codepoint.data);
++        try testing.expect(list_cell.row.wrap);
++    }
 +}
 +
  test "Terminal: print wide char with 1-column width" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -9187,11 +9266,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
+@@ -9187,11 +9330,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
      try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
      try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
  

@@ -1,0 +1,15 @@
+name = "wide_wrap_scrolled_fill"
+# A wide character that does not fit a line a wrap scrolled in under a
+# coloured pen leaves the default cell at its end: tmux's wrap scrolls in a
+# default line (screen-write.c screen_write_cell, screen_write_linefeed
+# with bg 8), so capture-pane -e ends the background before that cell and
+# starts it again on the next line. Ghostty fills the line with the pen's
+# background, and patch 0037 kept that cell, so the next line lost its
+# opening background. Found by scripts/emu_fuzz.py --gen round2 (longline).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "5", "-y", "2", "sh", "-c", "printf '\\033[41mab\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\344\\270\\200\\033[mxyz'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-J", "-S", "-", "-t", "a:"] },
+]
