@@ -139,7 +139,7 @@ struct Raw {
 /// Ghostty's DEC Special Graphics table (charsets.zig `dec_special`)
 /// backwards: the character the program printed for a glyph, as tmux
 /// stores it (the charset is an attribute in tmux).
-pub(super) fn dec_special_source(c: char) -> char {
+pub(crate) fn dec_special_source(c: char) -> char {
     const TABLE: [(u32, char); 31] = [
         (0x25C6, '`'),
         (0x2592, 'a'),

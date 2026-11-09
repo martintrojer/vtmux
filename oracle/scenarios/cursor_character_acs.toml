@@ -1,0 +1,11 @@
+name = "cursor_character_acs"
+# #{cursor_character} is the cell as the grid holds it (format.c
+# format_cb_cursor_character): a line-drawing character is the ASCII one the
+# program printed, which tmux maps only when drawing (tty_acs_get); vtmux
+# gave the glyph Ghostty stores. Found by scripts/emu_fuzz.py (charsets).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "4", "sh", "-c", "printf '\\033(0lqk\\033(B\\033[2D'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x}:#{cursor_character}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]

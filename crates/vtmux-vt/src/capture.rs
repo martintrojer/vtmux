@@ -17,7 +17,7 @@ use crate::term::{HistoryRow, LineMark, PaneTerm};
 
 mod raw;
 pub use raw::capture_grid;
-use raw::dec_special_source;
+pub(crate) use raw::dec_special_source;
 
 /// One end of the captured range, as `-S` / `-E` give it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

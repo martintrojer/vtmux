@@ -1,0 +1,90 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "cursor_character_acs",
+  "inputs": {
+    "name": "cursor_character_acs",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '\\033(0lqk\\033(B\\033[2D'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:",
+          "#{cursor_x}:#{cursor_character}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1:q\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u000elqk\u000f\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

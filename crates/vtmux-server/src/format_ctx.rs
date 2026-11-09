@@ -817,15 +817,16 @@ impl<'a> Ctx<'a> {
                 .unwrap_or_default(),
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),
-            // format_cb_cursor_character: the cell under the cursor, nothing
-            // on the second half of a wide character; a blank or a cell past
-            // the line's end is the default cell's space.
+            // format_cb_cursor_character: the cell under the cursor as the
+            // grid holds it (a line-drawing character is the ASCII one),
+            // nothing on the second half of a wide character; a blank or a
+            // cell past the line's end is the default cell's space.
             "cursor_character" => {
                 let (cx, cy) = p.term.cursor();
                 let row = p.term.row(p.term.history_size() + usize::from(cy));
                 match row.cells.get(usize::from(cx)) {
                     Some(c) if c.width == 0 => return None,
-                    Some(c) if !c.text.is_empty() => c.text.to_string(),
+                    Some(c) if !c.text.is_empty() => c.data().into_owned(),
                     _ => " ".to_owned(),
                 }
             }

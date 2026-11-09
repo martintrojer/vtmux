@@ -103,6 +103,24 @@ pub struct Cell {
     pub tab: bool,
 }
 
+impl Cell {
+    /// The text as tmux's grid holds it: a character printed under DEC
+    /// Special Graphics is the ASCII one the program sent (tmux maps it
+    /// only when drawing, `tty_acs_get`), where Ghostty stores the glyph.
+    #[must_use]
+    pub fn data(&self) -> std::borrow::Cow<'_, str> {
+        if self.acs {
+            self.text
+                .chars()
+                .map(crate::capture::dec_special_source)
+                .collect::<String>()
+                .into()
+        } else {
+            self.text.as_str().into()
+        }
+    }
+}
+
 /// `clone_from` reuses the text's buffer (a derived one allocates a new
 /// `String`): frames copy whole screens of cells.
 impl Clone for Cell {
