@@ -54,7 +54,7 @@ Per-test sums (each test alone, 8 at once):
 3. **The oracle pool was 6 whatever the host, in name order.** 1138 s of scenarios on 6 workers; the slow ones (`status_msg_freeze` 45 s, `menu_mouse_stayopen` 35 s, the other `status_msg_*`) sort late and ran on alone at the end. One scenario per 6 CPUs past 6 (at most 16), and each run's times (`target/oracle-durations/`) start the slowest first next time: 198 s -> 110 s (bigger pool) -> 72 s (ordered).
 4. **Races the load exposed** (pre-existing; see *Flakes*).
 5. **A test's independent worlds run side by side** (`crates/vtmux/tests/par`): the two binaries of 88 attach tests, cli's and control's `compare`, and the cases of the slowest loops. Flood tests stay one at a time (each keeps several CPUs busy and some time their exits), as do runs that share a file outside their worlds.
-6. **`check.sh` runs the suites at once on a host with 16 or more CPUs**, after making and checking fresh every build they make.
+6. **`check.sh` runs the suites at once on a host with `nproc` 32 or more** (first 16; together they peaked at 14.5 of 16 CPUs, so a 16-core laptop runs them serially), after making and checking fresh every build they make.
 
 ## Flakes
 

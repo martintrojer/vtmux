@@ -5,7 +5,7 @@ vtmux is a drop-in tmux 3.8 replacement in Rust on libghostty-vt. The design and
 ## Gates
 
 - **Fast** (while iterating): `mise exec -- cargo test -p <crate>` for the crate you touched.
-- **Slow** (before closing work, and once per merged batch): `mise exec -- bash scripts/check.sh` — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` (pedantic is on via `[workspace.lints]`), `cargo test --workspace`, then `cargo xtask regress` and `cargo xtask oracle replay` once those exist. On a host with 16 or more CPUs the test suites and harness runs go at once, each log printed whole as it ends (`VTMUX_CHECK_PARALLEL=0` runs them one after another, as CI's runners do).
+- **Slow** (before closing work, and once per merged batch): `mise exec -- bash scripts/check.sh` — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` (pedantic is on via `[workspace.lints]`), `cargo test --workspace`, then `cargo xtask regress` and `cargo xtask oracle replay` once those exist. The test suites and harness runs go at once, each log printed whole as it ends, only when `nproc` (the CPUs this process may use, so a pinned gate counts its pins) is 32 or more, or with `VTMUX_CHECK_PARALLEL=1`; otherwise (a 16-core laptop, CI's runners) they run one after another, and `VTMUX_CHECK_PARALLEL=0` forces that on a big host.
 - **Targeted slow**: `mise exec -- cargo xtask regress --only <test>` and `mise exec -- cargo xtask oracle replay --only <scenario>`.
 - **Budget**: slow gate 10 min. Over budget triggers test upkeep, not a stop: `scripts/test-times.sh` gives a test binary's per-test times (last pass: `docs/test-health/2026-11-08-test-suite-speed.md`).
 - A skip is not a pass: say so in the gate record.

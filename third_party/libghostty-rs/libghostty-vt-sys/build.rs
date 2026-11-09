@@ -94,6 +94,7 @@ fn main() {
     // prefix (its repo layout) named a file that never exists here, so
     // cargo reran the script and rebuilt everything above it every time.
     println!("cargo:rerun-if-changed=build.rs");
+    emit_rerun_inputs();
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
@@ -112,6 +113,45 @@ fn main() {
     }
 
     build_vendored(link_mode, &target);
+}
+
+/// vtmux: what else the library depends on, beyond `build.rs` and `patches/`
+/// (`local_patches`): the tree `GHOSTTY_SOURCE_DIR` names (an edit there is
+/// the local-ghostty workflow), and the Zig compiler (the repo's `mise.toml`
+/// pin, and the `zig` executable on PATH: mise puts each version in a
+/// directory of its own, so a bump changes that path). A path that does not
+/// exist counts as changed to cargo, so each is named only if it exists.
+fn emit_rerun_inputs() {
+    let watch = |p: &Path| println!("cargo:rerun-if-changed={}", p.display());
+    if let Some(dir) = env::var_os("GHOSTTY_SOURCE_DIR") {
+        // Entry by entry: a directory is scanned whole, and `.git` and the
+        // Zig caches change without the sources doing so.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.filter_map(Result::ok) {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                if !matches!(&*name, ".git" | ".zig-cache" | "zig-out") {
+                    watch(&e.path());
+                }
+            }
+        }
+    }
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    if let Some(mise) = manifest
+        .ancestors()
+        .map(|d| d.join("mise.toml"))
+        .find(|p| p.exists())
+    {
+        watch(&mise);
+    }
+    if let Some(path) = env::var_os("PATH") {
+        if let Some(zig) = env::split_paths(&path)
+            .map(|d| d.join("zig"))
+            .find(|p| p.is_file())
+        {
+            watch(&zig);
+        }
+    }
 }
 
 /// vtmux: a hash of what decides Ghostty's native page layout in this

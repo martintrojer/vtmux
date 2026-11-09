@@ -37,11 +37,15 @@ if rustup target list --installed 2>/dev/null | grep -qx "$other"; then
 fi
 VTMUX_CHECK_HARNESS="${VTMUX_CHECK_HARNESS:-1}"
 # The suites below build nothing once these are built, so they can run at
-# once: on a host with CPUs to spare (16 or more) they do, each into its own
-# log, printed whole as it ends; on a smaller one (CI's runners) one after
-# another, as they always ran. They wait on terminals, timers and each
+# once: on a big host (`nproc` 32 or more: it counts the CPUs this process may
+# use, so a pinned gate or a cpuset container is its size, where
+# `getconf _NPROCESSORS_ONLN` counts the host's) they do, each into its own
+# log, printed whole as it ends; on a smaller one (a 16-core laptop, CI's
+# runners) one after another, as they always ran: together they pegged a
+# 16-core machine (peak 14.5 of 16 CPUs, `cargo test` alone peaks at 6.4).
+# They wait on terminals, timers and each
 # other's processes far more than they compute, so together they take about
-# as long as the longest. VTMUX_CHECK_PARALLEL=0|1 overrides.
+# as long as the longest. VTMUX_CHECK_PARALLEL=1 forces it on, =0 off.
 # The builds the suites make (`cargo test`; `cargo xtask` builds xtask, and
 # regress and replay `cargo build -p vtmux`), each made now and then checked
 # fresh: one that is not (a build script that reruns every time, two of them
@@ -61,8 +65,11 @@ for b in "${builds[@]}"; do
 done
 parallel="${VTMUX_CHECK_PARALLEL:-auto}"
 if [ "$parallel" = auto ]; then
-  if [ "$(getconf _NPROCESSORS_ONLN)" -ge 16 ]; then parallel=1; else parallel=0; fi
+  # macOS has no nproc (and no CPU pinning): its own count.
+  cpus=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN)
+  if [ "$cpus" -ge 32 ]; then parallel=1; else parallel=0; fi
 fi
+echo "check: suites run $([ "$parallel" = 1 ] && echo 'at once' || echo 'one after another') (VTMUX_CHECK_PARALLEL=${VTMUX_CHECK_PARALLEL:-auto}, ${cpus:-unset} CPUs)"
 names=()
 starts=()
 # Job control: a background job gets a process group of its own (and no
