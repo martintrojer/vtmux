@@ -184,7 +184,9 @@ pub(crate) fn dec_special_source(c: char) -> char {
 
 /// An empty cell inside the line's allocated cells is a `CLEARED` one:
 /// tmux clears the cells it allocates (`grid_expand_line`) and those an
-/// erase reaches; past the allocation the cell is the default one.
+/// erase reaches; past the allocation the cell is the default one. One
+/// cleared to an RGB background is an extended cell, which keeps no
+/// `CLEARED` (`grid_clear_cell`, `grid_extended_cell`).
 fn raw(c: &RowCell, in_size: bool) -> Raw {
     if c.padding() && !matches!(c.tab, 1..=32) {
         return Raw {
@@ -209,7 +211,8 @@ fn raw(c: &RowCell, in_size: bool) -> Raw {
             width: 1,
             data: " ".to_owned(),
             padding: false,
-            cleared: in_size || c.style.bg != Color::Default,
+            cleared: !matches!(c.style.bg, Color::Rgb(..))
+                && (in_size || c.style.bg != Color::Default),
             tab: false,
         };
     }
@@ -362,5 +365,16 @@ mod tests {
             "{d}"
         );
         assert!(d.contains("\t\tC 2,1 data=(1,1,!) flags=PADDING[4]"), "{d}");
+    }
+
+    /// A cell erased to an RGB background is an extended one in tmux and
+    /// keeps no `CLEARED` (grid.c `grid_clear_cell`).
+    #[test]
+    fn an_rgb_erase_is_not_cleared() {
+        let d = dump(10, 3, b"\x1b[48;2;1;2;3m\x1b[K\x1b[mab");
+        assert!(
+            d.contains("\t\tC 0,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=#010203[2010203]"),
+            "{d}"
+        );
     }
 }
