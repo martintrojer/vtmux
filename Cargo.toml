@@ -10,14 +10,19 @@ version = "3.8.0-beta.1"
 edition = "2024"
 rust-version = "1.99.1"
 license = "ISC"
-publish = false
+repository = "https://github.com/martintrojer/vtmux"
+homepage = "https://github.com/martintrojer/vtmux"
+authors = ["Martin Trojer <martin.trojer@gmail.com>"]
 
+# Every crate but xtask is published (docs/RELEASING.md, scripts/publish.sh),
+# so each path dependency also names the exact version it is published at:
+# the crates are one program split up, with no API promised between them.
 [workspace.dependencies]
-vtmux-core = { path = "crates/vtmux-core" }
-vtmux-vt = { path = "crates/vtmux-vt" }
-vtmux-server = { path = "crates/vtmux-server" }
-vtmux-client = { path = "crates/vtmux-client" }
-vtmux-snapshot = { path = "crates/vtmux-snapshot" }
+vtmux-core = { path = "crates/vtmux-core", version = "=3.8.0-beta.1" }
+vtmux-vt = { path = "crates/vtmux-vt", version = "=3.8.0-beta.1" }
+vtmux-server = { path = "crates/vtmux-server", version = "=3.8.0-beta.1" }
+vtmux-client = { path = "crates/vtmux-client", version = "=3.8.0-beta.1" }
+vtmux-snapshot = { path = "crates/vtmux-snapshot", version = "=3.8.0-beta.1" }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
@@ -39,10 +44,11 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
-# libghostty-vt-sys builds ghostty in Zig Debug mode when DEBUG is set, and
-# that parses ~5 KB/s: too slow for any PTY test that floods a pane. The
-# override gives its build script DEBUG=false, OPT_LEVEL=3 -> ReleaseFast.
-[profile.dev.package.libghostty-vt-sys]
+# vtmux-ghostty-vt-sys (libghostty-vt-sys) builds ghostty in Zig Debug mode
+# when DEBUG is set, and that parses ~5 KB/s: too slow for any PTY test that
+# floods a pane. The override gives its build script DEBUG=false,
+# OPT_LEVEL=3 -> ReleaseFast.
+[profile.dev.package.vtmux-ghostty-vt-sys]
 opt-level = 3
 debug = false
 

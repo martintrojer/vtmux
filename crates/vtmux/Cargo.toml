@@ -4,7 +4,16 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Drop-in tmux 3.8 replacement in Rust on Ghostty's libghostty-vt. Modern stack. Better rendering. Live upgrades."
+readme = "../../README.md"
+keywords = ["tmux", "terminal", "multiplexer", "ghostty"]
+categories = ["command-line-utilities"]
+# What builds the crate: no tests, fixtures, examples or oracle traces
+# (cargo adds `readme` itself).
+include = ["/src/**/*.rs", "/LICENSE"]
 
 [dependencies]
 vtmux-core.workspace = true
@@ -22,6 +31,7 @@ workspace = true
 [dev-dependencies]
 tempfile = "3"
 portable-pty = "0.9"
-vtmux-vt.workspace = true
-vtmux-snapshot.workspace = true
+# Paths alone (no version), so publishing drops them: the tests do not ship.
+vtmux-vt = { path = "../vtmux-vt" }
+vtmux-snapshot = { path = "../vtmux-snapshot" }
 rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "pty", "process"] }

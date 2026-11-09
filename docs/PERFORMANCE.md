@@ -144,6 +144,8 @@ The release profile is fat LTO in one codegen unit, stripped. Against cargo's de
 | output parsing (Ghostty's, untouched by LTO) | | flat |
 | build after touching `vtmux-core` | 108 s | 118 s |
 
+`cargo install vtmux` builds the "default" column: a published crate does not carry the workspace's profile. The environment line in [RELEASING.md](RELEASING.md#what-cargo-install-vtmux-gets) builds this profile.
+
 Ghostty is linked in statically (1.35 MB of text; tmux links libevent and ncurses). `panic = "abort"` would save 0.67 MB, but a live upgrade catches a panic to switch back to the old binary, so panics unwind.
 
 ## How it's measured

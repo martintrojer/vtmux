@@ -267,19 +267,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
-name = "libghostty-vt"
-version = "0.2.2"
-dependencies = [
- "bitflags 2.13.2",
- "int-enum",
- "libghostty-vt-sys",
-]
-
-[[package]]
-name = "libghostty-vt-sys"
-version = "0.2.2"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -733,6 +720,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vtmux-ghostty-vt"
+version = "3.8.0-beta.1"
+dependencies = [
+ "bitflags 2.13.2",
+ "int-enum",
+ "vtmux-ghostty-vt-sys",
+]
+
+[[package]]
+name = "vtmux-ghostty-vt-sys"
+version = "3.8.0-beta.1"
+
+[[package]]
 name = "vtmux-server"
 version = "3.8.0-beta.1"
 dependencies = [
@@ -759,7 +759,7 @@ dependencies = [
 name = "vtmux-vt"
 version = "3.8.0-beta.1"
 dependencies = [
- "libghostty-vt",
+ "vtmux-ghostty-vt",
 ]
 
 [[package]]

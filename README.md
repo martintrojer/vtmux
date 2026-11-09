@@ -19,8 +19,10 @@ With cargo, once the crates are on crates.io (not yet). The build compiles Ghost
 
 ```sh
 mise use -g zig@0.17
-cargo install vtmux
+cargo install --locked vtmux
 ```
+
+That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
 
 From a checkout (mise brings the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
 

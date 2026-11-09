@@ -1,6 +1,24 @@
-# libghostty-vt-sys
+# vtmux-ghostty-vt-sys
 
-Raw FFI bindings for libghostty-vt.
+Raw FFI bindings for libghostty-vt: [vtmux](https://github.com/martintrojer/vtmux)'s
+fork of [libghostty-rs](https://github.com/uzaaft/libghostty-rs)'s
+`libghostty-vt-sys`, on a pinned [Ghostty](https://github.com/ghostty-org/ghostty)
+commit with vtmux's patches (`VENDOR.md` in vtmux's repository lists every
+one). The library is still `libghostty_vt_sys`. Built for vtmux: no API is
+promised to anyone else.
+
+Building it needs [Zig](https://ziglang.org/download/) 0.17 on `PATH`
+(`mise use -g zig@0.17`), and curl, tar and git: the build script downloads
+GitHub's archive of the pinned commit, checks its Zig package hash, and
+applies the patches shipped in this crate. Offline, set
+`GHOSTTY_SOURCE_TARBALL` to the absolute path of a copy of that archive (or
+of `git archive --format=tar.gz` of the commit); `GHOSTTY_SOURCE_URL` names
+a mirror.
+
+MIT (`LICENSE`, libghostty-rs's; upstream is MIT OR Apache-2.0). Ghostty is
+MIT too (`LICENSE-ghostty`).
+
+From upstream's README:
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.
 - Exposes checked-in generated bindings in `src/bindings.rs`.

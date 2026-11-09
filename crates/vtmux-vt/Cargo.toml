@@ -4,10 +4,19 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "vtmux's pane terminal: Ghostty's libghostty-vt shaped like a tmux pane (capture, query replies, state export for live upgrade). Internal to vtmux, no stable API: install `vtmux`."
+keywords = ["tmux", "terminal", "ghostty", "vtmux"]
+categories = ["command-line-utilities"]
+# What builds the crate: no tests, fixtures, examples or oracle traces.
+include = ["/src/**/*.rs", "/LICENSE"]
 
 [dependencies]
-libghostty-vt = { path = "../../third_party/libghostty-rs/libghostty-vt" }
+# vtmux's fork of libghostty-vt, published as vtmux-ghostty-vt
+# (third_party/libghostty-rs/VENDOR.md); imported as `libghostty_vt`.
+libghostty-vt = { package = "vtmux-ghostty-vt", version = "=3.8.0-beta.1", path = "../../third_party/libghostty-rs/libghostty-vt" }
 
 [lints]
 workspace = true

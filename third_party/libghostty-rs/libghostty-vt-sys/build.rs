@@ -3,8 +3,23 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
-const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
 const GHOSTTY_COMMIT: &str = "3bd54e025cc3349ee76ab1af7ec1ff8f7353632b";
+
+/// vtmux: where the source of `GHOSTTY_COMMIT` is downloaded from (GitHub's
+/// archive of the commit), unless `GHOSTTY_SOURCE_URL` names a mirror or
+/// `GHOSTTY_SOURCE_TARBALL` a copy already downloaded.
+const GHOSTTY_ARCHIVE: &str = "https://github.com/ghostty-org/ghostty/archive";
+
+/// vtmux: the Zig package hash of that archive, what `zig fetch <archive>`
+/// prints. It hashes the files the archive holds, not its compressed bytes,
+/// so it holds whatever GitHub compresses with, and a tarball made by `git
+/// archive` of the commit gives it too. Bump it with `GHOSTTY_COMMIT`.
+const GHOSTTY_HASH: &str = "ghostty-1.4.1-dev-5UdBC2W7iAUWphT-4Tc3hKfYcOimJdvisj5GCzVGaWke";
+
+/// vtmux: the Zig the commit's `build.zig.zon` asks for
+/// (`minimum_zig_version`; Zig breaks its build API between minor versions,
+/// so only this major.minor builds it).
+const ZIG_VERSION: &str = "0.17";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -85,6 +100,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_CPU");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_TARBALL");
+    println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_URL");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
@@ -200,6 +217,7 @@ fn emit_patch_stack() {
 fn build_vendored(link_mode: LinkMode, target: &str) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let host = env::var("HOST").expect("HOST must be set");
+    check_zig();
 
     // Locate ghostty source: env override > fetch into OUT_DIR.
     let ghostty_dir = match env::var("GHOSTTY_SOURCE_DIR") {
@@ -439,8 +457,52 @@ fn zig_optimize_mode() -> &'static str {
     }
 }
 
-/// Clone ghostty at the pinned commit into OUT_DIR/ghostty-src.
-/// Reuses an existing clone if the commit matches.
+/// vtmux: fail the build, with `message` as cargo shows it (a build
+/// script's stderr), not a panic's backtrace hint.
+fn fail(message: &str) -> ! {
+    eprintln!("error: {message}");
+    std::process::exit(1);
+}
+
+/// vtmux: the `zig` on PATH is the one Ghostty's build needs, or the build
+/// stops here and says what to install (a `cargo install vtmux` user may
+/// have none, or another version, which fails deep in ghostty's build.zig).
+fn check_zig() {
+    let install = format!(
+        "install Zig {ZIG_VERSION} (`mise use -g zig@{ZIG_VERSION}`, or https://ziglang.org/download/) and put it first on PATH"
+    );
+    let version = match Command::new("zig").arg("version").output() {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_owned(),
+        Ok(out) => fail(&format!(
+            "`zig version` failed ({}): {}; {install}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+        Err(e) => fail(&format!(
+            "vtmux-ghostty-vt-sys builds Ghostty from source with Zig {ZIG_VERSION}, and there is no `zig` to run ({e}): {install}"
+        )),
+    };
+    if !zig_version_matches(&version) {
+        fail(&format!(
+            "Ghostty {} needs Zig {ZIG_VERSION}, and the `zig` on PATH is {version}: {install}",
+            &GHOSTTY_COMMIT[..9]
+        ));
+    }
+}
+
+/// `zig version` output (`0.17.0`, `0.17.0-dev.12+abc`) of `ZIG_VERSION`'s
+/// major.minor.
+fn zig_version_matches(version: &str) -> bool {
+    version
+        .strip_prefix(ZIG_VERSION)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// vtmux: Ghostty's source at the pinned commit, with vtmux's patches applied,
+/// in OUT_DIR/ghostty-src. Reuses it if the stamp matches. The source is
+/// GitHub's archive of the commit (`GHOSTTY_SOURCE_URL` for another place,
+/// `GHOSTTY_SOURCE_TARBALL` for a file: an offline build, a distribution),
+/// checked against `GHOSTTY_HASH` before anything is extracted.
 fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     let src_dir = out_dir.join("ghostty-src");
     let stamp = src_dir.join(".ghostty-commit");
@@ -463,30 +525,27 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
         return src_dir;
     }
 
-    // Clean and clone fresh.
+    // Clean and extract fresh.
     if src_dir.exists() {
         std::fs::remove_dir_all(&src_dir)
             .unwrap_or_else(|e| panic!("failed to remove {}: {e}", src_dir.display()));
     }
 
-    eprintln!("Fetching ghostty {GHOSTTY_COMMIT} ...");
+    let (tarball, downloaded) = match env::var_os("GHOSTTY_SOURCE_TARBALL") {
+        Some(path) => (PathBuf::from(path), false),
+        None => (download_ghostty(out_dir), true),
+    };
+    let tarball = verify_ghostty(&tarball);
+    extract_ghostty(&tarball, out_dir, &src_dir);
+    if downloaded {
+        let _ = std::fs::remove_file(&tarball);
+    }
 
-    let mut clone = Command::new("git");
-    clone
-        .arg("clone")
-        .arg("--filter=blob:none")
-        .arg("--no-checkout")
-        .arg(GHOSTTY_REPO)
-        .arg(&src_dir);
-    run(clone, "git clone ghostty");
-
-    let mut checkout = Command::new("git");
-    checkout
-        .arg("checkout")
-        .arg(GHOSTTY_COMMIT)
-        .current_dir(&src_dir);
-    run(checkout, "git checkout ghostty commit");
-
+    // Its own repository, so `git apply` takes the patches' paths from
+    // here, not from a repository OUT_DIR is inside (a checkout's target/).
+    let mut init = Command::new("git");
+    init.arg("init").arg("-q").current_dir(&src_dir);
+    run_tool(init, "git", "apply vtmux's patches to Ghostty");
     for (path, _) in &patches {
         let mut apply = Command::new("git");
         apply.arg("apply").arg(path).current_dir(&src_dir);
@@ -496,6 +555,107 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     std::fs::write(&stamp, want).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
+}
+
+/// vtmux: download the pinned commit's archive into OUT_DIR with curl.
+fn download_ghostty(out_dir: &Path) -> PathBuf {
+    let url = env::var("GHOSTTY_SOURCE_URL")
+        .unwrap_or_else(|_| format!("{GHOSTTY_ARCHIVE}/{GHOSTTY_COMMIT}.tar.gz"));
+    let tarball = out_dir.join(format!("ghostty-{GHOSTTY_COMMIT}.tar.gz"));
+    eprintln!("Downloading ghostty {GHOSTTY_COMMIT} from {url} ...");
+    let mut curl = Command::new("curl");
+    curl.args(["--fail", "--location", "--silent", "--show-error"])
+        .args(["--retry", "3", "--output"])
+        .arg(&tarball)
+        .arg(&url);
+    let status = curl.status().unwrap_or_else(|e| {
+        fail(&format!(
+            "no `curl` to download Ghostty with ({e}): install curl, or download {url} and set GHOSTTY_SOURCE_TARBALL to it"
+        ))
+    });
+    if !status.success() {
+        fail(&format!(
+            "downloading {url} failed ({status}); without network, download it elsewhere and set GHOSTTY_SOURCE_TARBALL to the file"
+        ));
+    }
+    tarball
+}
+
+/// vtmux: extract `tarball` into `src_dir`. GitHub's archive has the tree
+/// under one directory (`ghostty-<commit>/`); `git archive` without
+/// `--prefix` has it at the top. Zig's hash is the same for both.
+fn extract_ghostty(tarball: &Path, out_dir: &Path, src_dir: &Path) {
+    let tmp = out_dir.join("ghostty-extract");
+    if tmp.exists() {
+        std::fs::remove_dir_all(&tmp)
+            .unwrap_or_else(|e| panic!("failed to remove {}: {e}", tmp.display()));
+    }
+    std::fs::create_dir_all(&tmp)
+        .unwrap_or_else(|e| panic!("failed to create {}: {e}", tmp.display()));
+    let mut extract = Command::new("tar");
+    extract.arg("-xzf").arg(tarball).current_dir(&tmp);
+    run_tool(extract, "tar", "extract the Ghostty source");
+    let entries: Vec<PathBuf> = std::fs::read_dir(&tmp)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", tmp.display()))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    let root = match entries.as_slice() {
+        [only] if only.is_dir() => only.clone(),
+        _ => tmp.clone(),
+    };
+    std::fs::rename(&root, src_dir).unwrap_or_else(|e| {
+        panic!(
+            "failed to move {} to {}: {e}",
+            root.display(),
+            src_dir.display()
+        )
+    });
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// vtmux: `tarball` is the pinned commit's source: `zig fetch` prints its
+/// package hash (and keeps a copy in Zig's global cache, as a dependency).
+/// Returns its absolute path.
+fn verify_ghostty(tarball: &Path) -> PathBuf {
+    let path = std::fs::canonicalize(tarball).unwrap_or_else(|e| {
+        fail(&format!(
+            "GHOSTTY_SOURCE_TARBALL {}: {e}",
+            tarball.display()
+        ))
+    });
+    let out = Command::new("zig")
+        .arg("fetch")
+        .arg(&path)
+        .output()
+        .unwrap_or_else(|e| fail(&format!("failed to run `zig fetch`: {e}")));
+    let hash = String::from_utf8_lossy(&out.stdout);
+    let hash = hash.trim();
+    if !out.status.success() || hash != GHOSTTY_HASH {
+        fail(&format!(
+            "{} is not Ghostty {GHOSTTY_COMMIT}: `zig fetch` gives {}, expected {GHOSTTY_HASH}{}",
+            path.display(),
+            if hash.is_empty() { "no hash" } else { hash },
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .filter(|l| l.starts_with("error"))
+                .map(|l| format!(" ({l})"))
+                .collect::<String>()
+        ));
+    }
+    path
+}
+
+/// vtmux: run a tool the build needs besides Zig, saying which one is
+/// missing rather than panicking on the spawn.
+fn run_tool(mut command: Command, tool: &str, purpose: &str) {
+    let status = command.status().unwrap_or_else(|e| {
+        fail(&format!(
+            "no `{tool}` to {purpose} with ({e}): install {tool}"
+        ))
+    });
+    if !status.success() {
+        fail(&format!("`{tool}` failed to {purpose} ({status})"));
+    }
 }
 
 /// The vtmux patches to apply to the fetched ghostty, in name order, with

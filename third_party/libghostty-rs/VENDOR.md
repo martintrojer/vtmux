@@ -6,6 +6,42 @@ MIT OR Apache-2.0 (`LICENSE`, from the same commit). `vtmux-vt` depends on
 them by path. The workspace excludes `third_party/`, so vtmux's lints, `fmt`
 and doctests do not run on this code.
 
+## Published as vtmux's own crates
+
+The upstream names are taken on crates.io (by upstream, at another Ghostty
+and without these patches), so the fork publishes as `vtmux-ghostty-vt-sys`
+and `vtmux-ghostty-vt`, at vtmux's version (`docs/RELEASING.md`). The
+libraries keep upstream's names (`[lib] name`), and `vtmux-vt` renames the
+dependency back (`package = "vtmux-ghostty-vt"`), so no code says the new
+names. Licence: MIT, one of upstream's two, for the wrapper and for vtmux's
+changes here; each crate ships libghostty-rs's `LICENSE`, and the sys crate
+also `LICENSE-ghostty` (Ghostty's MIT licence, from the pinned commit), as
+its build script downloads, patches and links in Ghostty. Folding the two
+into `vtmux-vt` would have put them under the workspace lints and lost the
+per-file diff against upstream this file keeps.
+
+## Where the Ghostty source comes from
+
+The sys crate's build script downloads GitHub's archive of
+`GHOSTTY_COMMIT` with curl, checks it with `zig fetch` against
+`GHOSTTY_HASH` (Zig's package hash: of the files, not of the compressed
+bytes, so `git archive` of the commit gives the same), extracts it into
+`OUT_DIR/ghostty-src` and applies `patches/*.patch` (name order, `git
+apply` in a fresh `git init`, so a target dir inside another repository
+does not take the paths). The packaged crate carries the patches (230 KiB
+compressed), not Ghostty (150 MB unpacked, 40 MB as a tarball: over the
+10 MB crate limit, and a hand-picked subset of it would need re-picking at
+every bump). `GHOSTTY_SOURCE_TARBALL=<absolute path>` uses a tarball
+already downloaded (an offline build: `git archive --format=tar.gz
+<commit>` of a clone works too, with or without `--prefix`),
+`GHOSTTY_SOURCE_URL` a mirror. Zig's own dependencies
+(uucode, zigimg and others) come from `deps.files.ghostty.org` or Zig's
+global cache, as before (`GHOSTTY_ZIG_SYSTEM_DIR` for a sandbox). The
+script stops with what to install when `zig` is missing or not
+`ZIG_VERSION` (0.17), or curl, tar or git is missing. docs.rs builds with
+`DOCS_RS` set, which skips the native build: the checked-in bindings are
+enough for rustdoc.
+
 ## Why vendored
 
 The published 0.2.2 pins ghostty `a887df42c`, which predates the fix for
@@ -19,6 +55,13 @@ the pin is bumped here.
 Recorded per commit in git history; the list is kept current:
 
 - `libghostty-vt/Cargo.toml`: `path` on the `libghostty-vt-sys` dependency.
+- Both `Cargo.toml`s: published as `vtmux-ghostty-vt-sys` and
+  `vtmux-ghostty-vt` at vtmux's version, licence MIT, vtmux's repository,
+  an `include` list (above); the redundant dev-dependency on the sys crate
+  is gone.
+- `libghostty-vt-sys/build.rs`: the Ghostty source is GitHub's archive of
+  the commit, checked with `zig fetch` (above), where upstream cloned it
+  with git; the Zig version is checked first.
 - `libghostty-vt-sys/build.rs`: `GHOSTTY_COMMIT` = `3bd54e025cc3` (ghostty
   main, 2026-10-31), which contains `e257bb45`.
 - `libghostty-vt-sys/src/bindings.rs`: regenerated from that commit's
@@ -1206,9 +1249,13 @@ Recorded per commit in git history; the list is kept current:
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
-   `libghostty-vt-sys/build.rs`.
+   `libghostty-vt-sys/build.rs`, and `GHOSTTY_HASH` to what `zig fetch
+   https://github.com/ghostty-org/ghostty/archive/<commit>.tar.gz` prints.
+   Copy the commit's `LICENSE` to `libghostty-vt-sys/LICENSE-ghostty` if
+   it changed.
 2. Match Zig to the commit's `build.zig.zon` `minimum_zig_version` in
-   `mise.toml` and `.github/workflows/ci.yml`.
+   `mise.toml`, `.github/workflows/ci.yml`, `ZIG_VERSION` in
+   `libghostty-vt-sys/build.rs` and the README's install line.
 3. Regenerate the bindings from the new headers, in
    `third_party/libghostty-rs/libghostty-vt-sys`:
    `GHOSTTY_INCLUDE_DIR=<ghostty-install>/include cargo run --features

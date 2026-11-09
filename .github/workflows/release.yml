@@ -8,6 +8,7 @@ name: release
 # `## 3.8-beta1` section to CHANGELOG.md, try `scripts/release-tarball.sh
 # x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`. The build
 # fails when the tag is not `v` + what `vtmux -V` prints.
+# crates.io is a separate step: docs/RELEASING.md.
 on:
   push:
     tags: ["v*"]
@@ -39,8 +40,9 @@ jobs:
         with:
           reference-tmux: "false"
           rust-cache: "false"
-      # libghostty-vt-sys's build script clones the pinned ghostty commit, applies
-      # the vendored patches and builds it with Zig (ReleaseFast, baseline CPU).
+      # vtmux-ghostty-vt-sys's build script downloads the pinned ghostty commit,
+      # applies the vendored patches and builds it with Zig (ReleaseFast,
+      # baseline CPU).
       - name: Build and package
         id: package
         shell: bash

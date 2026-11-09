@@ -59,6 +59,8 @@ Each pane's screen lives in its own libghostty-vt terminal inside the server, wh
 | `vtmux` | The binary: global flags, connect-or-start, then a command, attach or control mode. |
 | `xtask` | Test tooling: the reference tmux build, the regress runner, the behaviour oracle, socket reaping. |
 
+Under `vtmux-vt` sit `vtmux-ghostty-vt` and `vtmux-ghostty-vt-sys` (`third_party/libghostty-rs`, outside the workspace): libghostty-rs's `libghostty-vt` and `libghostty-vt-sys`, forked, published under vtmux's names. The sys crate's build script downloads the pinned Ghostty commit, checks its Zig package hash, applies vtmux's patches and builds it with Zig (`VENDOR.md` there). Every crate but `xtask` is published to crates.io, in dependency order ([RELEASING.md](RELEASING.md)).
+
 `unsafe` is allowed only in `vtmux-vt` and `vtmux-server/src/sys/`. Every other crate is `#![forbid(unsafe_code)]` (D10).
 
 ## Output: a program prints

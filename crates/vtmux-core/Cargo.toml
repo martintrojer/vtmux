@@ -4,7 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "tmux 3.8's semantics in pure Rust for vtmux: commands, formats, options, keys, layouts, the client/server protocol. Internal to vtmux, no stable API: install `vtmux`."
+keywords = ["tmux", "terminal", "multiplexer", "vtmux"]
+categories = ["command-line-utilities"]
+# What builds the crate: no tests, fixtures, examples or oracle traces.
+include = ["/src/**/*.rs", "/src/keys/defaults.in", "/src/keys/widths.in", "/src/options/table.in", "/LICENSE"]
 
 [dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "time"] }
@@ -13,8 +20,9 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tz-syste
 [dev-dependencies]
 tempfile = "3"
 # Test-only: the styled-row goldens replay the reference client's terminal bytes
-# through PaneTerm. The library itself stays free of FFI (D10).
-vtmux-vt.workspace = true
+# through PaneTerm. The library itself stays free of FFI (D10). A path alone
+# (no version), so publishing drops it: the tests do not ship.
+vtmux-vt = { path = "../vtmux-vt" }
 
 [lints]
 workspace = true

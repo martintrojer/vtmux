@@ -22,6 +22,8 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 **Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself.
 
+**crates.io ready.** All eight crates package and build from their `.crate` files alone, so `cargo install --locked vtmux` works once they are published (Zig 0.17 on `PATH`). The patched libghostty-rs ships as `vtmux-ghostty-vt-sys` and `vtmux-ghostty-vt`, whose build downloads the pinned Ghostty and checks its hash (`GHOSTTY_SOURCE_TARBALL` for offline builds), and stops with what to install when Zig is missing or the wrong version. How to release: [docs/RELEASING.md](docs/RELEASING.md).
+
 **In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Live upgrades keep the grant, and a downgrade that would drop it is refused.
 
 Every opt-in is tmux 3.8, byte for byte, while off.

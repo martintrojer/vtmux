@@ -2,6 +2,8 @@
 //! Developer tasks: `ref-tmux`, `regress`, `oracle`, `reap`, `sockets`.
 
 mod oracle;
+#[cfg(test)]
+mod publish;
 mod reap;
 mod ref_tmux;
 mod regress;

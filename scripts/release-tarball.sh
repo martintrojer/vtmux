@@ -58,12 +58,10 @@ case "$tmux_v" in
 esac
 
 cp LICENSE README.md CHANGELOG.md "$stage/"
-# libghostty-vt is linked in statically: ship its licence and Ghostty's.
+# libghostty-vt is linked in statically: ship its licence and Ghostty's (the
+# pinned commit's, kept beside the patches).
 cp third_party/libghostty-rs/LICENSE "$stage/licenses/libghostty-rs-LICENSE"
-# The newest build directory, in case an older one is left from another pin.
-# shellcheck disable=SC2012
-ghostty_license=$(ls -t target/release/build/libghostty-vt-sys-*/out/ghostty-src/LICENSE | head -1)
-cp "$ghostty_license" "$stage/licenses/ghostty-LICENSE"
+cp third_party/libghostty-rs/libghostty-vt-sys/LICENSE-ghostty "$stage/licenses/ghostty-LICENSE"
 
 tar -C target/dist -czf "$stage.tar.gz" "$name"
 if command -v sha256sum >/dev/null; then
