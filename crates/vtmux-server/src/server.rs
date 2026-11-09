@@ -3360,7 +3360,8 @@ impl Server {
         let compositor = &self.clients[&id].compositor;
         let same = turn.frames(caps, size).find(|f| {
             self.clients.get(&ClientId(f.leader)).is_some_and(|l| {
-                compositor.writes_as(&l.compositor, &f.forced, &f.frame, &screen, &tags)
+                let shown = (&l.compositor, f.forced.as_slice(), f.frame.as_slice());
+                compositor.writes_as(shown, &screen, &tags)
             })
         });
         if let Some(crate::render::share::SharedFrame { frame, .. }) = same {

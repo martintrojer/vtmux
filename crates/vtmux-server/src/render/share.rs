@@ -199,94 +199,63 @@ impl Compositor {
         &self.forced
     }
 
-    /// Whether [`Self::frame_tagged`] of `screen` (with `tags` and the
-    /// cells `forced`) would write what `leader`'s just did, `frame`: the
-    /// frame is a function of the terminal's screen, the new one, the
-    /// forced cells and the caps, so it does when the caps match and this
-    /// terminal shows what `leader`'s showed before its frame, and
-    /// `screen` is what `leader`'s shows now.
-    #[must_use]
-    pub fn writes_as(
-        &self,
-        leader: &Self,
-        forced: &[(u16, u16, u16)],
-        frame: &[u8],
-        screen: &Snapshot,
-        tags: &[u64],
-    ) -> bool {
+    /// The screen `leader`'s frame of this turn left, with its tags, if
+    /// this terminal shows what `leader`'s showed before that frame and the
+    /// frame would force the same cells: this compositor's frame of that
+    /// screen is then `leader`'s, as a frame is a function of the screen
+    /// the terminal shows, the new one, the forced cells and the caps.
+    fn after<'a>(&self, (leader, forced, frame): Shown<'a>) -> Option<(&'a Snapshot, &'a [u64])> {
         if self.forced != forced || self.blocked {
-            return false;
+            return None;
         }
         // frame_tagged keeps an unchanged screen as the spare, a changed
         // one as `last` and the screen before it as the spare.
-        let (before, before_tags, now, now_tags) = if frame.is_empty() {
+        let ((before, before_tags), (now, now_tags)) = if frame.is_empty() {
             (
-                &leader.last,
-                &leader.last_tags,
-                &leader.spare,
-                &leader.spare_tags,
+                (&leader.last, &leader.last_tags),
+                (&leader.spare, &leader.spare_tags),
             )
         } else {
             (
-                &leader.spare,
-                &leader.spare_tags,
-                &leader.last,
-                &leader.last_tags,
+                (&leader.spare, &leader.spare_tags),
+                (&leader.last, &leader.last_tags),
             )
         };
-        let Some(now) = now else {
-            return false;
-        };
-        let shown = match (&self.last, before) {
+        let shows = match (&self.last, before) {
             (None, None) => true,
             (Some(a), Some(b)) => same_rows(a, &self.last_tags, b, before_tags),
             _ => false,
         };
-        shown && same_rows(screen, tags, now, now_tags)
+        shows.then_some((now.as_deref()?, now_tags.as_slice()))
+    }
+
+    /// Whether [`Self::frame_tagged`] of `screen` (with `tags`) would write
+    /// what `shown`'s compositor just did ([`Self::after`]): `screen` is
+    /// what that one's frame left.
+    #[must_use]
+    pub fn writes_as(&self, shown: Shown<'_>, screen: &Snapshot, tags: &[u64]) -> bool {
+        self.after(shown)
+            .is_some_and(|(now, now_tags)| same_rows(screen, tags, now, now_tags))
     }
 
     /// [`Self::writes_as`] of a plain screen not drawn yet, known by its
     /// row tags (each a composed or status row, none 0) and its cursor:
-    /// the screen `leader`'s frame left has the same tags and cursor (and
-    /// no wrapped rows, which a plain screen has none of).
+    /// the screen the frame left has the same tags and cursor (and no
+    /// wrapped rows, which a plain screen has none of).
     #[must_use]
     pub fn shows_as(
         &self,
-        (leader, forced, frame): Shown<'_>,
+        shown: Shown<'_>,
         tags: &[u64],
         cursor: (Option<(u16, u16)>, bool),
     ) -> bool {
-        if self.forced != forced || self.blocked || tags.contains(&0) {
-            return false;
-        }
-        let (before, before_tags, now, now_tags) = if frame.is_empty() {
-            (
-                &leader.last,
-                &leader.last_tags,
-                &leader.spare,
-                &leader.spare_tags,
-            )
-        } else {
-            (
-                &leader.spare,
-                &leader.spare_tags,
-                &leader.last,
-                &leader.last_tags,
-            )
-        };
-        let Some(now) = now else {
-            return false;
-        };
-        let shown = match (&self.last, before) {
-            (None, None) => true,
-            (Some(a), Some(b)) => same_rows(a, &self.last_tags, b, before_tags),
-            _ => false,
-        };
-        shown
-            && now_tags.as_slice() == tags
-            && usize::from(now.rows) == tags.len()
-            && (now.cursor, now.cursor_visible) == cursor
-            && now.wrapped.is_empty()
+        !tags.contains(&0)
+            && self.after(shown).is_some_and(|(now, now_tags)| {
+                now_tags == tags
+                    && usize::from(now.rows) == tags.len()
+                    && (now.cursor, now.cursor_visible) == cursor
+                    && now.wrapped.is_empty()
+            })
     }
 
     /// The screen the last frame left, to share with a client that takes
