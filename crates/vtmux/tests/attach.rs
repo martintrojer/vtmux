@@ -7867,6 +7867,51 @@ fn kitty_keys_grant_follows_the_program() {
     }
 }
 
+/// D29's grant ends with the process group that pushed it: a program
+/// killed without popping its flags leaves the shell its keys as tmux
+/// sends them, not `CSI 99;5u` until a `reset`. The pane's shell runs the
+/// program as a foreground job (`set -m`, its own process group), which
+/// pushes flag 1 and is killed (SIGKILL). A key sent while it runs is kitty
+/// (rule 5: a running program keeps its grant; it sits in the tty's queue
+/// for the `cat` the shell then becomes), and the key sent after the shell
+/// has reaped it is not. The shell signals the reap on a channel, not on
+/// the screen: a job-control shell may report the kill there (dash prints
+/// `Killed`, bash does not), so the pane's text is the host's. vtmux only
+/// (tmux 3.8 has no such option).
+#[test]
+fn kitty_keys_grant_ends_when_the_pushing_program_is_killed() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let out = w.home.path().join("out");
+    let pid = w.home.path().join("pid");
+    let script = format!(
+        "stty raw -echo; tmux wait-for go; set -m; \
+         sh -c 'echo $$ > {}; printf \"\\033[>1uP\"; exec sleep 1000'; \
+         tmux wait-for -S reaped; exec cat > {}",
+        pid.display(),
+        out.display()
+    );
+    let mut a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    cli_ok(&w, &["set", "-s", "vtmux-kitty-keys", "on"]);
+    cli_ok(&w, &["wait-for", "-S", "go"]);
+    // The program pushed (its `P` is on the screen) and is running.
+    a.wait(|_| pane_line(&w) == "P");
+    cli_ok(&w, &["send-keys", "-t", "a", "C-c"]);
+    let program = std::fs::read_to_string(&pid).unwrap();
+    let killed = std::process::Command::new("kill")
+        .args(["-9", program.trim()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    // The shell reaped it and goes on to `cat`: no key is kitty now.
+    cli_ok(&w, &["wait-for", "reaped"]);
+    cli_ok(&w, &["send-keys", "-t", "a", "C-c", "Escape"]);
+    file_is(&out, b"\x1b[99;5u\x03\x1b");
+    // A pane that is typed at gets the same.
+    a.keys(b"\x03");
+    file_is(&out, b"\x1b[99;5u\x03\x1b\x03");
+}
+
 /// The desktop notifications in a terminal's bytes: each OSC 9 (not the
 /// `9;4` progress bar) and OSC 777, whole, terminator included.
 fn notifications(bytes: &[u8]) -> Vec<Vec<u8>> {

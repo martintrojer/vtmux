@@ -302,6 +302,10 @@ pub struct Pane {
     pub output_generation: u64,
     /// What its shell said of its prompts and commands through OSC 133.
     pub shell_commands: ShellCommands,
+    /// D29: the process group that was granted the kitty keyboard protocol
+    /// on each screen (primary, alternate), whose end ends the grant
+    /// ([`crate::pane_kitty`]).
+    pub kitty_owner: [Option<i32>; 2],
 }
 
 /// A pane's shell prompts and commands as OSC 133 reported them
@@ -633,6 +637,14 @@ impl Model {
     #[must_use]
     pub fn key_modes(&self, p: PaneId) -> Option<crate::keys::KeyModes> {
         Some(self.key_modes_of(&self.panes.get(&p)?.term))
+    }
+
+    /// [`Model::key_modes`] for a key about to be encoded: a kitty grant
+    /// whose program has gone ends first (D29, [`crate::pane_kitty`]).
+    #[must_use]
+    pub fn key_modes_now(&mut self, p: PaneId) -> Option<crate::keys::KeyModes> {
+        self.panes.get_mut(&p)?.end_dead_kitty_grants();
+        self.key_modes(p)
     }
 
     /// The key encoding modes of a terminal (a pane's, or a popup's) under

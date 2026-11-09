@@ -174,6 +174,27 @@ fn a_panes_shell_commands_round_trip() {
         && p.command_status.is_none()));
 }
 
+/// The process groups holding a pane's kitty keyboard grants (D29), added
+/// within v1 as ignorable fields (an older reader skips them, and a
+/// stream without them reads as no recorded owner), round-trip; the golden
+/// stream has none.
+#[test]
+fn a_panes_kitty_owners_round_trip() {
+    let mut s = sample();
+    s.panes[0].kitty_owner_primary = Some(4242);
+    s.panes[0].kitty_owner_alternate = Some(4343);
+    s.panes[1].kitty_owner_alternate = Some(7);
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(
+        golden
+            .panes
+            .iter()
+            .all(|p| p.kitty_owner_primary.is_none() && p.kitty_owner_alternate.is_none())
+    );
+    assert_eq!(s.meta.requires, Vec::<String>::new());
+}
+
 /// Where a client terminal's queries stand, added within v1, round-trips,
 /// required or not ([`TERM_QUERIES_FEATURE`], which the builds before it
 /// was ignorable listed); the golden stream has none.

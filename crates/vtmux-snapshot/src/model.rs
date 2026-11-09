@@ -656,6 +656,12 @@ record! {
         40 => opt command_end_time: Option<i64>,
         41 => one command_running: bool,
         42 => opt command_status: Option<u8>,
+        /// The process groups whose kitty keyboard grants (D29) the
+        /// primary and the alternate screen hold, whose end ends them.
+        /// Ignorable: a snapshot without them (a build before) has its
+        /// grants settled on import.
+        43 => opt kitty_owner_primary: Option<i32>,
+        44 => opt kitty_owner_alternate: Option<i32>,
     }
 }
 
@@ -1398,6 +1404,8 @@ pub(crate) mod tests {
             command_end_time: None,
             command_running: false,
             command_status: None,
+            kitty_owner_primary: None,
+            kitty_owner_alternate: None,
         }
     }
 

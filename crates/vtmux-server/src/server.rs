@@ -2977,7 +2977,7 @@ impl Server {
             self.mode_key(p, c, key.to_core(), true);
             return;
         }
-        let Some(modes) = self.model.key_modes(p) else {
+        let Some(modes) = self.model.key_modes_now(p) else {
             return;
         };
         let bytes = crate::keys::encode(key, modes);
@@ -3021,6 +3021,9 @@ impl Server {
             return;
         }
         for other in self.model.synchronized_peers(p) {
+            if let Some(o) = self.model.panes.get_mut(&other) {
+                o.end_dead_kitty_grants();
+            }
             let bytes = bytes_for(self, other);
             if let Some(io) = self.model.panes.get_mut(&other).and_then(|o| o.io.as_mut()) {
                 io.write(&bytes);
@@ -5260,6 +5263,7 @@ impl Server {
             requests: crate::term_queries::PaneRequests::default(),
             output_generation: 0,
             shell_commands: crate::model::ShellCommands::default(),
+            kitty_owner: [None; 2],
         })
     }
 
@@ -5451,6 +5455,7 @@ impl Server {
         // D29: a respawn ends the old program's kitty keyboard grant, on
         // both screens.
         pane.term.reset_kitty_keys();
+        pane.kitty_owner = [None; 2];
         // grid_clear_lines: an erase, never into history (scroll-on-clear
         // is for the program's clears).
         pane.term.set_scroll_on_clear(false);
@@ -5641,7 +5646,9 @@ impl Server {
             .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
         pane.term.set_extended_keys(extended_keys);
         pane.term.set_kitty_keys(kitty_keys);
+        pane.end_dead_kitty_grants();
         pane.term.feed(bytes);
+        pane.note_kitty_grants();
         // input.c:1065-1068: output to a pane not in a mode is written
         // through it, so its cursor moves arm the window's offset timer.
         let cursor_moved = pane.modes.is_empty();
