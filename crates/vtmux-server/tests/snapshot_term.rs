@@ -387,6 +387,60 @@ fn pen_links_cross_a_snapshot() {
     }
 }
 
+/// The links a pane's cells were drawn with keep their external ids
+/// across a snapshot (a live upgrade redraws them as the terminal was
+/// told them), on either screen and in a held synchronized update, and a
+/// link drawn after it takes a new one.
+#[test]
+fn drawn_link_ids_cross_a_snapshot() {
+    let numbers = |t: &PaneTerm| -> Vec<(u64, String)> {
+        let mut out: Vec<_> = t
+            .screen()
+            .snapshot()
+            .cells
+            .iter()
+            .filter_map(|c| c.link.as_ref().map(|l| (l.number(), l.uri().to_owned())))
+            .collect();
+        out.dedup();
+        out
+    };
+    let held = |t: &PaneTerm| -> Vec<u64> {
+        let held = t.sync_held().expect("held");
+        held.screen
+            .cells
+            .iter()
+            .filter_map(|c| Some(c.link.as_ref()?.number()))
+            .collect()
+    };
+    for form in [Form::Rows, Form::SamePin] {
+        let mut a = pane(
+            20,
+            4,
+            10,
+            b"\x1b]8;id=a;http://x/\x1b\\A\x1b]8;;\x1b\\ \x1b]8;;http://y/\x1b\\B\x1b]8;;\x1b\\",
+        );
+        let primary = numbers(&a);
+        assert_eq!(primary.len(), 2, "{form:?}: {primary:?}");
+        a.feed(b"\x1b[?1049h\x1b]8;;http://z/\x1b\\C\x1b]8;;\x1b\\");
+        let alternate = numbers(&a);
+        a.feed(b"\x1b[?2026h");
+        let t = through_stream(term_to_snapshot(&a, form), form);
+        let mut b = term_from_snapshot(&t, PATCH_STACK).unwrap();
+        assert_eq!(held(&b), held(&a), "{form:?}: the held screen's links");
+        assert_eq!(numbers(&b), alternate, "{form:?}: the alternate screen");
+        b.feed(b"\x1b[?2026l\x1b[?1049l");
+        assert_eq!(numbers(&b), primary, "{form:?}: the primary screen");
+        b.feed(b"\x1b]8;id=a;http://x/\x1b\\D\x1b]8;;http://y/\x1b\\E");
+        let more = numbers(&b);
+        assert_eq!(more[..2], primary[..], "{form:?}: {more:?}");
+        assert_eq!(
+            more[2].0, primary[0].0,
+            "{form:?}: the same id and URI, the same link"
+        );
+        assert!(more[3].0 > alternate[0].0, "{form:?}: a link of its own");
+    }
+}
+
 #[test]
 fn alternate_screen_sync_hold_and_raw_links() {
     let mut bytes = Vec::new();

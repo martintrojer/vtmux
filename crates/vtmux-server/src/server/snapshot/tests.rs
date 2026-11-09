@@ -1312,6 +1312,15 @@ fn an_ordinary_attached_client_requires_no_feature() {
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048h", false);
     ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048$p", false);
+    // A link the client was drawn (OSC 8, `drawn_links`) is too.
+    a.pane_input(
+        vtmux_core::ids::PaneId(0),
+        b"\x1b]8;;http://x\x1b\\L\x1b]8;;\x1b\\",
+        false,
+    );
+    a.render_clients();
+    let drawn = a.to_snapshot(snap::Meta::default());
+    assert_eq!(drawn.panes[0].term.as_ref().unwrap().drawn_links.len(), 1);
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());

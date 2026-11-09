@@ -326,6 +326,7 @@ mod tests {
             light_theme: false,
             attrs: super::super::Attrs::XTERM,
             isolates: false,
+            hyperlinks: false,
         }
     }
 

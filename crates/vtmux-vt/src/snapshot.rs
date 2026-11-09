@@ -5,8 +5,10 @@ use libghostty_vt::screen::{CellContentTag, CellWide};
 use libghostty_vt::style::{self, StyleColor};
 
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::link::Link;
 use crate::term::PaneTerm;
 use crate::text::CellText;
 
@@ -94,8 +96,9 @@ pub struct Cell {
     /// Ghostty keeps no charset per cell; [`PaneTerm`] carries it in the
     /// cell's DECSCA protection bit (see `term.rs`).
     pub acs: bool,
-    /// Inside an OSC 8 hyperlink (tmux's `gc->link != 0`).
-    pub link: bool,
+    /// The OSC 8 hyperlink the cell is in (tmux's `gc->link`), as the
+    /// outer terminal is given it.
+    pub link: Option<Arc<Link>>,
     /// A TAB cell (tmux's `GRID_FLAG_TAB`), only in a [`crate::Row`]: the
     /// text is the `width` spaces the tab covers and the cells after it
     /// are width 0. [`Snapshot`] cells never have it (a tab draws as the
@@ -130,7 +133,7 @@ impl Clone for Cell {
             width: self.width,
             style: self.style,
             acs: self.acs,
-            link: self.link,
+            link: self.link.clone(),
             tab: self.tab,
         }
     }
@@ -140,7 +143,7 @@ impl Clone for Cell {
         self.width = source.width;
         self.style = source.style;
         self.acs = source.acs;
-        self.link = source.link;
+        self.link.clone_from(&source.link);
         self.tab = source.tab;
     }
 }
@@ -358,7 +361,8 @@ impl ScreenView {
                 let mut x = 0;
                 while let Some(cell) = cell_iter.next() {
                     let Some(slot) = line.get_mut(x) else { break };
-                    row_changed |= read_cell(cell, slot, &mut scratch);
+                    let at = (x, y);
+                    row_changed |= read_cell(cell, slot, &mut scratch, || term.drawn_link(at));
                     x += 1;
                 }
                 if row_changed {
@@ -387,7 +391,13 @@ fn update_cursor(view: &mut Rc<Snapshot>, snap: &libghostty_vt::render::Snapshot
 }
 
 /// Read one cell into `slot`, reusing its text buffer; whether it changed.
-fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String) -> bool {
+/// `link` reads the link of a cell that has one.
+fn read_cell(
+    cell: &CellIteration<'_, '_>,
+    slot: &mut Cell,
+    scratch: &mut String,
+    link: impl FnOnce() -> Option<Arc<Link>>,
+) -> bool {
     let raw = cell.raw_cell();
     // Most cells are unstyled: Ghostty's style lookup is the dear part of
     // a read.
@@ -399,7 +409,7 @@ fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String
     } else {
         Style::default()
     };
-    let (mut width, mut acs, mut link) = (1, false, false);
+    let (mut width, mut acs, mut linked) = (1, false, false);
     if let Ok(raw) = raw {
         // A cell erased with a background has no text and carries the
         // colour in its content tag instead of its style.
@@ -423,8 +433,9 @@ fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String
             _ => 1,
         };
         acs = raw.is_protected().unwrap_or(false);
-        link = raw.has_hyperlink().unwrap_or(false);
+        linked = raw.has_hyperlink().unwrap_or(false);
     }
+    let link = if linked { link() } else { None };
     scratch.clear();
     let _ = cell.graphemes_utf8(scratch);
     let changed = slot.width != width
@@ -495,7 +506,7 @@ mod tests {
         let flags: Vec<_> = (0..4)
             .map(|x| {
                 let c = s.cell(x, 0).unwrap();
-                (c.acs, c.link)
+                (c.acs, c.link.is_some())
             })
             .collect();
         assert_eq!(
@@ -504,6 +515,18 @@ mod tests {
         );
         assert_eq!(s.cell(1, 0).unwrap().text, "│");
         assert_eq!(s.wrapped, [false, true, false]);
+    }
+
+    /// `s` without its links, and their URIs: two panes number links apart.
+    fn by_uri(s: &Snapshot) -> (Snapshot, Vec<Option<String>>) {
+        let uris = s
+            .cells
+            .iter()
+            .map(|c| c.link.as_ref().map(|l| l.uri().to_owned()))
+            .collect();
+        let mut s = s.clone();
+        s.cells.iter_mut().for_each(|c| c.link = None);
+        (s, uris)
     }
 
     /// The kept view, read after every piece of output, matches a fresh
@@ -536,7 +559,11 @@ mod tests {
             }
             let mut view = ScreenView::default();
             view.update(&fresh);
-            assert_eq!(kept.screen().snapshot(), view.snapshot(), "after piece {i}");
+            assert_eq!(
+                by_uri(kept.screen().snapshot()),
+                by_uri(view.snapshot()),
+                "after piece {i}"
+            );
         }
         let before = kept.screen().row_stamps().to_vec();
         kept.feed(b"\x1b[2;1Hz");
@@ -564,7 +591,7 @@ mod tests {
         t.feed(b"\r\nthree");
         let mut fresh = PaneTerm::new(10, 3, 100);
         fresh.feed(b"one\r\ntwo\r\nthree");
-        assert_eq!(t.screen().snapshot(), &snapshot(&fresh));
+        assert_eq!(by_uri(t.screen().snapshot()), by_uri(&snapshot(&fresh)));
         let after = t.screen().row_stamps().to_vec();
         assert!(
             before.iter().all(|s| !after.contains(s)),

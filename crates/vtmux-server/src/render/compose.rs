@@ -86,7 +86,7 @@ impl Theme {
             width: c.width,
             style: self.style(&c.style),
             acs: c.style.attrs.contains(Attrs::ACS),
-            link: c.style.link.is_some(),
+            link: c.style.link.as_deref().map(vtmux_vt::format_link),
             tab: false,
         }
     }
@@ -842,7 +842,7 @@ fn is_empty<T: PartialEq>(c: &Cell, bg: &T, last: &T) -> bool {
     };
     c.width == 1
         && !c.acs
-        && !c.link
+        && c.link.is_none()
         && (c.text.is_empty() || c.text == " ")
         && bg == last
         && c.style == plain
@@ -1087,7 +1087,10 @@ mod tests {
     #[test]
     fn charset_and_link_spaces_are_not_empty() {
         let red = Color::Palette(1);
-        for mark in [|c: &mut Cell| c.acs = true, |c: &mut Cell| c.link = true] {
+        for mark in [
+            |c: &mut Cell| c.acs = true,
+            |c: &mut Cell| c.link = Some(vtmux_vt::Link::fresh("http://l")),
+        ] {
             let mut row: Vec<Cell> = (0..12)
                 .map(|_| text_cell(" ", red, Color::Default))
                 .collect();

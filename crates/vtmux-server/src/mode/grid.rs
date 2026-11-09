@@ -144,7 +144,7 @@ fn used_cells(mut row: Row) -> Row {
     while row.cells.last().is_some_and(|c| {
         c.text.is_empty()
             && c.width == 1
-            && !c.link
+            && c.link.is_none()
             && !c.acs
             && c.style == vtmux_vt::Style::default()
     }) {
@@ -367,19 +367,29 @@ impl Grid {
         (rows, self.hsize, self.hscrolled, self.sx, self.sy)
     }
 
-    /// A copy of the rows [`Self::export`] gave.
+    /// A copy of the rows [`Self::export`] gave, `pane` the terminal it
+    /// copies: a link's cells are drawn with the pane's link for its URI
+    /// when it has just one, else with a new link per URI (the rows keep
+    /// no link's id, D-068).
     #[must_use]
     pub fn import(
         rows: &[vtmux_snapshot::Row],
-        hsize: usize,
-        hscrolled: usize,
-        sx: usize,
-        sy: usize,
+        (hsize, hscrolled, sx, sy): (usize, usize, usize, usize),
+        pane: &PaneTerm,
     ) -> Self {
+        let mut known: std::collections::HashMap<String, std::sync::Arc<vtmux_vt::Link>> =
+            std::collections::HashMap::new();
+        let mut link = |uri: &str| {
+            let link = known.entry(uri.to_owned()).or_insert_with(|| {
+                pane.drawn_link_of(uri)
+                    .unwrap_or_else(|| vtmux_vt::Link::fresh(uri))
+            });
+            std::sync::Arc::clone(link)
+        };
         let lines = rows
             .iter()
             .map(|r| {
-                let (row, links) = crate::server::snapshot::rows::row_in(r);
+                let (row, links) = crate::server::snapshot::rows::row_in(r, &mut link);
                 let flags = r.mark.map_or(0, |m| m.flags);
                 Line {
                     row: OnceCell::from(row),

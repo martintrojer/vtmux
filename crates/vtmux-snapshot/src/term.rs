@@ -93,6 +93,23 @@ record! {
 }
 
 record! {
+    /// A link the pane's cells were drawn with: the emulator's URI and id
+    /// for it, and the number of the external id the outer terminal was
+    /// given (`tmuxN`, tmux's `hyperlinks_put`). A reader without it gives
+    /// the pane's links new numbers as it draws them.
+    pub struct DrawnLink {
+        1 => one uri: Vec<u8>,
+        /// The `id=` parameter; without one, the emulator's own id.
+        2 => opt id: Option<Vec<u8>>,
+        3 => one implicit: u32,
+        /// An emulator id of the alternate screen's (each screen counts
+        /// its own).
+        4 => one alternate: bool,
+        5 => one number: u64,
+    }
+}
+
+record! {
     /// tmux's pen hyperlink and the copies of the pen it keeps, each as the
     /// OSC 8 payload (`params;uri`) that set it, and the link the
     /// emulator's cursor has ([`TermState::pen_links`]). A reader without
@@ -520,6 +537,8 @@ record! {
         /// program, which stopped handling `SIGWINCH` once granted, would
         /// draw at the old size.
         42 => one inband_resize: bool,
+        /// The links the pane's cells were drawn with.
+        43 => many drawn_links: Vec<DrawnLink>,
     }
 }
 
@@ -761,6 +780,31 @@ pub(crate) mod tests {
         });
         round_trip(&t);
         round_trip(t.pen_links.as_ref().unwrap());
+    }
+
+    /// The links a pane's cells were drawn with, added after the golden
+    /// file was written; a stream without them reads as none.
+    #[test]
+    fn drawn_links_field() {
+        let mut t = sample_term();
+        assert_eq!(t.drawn_links, []);
+        t.drawn_links = vec![
+            DrawnLink {
+                uri: b"http://x/".to_vec(),
+                id: Some(b"a".to_vec()),
+                number: 7,
+                ..DrawnLink::default()
+            },
+            DrawnLink {
+                uri: b"http://y/".to_vec(),
+                implicit: 3,
+                alternate: true,
+                number: 0x1_0000_0000,
+                ..DrawnLink::default()
+            },
+        ];
+        round_trip(&t);
+        round_trip(&t.drawn_links[1]);
     }
 
     /// Every field added after the golden file was written, set.

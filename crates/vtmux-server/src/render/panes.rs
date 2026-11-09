@@ -255,7 +255,7 @@ impl Borders {
                         width: 1,
                         style,
                         acs: true,
-                        link: false,
+                        link: None,
                         tab: false,
                     },
                 );

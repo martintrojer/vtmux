@@ -315,6 +315,8 @@ fn feature_value(name: &str) -> Option<&'static str> {
         "Smol" => "\x1b[53m",
         "smxx" => "\x1b[9m",
         "Spb" => SPB,
+        // `hyperlinks` (tty-features.c:101).
+        "Hls" => "\x1b]8;%?%p1%l%tid=%p1%s%;;%p2%s\x1b\\",
         _ => return None,
     })
 }

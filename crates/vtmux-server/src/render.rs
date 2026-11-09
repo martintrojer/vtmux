@@ -18,11 +18,12 @@ pub mod share;
 pub mod status;
 pub mod tree;
 pub mod window;
+use std::sync::Arc;
 use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;
 use vtmux_core::term_features::{Cap, OpenError, Term};
 use vtmux_core::width;
-use vtmux_vt::{Color, Snapshot, Style, Underline};
+use vtmux_vt::{Color, Link, Snapshot, Style, Underline};
 
 /// What the compositor needs of a client's terminal, from its
 /// [`Term`] (terminfo-free, D8): `terminal-features`, `terminal-overrides`,
@@ -64,6 +65,8 @@ pub struct Caps {
     pub isolates: bool,
     /// The attributes it can show.
     pub attrs: Attrs,
+    /// `Hls` (the `hyperlinks` feature): cells' OSC 8 links are written.
+    pub hyperlinks: bool,
 }
 
 /// The attribute capabilities `tty_attributes` writes with (tty.c:2727-
@@ -207,6 +210,7 @@ impl Caps {
             light_theme: false,
             isolates: term.feature_present("utf8") && term.has_name("Bidi"),
             attrs: Attrs::from_term(term),
+            hyperlinks: term.has_name("Hls"),
         }
     }
 }
@@ -396,7 +400,7 @@ pub fn clear_cells(cells: &mut [vtmux_vt::Cell]) {
         c.width = 0;
         c.style = Style::default();
         c.acs = false;
-        c.link = false;
+        c.link = None;
         c.tab = false;
     }
 }
@@ -575,7 +579,7 @@ impl Compositor {
             return Vec::new();
         };
         let mut out = String::new();
-        place_cursor(&mut out, &mut Style::default(), last, caps);
+        place_cursor(&mut out, &mut Pen::default(), last, caps);
         out.into_bytes()
     }
     /// Rows `y..y + n` of the last frame sent, if it had this size: what
@@ -673,7 +677,7 @@ impl Compositor {
             out.push_str("\x1b[?2026h");
         }
         out.push_str(&self.cursor_codes.hide);
-        let mut style = Style::default();
+        let mut style = Pen::default();
         out.push_str("\x1b[0m");
         // Where the terminal's cursor is, when known: a cell written there
         // needs no cursor move (tty_cursor skips one to where it already
@@ -729,7 +733,7 @@ impl Compositor {
                     // drawing the cell two wide covers, and one drawing it
                     // one wide keeps (else it shows what it showed before).
                     let _ = write!(out, "\x1b[{};{}H", y + 1, x + 2);
-                    set_style(&mut out, &mut style, cell.style, caps);
+                    set_style(&mut out, &mut style, cell.style, None, caps);
                     out.push(' ');
                     at = None;
                 }
@@ -757,7 +761,7 @@ impl Compositor {
                     .count();
                 let erasable = cell.style.bg == Color::Default || caps.bce;
                 if run >= 10 && erasable {
-                    set_style(&mut out, &mut style, cell.style, caps);
+                    set_style(&mut out, &mut style, cell.style, None, caps);
                     let run = u16::try_from(run).unwrap_or(u16::MAX);
                     if x + run == screen.cols {
                         out.push_str("\x1b[K");
@@ -781,11 +785,11 @@ impl Compositor {
                     && caps.bce
                     && !caps.overlay
                 {
-                    set_style(&mut out, &mut style, cell.style, caps);
+                    set_style(&mut out, &mut style, cell.style, None, caps);
                     out.push_str("\x1b[K");
                     break;
                 }
-                set_style(&mut out, &mut style, cell.style, caps);
+                set_style(&mut out, &mut style, cell.style, cell.link.as_ref(), caps);
                 out.push_str(&outer_text(cell));
                 x += u16::from(cell.width.max(1));
                 at = (x < screen.cols && !narrow).then_some((x, y));
@@ -842,7 +846,7 @@ fn is_skin_tone(c: char) -> bool {
 /// to join. Returns the next column to look at.
 fn write_after_base(
     out: &mut String,
-    style: &mut Style,
+    style: &mut Pen,
     screen: &Snapshot,
     (x, y): (u16, u16),
     caps: Caps,
@@ -856,13 +860,13 @@ fn write_after_base(
         .cell(lx, y)
         .filter(|c| !c.text.is_empty() && c.text != " " && !lone_regional(c))?;
     let _ = write!(out, "\x1b[{};{}H", y + 1, lx + 1);
-    set_style(out, style, left.style, caps);
+    set_style(out, style, left.style, None, caps);
     out.push(' ');
     let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
-    set_style(out, style, cell.style, caps);
+    set_style(out, style, cell.style, cell.link.as_ref(), caps);
     out.push_str(&outer_text(cell));
     let _ = write!(out, "\x1b[{};{}H", y + 1, lx + 1);
-    set_style(out, style, left.style, caps);
+    set_style(out, style, left.style, left.link.as_ref(), caps);
     out.push_str(&outer_text(left));
     Some(x + u16::from(cell.width.max(1)))
 }
@@ -901,7 +905,7 @@ fn joins_wide(c: char) -> bool {
 /// next column to look at and whether it must be written.
 fn write_regional(
     out: &mut String,
-    style: &mut Style,
+    style: &mut Pen,
     screen: &Snapshot,
     (x, y): (u16, u16),
     at: Option<(u16, u16)>,
@@ -920,13 +924,13 @@ fn write_regional(
     });
     if let Some(next) = next {
         let _ = write!(out, "\x1b[{};{}H", y + 1, x + 2);
-        set_style(out, style, next.style, caps);
+        set_style(out, style, next.style, None, caps);
         out.push(' ');
     }
     if next.is_some() || at != Some((x, y)) {
         let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
     }
-    set_style(out, style, cell.style, caps);
+    set_style(out, style, cell.style, cell.link.as_ref(), caps);
     if x + 1 == screen.cols {
         out.push(' ');
         return (x + 1, false);
@@ -971,11 +975,16 @@ fn outer_text(cell: &vtmux_vt::Cell) -> std::borrow::Cow<'_, str> {
     out.into()
 }
 
-/// End the frame's drawing (`\x1b[0m`) and move the cursor. A column
-/// past the last one is the terminal's pending wrap after the row's last
-/// cell, which `tty_cursor` leaves alone (tty.c:2468); writing that cell
-/// again puts the terminal there.
-fn place_cursor(out: &mut String, style: &mut Style, screen: &Snapshot, caps: Caps) {
+/// End the frame's drawing (a link left open ended, then `\x1b[0m`: what
+/// comes between frames, passthrough or a detach's message, is in none)
+/// and move the cursor. A column past the last one is the terminal's
+/// pending wrap after the row's last cell, which `tty_cursor` leaves alone
+/// (tty.c:2468); writing that cell again puts the terminal there.
+fn place_cursor(out: &mut String, style: &mut Pen, screen: &Snapshot, caps: Caps) {
+    let end = |out: &mut String, style: &mut Pen| {
+        set_link(out, style, None, caps);
+        out.push_str("\x1b[0m");
+    };
     match screen.cursor {
         Some((x, y)) if x >= screen.cols => {
             let last = (0..screen.cols)
@@ -983,7 +992,7 @@ fn place_cursor(out: &mut String, style: &mut Style, screen: &Snapshot, caps: Ca
                 .find_map(|cx| screen.cell(cx, y).filter(|c| c.width != 0).map(|c| (cx, c)));
             if let Some((cx, cell)) = last {
                 let _ = write!(out, "\x1b[{};{}H", y + 1, cx + 1);
-                set_style(out, style, cell.style, caps);
+                set_style(out, style, cell.style, cell.link.as_ref(), caps);
                 // A lone regional indicator there went out as a space.
                 if lone_regional(cell) {
                     out.push(' ');
@@ -991,16 +1000,47 @@ fn place_cursor(out: &mut String, style: &mut Style, screen: &Snapshot, caps: Ca
                     out.push_str(&outer_text(cell));
                 }
             }
-            out.push_str("\x1b[0m");
+            end(out, style);
         }
         Some((x, y)) => {
-            out.push_str("\x1b[0m");
+            end(out, style);
             let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
         }
-        None => out.push_str("\x1b[0m"),
+        None => end(out, style),
     }
 }
-fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
+/// What the terminal writes with: the attributes and the hyperlink.
+#[derive(Debug, Default)]
+struct Pen {
+    style: Style,
+    link: Option<Arc<Link>>,
+}
+
+/// Write `wanted` with `link` (tty.c `tty_attributes`, which ends with
+/// `tty_hyperlink`).
+fn set_style(out: &mut String, pen: &mut Pen, wanted: Style, link: Option<&Arc<Link>>, caps: Caps) {
+    set_attrs(out, &mut pen.style, wanted, caps);
+    set_link(out, pen, link, caps);
+}
+
+/// `tty_hyperlink` (tty.c:2598-2615): when the link changes, `Hls` with
+/// its external id and URI, or with neither to end it; nothing on a
+/// terminal without `Hls`. tmux's form (`tty_feature_hyperlinks`,
+/// tty-features.c:101), as for the attributes (D-007).
+fn set_link(out: &mut String, pen: &mut Pen, link: Option<&Arc<Link>>, caps: Caps) {
+    if !caps.hyperlinks || pen.link.as_ref() == link {
+        return;
+    }
+    match link {
+        Some(l) => {
+            let _ = write!(out, "\x1b]8;id={};{}\x1b\\", l.id(), l.uri());
+        }
+        None => out.push_str("\x1b]8;;\x1b\\"),
+    }
+    pen.link = link.cloned();
+}
+
+fn set_attrs(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
     if *current == wanted {
         return;
     }
@@ -1151,6 +1191,7 @@ mod tests {
             light_theme: false,
             isolates: false,
             attrs: Attrs::XTERM,
+            hyperlinks: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -1183,7 +1224,60 @@ mod tests {
             light_theme: false,
             isolates: false,
             attrs: Attrs::XTERM,
+            hyperlinks: false,
         }
+    }
+
+    /// tty.c `tty_hyperlink`: a terminal with `Hls` is told each cell's
+    /// link as tmux words it, `OSC 8 ; id=tmuxN ; URI ST` where the link
+    /// changes and `OSC 8 ; ; ST` where it ends; a link goes on from one
+    /// row to the next (a wrapped link is one link), and the frame ends
+    /// with none open. A terminal without `Hls` is told nothing, the cells
+    /// written as ever.
+    #[test]
+    fn links_are_written_where_they_change() {
+        let mut pane = vtmux_vt::PaneTerm::new(6, 3, 0);
+        pane.feed(b"\x1b]8;id=a;http://a\x1b\\ab\x1b]8;;\x1b\\c\x1b]8;;http://b\\x\x1b\\defghi\x1b]8;;\x1b\\");
+        let screen = pane.screen().snapshot().clone();
+        let id = |x: u16, y: u16| screen.cell(x, y).unwrap().link.as_ref().unwrap().id();
+        let (a, b) = (id(0, 0), id(3, 0));
+        assert_ne!(a, b);
+        let caps = Caps {
+            hyperlinks: true,
+            ..test_caps()
+        };
+        let frame = String::from_utf8(Compositor::default().frame(screen.clone(), caps)).unwrap();
+        let want = format!(
+            "\x1b]8;id={a};http://a\x1b\\ab\x1b]8;;\x1b\\c\x1b]8;id={b};http://b\\\\x\x1b\\def\x1b[2;1Hghi"
+        );
+        assert!(frame.contains(&want), "{frame:?}");
+        let end = frame.rfind("ghi").unwrap();
+        assert!(frame[end..].starts_with("ghi\x1b]8;;\x1b\\"), "{frame:?}");
+        let plain = String::from_utf8(Compositor::default().frame(screen, test_caps())).unwrap();
+        assert!(!plain.contains("\x1b]8"), "{plain:?}");
+        assert!(plain.contains("abcdef\x1b[2;1Hghi"), "{plain:?}");
+    }
+
+    /// A cell whose link changed is written again with it, even when its
+    /// text and style did not change.
+    #[test]
+    fn a_changed_link_redraws_the_cell() {
+        let caps = Caps {
+            hyperlinks: true,
+            ..test_caps()
+        };
+        let mut c = Compositor::default();
+        let mut screen = erased(4);
+        screen.cells[0].text = "x".into();
+        let _ = c.frame(screen.clone(), caps);
+        let link = vtmux_vt::Link::fresh("http://l");
+        screen.cells[0].link = Some(std::sync::Arc::clone(&link));
+        let frame = String::from_utf8(c.frame(screen, caps)).unwrap();
+        let want = format!(
+            "\x1b[1;1H\x1b]8;id={};http://l\x1b\\x\x1b]8;;\x1b\\",
+            link.id()
+        );
+        assert!(frame.contains(&want), "{frame:?}");
     }
 
     /// A blank `cols` x 1 screen of erased cells (no text).
@@ -1532,6 +1626,7 @@ mod tests {
             light_theme: false,
             isolates: false,
             attrs: Attrs::XTERM,
+            hyperlinks: false,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -1572,6 +1667,7 @@ mod tests {
             light_theme: false,
             isolates: false,
             attrs: Attrs::XTERM,
+            hyperlinks: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

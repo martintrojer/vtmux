@@ -1,0 +1,319 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "osc8_ids_numbered_when_drawn",
+  "inputs": {
+    "name": "osc8_ids_numbered_when_drawn",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "sh",
+          "-c",
+          "printf '\\033]8;;file://h/t/a.txt\\033\\\\a.txt\\033]8;;\\033\\\\  \\033]8;;file://h/t/b\\033\\\\b\\033]8;;\\033\\\\\\n\\033]8;id=x;http://e/\\033\\\\one\\033]8;;\\033\\\\ mid \\033]8;id=x;http://e/\\033\\\\two\\033]8;;\\033\\\\\\n\\033]8;;http://w/\\033\\\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\033]8;;\\033\\\\\\n'; i=0; while [ $i -lt 6 ]; do echo; i=$((i+1)); done; printf END; tmux wait-for -S p; exec cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right]P#{scroll_position}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "terminal-features[9]",
+          "xterm*:hyperlinks"
+        ]
+      },
+      {
+        "wait_for": "p"
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-068",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "\\e]8;id=tmux1;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+              "WWWWWWWWWW",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "END",
+              "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+            ],
+            "cursor": [
+              3,
+              8
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a",
+          "-X",
+          "history-top"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-068",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "\\e]8;id=tmux2;file://h/t/a.txt\\e\\a.txt\\e]8;;\\e\\  \\e]8;id=tmux3;file://h/t/b\\e\\b\\e]8;;\\e\\                              \\e[30m\\e[43mP2",
+              "\\e[39m\\e[49m\\e]8;id=tmux4;http://e/\\e\\one\\e]8;;\\e\\ mid \\e]8;id=tmux4;http://e/\\e\\two\\e]8;;\\e\\",
+              "\\e]8;id=tmux1;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+              "WWWWWWWWWW",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+            ],
+            "cursor": [
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-068",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "\\e]8;id=tmux1;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+              "WWWWWWWWWW",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "END",
+              "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+            ],
+            "cursor": [
+              3,
+              8
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e]8;id=tmux4;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+          "WWWWWWWWWW",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "END",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          8
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e]8;id=tmux1;file://h/t/a.txt\\e\\a.txt\\e]8;;\\e\\  \\e]8;id=tmux2;file://h/t/b\\e\\b\\e]8;;\\e\\                              \\e[30m\\e[43mP2",
+          "\\e[39m\\e[49m\\e]8;id=tmux3;http://e/\\e\\one\\e]8;;\\e\\ mid \\e]8;id=tmux3;http://e/\\e\\two\\e]8;;\\e\\",
+          "\\e]8;id=tmux4;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+          "WWWWWWWWWW",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e]8;id=tmux4;http://w/\\e\\WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\\e]8;;\\e\\",
+          "WWWWWWWWWW",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "END",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          8
+        ]
+      }
+    }
+  ]
+}

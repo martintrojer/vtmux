@@ -3427,6 +3427,7 @@ impl CopyMode {
     pub fn import(
         r: &vtmux_snapshot::CopyMode,
         now: Instant,
+        pane: &vtmux_vt::PaneTerm,
     ) -> Result<Self, vtmux_snapshot::Error> {
         let mut rows = Vec::new();
         for page in &r.history {
@@ -3436,10 +3437,13 @@ impl CopyMode {
         rows.extend(r.rows.iter().cloned());
         let backing = Grid::import(
             &rows,
-            hsize,
-            us(r.hscrolled),
-            r.grid_sx as usize,
-            r.grid_sy as usize,
+            (
+                hsize,
+                us(r.hscrolled),
+                r.grid_sx as usize,
+                r.grid_sy as usize,
+            ),
+            pane,
         );
         Ok(Self {
             key_mode: key_mode_in(r.key_mode),

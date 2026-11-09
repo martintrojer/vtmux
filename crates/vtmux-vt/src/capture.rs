@@ -8,11 +8,13 @@ use libghostty_vt::error::Error;
 use libghostty_vt::screen::{CellContentTag, CellWide, GridRef, HyperlinkId};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
+use crate::link::Links;
 use crate::snapshot::{Cell, Color, Style, Underline};
 use crate::text::CellText;
 use std::cell::RefCell;
 use std::io::Write as _;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::term::{HistoryRow, LineMark, PaneTerm};
 
@@ -281,7 +283,7 @@ impl Source<'_> {
                         && c.width == 1
                         && !c.acs
                         && (kind.any_style
-                            || (!c.link && (kind.styled || c.style == Style::default())));
+                            || (c.link.is_none() && (kind.styled || c.style == Style::default())));
                     if kind.styled {
                         styles.push(c.style);
                     }
@@ -731,6 +733,14 @@ struct LinkTarget {
 }
 
 impl LinkTarget {
+    /// The link drawn for this one, from `links`; read on the alternate
+    /// screen or not.
+    fn link(&self, links: &RefCell<Links>, alternate: bool) -> Option<Arc<crate::Link>> {
+        links
+            .borrow_mut()
+            .get(self.uri.as_deref()?, self.id.as_ref()?, alternate)
+    }
+
     /// The link of the cell at `gr`; none if neither part reads.
     fn read(gr: &GridRef<'_>) -> Option<Box<Self>> {
         let target = Self {
@@ -842,14 +852,15 @@ impl RowCell {
             style: c.style,
             wide,
             acs: c.acs,
-            link: c.link,
+            link: c.link.is_some(),
             target: None,
             tab,
         }
     }
 
-    /// The cell as the renderer sees it (as [`crate::snapshot`] reads it).
-    fn to_cell(&self) -> Cell {
+    /// The cell as the renderer sees it (as [`crate::snapshot`] reads it),
+    /// its link from `links` (read on the alternate screen or not).
+    fn to_cell(&self, links: &RefCell<Links>, alternate: bool) -> Cell {
         // tmux stores a tab as one cell as wide as the tab, then padding.
         let (text, width, tab) = match (self.tab, self.wide) {
             (TAB_CONTINUATION, _) => (CellText::new(), 0, false),
@@ -863,10 +874,18 @@ impl RowCell {
             width,
             style: self.style,
             acs: self.acs,
-            link: self.link,
+            link: self
+                .target
+                .as_deref()
+                .and_then(|t| t.link(links, alternate)),
             tab,
         }
     }
+}
+
+/// [`RowCell::to_cell`] of each of `cells`.
+fn to_cells(cells: &[RowCell], links: &RefCell<Links>, alternate: bool) -> Vec<Cell> {
+    cells.iter().map(|c| c.to_cell(links, alternate)).collect()
 }
 
 /// One row of tmux's grid as copy mode reads it (`grid_get_line`): every
@@ -931,7 +950,7 @@ impl PaneTerm {
             HistoryRow::Frozen(f) => f.thaw(),
         };
         Some(Row {
-            cells: cells.iter().map(RowCell::to_cell).collect(),
+            cells: to_cells(&cells, &self.links, false),
             wrapped,
         })
     }
@@ -948,7 +967,7 @@ impl PaneTerm {
         }
         let (cells, wrapped) = read_row(self, y, hsize, usize::from(self.cols()), &mut None);
         Row {
-            cells: cells.iter().map(RowCell::to_cell).collect(),
+            cells: to_cells(&cells, &self.links, y >= hsize && self.alternate_on()),
             wrapped,
         }
     }
@@ -967,7 +986,7 @@ impl PaneTerm {
             }
             let (cells, wrapped) = read_row(self, y, hsize, cols, &mut last);
             Row {
-                cells: cells.iter().map(RowCell::to_cell).collect(),
+                cells: to_cells(&cells, &self.links, y >= hsize && self.alternate_on()),
                 wrapped,
             }
         })
@@ -1000,6 +1019,8 @@ pub struct ScreenCopy {
     /// The cells and codepoints of the row [`ScreenCopy::text`] read
     /// last, kept for the next: a search reads every row.
     scratch: RefCell<(Vec<libghostty_vt::screen::Cell>, Vec<u32>)>,
+    /// The pane's links ([`PaneTerm::drawn_link`]).
+    links: Rc<RefCell<Links>>,
 }
 
 impl std::fmt::Debug for ScreenCopy {
@@ -1018,7 +1039,7 @@ impl ScreenCopy {
     pub fn row(&self, y: usize) -> Row {
         let (cells, wrapped) = self.row_cells(y, false);
         Row {
-            cells: cells.iter().map(RowCell::to_cell).collect(),
+            cells: to_cells(&cells, &self.links, self.alternate_at(y)),
             wrapped,
         }
     }
@@ -1031,9 +1052,14 @@ impl ScreenCopy {
         let (cells, wrapped) = self.row_cells(y, true);
         let used = cells.iter().rposition(|c| !c.unused()).map_or(0, |x| x + 1);
         Row {
-            cells: cells[..used].iter().map(RowCell::to_cell).collect(),
+            cells: to_cells(&cells[..used], &self.links, self.alternate_at(y)),
             wrapped,
         }
+    }
+
+    /// Row `y` is a row of the alternate screen (history is the primary's).
+    fn alternate_at(&self, y: usize) -> bool {
+        self.frozen.is_some() && y >= self.hsize
     }
 
     /// The row's cells; with `used_only` they may stop after the last
@@ -1183,6 +1209,28 @@ impl PaneTerm {
         hyperlink_at(&self.term, y + retained - hsize, x)
     }
 
+    /// The link of the cell at `(x, y)` of the visible screen, which has
+    /// one, as the outer terminal is given it ([`crate::Link`]).
+    pub(crate) fn drawn_link(&self, (x, y): (usize, usize)) -> Option<Arc<crate::Link>> {
+        let gr = self
+            .term
+            .grid_ref(Point::Viewport(PointCoordinate {
+                x: u16::try_from(x).ok()?,
+                y: u32::try_from(y).ok()?,
+            }))
+            .ok()?;
+        let target = LinkTarget::read(&gr)?;
+        target.link(&self.links, self.alternate_on())
+    }
+
+    /// The link this pane's cells with `uri` were drawn with, when only one
+    /// link has it: for lines that keep only the URI (a copy mode restored
+    /// from a snapshot).
+    #[must_use]
+    pub fn drawn_link_of(&self, uri: &str) -> Option<Arc<crate::Link>> {
+        self.links.borrow().by_uri(uri)
+    }
+
     /// Copy the grid (see [`ScreenCopy`]). Compressed history pages are
     /// copied compressed: the pane's stay so, the copy decodes a page on
     /// its first read.
@@ -1215,6 +1263,7 @@ impl PaneTerm {
             marks: self.line_marks(),
             last: RefCell::new(None),
             scratch: RefCell::default(),
+            links: Rc::clone(&self.links),
         }
     }
 }
@@ -2938,7 +2987,7 @@ mod tests {
             while want.cells.last().is_some_and(|c| {
                 c.text.is_empty()
                     && c.width == 1
-                    && !c.link
+                    && c.link.is_none()
                     && !c.acs
                     && c.style == Style::default()
             }) {

@@ -119,7 +119,7 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
                 _ => (snap::Wide::Narrow, snap::Tab::None),
             }
         };
-        let link = if c.link {
+        let link = if c.link.is_some() {
             let uri = link(x).unwrap_or_default();
             let at = *known.entry(uri).or_insert_with_key(|uri| {
                 out.links.push(snap::Hyperlink {
@@ -151,8 +151,12 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
     out
 }
 
-/// The vtmux-vt row of a snapshot row, and its hyperlinks by column.
-pub fn row_in(row: &snap::Row) -> (vt::Row, Vec<(usize, String)>) {
+/// The vtmux-vt row of a snapshot row, and its hyperlinks by column, each
+/// link the one `link` gives for its URI: the rows keep no link's id.
+pub fn row_in(
+    row: &snap::Row,
+    link: &mut dyn FnMut(&str) -> std::sync::Arc<vt::Link>,
+) -> (vt::Row, Vec<(usize, String)>) {
     let mut links = Vec::new();
     // Each column's grapheme tail: the first one listed for it.
     let mut rests: Vec<Option<&str>> = vec![None; row.cells.len()];
@@ -179,20 +183,23 @@ pub fn row_in(row: &snap::Row) -> (vt::Row, Vec<(usize, String)>) {
                 (snap::Tab::None, snap::Wide::Wide) => (2, false),
                 (snap::Tab::None, _) => (1, false),
             };
+            let mut linked = None;
             if c.link != 0
                 && let Some(l) = row.links.get(usize::from(c.link) - 1)
                 && !l.uri.is_empty()
             {
                 // Copy mode keeps a link's URI as text (`vt::Rows`), and
                 // wrote it so.
-                links.push((x, String::from_utf8_lossy(&l.uri).into_owned()));
+                let uri = String::from_utf8_lossy(&l.uri).into_owned();
+                linked = Some(link(&uri));
+                links.push((x, uri));
             }
             vt::Cell {
                 text: text.into(),
                 width,
                 style: style_in(&c.style),
                 acs: c.flags & snap::row::cell_flag::ACS != 0,
-                link: c.link != 0,
+                link: linked,
                 tab,
             }
         })
@@ -223,7 +230,8 @@ mod tests {
         styled.style.underline = vt::Underline::Curly;
         styled.acs = true;
         let mut linked = cell("l", 1);
-        linked.link = true;
+        let link = vt::Link::fresh("http://x");
+        linked.link = Some(std::sync::Arc::clone(&link));
         let mut tab = cell("   ", 3);
         tab.tab = true;
         let row = vt::Row {
@@ -242,7 +250,10 @@ mod tests {
             wrapped: true,
         };
         let out = row_out(&row, |x| (x == 5).then(|| "http://x".to_owned()));
-        let (back, links) = row_in(&out);
+        let (back, links) = row_in(&out, &mut |uri| {
+            assert_eq!(uri, "http://x");
+            std::sync::Arc::clone(&link)
+        });
         assert_eq!(back, row);
         assert_eq!(links, [(5, "http://x".to_owned())]);
     }
@@ -276,14 +287,14 @@ mod tests {
                 rest: "\u{303}".into(),
             },
         ];
-        let (back, _) = row_in(&row);
+        let (back, _) = row_in(&row, &mut |uri| vt::Link::fresh(uri));
         let texts: Vec<&str> = back.cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(texts, ["e\u{300}", "e", "e\u{301}"]);
 
         let linked = |text: &str| vt::Cell {
             text: text.into(),
             width: 1,
-            link: true,
+            link: Some(vt::Link::fresh("http://l")),
             ..vt::Cell::default()
         };
         let row = vt::Row {

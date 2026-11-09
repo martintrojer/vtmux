@@ -57,14 +57,14 @@ fn linked_cursor_survives_a_clear_that_prunes_its_page() {
         let s = snapshot(&t);
         let cell = s.cell(0, 0).unwrap();
         assert_eq!(
-            (cell.text.as_str(), cell.link),
+            (cell.text.as_str(), cell.link.is_some()),
             ("y", true),
             "lines={lines}"
         );
         t.feed(&b"\x1b]8;;\x1b\\z\x1b]8;;http://o\x1b\\q\r\n".repeat(50));
         let s = snapshot(&t);
         assert!(
-            s.cells.iter().any(|c| c.text == "q" && c.link),
+            s.cells.iter().any(|c| c.text == "q" && c.link.is_some()),
             "lines={lines}"
         );
     }

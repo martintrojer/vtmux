@@ -8614,3 +8614,272 @@ fn inband_resize_grant_refuses_a_downgrade_until_released() {
     let up = w.cli(&["vtmux-upgrade", "-b", older]);
     assert!(up.status.success(), "{up:?}");
 }
+
+/// The OSC 8 sequences in `text` (ended by ST or BEL), each once, sorted:
+/// what is written when differs with how the screen is drawn.
+fn osc8(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (at, _) in text.match_indices("\x1b]8;") {
+        let rest = &text[at..];
+        let end = [
+            rest.find("\x1b\\").map(|e| e + 2),
+            rest.find('\x07').map(|e| e + 1),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(rest.len());
+        let seq = rest[..end].escape_debug().to_string();
+        if !out.contains(&seq) {
+            out.push(seq);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The client's screen as `capture-pane -e` of the terminal shows it:
+/// each cell's style and its link, the id the terminal was given and the
+/// URI.
+fn linked_screen(a: &Attached) -> String {
+    let opts = CaptureOpts {
+        escapes: true,
+        ..CaptureOpts::default()
+    };
+    String::from_utf8_lossy(&capture(&a.screen(), opts)).replace('\x1b', "\\e")
+}
+
+/// What a pane program prints: links as `ls --hyperlink=always` writes
+/// them (one link of its own per name, no `id=`; a URI with a backslash,
+/// which tmux keeps escaped, hyperlinks.c `hyperlinks_put`), one link
+/// with an `id=` in two places, and a link without one wrapped over two
+/// lines.
+fn link_lines() -> String {
+    let mut s = String::new();
+    for name in ["a.txt", "b c", "d\\e"] {
+        write!(s, "\x1b]8;;file://h/t/{name}\x1b\\{name}\x1b]8;;\x1b\\  ").unwrap();
+    }
+    s.push_str("\r\n\x1b]8;id=x;http://e/\x1b\\one\x1b]8;;\x1b\\ mid ");
+    s.push_str("\x1b]8;id=x;http://e/\x1b\\two\x1b]8;;\x1b\\\r\n");
+    write!(
+        s,
+        "\x1b]8;;http://w/\x1b\\{}\x1b]8;;\x1b\\\r\n",
+        "W".repeat(50)
+    )
+    .unwrap();
+    s
+}
+
+/// `ls --hyperlink=always` is GNU's (macOS's `ls` has no such flag).
+fn ls_has_hyperlink() -> bool {
+    Command::new("ls")
+        .args(["--hyperlink=always", "/"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// tty.c `tty_hyperlink`: a terminal with the `hyperlinks` feature
+/// (tty-features.c:96-109, `Hls`) is given each link as tmux words it,
+/// `OSC 8 ; id=tmuxN ; URI ST` with the link's external id (hyperlinks.c
+/// `hyperlinks_put`: one for each link without an `id=`, one for a URI and
+/// `id=` however often written, so a wrapped link is one link), and
+/// `OSC 8 ; ; ST` where it ends; the links of real `ls --hyperlink=always`
+/// output where the host has it; and a `link=` style in the status line
+/// (format-draw.c, whose URI is its id). A terminal without the feature
+/// (xterm-256color's own entry) is given none.
+#[test]
+fn hyperlinks_reach_a_terminal_with_the_feature() {
+    let dir = tempfile::tempdir().unwrap();
+    for f in ["one", "two words", "three"] {
+        std::fs::write(dir.path().join(f), b"").unwrap();
+    }
+    let ls = ls_has_hyperlink();
+    let lines = link_lines();
+    let dir_arg = dir.path().to_str().unwrap().to_owned();
+    let results = par::map(&bins(), 2, |bin| {
+        let mut seen = Vec::new();
+        for case in ["printf", "ls", "status", "plain", "xtversion"] {
+            if case == "ls" && !ls {
+                continue;
+            }
+            let w = World::new(bin.clone());
+            let program = match case {
+                "ls" => "cd \"$0\" && ls --hyperlink=always && printf END; exec cat -",
+                "status" => "printf END; exec cat -",
+                _ => "printf %s \"$0\"; printf END; exec cat -",
+            };
+            let arg = if case == "ls" { &dir_arg } else { &lines };
+            w.cli(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", program, arg,
+            ]);
+            w.cli(&["set", "-g", "status-right", "R"]);
+            if case == "status" {
+                w.cli(&[
+                    "set",
+                    "-g",
+                    "status-left",
+                    "#[link=https://s.example/]SL#[link=] ",
+                ]);
+            }
+            let features: &[&str] = if matches!(case, "plain" | "xtversion") {
+                &[]
+            } else {
+                &["-T", "hyperlinks"]
+            };
+            let mut a = w.attach(&[features, &["attach", "-t", "a"]].concat());
+            a.wait(|a| pane_text(a).contains("END") && status_row(a).contains("0:w"));
+            if case == "xtversion" {
+                // tty-keys.c `tty_keys_extended_device_attributes`: the
+                // terminal names itself; Ghostty has the feature
+                // (tty-features.c), and the client is drawn again.
+                assert_eq!(osc8(&a.text()), Vec::<String>::new());
+                a.keys(b"\x1bP>|ghostty 1.2.3\x1b\\");
+                a.wait(|a| osc8(&a.text()).len() > 2);
+            }
+            let ids = osc8(&a.text());
+            if case == "plain" {
+                assert!(ids.is_empty(), "{}: {ids:?}", bin.display());
+            }
+            let mut screen = linked_screen(&a);
+            if case == "xtversion" {
+                // The status line's colours follow the new features
+                // (RGB) in vtmux's redraw, not yet in tmux's.
+                screen.truncate(screen.trim_end().rfind('\n').unwrap_or(0));
+            }
+            seen.push(format!("{case}: {ids:?}\n{screen}"));
+        }
+        seen
+    });
+    for (v, t) in results[0].iter().zip(&results[1]) {
+        assert_eq!(v, t, "vtmux (left) vs tmux 3.8 (right)");
+    }
+    // The terminal (as the observer's capture shows it, escaping a
+    // backslash again) was given tmux's ids and URIs.
+    let printf = &results[0][0];
+    for want in [
+        r"\e]8;id=tmux1;file://h/t/a.txt\e\a.txt\e]8;;\e\",
+        r"\e]8;id=tmux3;file://h/t/d\\\\e\e\d\e",
+        r"\e]8;id=tmux4;http://e/\e\one",
+        r"\e]8;id=tmux4;http://e/\e\two",
+        r"\e]8;id=tmux5;http://w/\e\WWWW",
+    ] {
+        assert!(printf.contains(want), "{want} in {printf}");
+    }
+    assert!(!printf.contains("tmux6"), "{printf}");
+}
+
+/// Links in copy mode and in a popup reach the terminal as the pane's do:
+/// copy mode draws the pane's links (window-copy.c
+/// `window_copy_init` shares the pane's `hyperlinks`), here ones scrolled
+/// into history before anything drew them, with the ids tmux gave them;
+/// a popup's links are its own screen's (popup.c `popup_draw_cb`).
+#[test]
+fn hyperlinks_in_copy_mode_and_a_popup() {
+    // No space inside a link: copy mode draws a space by moving the
+    // cursor over it (`\e[C`), leaving the terminal's cell as it was.
+    let lines = link_lines().replace("b c", "b_c");
+    let popup_lines =
+        "\x1b]8;id=p;http://p/\x1b\\in popup\x1b]8;;\x1b\\ \x1b]8;;http://q/\x1b\\q\x1b]8;;\x1b\\";
+    let results = par::map(&bins(), 2, |bin| {
+        let w = World::new(bin.clone());
+        let program = "printf %s \"$0\"; i=0; while [ $i -lt 12 ]; do echo; i=$((i+1)); done; printf END; exec cat -";
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", program, &lines,
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        // The default shows the top line's time.
+        w.cli(&[
+            "set",
+            "-g",
+            "copy-mode-position-format",
+            "#[align=right]P#{scroll_position}",
+        ]);
+        let a = w.attach(&["-T", "hyperlinks", "attach", "-t", "a"]);
+        a.wait(|a| pane_text(a).contains("END") && status_row(a).contains("0:w"));
+        let mut seen = vec![format!("pane: {:?}", osc8(&a.text()))];
+        w.cli(&["copy-mode", "-t", "a"]);
+        w.cli(&["send", "-t", "a", "-X", "history-top"]);
+        a.wait(|a| pane_text(a).contains("b_c") && pane_text(a).contains("P8"));
+        seen.push(format!(
+            "copy mode: {:?}\n{}",
+            osc8(&a.text()),
+            linked_screen(&a)
+        ));
+        w.cli(&["send", "-t", "a", "-X", "cancel"]);
+        a.wait(|a| !pane_text(a).contains("a.txt"));
+        let client = client_name(&w, "a");
+        let popup = format!("printf %s '{popup_lines}'; exec cat -");
+        // display-popup waits for the popup to close (CMD_RETURN_WAIT).
+        let mut shown = Command::new(&w.bin)
+            .args(w.args())
+            .args(["display-popup", "-c", &client, "-w", "30", "-h", "5"])
+            .args(["sh", "-c", &popup])
+            .env_clear()
+            .envs(w.env())
+            .spawn()
+            .unwrap();
+        a.wait(|a| pane_text(a).contains("in popup q"));
+        seen.push(format!(
+            "popup: {:?}\n{}",
+            osc8(&a.text()),
+            linked_screen(&a)
+        ));
+        w.cli(&["display-popup", "-C", "-c", &client]);
+        let end = Instant::now() + Duration::from_secs(10);
+        while shown.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                let _ = shown.kill();
+                panic!("display-popup did not return");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        seen
+    });
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    let [pane, copy, popup] = &results[0][..] else {
+        panic!("{:?}", results[0])
+    };
+    assert_eq!(pane, "pane: []", "the links scrolled away undrawn");
+    assert!(
+        copy.contains(r"\e]8;id=tmux1;file://h/t/a.txt\e\a.txt"),
+        "{copy}"
+    );
+    assert!(copy.contains(r"\e]8;id=tmux5;http://w/\e\WWWW"), "{copy}");
+    assert!(
+        popup.contains(r"\e]8;id=tmux6;http://p/\e\in popup"),
+        "{popup}"
+    );
+    assert!(popup.contains(r"\e]8;id=tmux7;http://q/\e\q"), "{popup}");
+}
+
+/// Two clients on one window at one size, one with the `hyperlinks`
+/// feature and one without: only the first is given the links, so the
+/// two are never sent one frame (`render/share.rs` shares frames between
+/// clients of the same terminal capabilities only).
+#[test]
+fn clients_with_and_without_hyperlinks_get_their_own_frames() {
+    let lines = link_lines();
+    let results = par::map(&bins(), 2, |bin| {
+        let w = World::new(bin.clone());
+        let program = "read x; printf %s \"$0\"; printf END; exec cat -";
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", program, &lines,
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        let with = w.attach(&["-T", "hyperlinks", "attach", "-t", "a"]);
+        with.wait(|a| status_row(a).contains("0:w"));
+        let without = w.attach(&["attach", "-t", "a"]);
+        without.wait(|a| status_row(a).contains("0:w"));
+        w.cli(&["send", "-t", "a", "Enter"]);
+        for a in [&with, &without] {
+            a.wait(|a| pane_text(a).contains("END"));
+        }
+        let (a, b) = (osc8(&with.text()), osc8(&without.text()));
+        assert!(b.is_empty(), "{}: {b:?}", bin.display());
+        assert!(!a.is_empty(), "{}", bin.display());
+        // Both show the same text.
+        assert_eq!(pane_text(&with), pane_text(&without), "{}", bin.display());
+        format!("{a:?}\n{}", linked_screen(&with))
+    });
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}

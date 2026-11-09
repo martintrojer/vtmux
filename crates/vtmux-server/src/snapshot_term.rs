@@ -1057,10 +1057,22 @@ fn sync_out(screen: &vt::Snapshot, left: Duration) -> snap::term::SyncHold {
                 wrapped: screen.wrapped.get(y).copied().unwrap_or(false),
                 ..snap::Row::default()
             };
-            if cells.iter().any(|c| c.link) {
-                row.links.push(snap::Hyperlink::default());
-            }
+            // Each link as it was drawn: its number as the id, its URI as
+            // the link keeps it.
+            let mut links: Vec<&std::sync::Arc<vt::Link>> = Vec::new();
             for (col, c) in cells.iter().enumerate() {
+                let link = c.link.as_ref().map_or(0, |l| {
+                    let at = links.iter().position(|k| k == &l).unwrap_or_else(|| {
+                        links.push(l);
+                        row.links.push(snap::Hyperlink {
+                            id: Some(l.number().to_string().into_bytes()),
+                            uri: l.uri().as_bytes().to_vec(),
+                            implicit: 0,
+                        });
+                        links.len() - 1
+                    });
+                    u16::try_from(at + 1).unwrap_or(u16::MAX)
+                });
                 let codepoint = text_cell(c.text.as_str(), col, &mut row.graphemes);
                 row.cells.push(snap::Cell {
                     codepoint,
@@ -1071,7 +1083,7 @@ fn sync_out(screen: &vt::Snapshot, left: Duration) -> snap::term::SyncHold {
                     },
                     style: vt_style_out(&c.style),
                     flags: if c.acs { snap::row::cell_flag::ACS } else { 0 },
-                    link: u16::from(c.link),
+                    link,
                     semantic: snap::Semantic::Output,
                     tab: if c.tab {
                         snap::Tab::Covered
@@ -1092,6 +1104,14 @@ fn sync_out(screen: &vt::Snapshot, left: Duration) -> snap::term::SyncHold {
     }
 }
 
+/// The link of a held screen's cell, as [`sync_out`] wrote it; none for
+/// one a build before it wrote (no number).
+fn held_link(row: &snap::Row, link: u16) -> Option<std::sync::Arc<vt::Link>> {
+    let l = row.links.get(usize::from(link).checked_sub(1)?)?;
+    let number = std::str::from_utf8(l.id.as_deref()?).ok()?.parse().ok()?;
+    Some(vt::Link::restored(number, &String::from_utf8_lossy(&l.uri)))
+}
+
 fn sync_in(h: &snap::term::SyncHold) -> Result<(vt::Snapshot, Duration), TermError> {
     let cols = narrow::<u16>(h.cols, "held screen width")?;
     let mut cells = Vec::with_capacity(usize::from(cols) * h.rows.len());
@@ -1107,7 +1127,7 @@ fn sync_in(h: &snap::term::SyncHold) -> Result<(vt::Snapshot, Duration), TermErr
                 },
                 style: vt_style_in(&c.style),
                 acs: c.flags & snap::row::cell_flag::ACS != 0,
-                link: c.link != 0,
+                link: held_link(row, c.link),
                 tab: c.tab != snap::Tab::None,
             });
         }
@@ -1603,6 +1623,23 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             state: p.progress_bar.state.number().into(),
             progress: p.progress_bar.progress.into(),
         },
+        drawn_links: p
+            .drawn_links
+            .iter()
+            .map(|(uri, id, number)| {
+                let (id, implicit, alternate) = match id {
+                    vt::LinkKeyId::Explicit(id) => (Some(id.clone()), 0, false),
+                    vt::LinkKeyId::Implicit { alternate, n } => (None, *n, *alternate),
+                };
+                snap::term::DrawnLink {
+                    uri: uri.clone().into_bytes(),
+                    id,
+                    implicit,
+                    alternate,
+                    number: *number,
+                }
+            })
+            .collect(),
         pen_links: (p.links != vt::PenLinkState::default()).then(|| snap::term::PenLinks {
             pen: p.links.pen.clone(),
             saved: p.links.saved.clone(),
@@ -1915,6 +1952,20 @@ pub fn term_from_snapshot_with(
             })
             .unwrap_or_default(),
         inband_resize: t.inband_resize,
+        drawn_links: t
+            .drawn_links
+            .iter()
+            .map(|l| {
+                let id = match &l.id {
+                    Some(id) => vt::LinkKeyId::Explicit(id.clone()),
+                    None => vt::LinkKeyId::Implicit {
+                        alternate: l.alternate,
+                        n: l.implicit,
+                    },
+                };
+                (String::from_utf8_lossy(&l.uri).into_owned(), id, l.number)
+            })
+            .collect(),
     };
     let mut primary = screen_in(primary_screen)?;
     if let Some(layout) = &t.alternate_saved_layout

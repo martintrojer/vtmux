@@ -112,16 +112,42 @@ pub fn observe(t: &PaneTerm, times: bool) -> String {
         let _ = writeln!(out, "history {y} id {id} time {}", t.history_time(id));
     }
     let view = t.screen();
-    let _ = writeln!(out, "view {:?}", view.snapshot());
+    let mut snap = view.snapshot().clone();
+    by_rank(&mut snap);
+    let _ = writeln!(out, "view {snap:?}");
     out
+}
+
+/// Every link number in `snap` replaced by its rank among them: two panes
+/// number the links they draw from one counter, so the same input never
+/// gives the same numbers, only the same links.
+pub fn by_rank(snap: &mut vtmux_vt::Snapshot) {
+    let mut numbers: Vec<u64> = snap
+        .cells
+        .iter()
+        .filter_map(|c| Some(c.link.as_ref()?.number()))
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    for c in &mut snap.cells {
+        if let Some(l) = &c.link {
+            let rank = numbers.binary_search(&l.number()).unwrap_or(0) as u64 + 1;
+            c.link = Some(vtmux_vt::Link::restored(rank, l.uri()));
+        }
+    }
 }
 
 /// The export, with what differs between two exports of one terminal
 /// (the time left on a sync hold) zeroed.
 pub fn exported(t: &PaneTerm) -> TermState {
     let mut s = t.export_state();
-    if let Some((_, left)) = s.pane.sync.as_mut() {
+    if let Some((held, left)) = s.pane.sync.as_mut() {
         *left = std::time::Duration::ZERO;
+        by_rank(held);
+    }
+    // As `by_rank`: the links drawn, in the order drawn.
+    for (rank, l) in s.pane.drawn_links.iter_mut().enumerate() {
+        l.2 = rank as u64 + 1;
     }
     s
 }

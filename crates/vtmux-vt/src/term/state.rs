@@ -389,6 +389,9 @@ pub struct PaneState {
     pub links: PenLinkState,
     /// The program holds mode 2048, in-band resize (D31).
     pub inband_resize: bool,
+    /// The links cells were drawn with, by Ghostty's URI and id, and their
+    /// external ids' numbers ([`crate::link::Links`]).
+    pub drawn_links: Vec<(String, crate::link::LinkKeyId, u64)>,
 }
 
 /// tmux's pen hyperlink, DECSC's and the alternate screen's copies of it,
@@ -1007,6 +1010,8 @@ impl TermState {
         let Some(screen) = screen else {
             return false;
         };
+        // screen_reset_hyperlinks: a link written from now on is a new one.
+        self.pane.drawn_links.clear();
         let mut found = screen.cursor.link.take().is_some();
         for page in &mut screen.pages {
             let PageState::Rows(rows) = page else {
@@ -1298,6 +1303,7 @@ impl PaneTerm {
             }),
             links: self.scan.links.state(),
             inband_resize: self.inband_resize_granted(),
+            drawn_links: self.links.borrow().export(),
         }
     }
 
@@ -1378,6 +1384,7 @@ impl PaneTerm {
         // did, and set it never (it holds no printed character).
         self.scan.last_print = p.last_print;
         self.scan.links = PenLinks::from_state(&p.links);
+        self.links.borrow_mut().import(&p.drawn_links);
         self.scan.palette.restore(&p.palette);
         self.scan.progress = p.progress_bar;
         self.set_inband_granted(p.inband_resize);

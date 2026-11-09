@@ -632,11 +632,17 @@ fn mode_out(m: &crate::mode::Mode, now: Instant, screens: bool) -> Option<snap::
     }
 }
 
-fn mode_in(m: &snap::PaneMode, sx: usize, sy: usize, now: Instant) -> Option<crate::mode::Mode> {
+fn mode_in(
+    m: &snap::PaneMode,
+    sx: usize,
+    sy: usize,
+    now: Instant,
+    pane: &vtmux_vt::PaneTerm,
+) -> Option<crate::mode::Mode> {
     use crate::mode::Mode;
     match m {
         snap::PaneMode::Copy(c) => Some(Mode::Copy(Box::new(
-            crate::mode::copy::CopyMode::import(c, now).ok()?,
+            crate::mode::copy::CopyMode::import(c, now, pane).ok()?,
         ))),
         snap::PaneMode::Clock(k) => {
             let mut clock = crate::mode::clock::ClockMode::new(sx, sy);
@@ -1846,7 +1852,7 @@ impl Server {
         };
         let mut modes = Vec::new();
         for (n, m) in x.modes.iter().enumerate() {
-            match mode_in(m, sx, sy, now) {
+            match mode_in(m, sx, sy, now, &term) {
                 Some(mode) => modes.push(mode),
                 // A copy mode whose grid does not import is left, as
                 // modes the snapshot closes are.

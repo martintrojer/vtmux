@@ -251,7 +251,7 @@ fn mark_wrapped(out: &mut Vec<u8>, term: &vtmux_vt::PaneTerm, sx: u16, sy: u16) 
     // Read before the linefeed is fed: still the bottom row.
     let row = term.row(term.history_size() + usize::from(sy) - 1);
     let Some(cell) = row.cells.last() else { return };
-    if cell.width != 1 || cell.link || cell.acs || cell.tab {
+    if cell.width != 1 || cell.link.is_some() || cell.acs || cell.tab {
         return;
     }
     let blank = vtmux_vt::Style {
@@ -299,7 +299,7 @@ fn bottom_row_blank(term: &vtmux_vt::PaneTerm, sy: u16) -> bool {
         && row
             .cells
             .iter()
-            .all(|c| c.text.is_empty() && c.style == vtmux_vt::Style::default() && !c.link)
+            .all(|c| c.text.is_empty() && c.style == vtmux_vt::Style::default() && c.link.is_none())
 }
 
 /// The SGR that gives a grid cell `style`, from a reset.

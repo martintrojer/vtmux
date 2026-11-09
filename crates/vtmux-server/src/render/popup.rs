@@ -273,7 +273,10 @@ fn used_width(content: &Snapshot, y: usize) -> usize {
         .rev()
         .find(|&x| {
             content.cell(x, y).is_some_and(|c| {
-                !c.text.is_empty() || c.style != vtmux_vt::Style::default() || c.acs || c.link
+                !c.text.is_empty()
+                    || c.style != vtmux_vt::Style::default()
+                    || c.acs
+                    || c.link.is_some()
             })
         })
         .map_or(0, |x| usize::from(x) + 1)

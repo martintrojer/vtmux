@@ -431,6 +431,9 @@ pub struct PaneTerm {
     /// ([`PaneTerm::reset_kitty_keys`]) and Ghostty has it still: emptied
     /// as that screen comes up, and exported empty.
     kitty_stale: bool,
+    /// The links cells of this pane are drawn with (tmux's
+    /// `s->hyperlinks`), shared with its grid's copies.
+    pub(crate) links: Rc<RefCell<crate::link::Links>>,
 }
 
 /// tmux's `MODE_SYNC` (screen-write.c:211-240).
@@ -621,6 +624,7 @@ impl PaneTerm {
             sync: SyncHold::default(),
             kitty_option: false,
             kitty_stale: false,
+            links: Rc::default(),
         };
         pane.retain();
         Some(pane)
