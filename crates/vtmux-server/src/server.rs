@@ -3762,7 +3762,7 @@ impl Server {
         // pd->palette takes pane-colours from the global window options
         // (popup.c:625-626). tmux reads them once, as the popup opens;
         // vtmux at each draw, so a change shows in an open popup
-        // (compat/DIVERGENCES.md D-053).
+        // (compat/DIVERGENCES.md D-059).
         let palette = crate::render::window::palette(
             &self.model,
             vtmux_core::options::TreeId::GlobalWindow,
