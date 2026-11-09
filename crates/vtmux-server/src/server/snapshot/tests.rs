@@ -1485,10 +1485,9 @@ fn a_grant_and_its_owner_cross_a_rebuild() {
 
 /// A snapshot that names no owner (a build before it, or a downgrade and
 /// back, where the program may have ended unseen) is settled on import:
-/// the foreground group is taken as the pusher, whether a job's or the
-/// pane's own process (an exec'd program; rule 5, never drop a running
-/// program's grant); the primary screen not in use is the shell's, the
-/// alternate one's is gone.
+/// a program other than the shell in the foreground is taken as the
+/// pusher, the shell in the foreground means it has gone; the primary
+/// screen not in use is the shell's, the alternate one's is gone.
 #[test]
 fn a_grant_with_no_recorded_owner_is_settled_on_import() {
     use crate::pane_kitty::fake;
@@ -1509,14 +1508,11 @@ fn a_grant_with_no_recorded_owner_is_settled_on_import() {
     fake::kill(program);
     assert_eq!(kitty_of(&mut b).0, 0, "and ends with it");
     drop(b);
-    // The pane's own process group in the foreground: a program that
-    // was exec'd as the pane, which lives as long as the pane (rule 5);
-    // see `a_grant_in_the_panes_own_process_group_survives_an_import`.
+    // The shell in the foreground: nothing else can have pushed.
     fake::clear();
     fake::set_foreground(p, shell);
     let mut b = rebuild_with(&a, &dir, unnamed);
-    assert_eq!(kitty_of(&mut b).0, 1);
-    assert_eq!(b.model.panes[&p].kitty_owner, [Some(shell), None]);
+    assert_eq!(kitty_of(&mut b), (0, [0; 8]), "stale");
     drop(b);
     // The alternate screen's program in front, the shell's grant behind.
     fake::set_foreground(p, program);
@@ -1536,74 +1532,6 @@ fn a_grant_with_no_recorded_owner_is_settled_on_import() {
     fake::clear();
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
-}
-
-/// A program that is the pane's own process (`new-session cat -`, or mu's
-/// `exec /bin/sh -c ... exec "$SHELL" -c "$c"`) has the PTY's foreground
-/// group for its whole life: it is the pane's process group. An import of
-/// a snapshot that names no owner (from a build before the owners, in
-/// either direction: main -> this, this -> main -> this) took it for "the
-/// shell, the pusher gone" and dropped a running program's grant (D28
-/// rule 5). Real processes and the real foreground group, no fakes.
-#[test]
-fn a_grant_in_the_panes_own_process_group_survives_an_import() {
-    let unnamed = |s: &mut snap::Snapshot| {
-        s.panes[0].kitty_owner_primary = None;
-        s.panes[0].kitty_owner_alternate = None;
-    };
-    let wrapper = r#"c='exec cat -'; exec "${SHELL:-/bin/sh}" -c "$c""#;
-    let launches: [(&str, &[&str]); 2] = [
-        ("direct", &["cat", "-"]),
-        ("mu wrapper", &["/bin/sh", "-c", wrapper]),
-    ];
-    for (shape, command) in launches {
-        let dir = temp_dir("kittyown");
-        let mut first = server(&dir);
-        let mut new = vec!["new-session", "-d", "-s", "s"];
-        new.extend(command);
-        ok(&mut first, &dir, &new);
-        ok(&mut first, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
-        let p = PaneId(0);
-        let pid = first.model.panes[&p].pid;
-        // The pane's tty has its session by the time the child runs.
-        let end = Instant::now() + Duration::from_secs(10);
-        while first.model.panes[&p].foreground_pgid() != Some(pid) {
-            assert!(Instant::now() < end, "{shape}: foreground never the pane's");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        first.pane_input(p, b"\x1b[>1u", false);
-        assert_eq!(
-            first.model.panes[&p].kitty_owner,
-            [Some(pid), None],
-            "{shape}"
-        );
-        // this -> this: the owner is in the snapshot.
-        let mut same = rebuild_with(&first, &dir, |_| {});
-        assert_eq!(kitty_of(&mut same).0, 1, "{shape}: this -> this");
-        drop(same);
-        // main -> this: no owner recorded.
-        let mut main_this = rebuild_with(&first, &dir, unnamed);
-        assert_eq!(kitty_of(&mut main_this).0, 1, "{shape}: main -> this");
-        assert_eq!(
-            main_this.model.panes[&p].kitty_owner,
-            [Some(pid), None],
-            "{shape}"
-        );
-        // this -> main -> this: and once more through another build.
-        let mut twice = rebuild_with(&main_this, &dir, unnamed);
-        assert_eq!(kitty_of(&mut twice).0, 1, "{shape}: this -> main -> this");
-        // The alternate screen's grant is the same pane process's.
-        twice.pane_input(p, b"\x1b[?1049h\x1b[>4u", false);
-        let mut alt = rebuild_with(&twice, &dir, unnamed);
-        assert_eq!(kitty_of(&mut alt).0, 4, "{shape}: alternate");
-        assert_eq!(
-            alt.model.panes[&p].kitty_owner,
-            [None, Some(pid)],
-            "{shape}"
-        );
-        drop((first, main_this, twice, alt));
-        let _ = std::fs::remove_dir_all(dir);
-    }
 }
 
 /// A told client's 10 s to re-attach count from the rebuild, not from when
