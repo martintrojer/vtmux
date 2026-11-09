@@ -605,16 +605,47 @@ pub struct HistoryCounts {
 /// See [`HistoryCounts`] and [`history_bytes`]'s model.
 #[must_use]
 pub fn history_counts(term: &PaneTerm) -> HistoryCounts {
-    let sx = usize::from(term.cols());
-    let hsize = term.history_size();
-    let rows = hsize + usize::from(term.rows());
+    let p = PaneRows {
+        hsize: term.history_size(),
+        rows: usize::from(term.rows()),
+        cols: usize::from(term.cols()),
+        retained: term.term.scrollback_rows().unwrap_or(0),
+        alternate: term.alternate_on(),
+    };
+    let rows = p.hsize + p.rows;
     let mut counts = HistoryCounts {
         lines: rows,
         ..HistoryCounts::default()
     };
+    // A line of unstyled ASCII without a link (most of a long history) is
+    // counted from Ghostty's cells without building any: tmux sums sizes
+    // it keeps per line (format.c `format_cb_history_bytes`), and building
+    // every cell of a 100000-line history took longer than a format may
+    // run (format.c `format_check_time`), cutting short the rest of the
+    // line `list-panes` prints.
+    let kind = Plain {
+        any_style: false,
+        styled: false,
+        ascii: true,
+    };
+    let src = Source::Pane(term, p);
+    let (mut raw, mut plain) = (Vec::new(), Vec::new());
+    let mut styles = StyleRow::default();
     let mut last = None;
     for y in 0..rows {
-        let (cells, _) = read_row(term, y, hsize, sx, &mut last);
+        if plain_lines()
+            && src
+                .plain_line(y, kind, &mut last, &mut raw, &mut plain, &mut styles)
+                .is_some()
+        {
+            #[cfg(test)]
+            tests::PLAIN_ROWS.with(|n| n.set(n.get() + 1));
+            // No cell needs the extended form ([`cell_extended`]).
+            let used = plain.iter().rposition(|&c| c != 0).map_or(0, |i| i + 1);
+            counts.cells += plain_cellsize(&plain, used).max(used);
+            continue;
+        }
+        let (cells, _) = read_row(term, y, p.hsize, p.cols, &mut last);
         let used = cells
             .iter()
             .rposition(|c| !c.empty || c.padding())
@@ -3248,6 +3279,62 @@ mod tests {
             plain > 5_000 && cells > 5_000,
             "{plain} plain, {cells} as cells"
         );
+    }
+
+    /// `#{history_bytes}`'s count of lines of plain cells read straight
+    /// from Ghostty's cells is the general path's, over random content:
+    /// resident and compressed history, and the primary history under the
+    /// alternate screen.
+    #[test]
+    fn plain_lines_count_as_cells_do() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let (mut plain, mut cells) = (0, 0);
+        for round in 0..4 {
+            let cols = 12 + rng.below(30);
+            let mut t = PaneTerm::new(u16::try_from(cols).unwrap(), 6, 2000);
+            let lines = if round == 2 { 8000 } else { 300 + round * 200 };
+            t.feed(&random_output(&mut rng, lines, cols));
+            if round == 2 {
+                t.compress_all();
+                assert!(t.compressed_pages() > 0);
+            }
+            if round == 3 {
+                t.feed(b"\x1b[?1049h");
+                t.feed(&random_output(&mut rng, 3, cols));
+            }
+            let want = cells_only(|| history_counts(&t));
+            let (p, c) = (
+                PLAIN_ROWS.with(std::cell::Cell::get),
+                CELL_ROWS.with(std::cell::Cell::get),
+            );
+            assert_eq!(history_counts(&t), want, "round {round}");
+            plain += PLAIN_ROWS.with(std::cell::Cell::get) - p;
+            cells += CELL_ROWS.with(std::cell::Cell::get) - c;
+        }
+        // Both paths ran.
+        assert!(
+            plain > 500 && cells > 500,
+            "{plain} plain, {cells} as cells"
+        );
+    }
+
+    /// `#{history_bytes}` over a long history of plain text (`seq`) builds
+    /// no cells: building every one made a 70000-line pane's count take
+    /// longer than a format may run (format.c `format_check_time`), so
+    /// `list-panes` printed its line without the ` (active)` after it.
+    #[test]
+    fn a_plain_history_counts_without_building_cells() {
+        let mut t = PaneTerm::new(80, 24, 100_000);
+        for i in 1..=20_000 {
+            t.feed(format!("{i}\r\n").as_bytes());
+        }
+        t.compress_all();
+        assert!(t.compressed_pages() > 0);
+        let before = CELL_ROWS.with(std::cell::Cell::get);
+        let counts = history_counts(&t);
+        assert_eq!(CELL_ROWS.with(std::cell::Cell::get), before);
+        assert_eq!(counts, cells_only(|| history_counts(&t)));
+        assert_eq!(counts.lines, t.history_size() + 24);
     }
 
     /// A capture of a long history of plain text builds no cells for its

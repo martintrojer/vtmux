@@ -1109,6 +1109,14 @@ fn copy_mode_past_the_limit(server: &Path, server_env: &[(&str, &str)], bare: bo
         big("#{history_size} #{pane_current_command}").trim() == "69977 cat"
     });
     let pane = big("#{pane_id}").trim().to_owned();
+    // The listing is whole: building every cell of the long history to
+    // count its bytes ran past the format time limit (format.c
+    // `format_check_time`), cutting ` (active)` off the pane's line.
+    let listed = world.run(&["lsp", "-t", "a:big"]);
+    assert!(
+        listed.trim_end().ends_with(&format!("{pane} (active)")),
+        "{listed}"
+    );
     let pid = world.pid();
     let panes = world.pane_pids();
     let before = world.observe();
