@@ -1669,18 +1669,13 @@ fn failed_respawn_keeps_the_pane() {
             w.run(&["respawnw", "-k", "-t", "a:0", "cat", "-"]),
         ]);
         // The hung-up processes reaped: their exits have been handled.
-        let start = Instant::now();
-        while old
-            .iter()
-            .any(|&p| rustix::process::test_kill_process(p).is_ok())
-        {
-            assert!(
-                start.elapsed() < Duration::from_secs(10),
-                "old pane processes never reaped ({})",
-                w.bin.display()
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        common::wait(
+            &format!("the old panes reaped ({})", w.bin.display()),
+            || {
+                old.iter()
+                    .all(|&p| rustix::process::test_kill_process(p).is_err())
+            },
+        );
         limit_server_forks(w, None);
         runs.extend([
             w.run(&panes),
@@ -3517,11 +3512,7 @@ fn current_command_is_read_as_bytes() {
         }
         let list = || w.run(&["lsp", "-s", "-t", "a", "-F", "[#{pane_current_command}]"]);
         // Until every bash has exec'd.
-        let start = Instant::now();
-        while list().stdout.contains("[bash]") {
-            assert!(start.elapsed() < Duration::from_secs(10), "{:?}", list());
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        common::wait_for("every bash to exec", list, |l| !l.stdout.contains("[bash]"));
         let all = w.run(&["lsw", "-t", "a", "-F", "[#{pane_current_command}]"]);
         w.run(&["kill-server"]);
         vec![all]
@@ -3540,17 +3531,14 @@ fn current_command_is_read_as_bytes() {
         ]);
     }
     let want = "[cat]\n[ab]\n[ab]\n[aéb]\n[]\n[]\n[]\n[ab]\n[x#(y]\n";
-    let start = Instant::now();
-    loop {
-        let got = w
-            .run(&["lsw", "-t", "a", "-F", "[#{pane_current_command}]"])
-            .stdout;
-        if got == want {
-            break;
-        }
-        assert!(start.elapsed() < Duration::from_secs(10), "{got:?}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    common::wait_for(
+        "the names",
+        || {
+            w.run(&["lsw", "-t", "a", "-F", "[#{pane_current_command}]"])
+                .stdout
+        },
+        |got| got == want,
+    );
     w.run(&["kill-server"]);
 }
 
@@ -6607,16 +6595,12 @@ fn send_keys_in_key_modes(name: &str, keys: &[&str], backspace: Option<&str>) {
                     r"\033[>4;1m" => "Ext 1",
                     _ => "Ext 2",
                 };
-                let start = Instant::now();
-                while w
-                    .run(&["display", "-p", "-t", "a", "#{pane_key_mode}"])
-                    .stdout
-                    .trim()
-                    != want
-                {
-                    assert!(start.elapsed() < Duration::from_secs(5), "{mode}");
-                    std::thread::sleep(Duration::from_millis(20));
-                }
+                common::wait(mode, || {
+                    w.run(&["display", "-p", "-t", "a", "#{pane_key_mode}"])
+                        .stdout
+                        .trim()
+                        == want
+                });
                 for key in keys {
                     w.run(&["send-keys", "-t", "a", key]);
                     w.run(&["send-keys", "-t", "a", "-H", "7c"]);

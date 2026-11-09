@@ -125,11 +125,9 @@ impl World {
 
     /// Wait until `n` clients are attached.
     fn wait_clients(&self, n: usize) {
-        let end = Instant::now() + WAIT;
-        while self.run(&["lsc", "-F", "x"]).0.lines().count() < n {
-            assert!(Instant::now() < end, "never {n} clients");
-            thread::sleep(Duration::from_millis(50));
-        }
+        common::wait(&format!("{n} clients"), || {
+            self.run(&["lsc", "-F", "x"]).0.lines().count() >= n
+        });
     }
 
     /// Socket dir -> `SOCKDIR`.
@@ -192,15 +190,7 @@ impl Control {
 
     /// Poll the stream (max 5 s) until `pred` holds.
     fn wait(&self, what: &str, pred: impl Fn(&str) -> bool) {
-        let end = Instant::now() + WAIT;
-        while !pred(&self.text()) {
-            assert!(
-                Instant::now() < end,
-                "timeout waiting for {what}: {:?}",
-                self.text()
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait_for(what, || self.text(), |t| pred(t));
     }
 
     /// EOF on stdin, then the whole stream, stderr and exit status.
@@ -517,15 +507,7 @@ impl Cc {
 
     /// Poll the screen stream (max 5 s) until `pred` holds.
     fn wait(&self, what: &str, pred: impl Fn(&str) -> bool) {
-        let end = Instant::now() + WAIT;
-        while !pred(&self.text()) {
-            assert!(
-                Instant::now() < end,
-                "timeout waiting for {what}: {:?}",
-                self.text()
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        common::wait_for(what, || self.text(), |t| pred(t));
     }
 
     /// Wait for the client to exit; its exit status.
