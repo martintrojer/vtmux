@@ -1221,7 +1221,16 @@ fn a_switch_back_ignores_what_the_old_path_holds_now() {
     set_executable(&old);
 
     let message = failed(world.upgrade(&bin()));
-    assert!(message.starts_with("live upgrade failed: "), "{message}");
+    // macOS has no fexecve: the script cannot be the switch back's dry run,
+    // so the new image, whose own rebuild failed, serves through the last
+    // resort and the answer says the upgrade took effect at a second
+    // attempt (lu_switchback_last_resort).
+    assert!(
+        message.starts_with("live upgrade failed: ")
+            || (cfg!(target_os = "macos")
+                && message.starts_with("live upgrade took effect at a second attempt: ")),
+        "{message}"
+    );
 
     assert_eq!(world.pid(), pid);
     // Linux switches back through the executable kept open; macOS has no
