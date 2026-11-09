@@ -11,6 +11,7 @@ use libghostty_vt::terminal::{Point, PointCoordinate};
 use crate::snapshot::{Cell, Color, Style, Underline};
 use crate::text::CellText;
 use std::cell::RefCell;
+use std::io::Write as _;
 use std::rc::Rc;
 
 use crate::term::{HistoryRow, LineMark, PaneTerm};
@@ -122,42 +123,73 @@ struct PaneRows {
     alternate: bool,
 }
 
-/// One line of a capture: its cells, wrap flag, history time and OSC 133
-/// prompt/output marks.
-struct Line {
-    cells: Vec<RowCell>,
-    wrapped: bool,
-    time: i64,
-    prompt: bool,
-    output: bool,
+impl PaneRows {
+    /// The Ghostty screen row line `y` is (see [`read_row`]) and the rows a
+    /// lookup of it walks (see [`row_ref_near`]); `None` for the primary
+    /// history under the alternate screen, which is read from its copy.
+    fn screen_row(&self, y: usize) -> Option<(usize, usize)> {
+        if self.alternate && y < self.hsize {
+            return None;
+        }
+        let at = y + self.retained - self.hsize;
+        let walk = at
+            .checked_sub(self.retained)
+            .map_or(at, |active| active + self.rows);
+        Some((at, walk))
+    }
+}
+
+/// The cells a capture writes as their text alone, with nothing else of
+/// them to look at (see [`CellBits::plain`]): one codepoint or none, one
+/// column, no tab or line drawing.
+#[derive(Clone, Copy)]
+struct Plain {
+    /// Any style and link, and a blank with only a colour, are plain too:
+    /// without `-e`, `-N`, `-F` or `-H` they change nothing written.
+    any_style: bool,
+    /// Only ASCII is plain: `-F` flags a character of more than one byte
+    /// (`X`, [`row_extended`]).
+    ascii: bool,
+}
+
+impl Plain {
+    /// The bits of a Ghostty cell that change nothing written: the OSC 133
+    /// semantic bits, and the style and link when any are plain.
+    fn ignored(self) -> u64 {
+        const SEMANTIC: u64 = 0b11 << 46;
+        const STYLE_AND_LINK: u64 = (0xffff << 26) | (1 << 45);
+        SEMANTIC | if self.any_style { STYLE_AND_LINK } else { 0 }
+    }
+
+    fn of(opts: CaptureOpts) -> Self {
+        Self {
+            any_style: !(opts.escapes || opts.keep_spaces || opts.flags || opts.hyperlinks),
+            ascii: opts.flags,
+        }
+    }
 }
 
 impl Source<'_> {
-    /// Line `y` as one byte per cell when every cell of it is plain
-    /// ([`CellBits::plain`]); its cells as [`Source::line`] reads them, 0
-    /// for a blank, and whether it wraps. `None` when a cell is anything
-    /// else, or the line is not read from a Ghostty row or a [`Row`]: the
-    /// line then has to be read with [`Source::line`]. Builds no cells: a
-    /// capture of a long history of plain text reads every line.
+    /// Line `y` as one codepoint per cell when every cell of it is plain
+    /// (`kind`); its cells as [`Source::line`] reads them, 0 for a blank,
+    /// and whether it wraps. `None` when a cell is anything else, or the
+    /// line is not read from a Ghostty row or a [`Row`]: the line then has
+    /// to be read with [`Source::line`]. Builds no cells: a capture of a
+    /// long history of text reads every line.
     fn plain_line<'t>(
         &'t self,
         y: usize,
+        kind: Plain,
         last: &mut LastRow<'t>,
         raw: &mut Vec<libghostty_vt::screen::Cell>,
-        out: &mut Vec<u8>,
+        out: &mut Vec<u32>,
     ) -> Option<bool> {
         match self {
             Self::Pane(t, p) => {
-                if p.alternate && y < p.hsize {
-                    return None;
-                }
-                let at = y + p.retained - p.hsize;
-                let walk = at
-                    .checked_sub(p.retained)
-                    .map_or(at, |active| active + p.rows);
+                let (at, walk) = p.screen_row(y)?;
                 let row_ref = row_ref_stepped(&t.term, at, walk, last.as_ref())?;
                 *last = Some((at, row_ref.clone()));
-                let wrapped = plain_cells(&row_ref, p.cols, raw, out)?;
+                let wrapped = plain_cells(&row_ref, p.cols, kind, raw, out)?;
                 if y < p.hsize {
                     t.note_history_read();
                 }
@@ -166,18 +198,21 @@ impl Source<'_> {
             Self::Saved(..) => None,
             Self::Mode(l, sx) => {
                 if let Some((copy, at)) = l.entry_row(y) {
-                    let wrapped = copy.plain_cells(at, raw, out)?;
+                    let wrapped = copy.plain_cells(at, kind, raw, out)?;
                     out.resize((*sx).max(out.len()), 0);
                     return Some(wrapped);
                 }
                 let row = l.line(y);
                 out.clear();
                 for c in &row.cells {
-                    let plain =
-                        !c.tab && c.width == 1 && !c.acs && !c.link && c.style == Style::default();
-                    out.push(match c.text.as_bytes() {
-                        [] if plain => 0,
-                        &[b] if plain && b.is_ascii() => b,
+                    let plain = !c.tab
+                        && c.width == 1
+                        && !c.acs
+                        && (kind.any_style || (!c.link && c.style == Style::default()));
+                    let mut chars = c.text.chars();
+                    out.push(match (plain, chars.next(), chars.next()) {
+                        (true, None, _) => 0,
+                        (true, Some(c), None) if !kind.ascii || c.is_ascii() => u32::from(c),
                         _ => return None,
                     });
                 }
@@ -219,32 +254,46 @@ impl Source<'_> {
         }
     }
 
-    /// Line `y`; `last` is the row the capture read before, which a
-    /// pane's next row is stepped to from (see [`row_ref_near`]).
-    fn line<'t>(&'t self, y: usize, marks: &[(usize, LineMark)], last: &mut LastRow<'t>) -> Line {
-        let marked = |m: LineMark| marks.iter().any(|&(my, mm)| my == y && mm == m);
-        let (cells, wrapped, time, prompt, output) = match self {
-            Self::Pane(t, _) => {
-                let hsize = t.history_size();
-                let (cells, wrapped) = read_row(t, y, hsize, usize::from(t.cols()), last);
-                let time = if y < hsize {
-                    t.history_time(t.history_id(y))
-                } else {
-                    0
+    /// Line `y`'s cells in `cells`, and whether it wraps; `last` is the
+    /// row the capture read before, which a pane's next row is stepped to
+    /// from (see [`row_ref_near`]). `raw` and `cells` are kept from line to
+    /// line, so a line costs no allocation.
+    fn line<'t>(
+        &'t self,
+        y: usize,
+        last: &mut LastRow<'t>,
+        raw: &mut Vec<libghostty_vt::screen::Cell>,
+        cells: &mut Vec<RowCell>,
+    ) -> bool {
+        match self {
+            Self::Pane(t, p) => {
+                let Some((at, walk)) = p.screen_row(y) else {
+                    let wrapped;
+                    (*cells, wrapped) = t.frozen_row(y).map(FrozenRow::thaw).unwrap_or_default();
+                    return wrapped;
                 };
-                let (p, o) = (marked(LineMark::Prompt), marked(LineMark::Output));
-                (cells, wrapped, time, p, o)
+                if y < p.hsize {
+                    t.note_history_read();
+                }
+                let Some(row_ref) = row_ref_stepped(&t.term, at, walk, last.as_ref()) else {
+                    cells.clear();
+                    return false;
+                };
+                let wrapped = read_cells_into(&row_ref, p.cols, false, raw, cells);
+                *last = Some((at, row_ref));
+                wrapped
             }
             Self::Saved(rows, sx) => {
-                let (mut cells, wrapped) = rows.get(y).map(FrozenRow::thaw).unwrap_or_default();
+                let wrapped;
+                (*cells, wrapped) = rows.get(y).map(FrozenRow::thaw).unwrap_or_default();
                 // grid_string_cells reads the pane's width of a line
                 // whatever its own, so a narrower pane cuts it.
                 cells.truncate(*sx);
-                (cells, wrapped, 0, false, false)
+                wrapped
             }
             Self::Mode(l, sx) => {
                 let row = l.line(y);
-                let mut cells: Vec<RowCell> = Vec::with_capacity(row.cells.len());
+                cells.clear();
                 for c in &row.cells {
                     let after_tab = cells.last().is_some_and(|p: &RowCell| p.tab != 0);
                     cells.push(RowCell::from_cell(c, after_tab));
@@ -254,21 +303,8 @@ impl Source<'_> {
                     ..RowCell::default()
                 };
                 cells.resize((*sx).max(cells.len()), blank);
-                (
-                    cells,
-                    row.wrapped,
-                    l.time(y),
-                    l.starts(y, false),
-                    l.starts(y, true),
-                )
+                row.wrapped
             }
-        };
-        Line {
-            cells,
-            wrapped,
-            time,
-            prompt,
-            output,
         }
     }
 }
@@ -322,62 +358,60 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
     let mut last = Gc::default();
     let mut seen: Vec<LinkKey> = Vec::new();
     let mut at = None;
-    let (mut raw, mut plain) = (Vec::new(), Vec::new());
+    let (mut raw, mut plain, mut cells, mut links) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let kind = Plain::of(opts);
     for y in top..=bottom {
         // A row of plain cells needs no sequence when the cell before had
         // none (the default style, no charset, no link), and lists no link.
-        if (!opts.escapes || last == Gc::default())
-            && plain_lines()
-            && let Some(wrapped) = src.plain_line(y, &mut at, &mut raw, &mut plain)
-        {
-            #[cfg(test)]
+        let plain_wrapped = if (!opts.escapes || last == Gc::default()) && plain_lines() {
+            src.plain_line(y, kind, &mut at, &mut raw, &mut plain)
+        } else {
+            None
+        };
+        #[cfg(test)]
+        if plain_wrapped.is_some() {
             tests::PLAIN_ROWS.with(|n| n.set(n.get() + 1));
-            if opts.hyperlinks {
-                continue;
+        }
+        let wrapped = match plain_wrapped {
+            Some(_) if opts.hyperlinks => continue,
+            Some(wrapped) => wrapped,
+            None => {
+                let wrapped = src.line(y, &mut at, &mut raw, &mut cells);
+                if opts.hyperlinks {
+                    links.clear();
+                    line_links(&mut links, &cells, &mut seen);
+                    if links.is_empty() {
+                        continue;
+                    }
+                }
+                wrapped
             }
+        };
+        // cmd-capture-pane.c:363-401: the line's number, history time and
+        // flags first.
+        if opts.numbers || opts.times || opts.flags {
             let (time, prompt, output) = src.line_meta(y, &marks, opts);
             if opts.numbers {
                 let n = i64::try_from(y).unwrap_or(0) - i64::try_from(hsize).unwrap_or(0);
-                out.extend_from_slice(format!("{n} ").as_bytes());
+                let _ = write!(out, "{n} ");
             }
             if opts.times {
-                out.extend_from_slice(format!("{time} ").as_bytes());
+                let _ = write!(out, "{time} ");
             }
             if opts.flags {
-                out.extend_from_slice(row_flags(&[], wrapped, prompt, output).as_bytes());
+                let cells: &[RowCell] = if plain_wrapped.is_some() { &[] } else { &cells };
+                out.extend_from_slice(row_flags(cells, wrapped, prompt, output).as_bytes());
             }
+        }
+        if plain_wrapped.is_some() {
             emit_plain(&mut out, &plain, opts);
-            if !opts.join || !wrapped {
-                out.push(b'\n');
-            }
-            continue;
-        }
-        let line = src.line(y, &marks, &mut at);
-        let mut text = Vec::new();
-        if opts.hyperlinks {
-            line_links(&mut text, &line.cells, &mut seen);
-            if text.is_empty() {
-                continue;
-            }
+        } else if opts.hyperlinks {
+            out.extend_from_slice(&links);
         } else {
-            emit_row(&mut text, &line.cells, opts, &mut last);
+            emit_row(&mut out, &cells, opts, &mut last);
         }
-        // cmd-capture-pane.c:363-401: the line's number, history time and
-        // flags first.
-        if opts.numbers {
-            let n = i64::try_from(y).unwrap_or(0) - i64::try_from(hsize).unwrap_or(0);
-            out.extend_from_slice(format!("{n} ").as_bytes());
-        }
-        if opts.times {
-            out.extend_from_slice(format!("{} ", line.time).as_bytes());
-        }
-        if opts.flags {
-            out.extend_from_slice(
-                row_flags(&line.cells, line.wrapped, line.prompt, line.output).as_bytes(),
-            );
-        }
-        out.extend_from_slice(&text);
-        if !opts.join || !line.wrapped {
+        if !opts.join || !wrapped {
             out.push(b'\n');
         }
     }
@@ -946,14 +980,15 @@ impl ScreenCopy {
     fn plain_cells(
         &self,
         y: usize,
+        kind: Plain,
         raw: &mut Vec<libghostty_vt::screen::Cell>,
-        out: &mut Vec<u8>,
+        out: &mut Vec<u32>,
     ) -> Option<bool> {
         if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
             return None;
         }
         let row_ref = self.row_ref(y + self.retained - self.hsize)?;
-        plain_cells(&row_ref, self.cols, raw, out)
+        plain_cells(&row_ref, self.cols, kind, raw, out)
     }
 
     /// `history_size` when the copy was taken.
@@ -1271,8 +1306,23 @@ fn read_screen_cells(
 
 /// [`read_screen_cells`] of the row `row_ref` is on.
 fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCell>, bool) {
+    let mut cells = Vec::new();
+    let wrapped = read_cells_into(row_ref, cols, used_only, &mut Vec::new(), &mut cells);
+    (cells, wrapped)
+}
+
+/// [`read_cells`] into `cells`, Ghostty's cells read into `raw`: a reader
+/// of many rows keeps both.
+fn read_cells_into(
+    row_ref: &GridRef<'_>,
+    cols: usize,
+    used_only: bool,
+    raw: &mut Vec<libghostty_vt::screen::Cell>,
+    cells: &mut Vec<RowCell>,
+) -> bool {
     #[cfg(test)]
     tests::CELL_ROWS.with(|n| n.set(n.get() + 1));
+    cells.clear();
     let (wrapped, styled, linked) = row_ref.row().map_or((false, true, true), |row| {
         (
             row.is_wrapped().unwrap_or(false),
@@ -1281,9 +1331,8 @@ fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCe
             row.has_hyperlink().unwrap_or(true),
         )
     });
-    let mut raw = Vec::new();
-    if row_ref.row_cells(&mut raw).is_err() {
-        return (Vec::new(), wrapped);
+    if row_ref.row_cells(raw).is_err() {
+        return wrapped;
     }
     // An incomplete reflow can leave the page narrower than the screen.
     raw.truncate(cols);
@@ -1291,7 +1340,10 @@ fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCe
     if used_only {
         raw.truncate(raw.iter().rposition(|c| c.bits() != 0).map_or(0, |x| x + 1));
     }
-    let mut cells = Vec::with_capacity(raw.len());
+    cells.reserve(raw.len());
+    // The last style looked up, by its id in the row's page: a run of
+    // cells of one style costs one lookup.
+    let mut last_style: Option<(u32, Style)> = None;
     for (x, &cell) in raw.iter().enumerate() {
         let cell = CellBits(cell.bits());
         if cell.0 == 0 {
@@ -1311,7 +1363,15 @@ fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCe
         };
         // Most cells are unstyled: skip the style lookup for them.
         let mut style = if styled && cell.has_styling() {
-            gr.style().map(Style::from).unwrap_or_default()
+            let id = cell.field(26, 16);
+            match last_style {
+                Some((last, style)) if last == id => style,
+                _ => {
+                    let style = gr.style().map(Style::from).unwrap_or_default();
+                    last_style = Some((id, style));
+                    style
+                }
+            }
         } else {
             Style::default()
         };
@@ -1353,31 +1413,40 @@ fn read_cells(row_ref: &GridRef<'_>, cols: usize, used_only: bool) -> (Vec<RowCe
             tab,
         });
     }
-    whole_tabs(&mut cells, width, wrapped);
-    (cells, wrapped)
+    whole_tabs(cells, width, wrapped);
+    wrapped
 }
 
-/// The cells of the row at `row_ref`, `cols` at most, as one byte each
-/// ([`CellBits::plain`]) in `out`, and whether the row wraps; `None` when
-/// a cell is not plain or the row does not read.
+/// The cells of the row at `row_ref`, `cols` at most, as one codepoint
+/// each ([`CellBits::plain`]) in `out`, and whether the row wraps; `None`
+/// when a cell is not plain or the row does not read.
 fn plain_cells(
     row_ref: &GridRef<'_>,
     cols: usize,
+    kind: Plain,
     raw: &mut Vec<libghostty_vt::screen::Cell>,
-    out: &mut Vec<u8>,
+    out: &mut Vec<u32>,
 ) -> Option<bool> {
     let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
     row_ref.row_cells(raw).ok()?;
     // An incomplete reflow can leave the page narrower than the screen.
     raw.truncate(cols);
     out.clear();
-    let mut plain = true;
-    out.extend(raw.iter().map(|cell| {
-        let b = CellBits(cell.bits()).plain();
-        plain &= b.is_some();
-        b.unwrap_or(0)
-    }));
-    plain.then_some(wrapped)
+    // The usual row first, in two passes without a branch per cell: every
+    // cell the codepoint tag and an ASCII codepoint or none, nothing else
+    // that `kind` looks at.
+    let looked_at = !kind.ignored();
+    let ascii = raw.iter().fold(0, |acc, c| acc | (c.bits() & looked_at)) & !(0x7f << 2) == 0;
+    if ascii {
+        #[expect(clippy::cast_possible_truncation, reason = "below 0x80")]
+        out.extend(raw.iter().map(|c| ((c.bits() & looked_at) >> 2) as u32));
+        return Some(wrapped);
+    }
+    out.resize(raw.len(), 0);
+    for (o, cell) in out.iter_mut().zip(raw.iter()) {
+        *o = CellBits(cell.bits()).plain(kind)?;
+    }
+    Some(wrapped)
 }
 
 /// A Ghostty cell read from its bits rather than a `ghostty_cell_get` call
@@ -1455,17 +1524,34 @@ impl CellBits {
         self.byte(48)
     }
 
-    /// The cell as one byte when [`read_cells`] makes it a narrow cell of
-    /// the default style, no charset, link or tab, and at most one ASCII
-    /// byte of text: its codepoint, 0 for none (a blank). `None` for any
-    /// other cell. The OSC 133 semantic bits are ignored, as `read_cells`
-    /// ignores them.
-    fn plain(self) -> Option<u8> {
-        const SEMANTIC: u64 = 0b11 << 46;
-        // The codepoint tag (0) and a codepoint below 0x80, nothing else.
-        let bits = self.0 & !SEMANTIC;
-        (bits < 0x80 << 2 && bits.trailing_zeros() >= 2)
-            .then(|| u8::try_from(bits >> 2).expect("below 0x80"))
+    /// The cell's codepoint, 0 for none (a blank), when [`read_cells`]
+    /// makes it a narrow cell of one codepoint or none, no charset or tab,
+    /// of the default style and no link unless `kind` takes any (and then
+    /// a cell of only a background colour is a blank), and ASCII if `kind`
+    /// says. `None` for any other cell. The OSC 133 semantic bits are
+    /// ignored, as `read_cells` ignores them.
+    fn plain(self, kind: Plain) -> Option<u32> {
+        let bits = self.0 & !kind.ignored();
+        // The usual cell first: the codepoint tag (0), an ASCII codepoint
+        // or none, nothing else.
+        if bits < 0x80 << 2 && bits.trailing_zeros() >= 2 {
+            return Some(u32::try_from(bits >> 2).expect("below 0x80"));
+        }
+        match self.content_tag() {
+            // Past the 21-bit codepoint: the rest of the content, the
+            // width, the charset mark and the tab.
+            CellContentTag::Codepoint if bits >> 23 == 0 => {
+                let cp = u32::try_from(bits >> 2).expect("21 bits");
+                let c = char::from_u32(cp)?;
+                (!kind.ascii || c.is_ascii()).then_some(cp)
+            }
+            CellContentTag::BgColorPalette | CellContentTag::BgColorRgb
+                if kind.any_style && bits >> 26 == 0 =>
+            {
+                Some(0)
+            }
+            _ => None,
+        }
     }
 
     /// The cell as a search sees it when that is one ASCII byte: a blank
@@ -1600,7 +1686,8 @@ struct Gc {
     link: Option<LinkKey>,
 }
 
-fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Gc) {
+/// Line `cells` appended to `line` (`grid_string_cells`).
+fn emit_row(line: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Gc) {
     // `cellused`: one past the last cell with text.
     let used = cells.iter().rposition(|c| !c.empty).map_or(0, |i| i + 1);
     // GRID_STRING_EMPTY_CELLS unless -J or -T (cmd-capture-pane.c:349-350):
@@ -1613,7 +1700,7 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
         cells.len()
     };
 
-    let mut line = Vec::new();
+    let start = line.len();
     let mut has_link = false;
     // The last cell's sequences (`code`), which the closing OSC 8 is
     // appended to.
@@ -1643,9 +1730,9 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
                 acs: c.acs,
                 link: c.link_key(),
             };
-            sgr_code(&mut line, &last.style, &gc.style);
+            sgr_code(line, &last.style, &gc.style);
             if opts.octal {
-                escape_esc(&mut line, at);
+                escape_esc(line, at);
             }
             // SO/SI on the charset (a leading 0 keeps it).
             if gc.acs != last.acs {
@@ -1663,13 +1750,13 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
                         _ => b"",
                     };
                     has_link = add_hyperlink(
-                        &mut line,
+                        line,
                         vis_link(&String::from_utf8_lossy(id)).as_bytes(),
                         vis_link(uri).as_bytes(),
                         opts.octal,
                     );
                 } else if has_link {
-                    add_hyperlink(&mut line, b"", b"", opts.octal);
+                    add_hyperlink(line, b"", b"", opts.octal);
                     has_link = false;
                 }
             }
@@ -1687,24 +1774,22 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
     if has_link {
         // grid.c:1255-1258 appends the close to `code` with strlcat, which
         // still holds the last cell's sequences: they come out again.
-        let code = line[code_at..code_at + code_len].to_vec();
-        line.extend_from_slice(&code);
-        add_hyperlink(&mut line, b"", b"", opts.octal);
+        line.extend_from_within(code_at..code_at + code_len);
+        add_hyperlink(line, b"", b"", opts.octal);
     }
     if !opts.join && !opts.keep_spaces {
         // GRID_STRING_TRIM_SPACES (grid.c:1263).
-        while line.last() == Some(&b' ') {
+        while line.len() > start && line.last() == Some(&b' ') {
             line.pop();
         }
     }
-    out.extend_from_slice(&line);
 }
 
-/// [`emit_row`] for a line of plain cells (one byte each, 0 a blank: see
-/// [`Source::plain_line`]) when the cell written before had no sequence
-/// (the default style, no charset, no link): no cell needs one, so the
-/// line is its characters.
-fn emit_plain(out: &mut Vec<u8>, cells: &[u8], opts: CaptureOpts) {
+/// [`emit_row`] for a line of plain cells (one codepoint each, 0 a blank:
+/// see [`Source::plain_line`]) when the cell written before had no
+/// sequence (the default style, no charset, no link) or `-e` is off: no
+/// cell needs one, so the line is its characters.
+fn emit_plain(out: &mut Vec<u8>, cells: &[u32], opts: CaptureOpts) {
     let used = cells.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
     let end = if opts.join || opts.used_only {
         used
@@ -1715,16 +1800,25 @@ fn emit_plain(out: &mut Vec<u8>, cells: &[u8], opts: CaptureOpts) {
     };
     let start = out.len();
     let cells = &cells[..end.min(cells.len())];
-    if opts.octal {
-        for &b in cells {
-            match b {
-                0 => out.push(b' '),
-                b'\\' => out.extend_from_slice(b"\\\\"),
-                b => out.push(b),
-            }
+    let special = |c: u32| c >= 0x80 || (opts.octal && c == u32::from(b'\\'));
+    let mut rest = cells;
+    loop {
+        // A run of ASCII written as it is, a blank as a space.
+        let n = rest.iter().position(|&c| special(c)).unwrap_or(rest.len());
+        #[expect(clippy::cast_possible_truncation, reason = "below 0x80")]
+        out.extend(
+            rest[..n]
+                .iter()
+                .map(|&c| if c == 0 { b' ' } else { c as u8 }),
+        );
+        let Some(&c) = rest.get(n) else { break };
+        if c == u32::from(b'\\') {
+            out.extend_from_slice(b"\\\\");
+        } else {
+            let c = char::from_u32(c).expect("read as a char");
+            out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
         }
-    } else {
-        out.extend(cells.iter().map(|&b| if b == 0 { b' ' } else { b }));
+        rest = &rest[n + 1..];
     }
     if !opts.join && !opts.keep_spaces {
         // GRID_STRING_TRIM_SPACES (grid.c:1263).
@@ -1738,7 +1832,7 @@ fn emit_plain(out: &mut Vec<u8>, cells: &[u8], opts: CaptureOpts) {
 
 /// [`tmux_cellsize`] of a line of plain cells: every written cell (not a
 /// blank) has the same style, so each run of them is one flush.
-fn plain_cellsize(cells: &[u8], used: usize) -> usize {
+fn plain_cellsize(cells: &[u32], used: usize) -> usize {
     let mut size = 0;
     let mut i = 0;
     while i < used {
@@ -1949,12 +2043,22 @@ fn add_code(out: &mut Vec<u8>, reset: bool, new: &[i32], old: &[i32]) {
         return;
     }
     out.extend_from_slice(b"\x1b[");
-    let parts: Vec<String> = new.iter().map(ToString::to_string).collect();
-    out.extend_from_slice(parts.join(";").as_bytes());
+    for (i, v) in new.iter().enumerate() {
+        if i > 0 {
+            out.push(b';');
+        }
+        let _ = write!(out, "{v}");
+    }
     out.push(b'm');
 }
 
 fn sgr_code(out: &mut Vec<u8>, last: &Style, cur: &Style) {
+    // Nothing changed: no attribute is removed or added and every colour
+    // is the last one, so tmux writes nothing; the usual case, a cell
+    // like the one before.
+    if last == cur {
+        return;
+    }
     let (attr, mut lastattr) = (attr_bits(cur), attr_bits(last));
     let mut s: Vec<u32> = Vec::new();
 
@@ -1976,11 +2080,11 @@ fn sgr_code(out: &mut Vec<u8>, last: &Style, cur: &Style) {
     if !s.is_empty() {
         out.extend_from_slice(b"\x1b[");
         for (i, v) in s.iter().enumerate() {
-            if *v < 10 {
-                out.extend_from_slice(v.to_string().as_bytes());
+            let _ = if *v < 10 {
+                write!(out, "{v}")
             } else {
-                out.extend_from_slice(format!("{}:{}", v / 10, v % 10).as_bytes());
-            }
+                write!(out, "{}:{}", v / 10, v % 10)
+            };
             if i + 1 < s.len() {
                 out.push(b';');
             }
@@ -2551,7 +2655,8 @@ mod tests {
                         usize::try_from(cols + rng.below(cols)).unwrap()
                     ),
                     15 => write!(out, "\x1b[4:3m~\x1b[59m"),
-                    16..=18 => write!(out, "{:1$}", "", usize::try_from(rng.below(6)).unwrap()),
+                    16 => write!(out, "\u{e9}\u{2500}"),
+                    17..=18 => write!(out, "{:1$}", "", usize::try_from(rng.below(6)).unwrap()),
                     _ => write!(out, "w{} ", rng.below(1000)),
                 };
             }
@@ -2732,5 +2837,39 @@ mod tests {
             let _ = capture_lines(&copy, 60, o);
         }
         assert_eq!(CELL_ROWS.with(std::cell::Cell::get), before);
+    }
+
+    /// Nor does one of styled text (colours, attributes, a coloured erase,
+    /// characters past ASCII) unless the capture writes or looks at the
+    /// styles (`-e`, `-N`, `-F`, `-H`).
+    #[test]
+    fn a_styled_history_captures_without_building_cells_unless_styles_show() {
+        let mut t = PaneTerm::new(60, 5, 5000);
+        for i in 0..1500 {
+            t.feed(
+                format!("\x1b[32m2026\x1b[m \x1b[1;7mINFO\x1b[m {i} caf\u{e9} \u{2500}\x1b[44m\x1b[K\x1b[m\r\n")
+                    .as_bytes(),
+            );
+        }
+        let entry = t.copy_screen();
+        let copy = CopyLines {
+            rows: (0..entry.history_size() + 5)
+                .map(|y| entry.used_row(y))
+                .collect(),
+            copy: t.copy_screen(),
+            sy: 5,
+            entry: true,
+        };
+        for o in capture_opts()
+            .into_iter()
+            .filter(|o| o.start == LineRef::Start)
+        {
+            let before = CELL_ROWS.with(std::cell::Cell::get);
+            let _ = capture(&t, o);
+            let _ = capture_lines(&copy, 60, o);
+            let built = CELL_ROWS.with(std::cell::Cell::get) - before;
+            let styles_show = o.escapes || o.keep_spaces || o.flags || o.hyperlinks;
+            assert_eq!(built == 0, !styles_show, "{built} rows built for {o:?}");
+        }
     }
 }
