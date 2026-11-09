@@ -702,10 +702,15 @@ fn display_panes_bad_delay_is_not_a_command_error() {
 /// error for `-A`/`-B`/`-C` on a client that is not a control client is
 /// in the attach tests; here `-C` forms and their errors, `-A` pane
 /// states, `-S`, `-t`, and `switch-client -r` toggling read-only.
+/// Named, so no automatic rename races the stream: a pane slower to exec
+/// than vtmux's first name check (500 ms, D-012) is renamed after the
+/// client attached, the reference's at once.
 #[test]
 fn refresh_client_flags_and_sizes() {
     compare("refresh_client_flags_and_sizes", |w| {
-        w.run(&["new", "-d", "-s", "c", "-x", "80", "-y", "24", "cat"]);
+        w.run(&[
+            "new", "-d", "-s", "c", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+        ]);
         let mut c = w.control(&["attach", "-t", "c"]);
         c.wait("%session-changed", |t| t.contains("%session-changed"));
         let flags = "display -p 'f=#{client_flags} ro=#{client_readonly}'";
@@ -818,11 +823,16 @@ fn refresh_client_pane_output_states() {
 }
 
 /// `refresh-client -f new-layouts` changes the layout form control clients
-/// see (cmd-select-layout.c:93-96, format.c:859-896).
+/// see (cmd-select-layout.c:93-96, format.c:859-896). Named, so no
+/// automatic rename races the stream: tmux's first check reads its own
+/// forked server (D-012) and renames the window to the split's shell once
+/// that prints, which a slow run sees as `%window-renamed`.
 #[test]
 fn refresh_client_new_layouts_format() {
     compare("refresh_client_new_layouts_format", |w| {
-        w.run(&["new", "-d", "-s", "c", "-x", "80", "-y", "24", "cat"]);
+        w.run(&[
+            "new", "-d", "-s", "c", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+        ]);
         w.run(&["split-window", "-h", "-t", "c"]);
         let mut c = w.control(&["attach", "-t", "c"]);
         c.wait("%session-changed", |t| t.contains("%session-changed"));
