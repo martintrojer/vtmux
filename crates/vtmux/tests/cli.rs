@@ -1660,6 +1660,65 @@ fn failed_respawn_keeps_the_pane() {
     });
 }
 
+/// Poll `display -p -t target fmt` (max 10 s) until its output is `done`.
+fn display_until(w: &World, target: &str, fmt: &str, done: impl Fn(&str) -> bool) -> Run {
+    let start = Instant::now();
+    loop {
+        let r = w.run(&["display", "-p", "-t", target, fmt]);
+        if done(&r.stdout) || start.elapsed() > Duration::from_secs(10) {
+            return r;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `#{pane_current_path}` reads the cwd of the pane's foreground process
+/// group leader, and when that can't be read (the leader has exited while
+/// the rest of its pipeline runs, or belongs to another user, as under
+/// `sudo`) the session leader's: osdep-linux.c `osdep_get_cwd` falls back
+/// through `TIOCGSID`. So a split with `-c "#{pane_current_path}"` (the
+/// owner's `prefix %`) starts in the shell's directory, not in an empty
+/// one. Linux only: osdep-darwin.c has no fallback.
+#[cfg(target_os = "linux")]
+#[test]
+fn current_path_falls_back_to_the_session_leader() {
+    compare("current_path_falls_back_to_the_session_leader", |w| {
+        std::fs::create_dir(w.dir().join("sub")).expect("mkdir sub");
+        let dir = w.dir().to_str().expect("utf-8 dir");
+        // Job control puts the pipeline in its own foreground group, led
+        // by the subshell in `/`, which waits for a line on the terminal.
+        let script = "cd sub && set -m && \
+                      (cd / && printf '%s\\n' ready >/dev/tty && read x </dev/tty) | sleep 30";
+        let path = "#{pane_current_path}";
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "-c", dir, "sh", "-c", script])];
+        w.wait_for_text("a", "ready");
+        runs.push(w.run(&["display", "-p", "-t", "a", path]));
+        // The group's leader is what is read while it runs.
+        assert_eq!(runs[1].stdout, "/\n", "{}", w.bin.display());
+        runs.push(w.run(&["send-keys", "-t", "a", "x", "Enter"]));
+        // The leader gone, `sleep 30` keeps the group in the foreground.
+        runs.push(display_until(w, "a", path, |s| s != "/\n"));
+        let split = w.run(&[
+            "splitw",
+            "-d",
+            "-t",
+            "a",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            path,
+            "cat",
+            "-",
+        ]);
+        let pane = split.stdout.trim().to_owned();
+        runs.push(split);
+        display_until(w, &pane, "#{pane_current_command}", |s| s == "cat\n");
+        runs.push(w.run(&["display", "-p", "-t", &pane, path]));
+        runs
+    });
+}
+
 /// A multi-word command is run as `execvp` does (spawn.c:552), so an
 /// executable without a shebang runs through `/bin/sh` (ENOEXEC fallback),
 /// given by path and found through the pane's `PATH`.

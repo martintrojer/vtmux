@@ -505,12 +505,17 @@ pub fn foreground_name(master: &OwnedFd) -> Option<String> {
 }
 
 /// `osdep_get_cwd` (osdep-linux.c:64-89): the foreground process group's
-/// working directory.
+/// working directory or, when that can't be read (the group's leader has
+/// exited, or is another user's, as under `sudo`), the session leader's,
+/// found through `TIOCGSID`.
 #[cfg(not(target_os = "macos"))]
 #[must_use]
 pub fn foreground_cwd(master: &OwnedFd) -> Option<PathBuf> {
+    let cwd = |pid: rustix::process::Pid| {
+        std::fs::read_link(format!("/proc/{}/cwd", pid.as_raw_nonzero())).ok()
+    };
     let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
-    std::fs::read_link(format!("/proc/{}/cwd", pgrp.as_raw_nonzero())).ok()
+    cwd(pgrp).or_else(|| cwd(rustix::termios::tcgetsid(master).ok()?))
 }
 
 /// `osdep_get_cwd` (osdep-darwin.c:71-91): the foreground process group's
