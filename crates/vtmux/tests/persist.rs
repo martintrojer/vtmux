@@ -156,6 +156,17 @@ impl World {
         self.ok(&["kill-server"]);
         self.gone();
     }
+
+    /// Wait until no server listens on the socket (a client is told `no
+    /// server running on`): a server exiting under `exit-empty` takes a
+    /// client that connects before it closes its socket down with it
+    /// (`server exited unexpectedly`, client.c `CLIENT_EXIT_LOST_SERVER`),
+    /// as tmux's does, so a command run next waits for this.
+    fn wait_no_server(&self) {
+        wait_until("no server listens", || {
+            self.run(&["ls"]).1.starts_with("no server running on ")
+        });
+    }
 }
 
 impl Drop for World {
@@ -1221,6 +1232,7 @@ fn a_refused_restore_with_no_session_to_start_reaches_the_starting_client() {
             "{why}: {err:?}"
         );
         assert_eq!(err.lines().count(), 1, "{err:?}");
+        w.wait_no_server();
 
         // `attach` keeps tmux's own error, then says why.
         let (_, err, code) = w.run(&["attach"]);
@@ -1229,6 +1241,7 @@ fn a_refused_restore_with_no_session_to_start_reaches_the_starting_client() {
             err.starts_with("no sessions\n") && err.contains(why),
             "{why}: {err:?}"
         );
+        w.wait_no_server();
         assert_eq!(contents(&w.state()), before, "{why}: files are kept");
 
         // A command that makes a session has nothing to report.
