@@ -242,7 +242,7 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
             .rposition(|c| !c.empty || c.padding())
             .map_or(0, |i| i + 1);
         let size = tmux_cellsize(&cells, used).max(used);
-        let kept = super::read_row_kept(term, y, hsize);
+        let kept = super::read_row_kept(term, y, hsize, &last);
         let link = kept.hyperlink || cells.iter().any(|c| c.link);
         let extended = kept.extended || super::row_extended(&cells);
         let data: Osc133 = osc133

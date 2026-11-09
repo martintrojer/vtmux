@@ -333,10 +333,7 @@ impl Source<'_> {
         match self {
             Self::Pane(t, p) => match p.screen_row(y) {
                 None => t.frozen_row(y).map(|f| f.kept).unwrap_or_default(),
-                Some((at, _)) => match last {
-                    Some((l, row_ref)) if *l == at => ref_kept(row_ref),
-                    _ => screen_row_kept(&t.term, at),
-                },
+                Some((at, _)) => screen_row_kept(&t.term, at, last),
             },
             Self::Saved(rows, _) => rows.get(y).map(|r| r.kept).unwrap_or_default(),
             Self::Mode(..) => LineKept::default(),
@@ -1385,20 +1382,30 @@ fn row_ref_stepped<'t>(
 }
 
 /// The line flags row `y` of tmux's grid keeps ([`LineKept`]), read as
-/// [`read_row`] reads its cells.
-pub(crate) fn read_row_kept(term: &PaneTerm, y: usize, hsize: usize) -> LineKept {
+/// [`read_row`] reads its cells; `last` is what that call left, the
+/// reference to this very row, so a long history costs no lookup each.
+pub(crate) fn read_row_kept(
+    term: &PaneTerm,
+    y: usize,
+    hsize: usize,
+    last: &LastRow<'_>,
+) -> LineKept {
     if term.alternate_on() && y < hsize {
         return term.frozen_row(y).map(|f| f.kept).unwrap_or_default();
     }
     let retained = term.term.scrollback_rows().unwrap_or(0);
-    screen_row_kept(&term.term, y + retained - hsize)
+    screen_row_kept(&term.term, y + retained - hsize, last)
 }
 
-/// [`read_row_kept`] for row `y` of the active screen, history included.
-fn screen_row_kept(term: &Terminal<'_, '_>, y: usize) -> LineKept {
-    row_ref_at(term, y)
-        .map(|r| ref_kept(&r))
-        .unwrap_or_default()
+/// [`read_row_kept`] for row `y` of the active screen, history included:
+/// from `last` when it is that row (just read by [`read_screen_row_near`]).
+fn screen_row_kept(term: &Terminal<'_, '_>, y: usize, last: &LastRow<'_>) -> LineKept {
+    match last {
+        Some((at, row_ref)) if *at == y => ref_kept(row_ref),
+        _ => row_ref_at(term, y)
+            .map(|r| ref_kept(&r))
+            .unwrap_or_default(),
+    }
 }
 
 /// The line flags the row `row_ref` is of keeps.
@@ -2144,11 +2151,7 @@ fn styled_cellsize(cells: &[u32], styles: &StyleRow, used: usize) -> usize {
             continue;
         }
         let mut j = i + 1;
-        while j < extent
-            && written(j)
-            && styles.style(j) == styles.style(i)
-            && ascii(i)
-            && ascii(j)
+        while j < extent && written(j) && styles.style(j) == styles.style(i) && ascii(i) && ascii(j)
         {
             j += 1;
         }
@@ -3250,5 +3253,38 @@ mod tests {
         t.feed(b"\r\n\r\n\r\n\r\n\x1b[?1049h");
         assert_eq!(t.history_size(), 3);
         assert_eq!(flag_letters(&t)[..3], ["X", "HX", "-"]);
+    }
+
+    /// A line a scroll adds under an RGB background is cleared with
+    /// extended cells (grid.c `grid_empty_line`, `grid_clear_cell`), so it
+    /// is flagged `X`: on the alternate screen (no history), under a
+    /// scrolling region, and into history. Ghostty's blank fill of the new
+    /// line took the flag with it (Ghostty patch 0034; the reference gives
+    /// `X x` and `X ` for the first).
+    #[test]
+    fn a_line_scrolled_in_under_an_rgb_background_is_extended() {
+        // Each with the flags the reference gives (capture-pane -pF -S -).
+        for (name, feed, expected) in [
+            (
+                "alternate",
+                "\x1b[?1049h\x1b[4;1H\x1b[48;2;9;8;7mx\n",
+                "--XX",
+            ),
+            ("primary", "\x1b[4;1H\x1b[48;2;9;8;7mx\n", "---XX"),
+            (
+                "region",
+                "\x1b[2;3r\x1b[3;1H\x1b[48;2;9;8;7mx\n\x1b[r",
+                "--XX-",
+            ),
+            (
+                "alternate region",
+                "\x1b[?1049h\x1b[2;3r\x1b[3;1H\x1b[48;2;9;8;7mx\n\x1b[r",
+                "-XX-",
+            ),
+        ] {
+            let mut t = PaneTerm::new(10, 4, 100);
+            t.feed(feed.as_bytes());
+            assert_eq!(flag_letters(&t).concat(), expected, "{name}");
+        }
     }
 }

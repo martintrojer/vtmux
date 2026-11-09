@@ -193,6 +193,29 @@ fn fuzzed_escape_sequences_round_trip() {
     }
 }
 
+/// A line a scroll adds under an RGB background is flagged extended at
+/// once (`grid_empty_line`'s RGB cells; Ghostty patch 0034), or the snapshot,
+/// which gives a row back the flags its cells say, restores a flag the
+/// pane did not have: the alternate screen's scroll, a region scrolled into
+/// history, and the same in a screen without history.
+#[test]
+fn rows_scrolled_in_under_an_rgb_background_round_trip() {
+    for (name, feed) in [
+        ("alternate", "\x1b[?47h\x1b[4;1H\x1b[48;2;9;8;7mx\r\n"),
+        ("primary", "\x1b[4;1H\x1b[48;2;9;8;7mx\r\n"),
+        ("region", "\x1b[2;3r\x1b[3;1H\x1b[48;2;9;8;7mx\n"),
+        (
+            "alternate region",
+            "\x1b[?47h\x1b[2;3r\x1b[3;1H\x1b[48;2;9;8;7mx\n",
+        ),
+    ] {
+        for form in [Form::Rows, Form::SamePin] {
+            let mut a = pane(10, 4, 20, feed.as_bytes());
+            round_trip(&mut a, form, PROBE, &format!("{name} {form:?}"));
+        }
+    }
+}
+
 /// The oracle pane programs, each cut at a quarter, half, three quarters
 /// and the end, through a checkpoint; at the end with its history
 /// compressed too, through an upgrade stream (pages in Ghostty's form) and

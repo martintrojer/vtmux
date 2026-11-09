@@ -1098,7 +1098,9 @@ Recorded per commit in git history; the list is kept current:
     only, so an ASCII run costs no extra pass), grapheme attaches, a tab
     (`markTab`), an erase to an RGB background (`clearCells`, and
     `clearRows` after it resets the row: tmux clears to an RGB background
-    with extended cells). They are reset where `tmux_used` is (patch
+    with extended cells; `Screen.resetBlankRow` for the scroll paths that
+    reset a row after clearing it, and `cursorScrollAbove`, whose new
+    line is filled with the pen's blank cell by hand). They are reset where `tmux_used` is (patch
     0013's full-row clears, now `tmuxEmptied`) and with the row
     (`Row.reset`, `clearRows`). A reflow keeps them on the first row of a
     line it moves, splits or joins onto (`grid_reflow_move`,
@@ -1137,7 +1139,16 @@ Recorded per commit in git history; the list is kept current:
   `capture.rs` `line_flags_outlive_the_cells_that_set_them`,
   `state_roundtrip.rs` `kept_line_flags_round_trip`, `snapshot_term.rs`
   `kept_line_flags_cross_a_snapshot` (and its fuzzer, which found the
-  reflow and spacer-head cases), oracle `capture_line_flags`.
+  reflow and spacer-head cases), oracle `capture_line_flags`. New
+  `Terminal: a row scrolled in under an RGB pen is extended (vtmux)`
+  (fails without `resetBlankRow` and without the `cursorScrollAbove`
+  mark: a new line under an RGB pen had no bit, which the snapshot, giving
+  a row back the bits its cells say, then restored; the fuzzer found it
+  once main's generator took `?47h` and `CSI s`), vtmux's
+  `snapshot_term.rs` `rows_scrolled_in_under_an_rgb_background_round_trip`
+  (fails without them) and `capture.rs`
+  `a_line_scrolled_in_under_an_rgb_background_is_extended` (the reference's
+  flags; it passes without them, as readers OR the cells).
   `Terminal: tmux line flags follow a reflow` is the one new test not
   run without the change (its join case is the reflow fix the fuzzer
   asked for). The upstream tests `Terminal: print over wide char at 0,0`,

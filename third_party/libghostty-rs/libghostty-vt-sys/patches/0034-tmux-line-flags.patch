@@ -96,10 +96,47 @@ index f2dc09530..cf8313276 100644
      // We only set the new minimums if we're not reflowing. If we are
      // reflowing, then the outer resize call handles this for us.
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index c1b3b99d2..b85e499a2 100644
+index c1b3b99d2..55139fbed 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -1879,6 +1879,9 @@ pub fn clearRows(
+@@ -1005,7 +1005,7 @@ pub fn cursorDownScroll(self: *Screen) !void {
+             // The row is a fresh blank row now and must not retain
+             // metadata (wrap state, semantic prompt) from the
+             // discarded content.
+-            self.cursor.page_row.reset();
++            self.resetBlankRow(self.cursor.page_row);
+ 
+             self.cursorMarkDirty();
+         } else {
+@@ -1226,6 +1226,9 @@ pub fn cursorScrollAbove(self: *Screen) !void {
+             const cell_current: [*]pagepkg.Cell = @ptrCast(self.cursor.page_cell);
+             const cells = cell_current - self.cursor.x;
+             @memset(cells[0..self.pages.cols], blank_cell);
++            // vtmux: tmux clears the new line in an RGB background with
++            // extended cells (grid_empty_line).
++            if (blank_cell.content_tag == .bg_color_rgb) self.cursor.page_row.tmuxMarkExtended(false);
+         }
+     }
+ }
+@@ -1305,7 +1308,7 @@ fn cursorScrollAboveRotate(
+     // The recycled storage becomes the new blank cursor row and must
+     // not retain metadata (wrap state, semantic prompt) from the row
+     // whose content was moved to the next page.
+-    cur_rows[self.cursor.page_pin.y].reset();
++    self.resetBlankRow(&cur_rows[self.cursor.page_pin.y]);
+ 
+     // Mark the whole page as dirty.
+     //
+@@ -1384,7 +1387,7 @@ pub fn cursorScrollRegionUp(self: *Screen, limit: usize) !void {
+         // The row becomes the new blank cursor row after the rotation
+         // below and must not retain metadata (wrap state, semantic
+         // prompt) from the discarded content.
+-        row.reset();
++        self.resetBlankRow(row);
+     }
+ 
+     // Rotate the region rows so the now-blank top row moves to the
+@@ -1879,6 +1882,9 @@ pub fn clearRows(
              } else {
                  self.clearCells(page, row, cells);
                  row.* = .{ .cells = cells_offset };
@@ -109,7 +146,7 @@ index c1b3b99d2..b85e499a2 100644
              }
  
              row.dirty = true;
-@@ -1985,7 +1988,11 @@ pub fn clearCells(
+@@ -1985,7 +1991,11 @@ pub fn clearCells(
          }
      }
  
@@ -122,8 +159,23 @@ index c1b3b99d2..b85e499a2 100644
  }
  
  /// Clear cells but only if they are not protected.
+@@ -2148,6 +2158,14 @@ pub fn splitCellBoundary(
+     }
+ }
+ 
++/// vtmux: `Row.reset` for a row just cleared with `blankCell`: tmux
++/// empties the line and clears it in an RGB background with extended
++/// cells (grid_empty_line), so the row keeps `Row.tmux_extended`.
++pub inline fn resetBlankRow(self: *const Screen, row: *Row) void {
++    row.reset();
++    if (self.blankCell().content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
++}
++
+ /// Returns the blank cell to use when doing terminal operations that
+ /// require preserving the bg color.
+ pub inline fn blankCell(self: *const Screen) Cell {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index aefb0012c..f723905db 100644
+index c80bc1e4f..e7ec9222a 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -942,6 +942,12 @@ inline fn printSliceStoreRun(
@@ -301,6 +353,33 @@ index aefb0012c..f723905db 100644
      self.screens.active.cursorMarkDirty();
  }
  
+@@ -3261,7 +3334,7 @@ fn tmuxScrollRegionUpIntoHistory(self: *Terminal) !void {
+         const page = p.node.page();
+         const row = p.rowAndCell().row;
+         screen.clearCells(page, row, page.getCells(row));
+-        row.reset();
++        screen.resetBlankRow(row);
+         const rac = p.rowAndCell();
+         screen.cursor.page_row = rac.row;
+         screen.cursor.page_cell = rac.cell;
+@@ -3797,7 +3870,7 @@ fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bo
+             // storage it recycles. With left/right margins the row
+             // keeps content outside the margins so the metadata is
+             // preserved, matching the shift case above.
+-            if (!left_right) cur_row.reset();
++            if (!left_right) self.screens.active.resetBlankRow(cur_row);
+         }
+ 
+         // Mark the row as dirty
+@@ -4050,7 +4123,7 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+             // storage it recycles. With left/right margins the row
+             // keeps content outside the margins so the metadata is
+             // preserved, matching the shift case above.
+-            if (!left_right) cur_row.reset();
++            if (!left_right) self.screens.active.resetBlankRow(cur_row);
+         }
+ 
+         // Mark the row as dirty
 @@ -4374,7 +4447,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
      // is emptied (cellused 0) and the line above unwrapped.
@@ -337,7 +416,7 @@ index aefb0012c..f723905db 100644
  
              break :complete .{ 0, self.cols };
          },
-@@ -6861,9 +6934,11 @@ test "Terminal: print over wide char at 0,0" {
+@@ -6845,9 +6918,11 @@ test "Terminal: print over wide char at 0,0" {
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
@@ -350,7 +429,7 @@ index aefb0012c..f723905db 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
  
-@@ -6919,9 +6994,10 @@ test "Terminal: print over wide spacer tail" {
+@@ -6903,9 +6978,10 @@ test "Terminal: print over wide spacer tail" {
      try t.print('X');
  
      {
@@ -362,7 +441,7 @@ index aefb0012c..f723905db 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
-@@ -8434,9 +8510,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
+@@ -8418,9 +8494,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
      try testing.expectEqual(@as(usize, 0), page.graphemeCount());
  
      {
@@ -375,7 +454,7 @@ index aefb0012c..f723905db 100644
      }
  }
  
-@@ -16753,6 +16831,105 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+@@ -16757,6 +16835,141 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
      try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
  }
  
@@ -478,6 +557,42 @@ index aefb0012c..f723905db 100644
 +    try testing.expect(extended(&u, 0));
 +}
 +
++test "Terminal: a row scrolled in under an RGB pen is extended (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    const extended = struct {
++        fn at(term: *Terminal, y: usize) bool {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?.row.tmux_extended;
++        }
++    }.at;
++    // tmux's scroll clears the new line in the pen's background through
++    // grid_empty_line, whose RGB cells are extended: the whole-screen
++    // scroll, the region scroll of a screen that keeps no history
++    // (Row.reset had dropped the flag the clear set) and the region
++    // scroll into history (cursorScrollAbove filled the cells only).
++    for ([_]usize{ 0, 10_000 }) |bytes| {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 6, .max_scrollback_bytes = bytes });
++        defer t.deinit(alloc);
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 9, .g = 8, .b = 7 } });
++        t.setCursorPos(4, 1);
++        try t.index();
++        try testing.expect(extended(&t, 3));
++        // Not the rows above it, which the pen did not clear.
++        try testing.expect(!extended(&t, 2));
++        // A scrolling region.
++        try t.setAttribute(.{ .unset = {} });
++        t.eraseDisplay(.complete, false);
++        t.setTopAndBottomMargin(2, 3);
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 9, .g = 8, .b = 7 } });
++        t.setCursorPos(3, 1);
++        try t.index();
++        const blank = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?;
++        try testing.expectEqual(Cell.ContentTag.bg_color_rgb, blank.cell.content_tag);
++        try testing.expect(blank.row.tmux_extended);
++        try testing.expect(!extended(&t, 1));
++    }
++}
++
  test "Terminal: tmux cursor past the last column (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
@@ -516,7 +631,7 @@ index b0da5c457..44402909a 100644
  
      return .success;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
-index 83b28589e..444d4b3d0 100644
+index 5594f210d..e1350ba16 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
 @@ -316,6 +316,8 @@ fn rowFlags(row: *const Row) u8 {
@@ -537,7 +652,7 @@ index 83b28589e..444d4b3d0 100644
          const dst = page.getCells(row);
          if (r.cell_count > dst.len) return error.Invalid;
          if (@as(usize, r.cell_start) + r.cell_count > cells.len) return error.Invalid;
-@@ -1647,6 +1651,15 @@ test "vtmux state: rows round trip into a fresh terminal" {
+@@ -1651,6 +1655,15 @@ test "vtmux state: rows round trip into a fresh terminal" {
      const str_b = try sb.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
      defer testing.allocator.free(str_b);
      try testing.expectEqualStrings(str_a, str_b);
