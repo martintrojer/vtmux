@@ -6180,6 +6180,10 @@ fn format_jobs_do_not_leak() {
         runs.push(count(1));
         runs.push(w.run(&["kill-server"]));
         runs.push(count(0));
+        // The two worlds' tags differ (tmux prints the command it ran).
+        for r in &mut runs {
+            r.stdout = r.stdout.replace(&tag, "TAG");
+        }
         runs
     });
 }
