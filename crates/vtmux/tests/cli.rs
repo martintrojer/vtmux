@@ -1083,14 +1083,22 @@ fn shell_command_flag() {
             "set -g default-shell /bin/bash\nset -g exit-empty off\n",
         )
         .unwrap();
-        let mut runs = vec![
-            w.run(&["-N", "-c", "echo $0"]),
-            w.run(&["-f", "c", "-c", "echo $0 $SHELL; exit 3"]),
+        let mut runs = vec![w.run(&["-N", "-c", "echo $0"])];
+        // The shell answer of a fresh server waits for its config on Linux's
+        // reference; macOS's build answers before the config ran (`sh`), so
+        // there the config is read first, by a command of its own.
+        if cfg!(target_os = "linux") {
+            runs.push(w.run(&["-f", "c", "-c", "echo $0 $SHELL; exit 3"]));
+        } else {
+            runs.push(w.run(&["-f", "c", "start-server"]));
+            runs.push(w.run(&["-c", "echo $0 $SHELL; exit 3"]));
+        }
+        runs.extend([
             w.run(&["show", "-gv", "default-shell"]),
             w.run(&["set", "-g", "default-shell", "/bin/sh"]),
             w.run(&["-c", "echo $0 $SHELL"]),
             w.run(&["kill-server"]),
-        ];
+        ]);
         w.wait_gone();
         runs.push(w.run(&["-c", "echo ${TMUX:-unset}"]));
         w.wait_gone();
@@ -6785,6 +6793,13 @@ fn program_output_reaches_the_grid_as_in_tmux() {
             (
                 "widths",
                 r"printf 'x\360\237\207\254y\342\230\235z\357\270\217.\342\200\215\360\237\230\200\343\205\244|'",
+            ),
+            // SM/RM 20 are not tmux modes (input_csi_dispatch_sm): no LNM,
+            // and the IRM beside it is kept. ONLCR off, so a line feed
+            // returns the carriage only under LNM.
+            (
+                "lnm",
+                r"stty -opost; printf 'a\033[20h\nb\033[4;20hX\rY\033[4l\033[20l\r\n'",
             ),
         ];
         let state = "#{cursor_x},#{cursor_y} #{history_size} #{alternate_on} [#{pane_title}]";

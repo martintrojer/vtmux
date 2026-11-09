@@ -131,12 +131,15 @@ fn styles_wide_graphemes_links_and_flags() {
 
 #[test]
 fn cursor_modes_charsets_tabs_and_region() {
-    let bytes = b"\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[4h\x1b[20h\x1b[?7l\
+    let bytes = b"\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[4h\x1b[?7l\
         \x1b[?7h\x1b[?25l\x1b[3 q\x1b[?12h\x1b[3g\x1b[1;5H\x1bH\x1b[1;13H\x1bH\x1b[3;7r\x1b[?6h\
         \x1b)0\x0e\x1b[2;4Hab\x1b7\x1b[5;20Hzz\x1b[?1s\x1b[?1l\x1b[22t\x1b]2;one\x07\x1b[22t\
         \x1b]2;two\x07\x1b]4;1;rgb:10/20/30\x07\x1b]10;rgb:ff/00/00\x07\x1b[>4;1m\x1b[?2026h\
         0123456789012345678901234567890123456789";
     let mut a = pane(40, 8, 20, bytes);
+    // LNM is the server's to set (an empty pane's MODE_CRLF), not a
+    // program's.
+    a.set_crlf(true);
     round_trip(&mut a, CompressedPages::Rows, PROBE, "modes");
 }
 

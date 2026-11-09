@@ -1,0 +1,25 @@
+name = "lnm_respawn_upgrade"
+# LNM is tmux's MODE_CRLF: set only for an empty pane (spawn.c:462), kept by
+# respawn-pane (screen_reinit keeps it, screen.c:117) and cleared by RIS
+# (screen_write_reset, screen-write.c:430). A program's SM or RM 20 changes
+# nothing (input.c `input_csi_dispatch_sm`/`_rm` know 4 and 34 only), and
+# the IRM beside it in the same sequence still counts. `stty -opost` keeps
+# the tty's ONLCR out of it, so a line feed returns the carriage only under
+# LNM. The upgrades show the mode survives a live upgrade.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "10", "sh", "-c", "stty -opost; printf 'a\\033[20h\\nb\\033[4;20hX\\rY\\033[4l\\033[20l\\nc'; tmux wait-for -S one; exec cat -"] },
+  { wait_for = "one" },
+  { run = ["capture-pane", "-p", "-t", "a:w.0"] },
+  { run = ["split-window", "-d", "-I", "-t", "a:w"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w.1", "sh", "-c", "stty -opost; printf 'd\\ne\\033[20l\\nf'; tmux wait-for -S two; exec cat -"] },
+  { wait_for = "two" },
+  { run = ["capture-pane", "-p", "-t", "a:w.1"] },
+  { upgrade = {} },
+  { run = ["respawn-pane", "-k", "-t", "a:w.1", "sh", "-c", "stty -opost; printf 'g\\nh'; tmux wait-for -S three; exec cat -"] },
+  { wait_for = "three" },
+  { run = ["capture-pane", "-p", "-t", "a:w.1"] },
+  { upgrade = {} },
+  { run = ["respawn-pane", "-k", "-t", "a:w.1", "sh", "-c", "stty -opost; printf 'i\\033c\\nj\\nk'; tmux wait-for -S four; exec cat -"] },
+  { wait_for = "four" },
+  { run = ["capture-pane", "-p", "-t", "a:w.1"] },
+]
