@@ -1,5 +1,6 @@
 //! Real binary under a PTY; all runs have private labels and pinned env.
 mod common;
+mod par;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::cell::Cell;
@@ -332,7 +333,8 @@ fn bins() -> Vec<PathBuf> {
 /// `/tmp/tmux-<uid>/`.
 #[test]
 fn world_sockets_live_in_a_private_dir() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let dir = w.sockets.path().canonicalize().unwrap();
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
@@ -352,14 +354,15 @@ fn world_sockets_live_in_a_private_dir() {
         a.exited(0);
         drop(w);
         assert!(!dir.exists(), "{} outlived its world", dir.display());
-    }
+    });
 }
 fn pane_text(a: &Attached) -> String {
     String::from_utf8(capture(&a.screen(), CaptureOpts::default())).unwrap()
 }
 #[test]
 fn attach_detach_frames_and_exit() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -413,11 +416,12 @@ fn attach_detach_frames_and_exit() {
         });
         assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
         b.exited(0);
-    }
+    });
 }
 #[test]
 fn large_input_is_drained_without_another_key() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -434,12 +438,13 @@ fn large_input_is_drained_without_another_key() {
         a.wait(|a| pane_text(a).contains("12000"));
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 #[test]
 fn signal_exit_restores_terminal_modes() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for signal in [rustix::process::Signal::TERM, rustix::process::Signal::HUP] {
             let w = World::new(bin.clone());
             let mut a = w.attach(&["new", "-s", "a", "cat"]);
@@ -459,7 +464,7 @@ fn signal_exit_restores_terminal_modes() {
             a.wait(|a| a.text().contains("\x1b[?1049l"));
             assert!(w.cli(&["has", "-t", "a"]).status.success());
         }
-    }
+    });
 }
 
 /// A terminal client whose tty goes away is dropped by the server itself
@@ -472,7 +477,8 @@ fn closing_the_tty_fires_no_focus_out() {
     use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
     use rustix::termios::{Winsize, tcsetwinsize};
     use std::process::Stdio;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
         ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
@@ -543,12 +549,13 @@ fn closing_the_tty_fires_no_focus_out() {
         assert_eq!(log(), "|pane-focus-in:%0|client-detached:%0");
         let _ = child.kill();
         let _ = child.wait();
-    }
+    });
 }
 
 #[test]
 fn session_and_server_exit_messages() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "cat"]);
         a.wait(|a| a.text().contains("\x1b[?1049h"));
@@ -560,7 +567,7 @@ fn session_and_server_exit_messages() {
         assert!(w.cli(&["kill-server"]).status.success());
         b.exited(1);
         b.wait(|a| a.text().contains("[server exited]"));
-    }
+    });
 }
 
 /// tmux buffers frames for a stalled terminal (bufferevents); the vtmux
@@ -602,7 +609,8 @@ fn stalled_terminal_under_heavy_output_keeps_the_client() {
 /// ignored by an attached client (client.c `client_signal`).
 #[test]
 fn sigint_and_sigquit_leave_the_client_attached() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "cat"]);
         a.wait(|a| a.text().contains("\x1b[?1049h"));
@@ -613,7 +621,7 @@ fn sigint_and_sigquit_leave_the_client_attached() {
         a.keys(b"\x02d");
         a.exited(0);
         a.wait(|a| a.text().contains("[detached (from session a)]"));
-    }
+    });
 }
 
 fn pane_line(w: &World) -> String {
@@ -629,7 +637,8 @@ fn pane_line(w: &World) -> String {
 /// also keeps it as a paste buffer, `request` does not.
 #[test]
 fn pane_requests_reach_the_terminal_and_back() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let out = w.home.path().join("out");
         let a = &mut w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
@@ -714,7 +723,7 @@ fn pane_requests_reach_the_terminal_and_back() {
             bin.display()
         );
         assert_eq!(buffers(&w), "Both\n", "{}", bin.display());
-    }
+    });
 }
 
 /// tty-keys.c:990-1012: while terminal queries are outstanding a partial
@@ -722,7 +731,8 @@ fn pane_requests_reach_the_terminal_and_back() {
 /// still swallowed. DECRPM goes last: it ends vtmux's query window.
 #[test]
 fn split_terminal_replies_are_swallowed() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         // The pane signals once `stty raw` has run: a `|` typed earlier sits
         // in the cooked line and is echoed and then read by `cat`, twice.
@@ -748,14 +758,15 @@ fn split_terminal_replies_are_swallowed() {
             a.keys(b"|");
         }
         a.wait(|_| pane_line(&w) == "R|||");
-    }
+    });
 }
 
 /// tty-keys.c:118-131 and input-keys.c:658-671: Escape before an arrow is
 /// Escape plus the arrow for the pane's cursor mode, not xterm M-Up.
 #[test]
 fn escape_escape_arrow_is_escape_then_arrow() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (pre, want) in [("", "^[^[[A|"), ("printf '\\033[?1h'; ", "^[^[OA|")] {
             let w = World::new(bin.clone());
             let mut a = w.attach(&[
@@ -771,7 +782,7 @@ fn escape_escape_arrow_is_escape_then_arrow() {
             a.keys(b"\x1b\x1b[A|");
             a.wait(|_| pane_line(&w) == want);
         }
-    }
+    });
 }
 
 /// D-020 (not copied from tmux): `send-keys -K` keys reach the pane. tmux
@@ -872,7 +883,8 @@ fn send_keys_k_delivers_keys_to_the_pane() {
 /// tmux 3.8.
 #[test]
 fn pasted_bytes_reach_the_pane_as_sent() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let out = w.home.path().join("out");
         let script = format!(
@@ -903,7 +915,7 @@ fn pasted_bytes_reach_the_pane_as_sent() {
         a.keys(b"\x1b[200~q\x1b[201~q,");
         let got = read_until(b",");
         assert_eq!(got, b"a\xe6b\xf0\x9f\x98\x80c\x1b[A.,", "{}", bin.display());
-    }
+    });
 }
 
 /// A typed `M-BSpace` (CSI-u or xterm-modified, so `KEYC_IMPLIED_META`) with
@@ -929,83 +941,86 @@ fn typed_meta_bspace_follows_the_backspace_option() {
         b"\x1b[27;8;127~",
         b"\x1b[27;2;127~",
     ];
-    let mut seen: Vec<Vec<String>> = Vec::new();
+    let mut runs = Vec::new();
     for bin in bins() {
-        let mut rows = Vec::new();
         for option in ["C-h", "Up", "F1", "Home", "KP1", "BTab"] {
             for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
                 for format in ["csi-u", "xterm"] {
-                    let w = World::new(bin.clone());
-                    let out = w.home.path().join("out");
-                    let script = format!(
-                        "stty raw -echo; printf '{mode}'; printf R; exec cat > {}",
-                        out.display()
-                    );
-                    let mut a = w.attach(&[
-                        "new",
-                        "-s",
-                        "a",
-                        "sh",
-                        "-c",
-                        &script,
-                        ";",
-                        "set",
-                        "-g",
-                        "extended-keys",
-                        "on",
-                        ";",
-                        "set",
-                        "-g",
-                        "extended-keys-format",
-                        format,
-                        ";",
-                        "set",
-                        "-g",
-                        "backspace",
-                        option,
-                    ]);
-                    // The pane's own text: the status line may hold an `R`.
-                    a.wait(|_| pane_line(&w) == "R");
-                    let want_mode = match mode {
-                        "" => "VT10x",
-                        r"\033[>4;1m" => "Ext 1",
-                        _ => "Ext 2",
-                    };
-                    a.wait(|_| {
-                        let shown = w.cli(&["display", "-p", "-t", "a", "#{pane_key_mode}"]);
-                        String::from_utf8_lossy(&shown.stdout).trim() == want_mode
-                    });
-                    thread::sleep(Duration::from_millis(100));
-                    for input in INPUTS {
-                        a.keys(input);
-                        // Apart, so an Escape is not read as a prefix.
-                        thread::sleep(Duration::from_millis(60));
-                        a.keys(b"|");
-                        thread::sleep(Duration::from_millis(30));
-                    }
-                    a.keys(b".");
-                    let start = Instant::now();
-                    let bytes = loop {
-                        let bytes = std::fs::read(&out).unwrap_or_default();
-                        if bytes.ends_with(b".") {
-                            break bytes;
-                        }
-                        assert!(
-                            start.elapsed() < Duration::from_secs(5),
-                            "{option} {want_mode} {format}: {bytes:?}"
-                        );
-                        thread::sleep(Duration::from_millis(20));
-                    };
-                    rows.push(format!(
-                        "{option} {want_mode} {format}: {}",
-                        String::from_utf8_lossy(&bytes).escape_debug()
-                    ));
+                    runs.push((bin.clone(), option, mode, format));
                 }
             }
         }
-        seen.push(rows);
     }
-    assert_eq!(seen[0], seen[1], "vtmux (left) against tmux 3.8 (right)");
+    // 72 worlds of about a second each, mostly the gaps between keys.
+    let rows = par::map(&runs, 8, |(bin, option, mode, format)| {
+        let w = World::new(bin.clone());
+        let out = w.home.path().join("out");
+        let script = format!(
+            "stty raw -echo; printf '{mode}'; printf R; exec cat > {}",
+            out.display()
+        );
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "sh",
+            "-c",
+            &script,
+            ";",
+            "set",
+            "-g",
+            "extended-keys",
+            "on",
+            ";",
+            "set",
+            "-g",
+            "extended-keys-format",
+            format,
+            ";",
+            "set",
+            "-g",
+            "backspace",
+            option,
+        ]);
+        // The pane's own text: the status line may hold an `R`.
+        a.wait(|_| pane_line(&w) == "R");
+        let want_mode = match *mode {
+            "" => "VT10x",
+            r"\033[>4;1m" => "Ext 1",
+            _ => "Ext 2",
+        };
+        a.wait(|_| {
+            let shown = w.cli(&["display", "-p", "-t", "a", "#{pane_key_mode}"]);
+            String::from_utf8_lossy(&shown.stdout).trim() == want_mode
+        });
+        thread::sleep(Duration::from_millis(100));
+        for input in INPUTS {
+            a.keys(input);
+            // Apart, so an Escape is not read as a prefix.
+            thread::sleep(Duration::from_millis(60));
+            a.keys(b"|");
+            thread::sleep(Duration::from_millis(30));
+        }
+        a.keys(b".");
+        let start = Instant::now();
+        let bytes = loop {
+            let bytes = std::fs::read(&out).unwrap_or_default();
+            if bytes.ends_with(b".") {
+                break bytes;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "{option} {want_mode} {format}: {bytes:?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        format!(
+            "{option} {want_mode} {format}: {}",
+            String::from_utf8_lossy(&bytes).escape_debug()
+        )
+    });
+    let (vtmux, reference) = rows.split_at(rows.len() / 2);
+    assert_eq!(vtmux, reference, "vtmux (left) against tmux 3.8 (right)");
 }
 
 /// An endless flood at 80x24, started after READY + Enter.
@@ -1174,7 +1189,8 @@ fn slow_terminal_screen_is_correct_after_the_flood() {
 #[test]
 fn select_layout_string_is_fitted_to_the_client() {
     const V2: &str = r#"{"V":2,"L":{"t":"h","w":100,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"i":0},{"t":"p","w":49,"h":30,"x":51,"y":0,"i":1}]}}"#;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "sh"], 80, 24);
         a.wait(|a| pane_text(a).contains('$'));
@@ -1210,7 +1226,7 @@ fn select_layout_string_is_fitted_to_the_client() {
                     .any(|l| l.trim() == want)
             });
         }
-    }
+    });
 }
 
 /// resize.c:410-421 and server-client.c:1953-1970: select-layout on a
@@ -1220,7 +1236,8 @@ fn select_layout_string_is_fitted_to_the_client() {
 #[test]
 fn select_layout_on_a_background_window_waits_until_selected() {
     const V2: &str = r#"{"V":2,"L":{"t":"h","w":100,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"i":0},{"t":"p","w":49,"h":30,"x":51,"y":0,"i":1}]}}"#;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "cat"], 80, 24);
         let size = |t: &str| {
@@ -1250,7 +1267,7 @@ fn select_layout_on_a_background_window_waits_until_selected() {
         )
         .into_owned();
         assert_eq!(panes, "40x23\n39x23\n");
-    }
+    });
 }
 
 /// `update-environment` from the option, applied when a client attaches
@@ -1259,7 +1276,8 @@ fn select_layout_on_a_background_window_waits_until_selected() {
 /// list-clients sees the attached client.
 #[test]
 fn update_environment_on_attach() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let show = |args: &[&str]| {
             let mut a = vec!["showenv", "-t", "main"];
@@ -1308,7 +1326,7 @@ fn update_environment_on_attach() {
         assert_eq!(show(&["ABSENTVAR"]), "ABSENTVAR=pre2\n");
         assert!(w.cli(&["detach-client", "-s", "main"]).status.success());
         b.exited(0);
-    }
+    });
 }
 
 /// The divider column of a left-right split at 40x10: (glyph, fg) for each
@@ -1331,7 +1349,8 @@ fn divider(a: &Attached, x: u16) -> Vec<(String, vtmux_vt::Color)> {
 #[test]
 fn active_pane_change_moves_the_coloured_half_and_arrows() {
     use vtmux_vt::Color::Palette;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
         a.wait(|a| a.text().contains("\x1b[?1049h"));
@@ -1359,7 +1378,7 @@ fn active_pane_change_moves_the_coloured_half_and_arrows() {
         a.wait(|a| divider(a, 20) == want);
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// With three panes there is no half-colouring: a border cell takes the
@@ -1369,7 +1388,8 @@ fn active_pane_change_moves_the_coloured_half_and_arrows() {
 #[test]
 fn active_pane_change_recolours_shared_borders() {
     use vtmux_vt::Color::Palette;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
         a.wait(|a| a.text().contains("\x1b[?1049h"));
@@ -1402,7 +1422,7 @@ fn active_pane_change_recolours_shared_borders() {
         a.wait(|a| divider(a, 20) == want);
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// Clients alike take one client's drawing of their window
@@ -1471,7 +1491,8 @@ fn display(w: &World, f: &str) -> String {
 /// root binding runs, an unbound key after the prefix is swallowed.
 #[test]
 fn prefix_root_and_prefix2_bindings() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -1519,7 +1540,7 @@ fn prefix_root_and_prefix2_bindings() {
         assert!(!pane_line(&w).contains('j'), "{}", pane_line(&w));
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// `bind -r`: after the prefix, the key repeats without it within
@@ -1527,7 +1548,8 @@ fn prefix_root_and_prefix2_bindings() {
 /// (server-client.c `server_client_repeat_timer`).
 #[test]
 fn repeat_keys_within_and_after_repeat_time() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -1563,14 +1585,15 @@ fn repeat_keys_within_and_after_repeat_time() {
         assert_eq!(display(&w, "#{@n}"), "2");
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// `switch-client -T` from a binding moves the client into a table; the
 /// next key is looked up there, then the client goes back to root.
 #[test]
 fn switch_client_table_then_key() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -1603,7 +1626,7 @@ fn switch_client_table_then_key() {
         a.wait(|_| pane_line(&w) == "|");
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// list-clients' default template (cmd-list-clients.c:31-36) and the
@@ -1620,8 +1643,8 @@ fn list_clients_default_template_and_client_variables() {
          user=#{==:#{client_user},#{user}} col=#{client_colours} cw=#{client_cell_width} \
          ch=#{client_cell_height} disc=#{client_discarded} pid=#{?client_pid,y,n} \
          act=#{?client_activity,y,n} cr=#{?client_created,y,n} wr=#{?client_written,y,n}";
-    let mut outputs = Vec::new();
-    for bin in bins() {
+    let outputs = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut w = World::new(bin);
         w.term = "screen";
         let a = w.attach_sized(&["new", "-s", "s1", "-n", "w", "cat"], 100, 30);
@@ -1655,10 +1678,10 @@ fn list_clients_default_template_and_client_variables() {
         out.push_str(&norm(
             String::from_utf8_lossy(&w.cli(&["lsc", "-F", F]).stdout).into_owned(),
         ));
-        outputs.push(out);
         drop(control.stdin.take());
         let _ = control.wait();
-    }
+        out
+    });
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -1683,7 +1706,8 @@ fn cell_pixel_size_from_the_terminal_or_its_reply() {
     let wait_cell = |w: &World, a: &Attached, want: &str| {
         a.wait(|_| cell(w) == want);
     };
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let mut w = World::new(bin.clone());
         w.pixels = (400, 200);
         let a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
@@ -1734,7 +1758,7 @@ fn cell_pixel_size_from_the_terminal_or_its_reply() {
         let out = w.cli(&["display-popup", "-C", "-c", &name]);
         assert!(out.status.success(), "{out:?}");
         opened.wait().unwrap();
-    }
+    });
 }
 
 fn kt(w: &World) -> String {
@@ -1756,7 +1780,8 @@ fn kt(w: &World) -> String {
 /// and `client_prefix` agrees with the table.
 #[test]
 fn key_table_option_resets_the_client_table() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let new = |name: &str| {
             let mut v = vec!["new", "-d", "-s", name, "-n", "w"];
@@ -1802,7 +1827,7 @@ fn key_table_option_resets_the_client_table() {
         at.keys(b"x");
         at.wait(|_| display_t(&w, "b", "#{window_name}") == "xx");
         assert_eq!(kt(&w), "custom|0|b");
-    }
+    });
 }
 
 fn display_t(w: &World, t: &str, f: &str) -> String {
@@ -1817,7 +1842,8 @@ fn display_t(w: &World, t: &str, f: &str) -> String {
 /// (tty-keys.c:1030-1039, window.c `window_pane_update_focus`).
 #[test]
 fn focus_events_bump_activity_and_reach_the_pane() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let mut w = World::new(bin);
         w.term = "screen";
         let mut at = w.attach(&[
@@ -1860,7 +1886,7 @@ fn focus_events_bump_activity_and_reach_the_pane() {
         let (c2, s2, flags) = activity(&w);
         assert!(c2 > c1 && s2 > s1, "{c1} {c2} {s1} {s2}");
         assert_eq!(flags, "attached,focused,UTF-8");
-    }
+    });
 }
 
 /// `#{session_attached}`, `#{session_attached_list}`, list-sessions'
@@ -1871,8 +1897,8 @@ fn focus_events_bump_activity_and_reach_the_pane() {
 fn session_attached_and_activity_variables() {
     const F: &str = "#{session_name}|#{session_attached}|#{session_attached_list}|\
          #{?#{e|>:#{session_activity},#{session_created}},later,same}";
-    let mut outputs = Vec::new();
-    for bin in bins() {
+    let outputs = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut w = World::new(bin);
         w.term = "screen";
         let mut v = vec!["new", "-d", "-s", "s1", "-n", "w"];
@@ -1909,8 +1935,8 @@ fn session_attached_and_activity_variables() {
         at.keys(b"\x1bs");
         at.wait(|_| kt(&w).ends_with("|s2"));
         out.push_str(&snapshot(&w));
-        outputs.push(out);
-    }
+        out
+    });
     assert!(
         outputs[0].contains("s1: 1 windows  (attached)"),
         "{}",
@@ -1936,7 +1962,8 @@ fn terminal_features_apply_at_attach() {
         (&[], "truecolor", &[], true),
         (&[], "24bit", &["xterm*:RGB@"], true),
     ];
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (before, colorterm, after, rgb) in cases {
             let w = World::new(bin.clone());
             let pane = r"printf '\033[38;2;1;2;3mX\033[0m'; exec cat";
@@ -1975,7 +2002,7 @@ fn terminal_features_apply_at_attach() {
             a.keys(b"\x02d");
             a.exited(0);
         }
-    }
+    });
 }
 
 /// Whether the host has a terminfo entry for `term`: the reference tmux
@@ -2055,7 +2082,8 @@ fn terminals_tmux_refuses_leave_no_session() {
         assert_eq!(seen[0].1, "keep\n", "{term:?}");
     }
     // An override that removes `cup` refuses too.
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         assert!(
             w.cli(&["new", "-d", "-s", "keep", "cat", "-"])
@@ -2075,7 +2103,7 @@ fn terminals_tmux_refuses_leave_no_session() {
             "{}",
             bin.display()
         );
-    }
+    });
 }
 
 /// D-007: the key tree has the terminal's terminfo keys
@@ -2125,7 +2153,8 @@ fn terminfo_keys_follow_the_terminal() {
 /// it stays in its scrollback (`tty_start_tty`, `tty_stop_tty`).
 #[test]
 fn overrides_remove_the_alternate_screen() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         assert!(
             w.cli(&["new", "-d", "-s", "a", "cat", "-"])
@@ -2154,7 +2183,7 @@ fn overrides_remove_the_alternate_screen() {
             "{}: {text:?}",
             bin.display()
         );
-    }
+    });
 }
 
 /// `tty_check_fg`/`tty_check_bg`: a client with fewer than 256 colours gets
@@ -2257,7 +2286,8 @@ fn alerts_bell_forwarding_and_status() {
         (&["visual-bell", "on"], false),
         (&["visual-bell", "both"], true),
     ];
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (opt, want) in cases {
             let w = World::new(bin.clone());
             let a = w.attach(&[
@@ -2307,7 +2337,7 @@ fn alerts_bell_forwarding_and_status() {
             w.cli(&["select-window", "-t", "a:1"]);
             a.wait(|a| status_row(a).contains("1:b*"));
         }
-    }
+    });
 }
 
 /// cmd-display-message.c `tc = cmdq_get_target_client` (`CMD_CLIENT_CFLAG`,
@@ -2318,8 +2348,8 @@ fn alerts_bell_forwarding_and_status() {
 /// only when it is on it (cmd-display-message.c:117-126).
 #[test]
 fn display_message_c_shows_on_the_named_client() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
         w.cli(&["new", "-d", "-s", "b", "-n", "bw", "cat"]);
@@ -2353,8 +2383,8 @@ fn display_message_c_shows_on_the_named_client() {
         ));
         thread::sleep(Duration::from_millis(200));
         seen.push(format!("{} / {}", status_row(&a), status_row(&b)));
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
     // The formats use the -t target (the best session, b), not -c's.
     assert!(
@@ -2368,7 +2398,8 @@ fn display_message_c_shows_on_the_named_client() {
 /// `pi.c`): `%if` sees its tty, terminal name and name, on both servers.
 #[test]
 fn startup_config_conditions_see_the_attaching_client() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let conf = w.home.path().join("c.conf");
         std::fs::write(
@@ -2384,7 +2415,7 @@ fn startup_config_conditions_see_the_attaching_client() {
         assert_eq!(got, "has yes has", "{}", w.bin.display());
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// A pane program that prints `P ` and then `W<n>.` on each SIGWINCH.
@@ -2446,15 +2477,13 @@ fn stable(quiet: Duration, read: impl Fn() -> String) -> String {
 /// fixed time (reviewer-25 h.py). A script that must land inside a timer
 /// brackets it with [`Op::Mark`] and [`Op::Within`]: under load a run that
 /// took too long proves nothing, so it is thrown away and repeated.
+/// The two binaries run side by side.
 fn sizing(ops: &[Op]) {
-    let outputs: Vec<String> = bins()
-        .into_iter()
-        .map(|bin| {
-            (0..30)
-                .find_map(|_| run_sizing(&bin, ops))
-                .expect("every run took longer than its Op::Within budget")
-        })
-        .collect();
+    let outputs = par::map(&bins(), 2, |bin| {
+        (0..30)
+            .find_map(|_| run_sizing(bin, ops))
+            .expect("every run took longer than its Op::Within budget")
+    });
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -2564,11 +2593,11 @@ fn two_windows() -> Vec<Op> {
 /// attaching, a resize, a key (`server_client_update_latest`), select-window
 /// from the CLI and a client leaving.
 fn two_clients_under(policy: &'static str) {
-    for aggressive in ["off", "on"] {
+    par::each(&["off", "on"], |aggressive| {
         let mut ops = two_windows();
         ops.extend([
             Op::Run(wv(&["set", "-g", "window-size", policy])),
-            Op::Run(wv(&["setw", "-g", "aggressive-resize", aggressive])),
+            Op::Run(wv(&["setw", "-g", "aggressive-resize", *aggressive])),
             Op::Attach(0, "a", 50, 15),
             Op::Windows,
             Op::Attach(1, "a", 70, 20),
@@ -2585,7 +2614,7 @@ fn two_clients_under(policy: &'static str) {
             Op::Winch("a:0"),
         ]);
         sizing(&ops);
-    }
+    });
 }
 #[test]
 fn window_size_latest_with_two_clients() {
@@ -2609,14 +2638,14 @@ fn window_size_manual_with_two_clients() {
 /// (resize.c:349-361).
 #[test]
 fn aggressive_resize_counts_only_clients_looking_at_the_window() {
-    for aggressive in ["off", "on"] {
+    par::each(&["off", "on"], |aggressive| {
         let mut ops = two_windows();
         let mut new_b = vec!["new", "-d", "-s", "b", "-n", "y"];
         new_b.extend(WINCH);
         ops.extend([
             Op::Run(wv(&new_b)),
             Op::Run(&["link-window", "-d", "-s", "a:1", "-t", "b:5"]),
-            Op::Run(wv(&["setw", "-g", "aggressive-resize", aggressive])),
+            Op::Run(wv(&["setw", "-g", "aggressive-resize", *aggressive])),
             Op::Run(&["set", "-g", "window-size", "smallest"]),
             Op::Attach(0, "a", 50, 15),
             Op::Attach(1, "b", 70, 20),
@@ -2630,7 +2659,7 @@ fn aggressive_resize_counts_only_clients_looking_at_the_window() {
             Op::Winch("a:1"),
         ]);
         sizing(&ops);
-    }
+    });
 }
 
 /// reviewer-25 `two_clients` (parked `minor_window_size_latest_ignores_w`):
@@ -2800,14 +2829,15 @@ fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static st
 /// Every binary must show `want` in some run of [`alternate_flush`].
 fn alternate_flush_shows(before: &'static str, seq: &'static str, want: &str) {
     const TRIES: usize = 10;
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let shown = (0..TRIES).any(|_| alternate_flush(&bin, before, seq).contains(want));
         assert!(
             shown,
             "{want} never shown in {TRIES} runs of {}",
             bin.display()
         );
-    }
+    });
 }
 #[test]
 fn entering_the_alternate_screen_flushes_resizes() {
@@ -2905,8 +2935,8 @@ fn set_and_load_buffer_w_send_osc52() {
 /// copied, and the pipe's job still runs with `set-clipboard off`.
 #[test]
 fn copy_pipe_sends_osc52() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         w.cli(&[
             "new",
@@ -2946,8 +2976,8 @@ fn copy_pipe_sends_osc52() {
         thread::sleep(Duration::from_millis(400));
         seen.extend(osc52(&a.text()));
         seen.push(format!("piped {:?}", std::fs::read_to_string(&out)));
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
     // abc: on (pipe), on (pipe-no-clear), on (copy-selection).
     assert_eq!(
@@ -2968,7 +2998,8 @@ fn copy_pipe_sends_osc52() {
 /// next-prompt) are bound; [`owner_prompt_jumps`] types them.
 #[test]
 fn owner_copy_mode_vi_bindings() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -3023,7 +3054,7 @@ fn owner_copy_mode_vi_bindings() {
         assert_eq!(String::from_utf8_lossy(&buffer.stdout), "bcd\nhij");
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// The owner's `M-Up`/`M-Down` (previous-prompt, next-prompt) typed on an
@@ -3032,7 +3063,8 @@ fn owner_copy_mode_vi_bindings() {
 /// PROMPT, 133;C from preexec), against tmux 3.8 and vtmux.
 #[test]
 fn owner_prompt_jumps() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&[
             "new",
@@ -3073,7 +3105,7 @@ fn owner_prompt_jumps() {
         a.wait(|_| display(&w, "#{pane_in_mode}") == "0");
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// Two clients on session `a`, one on `b`, and what each does after
@@ -3311,7 +3343,8 @@ fn detach_client_e_runs_a_command_in_place_of_the_client() {
 /// has run, on both servers.
 #[test]
 fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let file = w.home.path().join("hist");
         let conf = w.home.path().join("c.conf");
@@ -3354,7 +3387,7 @@ fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
             w.bin.display()
         );
         assert!(w.cli(&["kill-server"]).status.success());
-    }
+    });
 }
 
 /// `prompt_load_history` (prompt-history.c:79-106) reads lines as bytes:
@@ -3362,7 +3395,8 @@ fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
 /// and written back unchanged when the server exits, on both servers.
 #[test]
 fn history_file_keeps_lines_that_are_not_utf8() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let file = w.home.path().join("hist");
         let data: &[u8] = b"command:display \xff\xfe\nsearch:caf\xe9\n";
@@ -3395,7 +3429,7 @@ fn history_file_keeps_lines_that_are_not_utf8() {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(std::fs::read(&file).unwrap(), data, "{}", w.bin.display());
-    }
+    });
 }
 
 /// A command client running `confirm-before` waits for the answer on the
@@ -3405,7 +3439,8 @@ fn history_file_keeps_lines_that_are_not_utf8() {
 /// goes to its stdout (cmd-command-prompt.c:259-262).
 #[test]
 fn waiting_prompts_answer_the_command_client() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
         a.wait(|a| status_row(a).contains("[a]"));
@@ -3454,7 +3489,7 @@ fn waiting_prompts_answer_the_command_client() {
             "{}",
             bin.display()
         );
-    }
+    });
 }
 
 /// Cells a stream of terminal output writes into the rectangle `(x, y, w, h)`
@@ -3545,8 +3580,8 @@ fn pane_flood_under_a_popup_writes_nothing_into_it() {
     const RECT: (u16, u16, u16, u16) = (30, 5, 30, 10);
     // Output every 10 ms for as long as the pane lives.
     let flood = "i=0; while :; do seq $i $((i+40)); i=$((i+1)); sleep 0.01; done";
-    let mut counts = Vec::new();
-    for bin in bins() {
+    let counts = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let start = Instant::now();
         let a = w.attach_sized(
@@ -3607,10 +3642,11 @@ fn pane_flood_under_a_popup_writes_nothing_into_it() {
         };
         assert!(row(RECT.1).starts_with('┌'), "{screen}");
         assert!(row(RECT.1 + RECT.3 - 1).starts_with('└'), "{screen}");
-        counts.push(writes_into(&bytes, skip, SIZE, RECT));
+        let count = writes_into(&bytes, skip, SIZE, RECT);
         let _ = w.cli(&["display-popup", "-C", "-t", "a"]);
         let _ = popup.wait();
-    }
+        count
+    });
     eprintln!(
         "writes into the popup: vtmux {}, reference {}",
         counts[0], counts[1]
@@ -3634,8 +3670,8 @@ fn client_name(w: &World, session: &str) -> String {
 /// `-F` is a flag that does nothing (3.8 reads nothing from it).
 #[test]
 fn switch_client_c_moves_the_named_client() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
         w.cli(&["new", "-d", "-s", "b", "-n", "bw", "cat"]);
@@ -3679,8 +3715,8 @@ fn switch_client_c_moves_the_named_client() {
         run(&["switch-client", "-c", &nb, "-T", "nope"]);
         run(&["switch-client", "-c", &nb, "-T", "prefix"]);
         run(&["lsc", "-F", "#{client_session} #{client_key_table}"]);
-        results.push(seen.into_inner());
-    }
+        seen.into_inner()
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -3693,8 +3729,8 @@ fn switch_client_c_moves_the_named_client() {
 /// client without the flag is attached (resize.c:95-107).
 #[test]
 fn switch_client_r_makes_a_client_read_only() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
         w.cli(&["set", "-g", "status-right", "R"]);
@@ -3764,8 +3800,8 @@ fn switch_client_r_makes_a_client_read_only() {
         thread::sleep(Duration::from_millis(300));
         let cap = w.cli(&["capture-pane", "-p", "-t", "a"]);
         seen.push(String::from_utf8_lossy(&cap.stdout).trim().to_owned());
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -3774,8 +3810,8 @@ fn switch_client_r_makes_a_client_read_only() {
 /// (cmd-new-session.c:335-336).
 #[test]
 fn attach_r_and_f_set_client_flags() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
         w.cli(&["set", "-g", "status-right", "R"]);
@@ -3803,8 +3839,8 @@ fn attach_r_and_f_set_client_flags() {
         c.wait(|c| status_row(c).contains("[n]"));
         let out = w3.cli(&["lsc", "-F", "#{client_readonly}|#{client_flags}"]);
         seen.push(String::from_utf8_lossy(&out.stdout).trim().to_owned());
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -3815,8 +3851,8 @@ fn attach_r_and_f_set_client_flags() {
 /// names the client, and `-r` is accepted.
 #[test]
 fn refresh_client_on_a_terminal_client() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
         w.cli(&["set", "-g", "status-right", "R"]);
@@ -3863,8 +3899,8 @@ fn refresh_client_on_a_terminal_client() {
         a.wait(|a| status_row(a).contains("L2"));
         seen.borrow_mut()
             .push(format!("after plain {}", status_row(&a).contains("L2")));
-        results.push(seen.into_inner());
-    }
+        seen.into_inner()
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -3877,8 +3913,8 @@ fn refresh_client_on_a_terminal_client() {
 /// while the movement commands still run. Both binaries, same script.
 #[test]
 fn read_only_client_cannot_run_mutating_copy_commands() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&[
             "new",
@@ -3964,8 +4000,8 @@ fn read_only_client_cannot_run_mutating_copy_commands() {
         seen.push(state(&w));
         seen.push(run(&["send-keys", "-t", "a", "-X", "cancel"]));
         seen.push(state(&w));
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
     // The refusals did something visible on the reference too.
     assert!(
@@ -3983,8 +4019,8 @@ fn read_only_client_cannot_run_mutating_copy_commands() {
 /// `-t %N` pick among the sessions linking it the same way.
 #[test]
 fn switch_client_prefers_an_unattached_session() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         for s in ["a", "b", "c", "d"] {
             w.cli(&["new", "-d", "-s", s, "-n", "w", "cat"]);
@@ -4042,8 +4078,8 @@ fn switch_client_prefers_an_unattached_session() {
             sessions(&w)
         ));
         drop(others);
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -4252,8 +4288,8 @@ fn set_titles_emits_the_expanded_string_once_per_change() {
         &["set", "-g", "set-titles-string", "#S · #{T:@win_label}"],
         &["refresh-client"],
     ];
-    let mut all = Vec::new();
-    for bin in bins() {
+    let all = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         assert!(
             w.cli(&[
@@ -4275,8 +4311,8 @@ fn set_titles_emits_the_expanded_string_once_per_change() {
         }
         a.keys(b"\x02d");
         a.exited(0);
-        all.push(seen);
-    }
+        seen
+    });
     assert_eq!(all[0], all[1], "vtmux (left) vs tmux 3.8 (right)");
     // What the reference wrote, in order (the first is the default string, which has the host name).
     let default = all[0][0][0].clone();
@@ -4335,8 +4371,8 @@ fn set_titles_writes_the_active_pane_path() {
         // The same path again: only the title.
         (&["rename-window", "w2"], "Tw2"),
     ];
-    let mut all = Vec::new();
-    for bin in bins() {
+    let all = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         for args in [
             &[
@@ -4362,8 +4398,8 @@ fn set_titles_writes_the_active_pane_path() {
         }
         a.keys(b"\x02d");
         a.exited(0);
-        all.push(seen);
-    }
+        seen
+    });
     assert_eq!(all[0], all[1], "vtmux (left) vs tmux 3.8 (right)");
     let x = "file://h/tmp/x";
     assert_eq!(
@@ -4379,7 +4415,8 @@ fn set_titles_writes_the_active_pane_path() {
 /// is what the default `xterm*` entry gives.
 #[test]
 fn set_titles_needs_the_title_feature() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         assert!(
             w.cli(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"])
@@ -4400,7 +4437,7 @@ fn set_titles_needs_the_title_feature() {
         assert!(!a.text().contains("\x1b]0;"), "{:?}", a.text());
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// The startup config's causes, once a session is attached (cfg.c
@@ -4488,8 +4525,8 @@ fn screen_text(a: &Attached) -> String {
 /// (`switch-client -Zt`) and the window is unzoomed when the mode goes.
 #[test]
 fn choose_tree_bindings_s_w_and_owner_s() {
-    let mut results = Vec::new();
-    for bin in bins() {
+    let results = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&[
             "new", "-d", "-s", "mmm", "-n", "a", "-x", "60", "-y", "12", "exec cat",
@@ -4529,8 +4566,8 @@ fn choose_tree_bindings_s_w_and_owner_s() {
         a.wait(|a| status_row(a).contains("[zzz]"));
         seen.push(screen_text(&a));
         seen.push(zoomed(&w));
-        results.push(seen);
-    }
+        seen
+    });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -4553,7 +4590,8 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
         ("on", true, false),
         ("all", true, true),
     ];
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (mode, background, want) in cases {
             let w = World::new(bin.clone());
             let file = w.home.path().join("payload");
@@ -4607,7 +4645,7 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
             let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
             assert_eq!(lines, ["XY"], "{what}: grid {text:?}");
         }
-    }
+    });
 }
 
 /// A popup's program has no pane (input.c `input_osc_52` and
@@ -4623,7 +4661,8 @@ fn popup_osc52_and_passthrough_reach_its_client() {
         ("external", "on", false, true),
         ("off", "all", false, true),
     ];
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (clip, pass, want_clip, want_pass) in cases {
             let w = World::new(bin.clone());
             let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
@@ -4668,7 +4707,7 @@ fn popup_osc52_and_passthrough_reach_its_client() {
             w.cli(&["display-popup", "-C", "-c", &name]);
             opened.wait().unwrap();
         }
-    }
+    });
 }
 
 /// input.c:2970, 3099, 3115, 3142, 3158, 3455, 3478: an OSC that changes the
@@ -4704,57 +4743,60 @@ fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
         // The redraw of an earlier cycle is over by the next one.
         (&[b"\x1b]4;1;red\x07", b"-"], true),
     ];
-    for bin in bins() {
-        for (steps, want) in cases {
-            let w = World::new(bin.clone());
-            let mut script = String::new();
-            for (i, step) in steps.iter().enumerate() {
-                let mut data = (*step).to_vec();
-                if i + 1 == steps.len() {
-                    data.extend_from_slice(b"X\x1bPtmux;\x1b");
-                    data.extend_from_slice(OSC52);
-                    data.extend_from_slice(b"\x1b\\Y");
-                }
-                let file = w.home.path().join(format!("step{i}"));
-                std::fs::write(&file, data).unwrap();
-                write!(script, "read x; cat {}; ", file.display()).unwrap();
+    let runs: Vec<_> = bins()
+        .into_iter()
+        .flat_map(|bin| cases.iter().map(move |case| (bin.clone(), case)))
+        .collect();
+    par::map(&runs, 8, |(bin, case)| {
+        let (steps, want) = case;
+        let w = World::new(bin.clone());
+        let mut script = String::new();
+        for (i, step) in steps.iter().enumerate() {
+            let mut data = (*step).to_vec();
+            if i + 1 == steps.len() {
+                data.extend_from_slice(b"X\x1bPtmux;\x1b");
+                data.extend_from_slice(OSC52);
+                data.extend_from_slice(b"\x1b\\Y");
             }
-            script.push_str("exec cat");
-            let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
-            // The server is up once the status line draws; then blank
-            // status-right: a long host name in it hides the window list
-            // of a 40-column client.
-            a.wait(|a| status_row(a).starts_with("[a]"));
-            w.cli(&["set", "-g", "status-right", ""]);
-            a.wait(|a| status_row(a).contains("0:w"));
-            w.cli(&["set", "-g", "allow-passthrough", "on"]);
-            let mut start = 0;
-            for _ in 0..steps.len() {
-                start = a.bytes.lock().unwrap().len();
-                w.cli(&["send-keys", "-t", "a:0", "Enter"]);
-                // Let the redraw of this cycle happen before the next.
-                thread::sleep(Duration::from_millis(500));
-            }
-            let end = Instant::now() + Duration::from_secs(5);
-            loop {
-                let out = w.cli(&["capture-pane", "-p", "-t", "a:0"]);
-                if String::from_utf8_lossy(&out.stdout).contains('Y') {
-                    break;
-                }
-                assert!(Instant::now() < end, "{}: no marker", bin.display());
-                thread::sleep(Duration::from_millis(20));
-            }
-            thread::sleep(Duration::from_millis(300));
-            let got = a.bytes.lock().unwrap()[start..].to_vec();
-            let n = got.windows(OSC52.len()).filter(|x| *x == OSC52).count();
-            assert_eq!(
-                n,
-                usize::from(*want),
-                "{} {steps:?}: OSC 52 in {got:?}",
-                bin.display()
-            );
+            let file = w.home.path().join(format!("step{i}"));
+            std::fs::write(&file, data).unwrap();
+            write!(script, "read x; cat {}; ", file.display()).unwrap();
         }
-    }
+        script.push_str("exec cat");
+        let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+        // The server is up once the status line draws; then blank
+        // status-right: a long host name in it hides the window list
+        // of a 40-column client.
+        a.wait(|a| status_row(a).starts_with("[a]"));
+        w.cli(&["set", "-g", "status-right", ""]);
+        a.wait(|a| status_row(a).contains("0:w"));
+        w.cli(&["set", "-g", "allow-passthrough", "on"]);
+        let mut start = 0;
+        for _ in 0..steps.len() {
+            start = a.bytes.lock().unwrap().len();
+            w.cli(&["send-keys", "-t", "a:0", "Enter"]);
+            // Let the redraw of this cycle happen before the next.
+            thread::sleep(Duration::from_millis(500));
+        }
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            let out = w.cli(&["capture-pane", "-p", "-t", "a:0"]);
+            if String::from_utf8_lossy(&out.stdout).contains('Y') {
+                break;
+            }
+            assert!(Instant::now() < end, "{}: no marker", bin.display());
+            thread::sleep(Duration::from_millis(20));
+        }
+        thread::sleep(Duration::from_millis(300));
+        let got = a.bytes.lock().unwrap()[start..].to_vec();
+        let n = got.windows(OSC52.len()).filter(|x| *x == OSC52).count();
+        assert_eq!(
+            n,
+            usize::from(*want),
+            "{} {steps:?}: OSC 52 in {got:?}",
+            bin.display()
+        );
+    });
 }
 
 /// The number after `CNT` in the status row, if any.
@@ -4772,7 +4814,8 @@ fn status_count(a: &Attached) -> Option<u32> {
 /// with neither nothing runs. The job counts its runs in a file.
 #[test]
 fn status_jobs_refresh_on_interval_and_refresh_client() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
         // The server is up once the status line draws; then blank
@@ -4827,7 +4870,7 @@ fn status_jobs_refresh_on_interval_and_refresh_client() {
             after <= settled + 1,
             "{what}: kept running ({settled} -> {after})"
         );
-    }
+    });
 }
 
 /// tty.c `tty_update_features` writes `Eneks` (`\e[>4;2m`, the `extkeys`
@@ -4862,46 +4905,49 @@ fn extended_keys_are_asked_of_a_terminal_with_extkeys() {
         ("xterm*:extkeys", "always", b"", true, true),
         ("", "on", b"", false, false),
     ];
-    for bin in bins() {
-        for (features, ek, reply, eneks, dseks) in cases {
-            let w = World::new(bin.clone());
-            let mut v = vec!["new", "-d", "-s", "a"];
-            v.extend(CAT);
-            assert!(w.cli(&v).status.success());
-            if !features.is_empty() {
-                w.cli(&["set", "-s", "terminal-features[10]", features]);
-            }
-            w.cli(&["set", "-s", "extended-keys", ek]);
-            let mut a = w.attach(&["attach", "-t", "a"]);
-            a.wait(|a| a.text().contains("\x1b[?2026$p"));
-            let what = format!("{} {features} {ek} {reply:?}", bin.display());
-            let has = |a: &Attached, needle: &[u8]| {
-                a.bytes
-                    .lock()
-                    .unwrap()
-                    .windows(needle.len())
-                    .any(|x| x == needle)
-            };
-            if reply.is_empty() {
-                // No reply: the start timer.
-                thread::sleep(Duration::from_secs(3));
-                assert!(!has(&a, ENEKS), "{what}: Eneks before the start timer");
-                a.wait_for(Duration::from_secs(5), |a| !eneks || has(a, ENEKS));
-            } else {
-                a.keys(reply);
-                a.wait(|a| !eneks || has(a, ENEKS));
-            }
-            // The redraw that follows, and no Eneks where none is due.
-            thread::sleep(Duration::from_millis(300));
-            assert_eq!(has(&a, ENEKS), eneks, "{what}: Eneks");
-            let before = a.bytes.lock().unwrap().len();
-            a.keys(b"\x02d");
-            a.exited(0);
-            let tail = a.bytes.lock().unwrap()[before..].to_vec();
-            let found = tail.windows(DSEKS.len()).any(|x| x == DSEKS);
-            assert_eq!(found, dseks, "{what}: Dseks in {tail:?}");
+    let runs: Vec<_> = bins()
+        .into_iter()
+        .flat_map(|bin| cases.iter().map(move |case| (bin.clone(), case)))
+        .collect();
+    par::map(&runs, 6, |(bin, case)| {
+        let &(features, ek, reply, eneks, dseks) = *case;
+        let w = World::new(bin.clone());
+        let mut v = vec!["new", "-d", "-s", "a"];
+        v.extend(CAT);
+        assert!(w.cli(&v).status.success());
+        if !features.is_empty() {
+            w.cli(&["set", "-s", "terminal-features[10]", features]);
         }
-    }
+        w.cli(&["set", "-s", "extended-keys", ek]);
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| a.text().contains("\x1b[?2026$p"));
+        let what = format!("{} {features} {ek} {reply:?}", bin.display());
+        let has = |a: &Attached, needle: &[u8]| {
+            a.bytes
+                .lock()
+                .unwrap()
+                .windows(needle.len())
+                .any(|x| x == needle)
+        };
+        if reply.is_empty() {
+            // No reply: the start timer.
+            thread::sleep(Duration::from_secs(3));
+            assert!(!has(&a, ENEKS), "{what}: Eneks before the start timer");
+            a.wait_for(Duration::from_secs(5), |a| !eneks || has(a, ENEKS));
+        } else {
+            a.keys(reply);
+            a.wait(|a| !eneks || has(a, ENEKS));
+        }
+        // The redraw that follows, and no Eneks where none is due.
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(has(&a, ENEKS), eneks, "{what}: Eneks");
+        let before = a.bytes.lock().unwrap().len();
+        a.keys(b"\x02d");
+        a.exited(0);
+        let tail = a.bytes.lock().unwrap()[before..].to_vec();
+        let found = tail.windows(DSEKS.len()).any(|x| x == DSEKS);
+        assert_eq!(found, dseks, "{what}: Dseks in {tail:?}");
+    });
 }
 
 /// `#{client_termtype}` is the XTVERSION text (tty-keys.c:1676-1747), and
@@ -4911,8 +4957,8 @@ fn extended_keys_are_asked_of_a_terminal_with_extkeys() {
 #[test]
 fn xtversion_reply_names_the_terminal() {
     const F: &str = "#{client_termtype}|#{client_termfeatures}";
-    let mut outputs = Vec::new();
-    for bin in bins() {
+    let outputs = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut v = vec!["new", "-d", "-s", "a"];
         v.extend(CAT);
@@ -4931,8 +4977,8 @@ fn xtversion_reply_names_the_terminal() {
         out.push_str(&lsc(&w));
         a.keys(b"x");
         a.wait(|_| pane_line(&w) == "x");
-        outputs.push(out);
-    }
+        out
+    });
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -4942,8 +4988,8 @@ fn xtversion_reply_names_the_terminal() {
 /// (input-keys.c `input_key`). The pane copies its input to a file.
 #[test]
 fn attached_keys_reach_the_pane_in_its_key_mode() {
-    let mut outputs = Vec::new();
-    for bin in bins() {
+    let outputs = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut out = Vec::new();
         for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
             let w = World::new(bin.clone());
@@ -4988,8 +5034,8 @@ fn attached_keys_reach_the_pane_in_its_key_mode() {
                 String::from_utf8_lossy(&bytes).escape_debug()
             ));
         }
-        outputs.push(out);
-    }
+        out
+    });
     assert_eq!(
         outputs[1][2],
         r"\033[>4;2m: \u{1b}[97;6u\u{1b}[13;2u\u{1b}[9;5u\u{1b}[1;7D\u{1b}[1;5D\u{1b}[97;3u.",
@@ -5051,8 +5097,8 @@ fn client_sessions(w: &World) -> String {
 /// client goes, and `attach -t a:1` selecting the window.
 #[test]
 fn attach_and_new_session_from_a_key_binding_switch_the_client() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         for cmd in [
             &["new", "-d", "-s", "s1", "-n", "w"][..],
@@ -5088,8 +5134,8 @@ fn attach_and_new_session_from_a_key_binding_switch_the_client() {
         got.push(client_sessions(&w));
         b.keys(b"\x02d");
         b.exited(0);
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(
         seen[1],
@@ -5110,8 +5156,8 @@ fn attach_and_new_session_from_a_key_binding_switch_the_client() {
 /// `switch-client` from a popup (the owner's session picker) work.
 #[test]
 fn nested_attach_is_refused_and_popup_switch_client_works() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let t = format!("{} -L {}", w.bin.display(), w.label);
         let script = w.home.path().join("nest.sh");
@@ -5169,8 +5215,8 @@ fn nested_attach_is_refused_and_popup_switch_client_works() {
         a.keys(b"\x02s");
         a.wait(|a| pane_text(a).contains("[b]"));
         got.push(client_sessions(&w));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     let nested = "sessions should be nested with care, unset $TMUX to force";
     assert_eq!(seen[1][0].matches(nested).count(), 4, "{}", seen[1][0]);
@@ -5223,8 +5269,8 @@ fn mouse_modes(bytes: &[u8]) -> Vec<String> {
 /// again.
 #[test]
 fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         // The pane prints what it reads, raw: its input is its modes.
         let a = w.attach(&[
@@ -5267,8 +5313,8 @@ fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
         for pair in marks.windows(2) {
             got.push(mouse_modes(&bytes[pair[0]..pair[1]]).join(" "));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1][1], "?1006l ?1000l ?1002l ?1003l");
     assert_eq!(seen[1][2], "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h");
@@ -5294,7 +5340,8 @@ fn outer_cursor(a: &Attached) -> (vtmux_vt::CursorShape, bool, Option<(u8, u8, u
 fn cursor_style_and_colour_reach_the_terminal() {
     use vtmux_vt::CursorShape::{Bar, Block, Default, Underline};
     let red = Some((255, 0, 0));
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let what = bin.display().to_string();
         let w = World::new(bin);
         let mut a = w.attach(&[
@@ -5333,7 +5380,7 @@ fn cursor_style_and_colour_reach_the_terminal() {
         assert!(w.cli(&["detach-client"]).status.success());
         a.exited(0);
         expect(&a, (Block, false, None));
-    }
+    });
 }
 
 /// `tty_update_cursor` (tty.c:805) hides the cursor with `civis` and
@@ -5351,7 +5398,8 @@ fn the_console_cursor_is_hidden_with_civis() {
         let on = last("\x1b[?25h").max(last("\x1b[?0c"));
         off > on
     };
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let what = bin.display().to_string();
         let w = World::new(bin);
         let script = r"stty -echo; printf A; read x; printf '\033[?25l'; read x; printf '\033[?25hB'; exec cat";
@@ -5381,7 +5429,7 @@ fn the_console_cursor_is_hidden_with_civis() {
             text.matches("\x1b[?25l\x1b[?1c").count(),
             "{what}: {text:?}"
         );
-    }
+    });
 }
 
 /// `tty_update_features` and `tty_stop_tty` (tty.c:506, 565): a terminal
@@ -5389,7 +5437,8 @@ fn the_console_cursor_is_hidden_with_civis() {
 /// are known and `Dsesc` when the client detaches.
 #[test]
 fn application_escape_mode_follows_the_appesc_feature() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let what = bin.display().to_string();
         let w = World::new(bin);
         assert!(
@@ -5412,7 +5461,7 @@ fn application_escape_mode_follows_the_appesc_feature() {
         a.wait_labelled(&what, Duration::from_secs(5), |a| {
             a.text().contains("\x1b[?7727l")
         });
-    }
+    });
 }
 
 /// `server_client_reset_state` with a window menu (server-client.c:
@@ -5423,8 +5472,8 @@ fn application_escape_mode_follows_the_appesc_feature() {
 /// panes' all-motion.
 #[test]
 fn outer_mouse_modes_under_a_menu() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
         a.wait(|a| mouse_modes(&a.bytes.lock().unwrap()).contains(&"?1002h".to_owned()));
@@ -5467,8 +5516,8 @@ fn outer_mouse_modes_under_a_menu() {
         for pair in marks.windows(2) {
             got.push(mouse_modes(&bytes[pair[0]..pair[1]]).join(" "));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     let all = "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h ?1002h ?1003h";
     let button = "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h ?1002h";
@@ -5482,8 +5531,8 @@ fn outer_mouse_modes_under_a_menu() {
 /// moves between windows (`WheelUpStatus`, `WheelDownStatus`).
 #[test]
 fn clicks_select_panes_and_windows() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(bin, &[]);
         let mut got = vec![display(&w, "#{pane_index}")];
         a.keys(&click(3, 3));
@@ -5498,8 +5547,8 @@ fn clicks_select_panes_and_windows() {
         got.push(settles(&w, "#{window_index}", "0"));
         a.keys(b"\x1b[<65;6;10M");
         got.push(settles(&w, "#{window_index}", "1"));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], ["1", "0", "1", "1", "0", "1"]);
 }
@@ -5508,15 +5557,15 @@ fn clicks_select_panes_and_windows() {
 /// tty-keys.c:1246-1271) clicks too, positions past 0x7f included.
 #[test]
 fn x10_reports_click() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(bin, &[&["resize-window", "-t", "a", "-x", "140"]]);
         let mut got = vec![display(&w, "#{pane_index}")];
         // Press at 3,3 (bytes 0x20+0, 0x20+3, 0x20+3), release.
         a.keys(b"\x1b[M\x20\x23\x23\x1b[M\x23\x23\x23");
         got.push(settles(&w, "#{pane_index}", "0"));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], ["1", "0"]);
 }
@@ -5528,8 +5577,8 @@ fn x10_reports_click() {
 fn mouse_formats_and_target_in_a_binding() {
     let f =
         "#{mouse_x},#{mouse_y},#{mouse_pane},#{mouse_status_line},#{mouse_status_range}|#{pane_id}";
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(
             bin,
             &[
@@ -5559,8 +5608,8 @@ fn mouse_formats_and_target_in_a_binding() {
         a.keys(b"\x1b[<2;5;4M\x1b[<2;5;4m");
         a.wait(|_| !user_option(&w, "@m").is_empty());
         got.push(user_option(&w, "@m"));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(
         seen[1],
@@ -5579,8 +5628,8 @@ fn mouse_formats_and_target_in_a_binding() {
 /// third click is `TripleClick` at once and no `DoubleClick` follows.
 #[test]
 fn double_click_waits_for_the_timeout_triple_click_does_not() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(
             bin,
             &[
@@ -5610,8 +5659,8 @@ fn double_click_waits_for_the_timeout_triple_click_does_not() {
             user_option(&w, "@s"),
             user_option(&w, "@d")
         ));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], ["double: early \"\"", "triple: s \"1\" d \"\""]);
 }
@@ -5621,8 +5670,8 @@ fn double_click_waits_for_the_timeout_triple_click_does_not() {
 /// a double click chooses it (mode-tree.c:1582-1617).
 #[test]
 fn status_left_click_opens_choose_tree_and_rows_click() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(
             bin,
             &[
@@ -5653,8 +5702,8 @@ fn status_left_click_opens_choose_tree_and_rows_click() {
         }
         got.push(session());
         got.push(display(&w, "#{pane_mode}"));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1][2..], ["b", ""]);
 }
@@ -5663,16 +5712,16 @@ fn status_left_click_opens_choose_tree_and_rows_click() {
 /// below it (server-client.c:1029-1035).
 #[test]
 fn status_position_top_moves_the_window_down() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(bin, &[&["set", "-g", "status-position", "top"]]);
         let mut got = vec![];
         a.keys(&click(3, 2));
         got.push(settles(&w, "#{pane_index}", "0"));
         a.keys(&click(11, 1));
         got.push(settles(&w, "#{window_index}", "1"));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], ["0", "1"]);
 }
@@ -5680,8 +5729,8 @@ fn status_position_top_moves_the_window_down() {
 /// A read-only client's mouse events do nothing (server-client.c:1477).
 #[test]
 fn read_only_client_drops_mouse_events() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         for cmd in [
             &[
@@ -5696,8 +5745,8 @@ fn read_only_client_drops_mouse_events() {
         a.wait(|a| pane_text(a).contains("[a]"));
         a.keys(&click(3, 3));
         thread::sleep(Duration::from_millis(400));
-        seen.push(display(&w, "#{pane_index}"));
-    }
+        display(&w, "#{pane_index}")
+    });
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], "1");
 }
@@ -5791,8 +5840,8 @@ fn forwarded_events(x10: bool) -> Vec<u8> {
 /// and with `mouse off`, where every event is forwarded unbound.
 #[test]
 fn mouse_forwarding_matches_tmux() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut got = Vec::new();
         let mut cases = Vec::new();
         for tracking in ["1000", "1002", "1003"] {
@@ -5837,8 +5886,8 @@ fn mouse_forwarding_matches_tmux() {
             );
             got.push(format!("{what}: {}", recorded(&mut a, &file, &what)));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(
         seen[1][16],
         concat!(
@@ -5858,8 +5907,8 @@ fn mouse_forwarding_matches_tmux() {
 /// from the terminal and falls back to X10 for an X10 one.
 #[test]
 fn mouse_forwarding_far_columns() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut got = Vec::new();
         for (ext, report) in [
             ("", "sgr"),
@@ -5906,8 +5955,8 @@ fn mouse_forwarding_far_columns() {
             let what = format!("{ext} {report}");
             got.push(format!("{what}: {}", recorded(&mut a, &file, &what)));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
@@ -5919,8 +5968,8 @@ fn mouse_forwarding_far_columns() {
 /// keeps the prefix (server-client.c:1655-1661).
 #[test]
 fn wheel_up_pane_enters_copy_mode_or_forwards() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut got = Vec::new();
         for modes in [
             "",
@@ -5981,8 +6030,8 @@ fn wheel_up_pane_enters_copy_mode_or_forwards() {
                 bytes
             ));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(
         seen[1],
@@ -6029,8 +6078,8 @@ fn changed(before: &str, read: impl Fn() -> String) -> String {
 /// (`KEYC_DRAGGING`) until the release.
 #[test]
 fn border_drag_resizes_panes() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = mouse_world(bin, &[&["splitw", "-v", "-t", "a:0.1", "cat"]]);
         let mut got = vec![geometry(&w)];
         // The vertical border is column 20 (1-based 21); drag it to 15,
@@ -6046,8 +6095,8 @@ fn border_drag_resizes_panes() {
         let before = got[2].clone();
         a.keys(b"\x1b[<0;13;3M\x1b[<32;15;3M\x1b[<32;19;3M\x1b[<32;25;3M\x1b[<0;25;3m");
         got.push(changed(&before, || geometry(&w)));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(seen[1][1], "%0 0,0 11x9\n%1 12,0 28x4\n%3 12,5 28x4");
     assert_eq!(seen[1][2], "%0 0,0 11x9\n%1 12,0 28x2\n%3 12,3 28x6");
@@ -6193,8 +6242,8 @@ const TEXT: &str = "alpha beta-gamma delta\\r\\nsecond line here\\r\\ngamma\\r\\
 /// `copy-pipe-and-cancel` 0.3 s later.
 #[test]
 fn double_and_triple_click_copy_under_the_pointer() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut got = Vec::new();
         for clicks in [2, 3] {
             let (w, mut a) = text_world(bin.clone(), TEXT, &[]);
@@ -6207,8 +6256,8 @@ fn double_and_triple_click_copy_under_the_pointer() {
             got.push(buffer_settles(&w));
             got.push(settles(&w, "#{pane_in_mode}", "0"));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(seen[1], ["beta", "0", "alpha beta-gamma delta", "0"]);
 }
@@ -6219,8 +6268,8 @@ fn double_and_triple_click_copy_under_the_pointer() {
 /// copies it and leaves.
 #[test]
 fn drag_from_a_shell_selects_and_copies() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let mut got = Vec::new();
         for vi in ["emacs", "vi"] {
             let (w, mut a) = text_world(bin.clone(), TEXT, &[&["set", "-g", "mode-keys", vi]]);
@@ -6229,8 +6278,8 @@ fn drag_from_a_shell_selects_and_copies() {
             got.push(format!("{vi}: {:?}", buffer_settles(&w)));
             got.push(settles(&w, "#{pane_in_mode}", "0"));
         }
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(
         seen[1],
@@ -6254,8 +6303,8 @@ fn copy_mode_mouse_bindings() {
         let _ = write!(lines, "line {i:02}\\r\\n");
     }
     lines.push_str("gamma\\r\\n");
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let (w, mut a) = text_world(bin, &lines, &[]);
         let mut got = Vec::new();
         assert!(w.cli(&["copy-mode", "-t", "a"]).status.success());
@@ -6288,8 +6337,8 @@ fn copy_mode_mouse_bindings() {
         c.extend(click(2, 6));
         a.keys(&c);
         got.push(buffer_settles(&w));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     assert_eq!(
         seen[1],
@@ -6314,8 +6363,8 @@ fn copy_mode_mouse_bindings() {
 /// and is forwarded to the second; `MouseDrag1Border` still resizes.
 #[test]
 fn default_bindings_drag_or_forward() {
-    let mut seen = Vec::new();
-    for bin in bins() {
+    let seen = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         let file = w.home.path().join("mouse");
         let text = format!("stty raw -echo; printf '{TEXT}'; exec cat");
@@ -6390,8 +6439,8 @@ fn default_bindings_drag_or_forward() {
         let before = geometry(&w);
         a.keys(b"\x1b[<0;21;3M\x1b[<32;18;3M\x1b[<32;15;3M\x1b[<0;15;3m");
         got.push(changed(&before, || geometry(&w)));
-        seen.push(got);
-    }
+        got
+    });
     assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
     // The left pane is 20 wide: row 1 is the wrapped "ta". ?1000h gets
     // the press and release but not the motion between.
@@ -6593,7 +6642,8 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             })
     }
 
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let name = bin.display().to_string();
         let w = World::new(bin);
         let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{name}: {args:?}");
@@ -6716,7 +6766,7 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
             reset(&mut left, &mut right, "NEW");
         }
         assert_eq!(sync_flag(), "0", "{name}: the timer ends the mode");
-    }
+    });
 }
 
 /// A process's run state: `T` when stopped (`/proc/PID/stat` on Linux,
@@ -6751,7 +6801,8 @@ fn proc_state(pid: u32) -> char {
 /// is discarded, for tmux as for vtmux.
 #[test]
 fn suspend_client_stops_and_sigcont_redraws() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let cli = |args: &[&str]| String::from_utf8_lossy(&w.cli(args).stdout).into_owned();
         w.cli(&[
@@ -6822,7 +6873,7 @@ fn suspend_client_stops_and_sigcont_redraws() {
         a.keys(b"\x02d");
         a.wait_labelled(&ctx, limit, |a| a.text().contains("DONE"));
         a.exited(0);
-    }
+    });
 }
 
 /// Lines in `path`, 0 while it does not exist.
@@ -6851,7 +6902,8 @@ fn wait_lines(ctx: &str, path: &std::path::Path, n: usize) {
 /// not listed.
 #[test]
 fn lock_client_runs_the_lock_command_and_redraws() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let cli = |args: &[&str]| String::from_utf8_lossy(&w.cli(args).stdout).into_owned();
         w.cli(&[
@@ -6928,7 +6980,7 @@ fn lock_client_runs_the_lock_command_and_redraws() {
         a.wait_labelled(&ctx, limit, |a| pane_text(a).contains("gnu\ngnu"));
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// `server_lock_session` and `server_lock` (server-fn.c:174-194): every
@@ -6936,7 +6988,8 @@ fn lock_client_runs_the_lock_command_and_redraws() {
 /// session's `lock-command`; each comes back redrawn.
 #[test]
 fn lock_session_and_lock_server_lock_every_matching_client() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         for s in ["a", "b"] {
             w.cli(&[
@@ -7005,7 +7058,7 @@ fn lock_session_and_lock_server_lock_every_matching_client() {
             .lines()
             .count();
         assert_eq!(listed, 3, "{ctx}");
-    }
+    });
 }
 
 /// session.c `session_update_activity` / `session_lock_timer`: an
@@ -7014,7 +7067,8 @@ fn lock_session_and_lock_server_lock_every_matching_client() {
 /// the timer goes again after the unlock.
 #[test]
 fn lock_after_time_locks_an_idle_session() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         w.cli(&[
             "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
@@ -7063,7 +7117,7 @@ fn lock_after_time_locks_an_idle_session() {
         });
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// A client that leaves while its lock command runs (detach-client,
@@ -7076,7 +7130,8 @@ fn lock_after_time_locks_an_idle_session() {
 /// leaves the terminal on it.
 #[test]
 fn a_client_leaving_while_locked_exits_with_its_reason() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (leave, reason, teardown) in [
             (&["detach-client"][..], "[detached (from session a)]", true),
             (&["kill-session", "-t", "a"][..], "[exited]", false),
@@ -7121,7 +7176,7 @@ fn a_client_leaving_while_locked_exits_with_its_reason() {
             }
             assert!(!text.contains("server exited unexpectedly"), "{ctx}");
         }
-    }
+    });
 }
 
 /// choose-client's info view (`i`, window-client.c
@@ -7133,10 +7188,9 @@ fn a_client_leaving_while_locked_exits_with_its_reason() {
 /// is compared, styles included, for terminals with different features.
 #[test]
 fn choose_client_info_view_shows_the_terminal() {
-    for term in ["xterm-256color", "screen", "tmux-256color"] {
-        let mut views = Vec::new();
-        for bin in bins() {
-            let mut w = World::new(bin);
+    par::each(&["xterm-256color", "screen", "tmux-256color"], |&term| {
+        let views = par::map(&bins(), 2, |bin| {
+            let mut w = World::new(bin.clone());
             w.term = term;
             assert!(
                 w.cli(&[
@@ -7173,13 +7227,13 @@ fn choose_client_info_view_shows_the_terminal() {
             .unwrap();
             let from = rows.find("Features").expect("a Features line");
             let to = rows.find("escape-time").expect("an escape-time line");
-            views.push(rows[from..to].to_owned());
-        }
+            rows[from..to].to_owned()
+        });
         assert_eq!(
             views[0], views[1],
             "{term}: vtmux (left) vs tmux 3.8 (right)"
         );
-    }
+    });
 }
 
 /// `-T utf8` marks a client UTF-8 when its locale does not (`LC_ALL=C`):
@@ -7188,8 +7242,8 @@ fn choose_client_info_view_shows_the_terminal() {
 /// client is not UTF-8.
 #[test]
 fn utf8_terminal_feature_sets_client_utf8() {
-    let mut outputs = Vec::new();
-    for bin in bins() {
+    let outputs = par::map(&bins(), 2, |bin| {
+        let bin = bin.clone();
         let w = World::new(bin);
         w.cli(&["new", "-d", "-s", "s", "-n", "w", "cat"]);
         w.cli(&["set", "-g", "status", "off"]);
@@ -7205,8 +7259,8 @@ fn utf8_terminal_feature_sets_client_utf8() {
             a.exited(0);
         }
         w.cli(&["kill-server"]);
-        outputs.push(seen);
-    }
+        seen
+    });
     assert_eq!(outputs[0], ["u8=1 f=1\n", "u8=0 f=0\n"]);
     assert_eq!(outputs[0], outputs[1], "left vtmux, right tmux 3.8");
 }
@@ -7218,7 +7272,8 @@ fn utf8_terminal_feature_sets_client_utf8() {
 /// used, the screen cleared on the way out instead (clear-on-attach.sh).
 #[test]
 fn clear_on_attach_off_scrolls_instead_of_the_alternate_screen() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for (setting, start, end) in [
             (
                 "on",
@@ -7253,7 +7308,7 @@ fn clear_on_attach_off_scrolls_instead_of_the_alternate_screen() {
                 "{what}: alternate screen"
             );
         }
-    }
+    });
 }
 
 /// The inactive blend the D26 tests set: text half way to the terminal's
@@ -7499,7 +7554,8 @@ fn client_theme_reaches_the_theme_colours() {
             .bg
     };
     let (dark, light) = (Color::Palette(100), Color::Palette(200));
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         for report in [true, false] {
             let w = World::new(bin.clone());
             let mut v = vec!["new", "-d", "-s", "a", "-n", "w"];
@@ -7530,7 +7586,7 @@ fn client_theme_reaches_the_theme_colours() {
             a.keys(b"\x02d");
             a.exited(0);
         }
-    }
+    });
 }
 
 /// tty.c `tty_send_requests` (tty.c:420): after the DECRQM 2026 query
@@ -7541,7 +7597,8 @@ fn client_theme_reaches_the_theme_colours() {
 #[test]
 fn colour_queries_at_attach_and_on_a_theme_report() {
     const COLOURS: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         let mut v = vec!["new", "-d", "-s", "a"];
         v.extend(CAT);
@@ -7559,7 +7616,7 @@ fn colour_queries_at_attach_and_on_a_theme_report() {
         a.wait(|a| find(&a.bytes.lock().unwrap()[before..], COLOURS).is_some());
         a.keys(b"\x02d");
         a.exited(0);
-    }
+    });
 }
 
 /// tty.c `tty_resize` (130-143): a terminal that reports 0 columns or 0
@@ -7568,7 +7625,8 @@ fn colour_queries_at_attach_and_on_a_theme_report() {
 /// after a resize (`MSG_RESIZE`, server-client.c:2712-2730).
 #[test]
 fn zero_size_terminal_is_80x24() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let w = World::new(bin.clone());
         assert!(w.cli(&["new", "-d", "-s", "a", "cat -"]).status.success());
         let mut a = w.attach_sized(&["attach", "-t", "a"], 0, 0);
@@ -7600,7 +7658,7 @@ fn zero_size_terminal_is_80x24() {
         a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
             client() == "80x24"
         });
-    }
+    });
 }
 
 /// The server's open descriptors: `/proc/<pid>/fd` where there is one,
@@ -7731,7 +7789,8 @@ fn lifecycle_round(w: &World, a: &Attached) {
 /// macOS's 511 PTYs (`kern.tty.ptmx_max`) over a test run.
 #[test]
 fn pane_lifecycles_leave_no_descriptor_behind() {
-    for bin in bins() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
         let vtmux = bin.as_os_str() == env!("CARGO_BIN_EXE_vtmux");
         let w = World::new(bin.clone());
         let a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
@@ -7774,5 +7833,5 @@ fn pane_lifecycles_leave_no_descriptor_behind() {
             a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
             same("after an upgrade");
         }
-    }
+    });
 }

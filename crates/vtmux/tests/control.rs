@@ -7,6 +7,7 @@
 //! explicit `-L`, `-f /dev/null`, pane command pinned to `cat`.
 
 mod common;
+mod par;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -277,8 +278,11 @@ fn pane_output(stream: &str) -> Vec<u8> {
 }
 
 /// Run a case on both binaries; the reference's result is the expectation.
-fn compare<T: PartialEq + std::fmt::Debug>(name: &str, case: impl Fn(&World) -> T) {
-    let [ours, theirs] = bins().map(|b| case(&World::new(&b)));
+/// The two binaries run side by side, each in a world of its own.
+fn compare<T: PartialEq + std::fmt::Debug + Send>(name: &str, case: impl Fn(&World) -> T + Sync) {
+    let mut runs = par::map(&bins(), 2, |b| case(&World::new(b)));
+    let theirs = runs.pop().unwrap();
+    let ours = runs.pop().unwrap();
     assert_eq!(ours, theirs, "{name}: left vtmux, right tmux 3.8");
 }
 
@@ -919,7 +923,9 @@ fn wait_exit_lingers_until_an_empty_line() {
 /// step (D-029), so its limit stays 10 s + 10 s slack.
 #[test]
 fn stalled_client_does_not_keep_the_server() {
-    for (bin, limit) in bins().into_iter().zip([20, 30]) {
+    let runs: Vec<_> = bins().into_iter().zip([20, 30]).collect();
+    par::map(&runs, 2, |(bin, limit)| {
+        let (bin, limit) = (bin.clone(), *limit);
         let w = World::new(&bin);
         w.run(&[
             "new",
@@ -963,7 +969,7 @@ fn stalled_client_does_not_keep_the_server() {
         }
         let _ = child.kill();
         let _ = child.wait();
-    }
+    });
 }
 
 /// A control client that reads steadily but is behind a flood when it is

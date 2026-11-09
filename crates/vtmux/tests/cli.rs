@@ -8,6 +8,7 @@
 //! the recorded expectations embedded below.
 
 mod common;
+mod par;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -334,16 +335,19 @@ impl Drop for World {
 /// Run `scenario` on vtmux and the reference and compare the transcripts.
 /// Each step's result is recorded; the reference's transcript is the
 /// expectation.
-fn compare(name: &str, scenario: impl Fn(&World) -> Vec<Run>) {
+/// The two binaries run side by side, each in a world of its own.
+fn compare(name: &str, scenario: impl Fn(&World) -> Vec<Run> + Sync) {
     let (_keep, as_tmux) = vtmux_as_tmux();
-    let ours = scenario(&World::new(&as_tmux));
     let Some(reference) = reference() else {
+        scenario(&World::new(&as_tmux));
         eprintln!(
             "{name}: SKIP reference comparison: no reference tmux (set VTMUX_REFERENCE_TMUX or run `cargo xtask ref-tmux`)"
         );
         return;
     };
-    let theirs = scenario(&World::new(&reference));
+    let mut runs = par::map(&[as_tmux, reference], 2, |bin| scenario(&World::new(bin)));
+    let theirs = runs.pop().unwrap();
+    let ours = runs.pop().unwrap();
     assert_eq!(ours.len(), theirs.len());
     for (i, (o, t)) in ours.iter().zip(&theirs).enumerate() {
         assert_eq!(
@@ -6146,8 +6150,16 @@ fn format_jobs_chained() {
 /// is signalled.
 #[test]
 fn format_jobs_do_not_leak() {
-    let marker = format!("sleep 600.{}", std::process::id());
+    static WORLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     compare("format_jobs_do_not_leak", |w| {
+        // Both binaries run at once: each counts its own jobs. Fixed width,
+        // so one marker is never the start of the other.
+        let tag = format!(
+            "{}{:03}",
+            std::process::id(),
+            WORLD.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let marker = format!("sleep 600.{tag}");
         let cmd = format!("#(exec {marker})");
         let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
         let count = |want: usize| Run {
@@ -6157,7 +6169,7 @@ fn format_jobs_do_not_leak() {
         };
         // A client's job lives while the client does. `[.]` keeps the
         // counting shell's own command line out of the match.
-        let alive = format!("pgrep -fc 'sleep 600[.]{}'", std::process::id());
+        let alive = format!("pgrep -fc 'sleep 600[.]{tag}'");
         runs.push(w.run(&[
             "display", "-p", &cmd, ";", "run", "-d1", "", ";", "run", &alive,
         ]));
