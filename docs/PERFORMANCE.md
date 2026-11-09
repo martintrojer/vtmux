@@ -622,3 +622,7 @@ Scratch builds, not committed, run against a baseline recorded from the same hos
 | `history_spec_rss_mb` | 105.5 MB | 205.4 MB | fail |
 | `cpu_ratio_plain` | 0.32 | 109 | fail |
 | `cpu_ratio_sgr` | 0.89 | 84 | fail |
+
+### Merger re-run of `bench-history-read.py` (release build, this laptop, load 11-13)
+
+Same script, tmux 3.8 and vtmux in turn, 3 runs, medians: `search-backward` at 100k lines 56-63 ms against tmux's 130-133 ms (0.45x), at 1M lines 464-563 ms against 1104-1155 ms (0.42-0.49x); `capture-pane -p -S -` 226 ms against 91-102 ms at 100k lines and 2083-2220 ms against 762-837 ms at 1M (2.7x slower); alternate screen on (`alt-on`) 20, 172 and 1773 ms at 2k, 100k and 1M lines against tmux's 39, 28 and 73 ms. These numbers replace the 4x and 4 s in the README's earlier text, which another load produced.

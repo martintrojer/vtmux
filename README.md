@@ -29,7 +29,7 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 | **CPU** | Pane output costs 0.37-0.46x tmux's server CPU with no client and 0.42-0.62x with one attached; 8 clients 0.06-0.19x; an idle server with a real config (TPM, a status poller) 0.28x. Busy agent TUIs (5-20 panes): 0.85-1.3x. |
 | **Rendering** | One composed frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. Under heavy output that means about 140x fewer bytes to your terminal: a redraw-heavy benchmark sends 0.07 MB where tmux sends 10.1 MB, at 0.3x the CPU. Typing in a shell sends about the same few bytes as tmux. |
 | **Compatibility** | Same CLI, config, formats, hooks and control mode. All 393 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 168 of tmux's own 174 regress tests (3 expected failures, each recorded, 1 skipped). |
-| **What it costs** | Speed over a few MB, as Ghostty does: an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.33 ms vs 0.21 ms (both far below what you can see); searching all of a 1M-line history in copy mode is 1.8x slower (about even at 100k lines). |
+| **What it costs** | Speed over a few MB, as Ghostty does: an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.33 ms vs 0.21 ms (both far below what you can see); with a 1M-line history, `capture-pane -S -` is 2.7x slower (2.1 s against 0.8 s) and a program opening the alternate screen (vim, less) holds the server for 1.8 s (0.17 s at 100k lines, 20 ms at the default 2000); a copy-mode search of all of it is faster than tmux's (about 0.45x). |
 
 ## What tmux can't do
 
