@@ -29,7 +29,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Search all of a 1M-line history | 1652 ms | 825 ms | 0.50x | was 3.1 s, and 10.5 s before that; 0.51x at 100k lines; *Copy mode and search* |
 | `capture-pane -S -` of a 1M-line history | 888 ms | 3622 ms | 4.1x | **Worse**, was 6.4 s; *Reading all of a history* |
 | Alternate screen up over a 1M-line history | 3 ms | 4.0 s | - | **Worse**, was 6.9 s; 0.4 s at 100k lines. vtmux copies the history, tmux does not; *Reading all of a history* |
-| 32 clients on one window of agent panes | 0.56 s per 10 s | 2.75 s | 4.9x | **Worse.** Each client composes its own frame; *Micro-benchmarks* |
+| 32 clients on one window of agent panes | 0.48 s per 10 s | 0.79 s | 1.6x | **Worse**, was 5.2x. Clients that show the window alike share its drawing and frame; *Micro-benchmarks* |
 | 100 agent panes, one client | 3.37 s per 10 s | 2.71 s | 0.80x | RSS 100 MB against 17.8 MB, **Worse** |
 | 10 agent panes for 30 minutes | 6.5 MB | 21.9-22.1 MB | - | no growth in either; **Worse** RSS |
 | Hidden panes, RSS per hidden pane | 48 KB | 74-80 KB | - | **Worse.** |
@@ -401,15 +401,15 @@ Raw runs: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-0
 
 ## Micro-benchmarks
 
-`scripts/bench-micro.py` covers what `bench.py` doesn't. It uses `bench.py`'s servers, attached clients and `/proc` probes. Each row is the median of 3 runs, taken on 2026-11-08 under `flock /tmp/vtmux-stress.lock` at `503f2a4`. The host was badly loaded (load 118 at the start, 10 at the end), so read the CPU rows as rough. Server CPU is seconds per 10 s of steady state.
+`scripts/bench-micro.py` covers what `bench.py` doesn't. It uses `bench.py`'s servers, attached clients and `/proc` probes. Each row is the median of 3 runs, taken on 2026-11-08 under `flock /tmp/vtmux-stress.lock` at `503f2a4`, except the `clients` rows: 2026-11-09 at `417a3c4` (*Many clients*). The host was badly loaded (load 118 at the start, 10 at the end; 19 to 10 for `clients`), so read the CPU rows as rough. Server CPU is seconds per 10 s of steady state.
 
 | scenario | tmux 3.8 | vtmux | vtmux / tmux | note |
 |---|---|---|---|---|
 | `flood`: 8 tiled panes each `cat` 20 MB at once, one 200x50 client, sync on | 5.47 s wall, 5.31 s CPU, 35.8 MB to the terminal | 1.38 s, 1.25 s, 1.14 MB | 0.24x CPU | 5152 against 118 frames. Peak RSS 14.3 against 28.2 MB, **Worse** |
 | `many_panes`: 50 `agent_tui.py` panes, 2 per window, one client | 2.14 s | 1.38 s | 0.64x | RSS 11.5 against 56.7 MB, **Worse** |
 | `many_panes`: 100 panes | 3.37 s | 2.71 s | 0.80x | RSS 17.8 against 100 MB, **Worse** |
-| `clients`: 16 clients (120x40, `window-size smallest`) on one window of 4 agent panes | 0.37 s | 1.49 s | 4.1x | **Worse.** RSS 7.1 against 32.6 MB |
-| `clients`: 32 clients | 0.56 s | 2.75 s | 4.9x | **Worse.** RSS 9.2 against 52.5 MB |
+| `clients`: 16 clients (120x40, `window-size smallest`) on one window of 4 agent panes | 0.31 s | 0.51 s | 1.65x | **Worse**, was 4.4x. RSS 7.1 against 25.8 MB |
+| `clients`: 32 clients | 0.48 s | 0.79 s | 1.6x | **Worse**, was 5.2x. RSS 9.2 against 41.3 MB |
 | `status`: `status-interval 1`, window and session loops, conditionals, strftime and `#{E:}` in the status, 20 windows, 4 clients | 0.055 s | 0.032 s | 0.59x | |
 | `jobs`: 8 different `#()` jobs in `status-right`, `status-interval 1`, 2 clients | 0.104 s | 0.122 s | 1.17x | **Worse**, about a job's worth of CPU |
 
@@ -423,20 +423,41 @@ Raw runs: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-0
 
 Neither server grows. vtmux added 0.2 MB in 30 minutes, at 1560 s.
 
-**Many clients.** This is where vtmux loses most. tmux writes each pane update to every client's terminal as it comes. vtmux composes a whole frame per client: its window, status line, the diff against that client's last frame, and the encoding. 16 clients showing the same window pay that 16 times.
+**Many clients.** tmux writes each pane update to every client's terminal as it comes. vtmux composes a whole frame per client (D14): its window, status line, the diff against that client's last frame, and the encoding. Before `perf_many_clients`, 16 clients showing the same window paid that 16 times, 4.4x tmux's CPU (5.2x at 32).
 
-- Before `audit_perf_hotpaths`, each client's frame also built a format context that lists every attached client, whether or not its status line was redrawn. That made a tick of n clients O(n^2). The context is now made only for a status redraw.
-- That cut server instructions by 23% at 32 clients (`perf stat -e instructions:u`, 8 s, two runs each: 22.3 and 21.9 G before, 17.0 and 16.9 G after) and changed nothing measurable at 2 or 4 clients.
-- Sharing one composed frame between clients that show the same window at the same size is the remaining fix. It is not done: each client keeps its own row caches and border styles (*Agent panes*), so it is a redesign, not a hot-path fix.
+Now clients that show a window alike share the work within a render turn (`render/share.rs`):
+
+- Clients of the same session, size, view and terminal (caps and reported colours) take the first one's drawing of the window and its composed rows, when their own drawing would be the same: their border styles (kept per client as tmux keeps them) are the same, and the drawing read no client's own `#()` job or animation.
+- A client whose terminal shows what another's showed, and whose new screen is that client's, takes that client's frame bytes. Plain frames (nothing over the window but the status line) are compared by row tags, status rows included, before they are drawn, and the screen is shared, not copied.
+- Every client still gets the bytes it would get alone. A server test runs one script with sharing on and off and compares every client's bytes, and debug builds draw each shared drawing and frame again the client's own way and check.
+
+`bench-micro.py clients` (`CLIENTS_N="1 2 5 10 16 32"`, 120x40 clients, sync on), median of 3, load 19 to 10, server CPU in seconds per 10 s:
+
+| clients | tmux 3.8 | vtmux before | vtmux after | before / tmux | after / tmux |
+|---|---|---|---|---|---|
+| 1 | 0.17 | 0.28 | 0.28 | 1.7x | 1.7x |
+| 2 | 0.16 | 0.32 | 0.28 | 1.9x | 1.7x |
+| 5 | 0.20 | 0.59 | 0.34 | 3.0x | 1.7x |
+| 10 | 0.25 | 0.90 | 0.40 | 3.6x | 1.6x |
+| 16 | 0.31 | 1.34 | 0.51 | 4.4x | 1.65x |
+| 32 | 0.48 | 2.50 | 0.79 | 5.2x | 1.6x |
+
+- Before is main `0107471`, after `417a3c4`, in the same run. Terminal bytes and frames are the same for both.
+- The ratio no longer grows with the clients: vtmux is about 1.6x-1.7x tmux from 1 client to 32. Each client after the first costs vtmux about 0.016 s per 10 s here, tmux 0.010.
+- What each further client still costs: writing its frame to its socket and reading its acknowledgement (D14's backpressure; tmux has none), its status line and its terminal's mouse modes.
+- Clients of different sizes, terminals or sessions (a linked window) draw alone, as before: the *Agent panes* table's second client is on another window and did not move (the PERF GATE run in the raw record).
+- RSS fell with it: 41.3 MB at 32 clients, was 52.4. Clients that share a drawing share its composed rows.
+- Earlier, `audit_perf_hotpaths` made a client's frame build its format context only for a status redraw (it lists every attached client, so a tick of n clients was O(n^2)): 23% fewer server instructions at 32 clients (`perf stat -e instructions:u`, 8 s, two runs each: 22.3 and 21.9 G before, 17.0 and 16.9 G after).
 
 **Profiles.** These come from `perf record -g` of a `release` build with frame pointers and line tables, with Ghostty built `ReleaseFast` (`LIBGHOSTTY_VT_SYS_OPTIMIZE`; a debug-info build otherwise gets Ghostty's `Debug` mode and profiles its integrity checks):
 
-- **16 clients.** Rendering is 81% of the server: building each pane's drawing inputs (`Source::window`, 18%: option lookups, styles, the pane's screen), composing rows (18%), the frame diff (15%), the client list described above (6%) and copying cells (10%).
+- **16 clients, before `perf_many_clients`.** Rendering was 81% of the server: building each pane's drawing inputs (`Source::window`, 18%: option lookups, styles, the pane's screen), composing rows (18%), the frame diff (15%), the client list described above (6%) and copying cells (10%), all per client.
+- **32 clients, after it.** Rendering is 64%. Writing the frames to the clients' sockets is 19% of it, the window drawing 13% (mostly the first client's: `Source::window` 4%, composing 3.4%), each client's cursor 2.2% and mouse modes 4.1%. Reading the clients' acknowledgements is another 10%.
 - **100 agent panes, one client.** Reading Ghostty's dirty rows at the end of each synchronized update is 33%, mostly for the 98 panes no client shows. Then parsing pane output, 20%. A hidden pane's view is read at each `?2026h` so that switching to it mid-update shows the held screen (*Hidden panes*). The same rows would be read at the next one anyway.
 - **Creating 400 panes.** The server's own code is 30%. The rest is the kernel: `fork` copying page tables (`copy_page_range`) and the copy-on-write faults after it. A bigger server costs more per `fork`, and tmux forks too (`fdforkpty`). Spawning with `vfork` or `posix_spawn` would avoid it, but the child's setup (controlling terminal, signals, directory fallbacks) has to move with it.
 - **A search over 100k lines, before the fix.** 78% was comparing cells (`matches_at`), and 31% of all samples went to reading rows as cells.
 
-Raw runs: [`test-health/2026-11-08-perf-hotpaths.md`](test-health/2026-11-08-perf-hotpaths.md).
+Raw runs: [`test-health/2026-11-08-perf-hotpaths.md`](test-health/2026-11-08-perf-hotpaths.md); *Many clients* and the 32-client profile: [`test-health/2026-11-09-perf-many-clients.md`](test-health/2026-11-09-perf-many-clients.md).
 
 ## With the owner's config
 
