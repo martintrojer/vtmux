@@ -22,6 +22,7 @@ pub mod input;
 pub mod jobs;
 pub mod key_dispatch;
 pub mod keys;
+pub mod live;
 pub mod menu;
 pub mod mode;
 pub mod model;

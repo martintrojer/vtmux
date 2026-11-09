@@ -11,7 +11,6 @@ use vtmux_core::layout::{Cell as LayoutCell, Dir, PaneStatus};
 use vtmux_core::options::TreeId;
 use vtmux_core::style::{CellStyle, Style};
 use vtmux_core::styled;
-use vtmux_core::time::WallClock as _;
 use vtmux_vt::{Color, Snapshot};
 
 use super::Caps;
@@ -83,6 +82,54 @@ pub struct Source<'a> {
     pub themes: &'a ThemeCache,
     /// The key tables (customize-mode's preview).
     pub keys: &'a vtmux_core::keys::KeyBindings,
+    /// The client the window is drawn for, if any.
+    pub client: Option<DrawnFor<'a>>,
+}
+
+/// `options_string_to_style` + `style_apply` of option text `text`, run
+/// through `expand` first when it is a format.
+fn parse_style(text: String, expand: impl FnOnce(&str) -> String) -> Style {
+    let text = if text.contains("#{") {
+        expand(&text)
+    } else {
+        text
+    };
+    let base = CellStyle::default();
+    let mut sy = Style::new(&base);
+    if sy.parse(&base, &text).is_err() {
+        return Style::new(&base);
+    }
+    sy
+}
+
+/// The client a window is drawn for, as its pane status lines and border
+/// styles see it (`ft->c`: `format_create(c, ...)` and
+/// `format_create_defaults(NULL, c, ...)`, window-border.c:171, 199-200;
+/// screen-redraw.c:1143), worked out on first use: most drawings expand
+/// neither.
+pub struct DrawnFor<'a> {
+    make: Box<dyn Fn() -> ClientView + 'a>,
+    view: std::cell::OnceCell<ClientView>,
+}
+
+impl<'a> DrawnFor<'a> {
+    pub fn new(make: impl Fn() -> ClientView + 'a) -> Self {
+        Self {
+            make: Box::new(make),
+            view: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn view(&self) -> ClientView {
+        self.view.get_or_init(&self.make).clone()
+    }
+
+    /// Whether a format read the client ([`ClientView::seen`]): what was
+    /// drawn is that client's own.
+    #[must_use]
+    pub fn seen(&self) -> bool {
+        self.view.get().is_some_and(|v| v.seen.get())
+    }
 }
 
 /// The attached clients as formats see them, worked out on first use:
@@ -240,10 +287,18 @@ impl Source<'_> {
         ctx
     }
 
-    /// `window_make_pane_status`'s format tree (window-border.c:199): the
-    /// client's jobs, tagged with the pane, for a status line.
+    /// [`Self::ctx`] for the client the window is drawn for
+    /// ([`Self::client`]).
+    fn client_ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
+        let mut ctx = self.ctx(found, caps);
+        ctx.client = self.client.as_ref().map(DrawnFor::view);
+        ctx
+    }
+
+    /// `window_make_pane_status`'s format tree (window-border.c:199-200):
+    /// the client's, with its jobs, tagged with the pane, for a status line.
     fn border_ctx(&self, found: Found, p: PaneId, caps: Caps, jobs: Option<&JobHandle>) -> Ctx<'_> {
-        let mut ctx = self.ctx(
+        let mut ctx = self.client_ctx(
             Found {
                 pane: Some(p),
                 ..found
@@ -271,18 +326,18 @@ impl Source<'_> {
     /// Style option `name` parsed whole (`options_string_to_style`); one
     /// that does not parse is the default style.
     fn parsed_style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> Style {
-        let text = self.string(tree, name);
-        let text = if text.contains("#{") {
-            vtmux_core::format::expand_str(&text, ctx)
-        } else {
-            text
-        };
-        let base = CellStyle::default();
-        let mut sy = Style::new(&base);
-        if sy.parse(&base, &text).is_err() {
-            return Style::new(&base);
-        }
-        sy
+        parse_style(self.string(tree, name), |text| {
+            vtmux_core::format::expand_str(text, ctx)
+        })
+    }
+
+    /// [`Self::style`] expanded for the client the window is drawn for in
+    /// window `found` ([`Self::client_ctx`]), built only for a format.
+    fn client_style(&self, tree: TreeId, name: &str, (found, caps): (Found, Caps)) -> CellStyle {
+        parse_style(self.string(tree, name), |text| {
+            vtmux_core::format::expand_str(text, &self.client_ctx(found, caps))
+        })
+        .cell
     }
 
     /// `server_client_update_theme_colours` (server-client.c:1274-1310):
@@ -445,7 +500,7 @@ impl Source<'_> {
                 modal: window.panes.modal,
                 rect: pane.rect,
             };
-            let border = self.border_style(cache.map(|c| &c.borders), p, key, &ctx);
+            let border = self.border_style(cache.map(|c| &c.borders), p, key, (found, caps));
             let palette = palette(self.model, TreeId::Pane(p), &pane.term, &self.theme(caps));
             let shown = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
             let (defaults, dim) = self.pane_defaults(pane, p == active, &ctx);
@@ -527,7 +582,6 @@ impl Source<'_> {
             let line = pane_status(&under, &d.border, d.lines, d.index, &expanded);
             (d.status, d.status_ranges) = (line.cells, line.ranges);
         }
-        let ctx = self.ctx(found, caps);
         // Never drawn: a scene without such cells.
         let unused = || styled::Cell {
             text: String::new(),
@@ -546,7 +600,8 @@ impl Source<'_> {
             panes: draws,
             active: Some(active),
             marked,
-            border: self.style(wtree, "pane-border-style", &ctx),
+            // redraw_get_default_border_style (screen-redraw.c:1143).
+            border: self.client_style(wtree, "pane-border-style", (found, caps)),
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),
             // Expanded only when drawn: `fill-character` is a format.
             outside: if scene.fills().0 {
@@ -567,13 +622,14 @@ impl Source<'_> {
 
     /// `window_pane_get_border_style`: pane `p`'s border style kept in
     /// `kept` (the drawing client's), else `pane-active-border-style`
-    /// (`key.active`) or `pane-border-style` expanded and kept.
+    /// (`key.active`) or `pane-border-style` expanded for the client in
+    /// window `found` (window-border.c:171) and kept.
     fn border_style(
         &self,
         kept: Option<&BorderStyles>,
         p: PaneId,
         key: BorderKey,
-        ctx: &Ctx<'_>,
+        (found, caps): (Found, Caps),
     ) -> CellStyle {
         if let Some((k, style)) = kept.and_then(|b| b.kept.borrow().get(&p).cloned())
             && k == key
@@ -585,7 +641,11 @@ impl Source<'_> {
         } else {
             "pane-border-style"
         };
-        let style = self.style(TreeId::Pane(p), option, ctx);
+        let found = Found {
+            pane: Some(p),
+            ..found
+        };
+        let style = self.client_style(TreeId::Pane(p), option, (found, caps));
         if let Some(b) = kept {
             b.kept.borrow_mut().insert(p, (key, style.clone()));
             b.fresh.borrow_mut().push(p);
@@ -764,8 +824,8 @@ impl Source<'_> {
         };
         let colour = Colour::parse(&value).map_or(Color::Default, |c| self.theme(caps).colour(c));
         let style = self.model.number_option(wtree, "clock-mode-style");
-        let tm = vtmux_core::time::SystemWallClock
-            .local_time(crate::mode::clock::now())
+        let live = &self.model.live;
+        let tm = vtmux_core::time::WallClock::local_time(live, live.now())
             .unwrap_or_else(|| vtmux_core::time::Tm::utc(0));
         m.screen(&crate::mode::clock::time_text(&tm, style), colour)
     }

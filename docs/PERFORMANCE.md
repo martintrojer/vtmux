@@ -427,7 +427,7 @@ Neither server grows. vtmux added 0.2 MB in 30 minutes, at 1560 s.
 
 Now clients that show a window alike share the work within a render turn (`render/share.rs`):
 
-- Clients of the same session, size, view and terminal (caps and reported colours) take the first one's drawing of the window and its composed rows, when their own drawing would be the same: their border styles (kept per client as tmux keeps them) are the same, and the drawing read no client's own `#()` job or animation.
+- Clients of the same session, size, view and terminal (caps and reported colours) take the first one's drawing of the window and its composed rows, when their own drawing would be the same: their border styles (kept per client as tmux keeps them) are the same, and the drawing read neither the client it was drawn for (`#{client_prefix}` in a pane status line or border style) nor its own `#()` job or animation. The time and each pane's foreground process (`#{pane_current_command}`, `#{pane_current_path}`) are read once per render turn (`live.rs`), so a drawing that shows them is every client's.
 - A client whose terminal shows what another's showed, and whose new screen is that client's, takes that client's frame bytes. Plain frames (nothing over the window but the status line) are compared by row tags, status rows included, before they are drawn, and the screen is shared, not copied.
 - Every client still gets the bytes it would get alone. A server test runs one script with sharing on and off and compares every client's bytes, and debug builds draw each shared drawing and frame again the client's own way and check.
 

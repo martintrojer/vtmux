@@ -1,0 +1,37 @@
+name = "border_format_client_prefix"
+size = [40, 10]
+# A pane status line is expanded for the client that draws it
+# (window_make_pane_status, window-border.c:199-200: format_create(c, ...)
+# and format_defaults(ft, c, ...)), so #{client_prefix} there is each
+# client's own: one client in the prefix table shows it, the other on the
+# same window does not.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "pane-border-status", "top"] },
+  { run = ["set", "-g", "pane-border-format", "[#{?client_prefix,PREFIX,none}]"] },
+  { attach = { session = "a" } },
+  { attach = { session = "a", id = "b" } },
+  { screen = {} },
+  { screen = { id = "b" } },
+  # C-b on b: its key table is the prefix table.
+  { keys_to = { id = "b", keys = "\u0002" } },
+  { settle = {} },
+  { screen = {} },
+  { screen = { id = "b" } },
+  # u is not bound in the prefix table: b goes back to the root table.
+  { keys_to = { id = "b", keys = "u" } },
+  { settle = {} },
+  { screen = {} },
+  { screen = { id = "b" } },
+  # C-b on the first client, with pane output after it.
+  { keys = "\u0002" },
+  { settle = {} },
+  { feed = { pane = "%0", bytes = "hello\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { screen = { id = "b" } },
+]

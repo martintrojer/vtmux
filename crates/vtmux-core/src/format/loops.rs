@@ -292,6 +292,10 @@ impl FormatContext for Overlay<'_> {
     fn job(&self, raw: &str, expanded: &str) -> String {
         self.parent.job(raw, expanded)
     }
+
+    fn wall(&self) -> Option<&dyn super::WallClock> {
+        self.parent.wall()
+    }
 }
 
 /// `format_add_window_neighbour` (format.c:5323-5347).

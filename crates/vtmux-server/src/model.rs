@@ -433,6 +433,9 @@ pub struct Model {
     /// session. The server refreshes it before a command resolves its
     /// targets ([`crate::server::Server::refresh_client_targets`]).
     pub(crate) client_targets: Vec<ClientTarget>,
+    /// The time and the panes' foreground processes, read once per render
+    /// turn ([`crate::live`]).
+    pub live: crate::live::LiveReads,
 }
 
 /// An attached client as [`Model::client_targets`] lists it.
@@ -479,6 +482,7 @@ impl Default for Model {
             held: None,
             dropped: Vec::new(),
             client_targets: Vec::new(),
+            live: crate::live::LiveReads::default(),
         }
     }
 }

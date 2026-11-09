@@ -3101,6 +3101,9 @@ impl Server {
         // What the clients before this one drew, for those after it.
         let mut turn = crate::render::share::Turn::default();
         self.update_moved_offsets();
+        // Every client of the turn sees one time and one foreground
+        // process per pane (crate::live).
+        self.model.live.hold();
         for (id, s) in attached {
             #[cfg(test)]
             if self.sharing == crate::render::share::Sharing::Off {
@@ -3113,6 +3116,7 @@ impl Server {
                 turn.forget_draws();
             }
         }
+        self.model.live.release();
     }
 
     /// Client `id`'s frame of this turn ([`Self::render_clients`]).
@@ -3808,7 +3812,7 @@ impl Server {
         jobs: &crate::format_jobs::JobHandle,
         turn: &mut crate::render::share::Turn,
     ) -> Option<WindowDrawing> {
-        let source = self.render_source();
+        let source = self.drawing_source(id);
         let client = &self.clients[&id];
         let cache = &client.window_cache;
         let view = client.view;
@@ -3864,12 +3868,15 @@ impl Server {
                 composition,
                 scene,
                 draw,
-                #[cfg(debug_assertions)]
-                at: crate::model::now_epoch(),
             });
-            // A drawing that read the client's own jobs or animation
-            // clock is its own.
-            if !jobs.used() {
+            // A drawing that read the client itself, its own jobs or its
+            // animation clock is its own.
+            if !jobs.used()
+                && !source
+                    .client
+                    .as_ref()
+                    .is_some_and(crate::render::window::DrawnFor::seen)
+            {
                 turn.publish(key, Rc::clone(&d));
             }
             d
@@ -3996,7 +4003,7 @@ impl Server {
         }
         #[cfg(debug_assertions)]
         {
-            let source = self.render_source();
+            let source = self.drawing_source(id);
             let ((cols, rows), caps) = (key.size, key.caps);
             let jobs = jobs.clone().peek();
             let (scene, mut draw) = source
@@ -4012,10 +4019,8 @@ impl Server {
                 .expect("a drawing");
             let theme = source.theme(caps);
             source.blend(key.session, &mut draw, &key.colours, caps, &theme);
-            if crate::model::now_epoch() == shared.at {
-                assert_eq!(*scene, *shared.scene, "a shared scene is the client's own");
-                assert_eq!(draw, shared.draw, "a shared drawing is the client's own");
-            }
+            assert_eq!(*scene, *shared.scene, "a shared scene is the client's own");
+            assert_eq!(draw, shared.draw, "a shared drawing is the client's own");
         }
         #[cfg(not(debug_assertions))]
         let _ = (key, jobs);
@@ -4455,6 +4460,17 @@ impl Server {
             clients: crate::render::window::Clients::new(|| self.client_views()),
             themes: &self.themes,
             keys: &self.key_bindings,
+            client: None,
+        }
+    }
+
+    /// [`Self::render_source`] for a window drawn for client `id`.
+    fn drawing_source(&self, id: ClientId) -> crate::render::window::Source<'_> {
+        crate::render::window::Source {
+            client: Some(crate::render::window::DrawnFor::new(move || {
+                self.client_view(id, &self.clients[&id])
+            })),
+            ..self.render_source()
         }
     }
 
@@ -4536,6 +4552,7 @@ impl Server {
                 .map(std::rc::Rc::clone),
             environ: std::rc::Rc::clone(&c.environ),
             view: c.view,
+            seen: std::rc::Rc::default(),
         }
     }
 
@@ -7044,6 +7061,139 @@ mod tests {
         );
         assert_eq!(shared[1][4], (0, 0, 0), "another size draws alone");
         assert!(shared[1][5].0 > 0, "{:?}", shared[1]);
+    }
+
+    /// Row `y` of what client `id`'s terminal shows, as text.
+    fn shown_row(server: &super::Server, id: super::ClientId, y: usize) -> String {
+        let Some((last, _)) = server.clients[&id].compositor.last() else {
+            return String::new();
+        };
+        let width = usize::from(last.cols);
+        last.cells[y * width..(y + 1) * width]
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect()
+    }
+
+    /// `words` as a command line, run with no client.
+    fn run_words(server: &mut super::Server, dir: &std::path::Path, words: &[&str]) {
+        let argv: Vec<Vec<u8>> = words.iter().map(|w| w.as_bytes().to_vec()).collect();
+        let calls = vtmux_core::cmd::parse_argv_bytes(&argv).unwrap();
+        let item = crate::commands::Item::new(None, dir.to_path_buf());
+        let end = crate::cmdq::End::Quiet;
+        server.cmdq_append(None, crate::cmdq::NewBatch::new(item, calls, end));
+        server.cmdq_process();
+    }
+
+    /// A pane's foreground process is read once per render turn
+    /// (`crate::live`): with every read naming another process, as a
+    /// shell running one command after another does, three clients alike
+    /// share one drawing of a pane status line that shows it
+    /// (`#{pane_current_command}`), each shows the turn's name, and the
+    /// next turn reads it again. Before, a client that took the drawing
+    /// read a newer name than its drawing's (debug builds draw it to check,
+    /// and panicked).
+    #[test]
+    fn a_turn_reads_each_pane_process_once() {
+        let (mut server, p, s, dir) = share_server("live");
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = std::rc::Rc::clone(&reads);
+        crate::live::fake::set(move |_| {
+            counted.set(counted.get() + 1);
+            Some(format!("c{}", counted.get()))
+        });
+        for words in [
+            &["set", "-g", "status-right", "R"][..],
+            &["set", "-g", "pane-border-status", "top"],
+            &[
+                "set",
+                "-g",
+                "pane-border-format",
+                "<#{pane_index}_#{pane_current_command}>",
+            ],
+        ] {
+            run_words(&mut server, &dir, words);
+        }
+        let mut clients: Vec<_> = (0..3)
+            .map(|_| attach_test_client(&mut server, s, &dir))
+            .collect();
+        let ids: Vec<_> = clients.iter().map(|(id, _)| *id).collect();
+        let mut turn = |server: &mut super::Server, output: &[u8]| {
+            server.model.panes.get_mut(&p).unwrap().term.feed(output);
+            let before = reads.get();
+            server.render_clients();
+            for (id, peer) in &mut clients {
+                frames(server, *id, peer);
+            }
+            let rows: Vec<_> = ids.iter().map(|&id| shown_row(server, id, 0)).collect();
+            (reads.get() - before, rows)
+        };
+        // The first turns start the terminals.
+        for _ in 0..3 {
+            turn(&mut server, b"");
+        }
+        let (n, texts) = turn(&mut server, b"y");
+        assert_eq!(n, 1, "one read in the turn");
+        let name = format!("<0_c{}>", reads.get());
+        assert!(texts.iter().all(|t| t.contains(&name)), "{name}: {texts:?}");
+        let (n, texts) = turn(&mut server, b"x");
+        assert_eq!(n, 1, "one read in the next turn");
+        let name = format!("<0_c{}>", reads.get());
+        assert!(texts.iter().all(|t| t.contains(&name)), "{name}: {texts:?}");
+        let taken = |i: usize| server.clients[&ids[i]].window_cache.shared.get().0;
+        assert!(taken(1) > 0 && taken(2) > 0, "the drawing was shared");
+        crate::live::fake::clear();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A pane status line that reads the client it is drawn for
+    /// (`#{client_prefix}`, window-border.c:199-200) is that client's own:
+    /// no other client takes its drawing, and the client in the prefix
+    /// table alone shows it.
+    #[test]
+    fn a_drawing_that_reads_its_client_is_its_own() {
+        let (mut server, p, s, dir) = share_server("own");
+        for words in [
+            &["set", "-g", "status-right", "R"][..],
+            &["set", "-g", "pane-border-status", "top"],
+            &[
+                "set",
+                "-g",
+                "pane-border-format",
+                "<#{?client_prefix,PREFIX,none}>",
+            ],
+        ] {
+            run_words(&mut server, &dir, words);
+        }
+        let mut clients: Vec<_> = (0..3)
+            .map(|_| attach_test_client(&mut server, s, &dir))
+            .collect();
+        let ids: Vec<_> = clients.iter().map(|(id, _)| *id).collect();
+        let mut turn = |server: &mut super::Server, output: &[u8]| {
+            server.model.panes.get_mut(&p).unwrap().term.feed(output);
+            server.render_clients();
+            for (id, peer) in &mut clients {
+                frames(server, *id, peer);
+            }
+            ids.iter()
+                .map(|&id| shown_row(server, id, 0))
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..3 {
+            turn(&mut server, b"");
+        }
+        let texts = turn(&mut server, b"");
+        assert!(texts.iter().all(|t| t.contains("<none>")), "{texts:?}");
+        server.on_client_input(ids[1], b"\x02").unwrap();
+        let texts = turn(&mut server, b"x");
+        assert!(texts[1].contains("<PREFIX>"), "{texts:?}");
+        assert!(!texts[0].contains("PREFIX") && !texts[2].contains("PREFIX"));
+        let taken: Vec<_> = ids
+            .iter()
+            .map(|id| server.clients[id].window_cache.shared.get().0)
+            .collect();
+        assert_eq!(taken, [0, 0, 0], "no drawing taken");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// The plain-frame skip (a turn where no composed row or the cursor

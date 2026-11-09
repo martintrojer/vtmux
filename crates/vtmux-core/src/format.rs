@@ -208,6 +208,13 @@ pub trait FormatContext {
     fn job(&self, _raw: &str, _expanded: &str) -> String {
         String::new()
     }
+
+    /// What time it is for this context's expansions, when not the system's
+    /// ([`SystemWallClock`]): the expansions that take no clock ([`expand`],
+    /// [`expand_time`] ...) ask here first.
+    fn wall(&self) -> Option<&dyn WallClock> {
+        None
+    }
 }
 
 pub use loops::{LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
@@ -259,6 +266,9 @@ impl<T: FormatContext + ?Sized> FormatContext for &T {
     }
     fn job(&self, raw: &str, expanded: &str) -> String {
         (**self).job(raw, expanded)
+    }
+    fn wall(&self) -> Option<&dyn WallClock> {
+        (**self).wall()
     }
 }
 
@@ -534,7 +544,12 @@ const PARSED_CACHE_LIMIT: usize = 256;
 /// Expand a parsed template against the real clocks.
 #[must_use]
 pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
-    expand_with(ast, ctx, &SystemClock::new(), &SystemWallClock)
+    expand_with(ast, ctx, &SystemClock::new(), wall_of(ctx))
+}
+
+/// The wall clock of `ctx` ([`FormatContext::wall`]), else the system's.
+fn wall_of(ctx: &dyn FormatContext) -> &dyn WallClock {
+    ctx.wall().unwrap_or(&SystemWallClock)
 }
 
 /// Expand a parsed template with `FORMAT_EXPAND_NOJOBS` (format.c:150): `#()` expands
@@ -543,7 +558,7 @@ pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
 #[must_use]
 pub fn expand_nojobs(ast: &Format, ctx: &dyn FormatContext) -> String {
     let clock = SystemClock::new();
-    let mut eval = Eval::new(ctx, &clock, &SystemWallClock, false);
+    let mut eval = Eval::new(ctx, &clock, wall_of(ctx), false);
     eval.nojobs = true;
     eval.expand(ast, 0)
 }
@@ -557,7 +572,7 @@ pub fn expand_str_nojobs(template: &str, ctx: &dyn FormatContext) -> String {
 /// Expand a parsed template; `clock` drives the [`TIME_LIMIT_MS`] cut-off.
 #[must_use]
 pub fn expand_with_clock(ast: &Format, ctx: &dyn FormatContext, clock: &dyn Clock) -> String {
-    expand_with(ast, ctx, clock, &SystemWallClock)
+    expand_with(ast, ctx, clock, wall_of(ctx))
 }
 
 /// Expand a parsed template; `wall` says what time it is and which zone is local
@@ -583,7 +598,7 @@ pub fn expand_with(
 /// before it is parsed. `display-message` uses this; `list-*` formats do not.
 #[must_use]
 pub fn expand_time(template: &str, ctx: &dyn FormatContext) -> String {
-    expand_time_with(template, ctx, &SystemClock::new(), &SystemWallClock)
+    expand_time_with(template, ctx, &SystemClock::new(), wall_of(ctx))
 }
 
 /// [`expand_time`] with `wall` as the clock and zone.

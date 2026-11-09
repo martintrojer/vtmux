@@ -1405,6 +1405,61 @@ fn active_pane_change_recolours_shared_borders() {
     }
 }
 
+/// Clients alike take one client's drawing of their window
+/// (`render::share`), which debug builds check against each one's own. A
+/// pane status line here shows the pane's foreground process
+/// (`#{pane_current_command}`), which a job-control shell running one
+/// command after another changes all the time, between two clients' draws
+/// too. The server reads it once per render turn (`crate::live`), so the
+/// check holds while the name changes many times under three clients; before,
+/// a client's own drawing read a newer name and the debug server panicked
+/// (`a shared drawing is the client's own`). vtmux alone: the debug check is
+/// what it tests.
+#[test]
+fn clients_alike_share_a_border_showing_a_changing_process() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let program = "set -m; while :; do echo x; sleep 0; done";
+    for cmd in [
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", program,
+        ][..],
+        &["set", "-g", "status-right", "x"],
+        &["set", "-g", "pane-border-status", "top"],
+        &[
+            "set",
+            "-g",
+            "pane-border-format",
+            "<#{pane_index}_#{pane_current_command}>",
+        ],
+        &["select-pane", "-t", "a", "-T", "t"],
+    ] {
+        assert!(w.cli(cmd).status.success(), "{cmd:?}");
+    }
+    let clients: Vec<_> = (0..3).map(|_| w.attach(&["attach", "-t", "a"])).collect();
+    for c in &clients {
+        c.wait(|c| c.text().contains("<0_"));
+    }
+    // Wait for the name to have changed often enough with the clients
+    // drawing it; each change was a chance for the race.
+    let mut changes = 0;
+    let mut last = String::new();
+    let end = Instant::now() + Duration::from_secs(60);
+    while changes < 40 {
+        let out = w.cli(&["display", "-p", "-t", "a", "#{pane_current_command}"]);
+        assert!(out.status.success(), "the server is gone");
+        let name = String::from_utf8_lossy(&out.stdout).into_owned();
+        if name != last {
+            changes += 1;
+            last = name;
+        }
+        assert!(Instant::now() < end, "{changes} changes of the name");
+    }
+    assert!(w.cli(&["ls"]).status.success(), "the server is gone");
+    for mut c in clients {
+        assert!(c.alive(), "{:?}", c.text());
+    }
+}
+
 fn display(w: &World, f: &str) -> String {
     String::from_utf8_lossy(&w.cli(&["display", "-p", "-t", "a", f]).stdout)
         .trim()

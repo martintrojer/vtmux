@@ -115,6 +115,9 @@ pub struct ClientView {
     pub environ: Rc<[(String, String)]>,
     /// The part of its current window the client shows (`tty->oox` ...).
     pub view: crate::view::View,
+    /// A format read this client as `ft->c` ([`Ctx::client`]): what it
+    /// expanded to is the client's own. Shared by the view's clones.
+    pub seen: Rc<std::cell::Cell<bool>>,
 }
 
 impl ClientView {
@@ -231,6 +234,14 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The client the formats are for (`ft->c`), marked as read
+    /// ([`ClientView::seen`]).
+    fn client(&self) -> Option<&ClientView> {
+        let c = self.client.as_ref()?;
+        c.seen.set(true);
+        Some(c)
+    }
+
     /// A loop child: the same server view and client over another target.
     fn child(&self, target: Found, client: Option<ClientView>) -> Ctx<'a> {
         let mut c = Ctx::new(self.model, self.info, self.global_env, target);
@@ -284,6 +295,12 @@ impl<'a> Ctx<'a> {
     /// no discard count or theme yet.
     fn client_value(&self, name: &str) -> Option<String> {
         let c = self.client.as_ref()?;
+        if name.starts_with("client_")
+            || name.starts_with("window_offset_")
+            || name == "window_bigger"
+        {
+            c.seen.set(true);
+        }
         let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "client_name" => c.name.clone(),
@@ -395,7 +412,7 @@ impl<'a> Ctx<'a> {
             // format_cb_session_attached, recalculate_sizes).
             "session_attached" => self.attached_to(s.id).count().to_string(),
             // format_cb_session_active: the client's session is this one.
-            "session_active" => flag(self.client.as_ref()?.session == Some(s.id)),
+            "session_active" => flag(self.client()?.session == Some(s.id)),
             // format_cb_session_many_attached.
             "session_many_attached" => flag(self.attached_to(s.id).count() > 1),
             // format_cb_session_attached_list: their names, in client order.
@@ -781,7 +798,7 @@ impl<'a> Ctx<'a> {
             "pane_command_running" => flag(p.shell_commands.running),
             "pane_command_duration" => p
                 .shell_commands
-                .duration(crate::model::now_epoch())?
+                .duration(self.model.live.now())?
                 .to_string(),
             "pane_command_status" => p.shell_commands.status?.to_string(),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
@@ -799,10 +816,10 @@ impl<'a> Ctx<'a> {
             "pane_tty" => p.tty.clone(),
             "pane_current_command" => {
                 // format_cb_current_command (format.c:958-978).
-                let cmd = io
-                    .and_then(|io| {
-                        sys::pty::foreground_name(&io.owned().try_clone_to_owned().ok()?)
-                    })
+                let cmd = self
+                    .model
+                    .live
+                    .foreground_name(p)
                     .filter(|c| !c.is_empty())
                     .or_else(|| {
                         let argv = crate::names::stringify_argv(&p.argv);
@@ -811,8 +828,10 @@ impl<'a> Ctx<'a> {
                     .unwrap_or_else(|| p.shell.to_string_lossy().into_owned());
                 parse_window_name(&cmd)
             }
-            "pane_current_path" => io
-                .and_then(|io| sys::pty::foreground_cwd(&io.owned().try_clone_to_owned().ok()?))
+            "pane_current_path" => self
+                .model
+                .live
+                .foreground_cwd(p)
                 .map(|d| d.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             "cursor_x" => p.term.cursor().0.to_string(),
@@ -1152,6 +1171,11 @@ impl Ctx<'_> {
 }
 
 impl FormatContext for Ctx<'_> {
+    /// The time as the render turn holds it ([`crate::live`]).
+    fn wall(&self) -> Option<&dyn vtmux_core::time::WallClock> {
+        Some(&self.model.live)
+    }
+
     fn job(&self, raw: &str, expanded: &str) -> String {
         self.jobs
             .as_ref()
@@ -1188,7 +1212,7 @@ impl FormatContext for Ctx<'_> {
 
     /// `#{I/c:...}`, `#{I/f:...}` and `#{I/e:...}` (format.c:6304-6327).
     fn client_query(&self, query: ClientQuery, name: &str) -> Option<String> {
-        let c = self.client.as_ref()?;
+        let c = self.client()?;
         let term = c.term.as_ref()?;
         let flag = |b: bool| u8::from(b).to_string();
         Some(match query {
@@ -1255,8 +1279,8 @@ impl FormatContext for Ctx<'_> {
             "pane_last_prompt_time" => self.pane().and_then(|p| p.shell_commands.last_prompt),
             "pane_command_start_time" => self.pane().and_then(|p| p.shell_commands.started),
             "pane_command_end_time" => self.pane().and_then(|p| p.shell_commands.ended),
-            "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
-            "client_created" => self.client.as_ref().map(|c| c.created_secs),
+            "client_activity" => self.client().map(|c| c.activity_secs),
+            "client_created" => self.client().map(|c| c.created_secs),
             "buffer_created" => {
                 let paste = &self.model.paste;
                 match &self.buffer {
@@ -1271,7 +1295,7 @@ impl FormatContext for Ctx<'_> {
 
     /// `format_loop_sessions` (format.c:5231): `format_defaults(c, s, NULL, NULL)`.
     fn sessions(&self) -> Vec<LoopItem<'_>> {
-        let current = self.client.as_ref().and_then(|c| c.session);
+        let current = self.client().and_then(|c| c.session);
         self.model
             .sessions_by_name()
             .map(|s| LoopItem {

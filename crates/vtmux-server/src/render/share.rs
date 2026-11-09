@@ -11,9 +11,11 @@
 //! ([`SharedFrame`]). What each client is sent stays exactly what it would
 //! have been sent alone: a drawing is shared only when the client's own
 //! would be equal, and a frame only when both the terminal's screen and
-//! the new screen are equal, cell for cell. (A drawing that shows the
-//! time shows it as of the first client's drawing, a moment earlier than
-//! the others would have drawn their own.)
+//! the new screen are equal, cell for cell. The time and the panes'
+//! foreground processes are read once per turn ([`crate::live`]), so a
+//! drawing that shows them is what every client of the turn would draw; one
+//! that reads the client it is drawn for (`#{client_prefix}` in a pane
+//! status line, say) is that client's alone.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,11 +62,6 @@ pub struct SharedDraw {
     pub draw: Draw,
     /// The border styles it was drawn with.
     pub borders: BorderShare,
-    /// When it was drawn, in seconds: a drawing can show the time (clock
-    /// mode, a pane status line's format), so debug builds check a client
-    /// that takes it against its own only within the same second.
-    #[cfg(debug_assertions)]
-    pub at: i64,
 }
 
 /// A frame one client was sent this turn, before its own additions (mouse
@@ -222,7 +219,10 @@ impl Compositor {
             )
         };
         let shows = match (&self.last, before) {
-            (None, None) => true,
+            // A frame of a terminal that shows nothing known is never
+            // empty: an empty one means `leader`'s compositor changed
+            // since (an invalidate), and says nothing of the screen.
+            (None, None) => !frame.is_empty(),
             (Some(a), Some(b)) => same_rows(a, &self.last_tags, b, before_tags),
             _ => false,
         };
@@ -304,5 +304,57 @@ impl Compositor {
         self.spare_tags = std::mem::replace(&mut self.last_tags, tags);
         self.sent = Some(std::time::Instant::now());
         frame.to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Caps, Compositor};
+
+    fn caps() -> Caps {
+        Caps {
+            rgb: false,
+            palette_colours: 256,
+            theme_palette: false,
+            sync: true,
+            bce: true,
+            setaf: true,
+            setab: true,
+            colours: 256,
+            overlay: false,
+            no_am: false,
+            light_theme: false,
+            isolates: false,
+        }
+    }
+
+    /// An empty frame means the leader's terminal shows the screen already.
+    /// A leader invalidated after it (its terminal shows nothing known, as a
+    /// client that has drawn nothing) does not make it the frame of a client
+    /// whose terminal shows nothing known: that one draws its own, whole.
+    #[test]
+    fn an_empty_frame_is_never_taken_by_a_terminal_that_shows_nothing() {
+        let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
+        pane.feed(b"abc");
+        let screen = vtmux_vt::snapshot(&pane);
+        let tags = vec![0; 2];
+        let mut leader = Compositor::default();
+        assert_ne!(leader.frame(screen.clone(), caps()), b"");
+        let empty = leader.frame(screen.clone(), caps());
+        assert_eq!(empty, b"", "the screen is shown already");
+        let fresh = Compositor::default();
+        let shown = (&leader, &[][..], &empty[..]);
+        assert!(
+            !fresh.writes_as(shown, &screen, &tags),
+            "it shows nothing yet"
+        );
+        leader.invalidate();
+        let shown = (&leader, &[][..], &empty[..]);
+        assert!(
+            !fresh.writes_as(shown, &screen, &tags),
+            "an invalidated leader's empty frame"
+        );
+        let mut own = fresh.clone();
+        assert_ne!(own.frame(screen, caps()), b"", "its own is whole");
     }
 }
