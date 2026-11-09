@@ -3,7 +3,8 @@
 vtmux follows tmux 3.8 exactly except where recorded here (spec: *Divergence
 process*). Every entry needs evidence. There is no "intentional divergence for
 product reasons" category. Protocol extensions (spec D28) have a category of
-their own, below.
+their own, below. A closed entry keeps its number, with `closed` and what
+fixed it in its title; numbers are never reused.
 
 ## Categories
 
