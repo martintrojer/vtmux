@@ -164,6 +164,9 @@ pub struct KeyModes {
     /// The server's `backspace` option: what `BSpace` is sent as
     /// (input-keys.c:592-614).
     pub backspace: CoreKey,
+    /// D29: the kitty keyboard flags of the active screen, 0 unless its
+    /// program was granted the protocol ([`vtmux_vt::PaneTerm::kitty_keys`]).
+    pub kitty: u8,
 }
 
 impl Default for KeyModes {
@@ -174,6 +177,7 @@ impl Default for KeyModes {
             key_mode: KeyMode::default(),
             csi_u: false,
             backspace: CoreKey::from_code(0x7f),
+            kitty: 0,
         }
     }
 }
@@ -189,6 +193,7 @@ impl KeyModes {
             key_mode: term.key_mode(),
             csi_u,
             backspace,
+            kitty: term.kitty_keys(),
         }
     }
 }
@@ -339,6 +344,16 @@ pub fn encode(key: &Key, modes: KeyModes) -> Vec<u8> {
 /// sequence in the pane's mode (`C-BSpace` in standard mode, a control
 /// character in an extended mode). What was written by then stays.
 pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
+    // D29: a granted screen gets the key as Ghostty encodes it.
+    if modes.kitty != 0
+        && let Some(k) = kitty_key(key)
+    {
+        let bytes = vtmux_vt::kitty_keys::encode(&k, modes.kitty);
+        if !bytes.is_empty() {
+            out.extend_from_slice(&bytes);
+            return true;
+        }
+    }
     let mut key = *key;
     // input-keys.c:592-614: an unmodified Backspace is the `backspace`
     // option's byte (default \177); a modified one is that key with the
@@ -416,6 +431,52 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
             true
         }
     }
+}
+
+/// D29: the key as libghostty's key encoder takes it; `None` for one it
+/// has no key for (a byte that is not UTF-8, a control character other
+/// than Enter, Tab and Escape), which goes as tmux sends it. Meta, typed
+/// as an Escape prefix or not, is Alt.
+fn kitty_key(key: &Key) -> Option<vtmux_vt::kitty_keys::KittyKey> {
+    use vtmux_vt::kitty_keys::KittyBase as K;
+    let base = match key.base {
+        Base::Char('\r') => K::Enter,
+        Base::Char('\t') => K::Tab,
+        Base::Char('\x1b') => K::Escape,
+        Base::Char('\x7f') => K::Backspace,
+        Base::Char(c) if c < ' ' => return None,
+        Base::Char(c) => K::Char(c),
+        Base::Byte(_) => return None,
+        Base::Named(n) => match n {
+            Named::F(n) => K::F(n),
+            Named::Insert => K::Insert,
+            Named::Delete => K::Delete,
+            Named::Home => K::Home,
+            Named::End => K::End,
+            Named::PageDown => K::PageDown,
+            Named::PageUp => K::PageUp,
+            Named::BackTab => {
+                return Some(vtmux_vt::kitty_keys::KittyKey {
+                    base: K::Tab,
+                    shift: true,
+                    alt: key.meta,
+                    ctrl: key.ctrl,
+                });
+            }
+            Named::Backspace => K::Backspace,
+            Named::Up => K::Up,
+            Named::Down => K::Down,
+            Named::Left => K::Left,
+            Named::Right => K::Right,
+            Named::Keypad(i) => K::Keypad(i),
+        },
+    };
+    Some(vtmux_vt::kitty_keys::KittyKey {
+        base,
+        shift: key.shift,
+        alt: key.meta,
+        ctrl: key.ctrl,
+    })
 }
 
 /// The byte of an unmodified `BSpace` (input-keys.c:595-612): the
@@ -616,8 +677,10 @@ fn encode_vt10x(c: char, key: &Key, out: &mut Vec<u8>) -> bool {
 
 /// Text sent as characters (`cmd_send_keys_inject_string`'s literal
 /// path): each character is a key of its own, and a byte that is not
-/// UTF-8 goes as it is.
+/// UTF-8 goes as it is. Encoded as tmux encodes them whatever the kitty
+/// flags (D29: `send-keys -l` and text stay tmux's).
 fn literal_bytes(arg: &str, modes: KeyModes, out: &mut Vec<u8>) {
+    let modes = KeyModes { kitty: 0, ..modes };
     for unit in vtmux_core::rawstr::units(arg) {
         match unit {
             vtmux_core::rawstr::Unit::Byte(b) => out.push(b),
@@ -694,6 +757,60 @@ mod tests {
 
     fn b(arg: &str) -> Vec<u8> {
         send_keys_bytes(arg, false, KeyModes::default())
+    }
+
+    /// D29: key names reach a granted screen as libghostty encodes them
+    /// under its flags (Shift+Enter, C-i apart from Tab, Escape apart from
+    /// Meta); text and `-l` stay as tmux sends them; flags 0 is tmux.
+    #[test]
+    fn kitty_flags_encode_key_names() {
+        let kitty = |flags: u8, arg: &str, literal: bool| {
+            let modes = KeyModes {
+                kitty: flags,
+                ..KeyModes::default()
+            };
+            String::from_utf8(send_keys_bytes(arg, literal, modes)).unwrap()
+        };
+        for (arg, want) in [
+            ("Escape", "\x1b[27u"),
+            ("C-c", "\x1b[99;5u"),
+            ("Enter", "\r"),
+            ("S-Enter", "\x1b[13;2u"),
+            ("Tab", "\t"),
+            ("C-i", "\x1b[105;5u"),
+            ("BTab", "\x1b[9;2u"),
+            ("M-a", "\x1b[97;3u"),
+            ("M-Escape", "\x1b[27;3u"),
+            ("a", "a"),
+            ("A", "A"),
+            ("BSpace", "\x7f"),
+            ("C-BSpace", "\x1b[127;5u"),
+            ("Up", "\x1b[A"),
+            ("C-Up", "\x1b[1;5A"),
+            ("F5", "\x1b[15~"),
+            ("hello", "hello"),
+        ] {
+            assert_eq!(kitty(1, arg, false), want, "{arg}");
+        }
+        assert_eq!(kitty(1, "C-c", true), "C-c");
+        assert_eq!(kitty(1, "Escape", true), "Escape");
+        assert_eq!(kitty(8, "a", false), "\x1b[97u");
+        assert_eq!(kitty(8, "hello", false), "hello");
+        assert_eq!(kitty(0, "Escape", false), "\x1b");
+        assert_eq!(kitty(0, "C-c", false), "\x03");
+        // A byte that is not UTF-8 has no kitty key: tmux's bytes.
+        let modes = KeyModes {
+            kitty: 1,
+            ..KeyModes::default()
+        };
+        let byte = Key {
+            base: Base::Byte(0xe9),
+            ctrl: false,
+            meta: true,
+            shift: false,
+            esc_prefix: false,
+        };
+        assert_eq!(encode(&byte, modes), b"\x1b");
     }
 
     #[test]

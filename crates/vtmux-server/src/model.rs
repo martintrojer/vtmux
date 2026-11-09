@@ -612,6 +612,12 @@ impl Model {
         }
     }
 
+    /// The server's `vtmux-kitty-keys` option (D29).
+    #[must_use]
+    pub fn kitty_keys(&self) -> bool {
+        self.number_option(TreeId::Server, "vtmux-kitty-keys") != 0
+    }
+
     /// The server's `extended-keys` option.
     #[must_use]
     pub fn extended_keys(&self) -> vtmux_vt::ExtendedKeys {

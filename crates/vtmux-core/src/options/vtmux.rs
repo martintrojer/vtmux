@@ -1,4 +1,5 @@
-//! vtmux's own options (paper cuts, spec *Paper-cut fixes*), kept out of
+//! vtmux's own options (paper cuts, spec *Paper-cut fixes*; protocol
+//! extensions, spec *Protocol extensions (D28)*), kept out of
 //! the generated tmux table so nothing tmux observes changes while they are
 //! off:
 //!
@@ -15,7 +16,20 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 4] = [
+pub(super) static EXTENSIONS: [OptionDef; 5] = [
+    // D29: the kitty keyboard protocol, pane side (spec, *Protocol
+    // extensions (D28)*).
+    OptionDef {
+        name: "vtmux-kitty-keys",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Grant the kitty keyboard protocol to programs that ask for it."),
+        unit: None,
+    },
     // D26: the pane blend.
     OptionDef {
         name: "vtmux-pane-active-blend",

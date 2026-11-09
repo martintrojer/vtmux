@@ -2,6 +2,10 @@
 
 vtmux's version is the tmux release it is tested against ([D25](docs/specs/2026-10-29-vtmux.md)): `3.8-beta1` is the first beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints `vtmux 3.8-beta1`.
 
+## Unreleased
+
+**Kitty keyboard protocol (opt-in).** `set -s vtmux-kitty-keys on` and programs that ask for it (neovim, helix, agent TUIs) get kitty-encoded keys: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Key tables and the prefix work as before; programs that don't ask see tmux. Off by default: byte for byte tmux 3.8.
+
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).

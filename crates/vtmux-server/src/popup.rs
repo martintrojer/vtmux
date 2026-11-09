@@ -465,6 +465,7 @@ impl Server {
     /// (`popup_job_update_cb`); at EOF the output is closed.
     pub(crate) fn popup_readable(&mut self, c: ClientId) {
         let extended_keys = self.model.extended_keys();
+        let kitty_keys = self.model.kitty_keys();
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
             return;
         };
@@ -473,6 +474,7 @@ impl Server {
             match io.read() {
                 ReadResult::Data(bytes) => {
                     p.term.set_extended_keys(extended_keys);
+                    p.term.set_kitty_keys(kitty_keys);
                     p.term.feed(&bytes);
                     // A popup fires no pane hooks (it has no pane), and
                     // its terminal keeps every event until taken.

@@ -5440,6 +5440,9 @@ impl Server {
         // synchronized output (input.c:922).
         pane.term.reset_input();
         pane.term.stop_sync();
+        // D29: a respawn ends the old program's kitty keyboard grant, on
+        // both screens.
+        pane.term.reset_kitty_keys();
         // grid_clear_lines: an erase, never into history (scroll-on-clear
         // is for the program's clears).
         pane.term.set_scroll_on_clear(false);
@@ -5607,6 +5610,7 @@ impl Server {
             .model
             .number_option(TreeId::Server, "input-buffer-size");
         let extended_keys = self.model.extended_keys();
+        let kitty_keys = self.model.kitty_keys();
         let scroll_on_clear = self.model.number_option(TreeId::Pane(p), "scroll-on-clear") != 0;
         let allow_set_title = self.model.number_option(TreeId::Pane(p), "allow-set-title") != 0;
         let redraw_pending = self.model.redraw_panes.contains(&p);
@@ -5621,6 +5625,7 @@ impl Server {
         pane.term
             .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
         pane.term.set_extended_keys(extended_keys);
+        pane.term.set_kitty_keys(kitty_keys);
         pane.term.feed(bytes);
         // input.c:1065-1068: output to a pane not in a mode is written
         // through it, so its cursor moves arm the window's offset timer.

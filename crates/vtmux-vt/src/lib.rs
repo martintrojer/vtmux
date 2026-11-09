@@ -7,6 +7,7 @@
 
 pub mod capture;
 mod dcs;
+pub mod kitty_keys;
 pub mod palette;
 pub mod progress;
 pub mod snapshot;

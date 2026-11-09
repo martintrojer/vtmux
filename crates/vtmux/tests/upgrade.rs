@@ -694,6 +694,56 @@ fn a_server_execs_itself_and_everything_carries_on() {
     world.echo("a:w2.1", "split");
 }
 
+/// D29, live upgrade (spec, *Protocol extensions (D28)*): a pane granted
+/// the kitty keyboard protocol keeps it across `vtmux-upgrade` (Ghostty's
+/// stack is in the snapshot), with the option turned off since; a pane
+/// whose push came while the option was off stays ungranted.
+#[test]
+fn a_granted_kitty_keys_pane_keeps_its_encoding_across_an_upgrade() {
+    let world = World::new();
+    world.run(&[
+        "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
+    ]);
+    let files: Vec<PathBuf> = (0..2)
+        .map(|i| world.home.path().join(format!("out{i}")))
+        .collect();
+    for (i, option) in ["on", "off"].into_iter().enumerate() {
+        world.run(&["set", "-s", "vtmux-kitty-keys", option]);
+        let script = format!(
+            "stty raw -echo; printf '\\033[>1uR{i}'; exec cat > {}",
+            files[i].display()
+        );
+        let target = format!("a:w{i}");
+        if i == 0 {
+            world.run(&["respawn-pane", "-k", "-t", "a:w", "sh", "-c", &script]);
+            world.run(&["rename-window", "-t", "a:w", "w0"]);
+        } else {
+            world.run(&["neww", "-d", "-t", "a", "-n", "w1", "sh", "-c", &script]);
+        }
+        wait("the push", || {
+            world
+                .run(&["capture-pane", "-p", "-t", &target])
+                .contains(&format!("R{i}"))
+        });
+    }
+    world.run(&["set", "-s", "vtmux-kitty-keys", "off"]);
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+    world.run(&["set", "-s", "vtmux-kitty-keys", "on"]);
+    for (i, want) in [&b"\x1b[27u.\x1b[99;5u."[..], b"\x1b.\x03."]
+        .into_iter()
+        .enumerate()
+    {
+        let target = format!("a:w{i}");
+        for key in ["Escape", "C-c"] {
+            world.run(&["send-keys", "-t", &target, key]);
+            world.run(&["send-keys", "-t", &target, "-H", "2e"]);
+        }
+        wait(&format!("w{i}'s keys"), || {
+            std::fs::read(&files[i]).unwrap_or_default() == want
+        });
+    }
+}
+
 /// Every row a pane shows and holds in history comes through an upgrade
 /// cell for cell, with its cursor: a `cat -` pane with line1 to line3
 /// typed (each echoed twice), and one with 40 lines of history whose

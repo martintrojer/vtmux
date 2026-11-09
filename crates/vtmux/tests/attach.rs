@@ -7846,3 +7846,138 @@ fn pane_lifecycles_leave_no_descriptor_behind() {
         }
     });
 }
+
+/// Wait (at most 10 s) until the file a `cat > file` pane writes holds
+/// exactly `want`.
+fn file_is(path: &std::path::Path, want: &[u8]) {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let got = std::fs::read(path).unwrap_or_default();
+        if got == want {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "{}: {:?}, want {:?}",
+            path.display(),
+            String::from_utf8_lossy(&got),
+            String::from_utf8_lossy(want)
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// D29 on (spec, *Protocol extensions (D28)*): a program that pushes kitty
+/// flag 1 while `vtmux-kitty-keys` is on gets `CSI ? 1 u` for its query,
+/// and every key that reaches it, typed at the attached client or named
+/// by `send-keys`, as libghostty encodes it: Escape `CSI 27u`, C-c
+/// `CSI 99;5u`, Enter `\r`, text as text, a typed Shift+Enter and C-i
+/// apart from Enter and Tab. Root and prefix bindings still take their
+/// keys, and the prefix sent on by `send-prefix` is a kitty key;
+/// `send-keys -l` stays text and `#{pane_key_mode}` stays tmux's. Turning
+/// the option off keeps the granted program's encoding (rule 5).
+/// vtmux only: tmux 3.8 has no such option (the off state is the oracle
+/// scenario `kitty_keys_off`).
+#[test]
+fn kitty_keys_reach_a_granted_pane_typed_and_sent() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let out = w.home.path().join("out");
+    let reply = w.home.path().join("reply");
+    let script = format!(
+        "stty raw -echo; tmux wait-for go; printf '\\033[>1u\\033[?u'; \
+         dd bs=1 count=5 of={} 2>/dev/null; printf R; exec cat > {}",
+        reply.display(),
+        out.display()
+    );
+    let mut a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    for c in [
+        &["set", "-s", "vtmux-kitty-keys", "on"][..],
+        &["set", "-s", "escape-time", "0"],
+        &["bind", "-n", "F5", "set", "-g", "@k", "F5"],
+        &["bind", "x", "set", "-g", "@p", "yes"],
+        &["wait-for", "-S", "go"],
+    ] {
+        cli_ok(&w, c);
+    }
+    a.wait(|_| pane_line(&w) == "R");
+    file_is(&reply, b"\x1b[?1u");
+    assert_eq!(cli_ok(&w, &["display", "-p", "#{pane_key_mode}"]), "VT10x");
+    let mut want: Vec<u8> = Vec::new();
+    for (typed, sent) in [
+        (&b"\x1b"[..], &b"\x1b[27u"[..]),
+        (b"\x03", b"\x1b[99;5u"),
+        (b"\r", b"\r"),
+        (b"hi", b"hi"),
+        (b"\x1b[13;2u", b"\x1b[13;2u"),
+        (b"\x1b[105;5u", b"\x1b[105;5u"),
+        (b"\t", b"\t"),
+        (b"\x02\x02", b"\x1b[98;5u"),
+    ] {
+        a.keys(typed);
+        want.extend_from_slice(sent);
+        file_is(&out, &want);
+    }
+    // Bindings take their keys before the pane encoding is reached.
+    a.keys(b"\x1b[15~");
+    a.wait(|_| cli_ok(&w, &["display", "-p", "#{@k}"]) == "F5");
+    a.keys(b"\x02x");
+    a.wait(|_| cli_ok(&w, &["display", "-p", "#{@p}"]) == "yes");
+    cli_ok(&w, &["send-keys", "-t", "a", "Escape", "C-c", "Enter", "a"]);
+    cli_ok(&w, &["send-keys", "-t", "a", "-l", "C-c"]);
+    want.extend_from_slice(b"\x1b[27u\x1b[99;5u\raC-c");
+    file_is(&out, &want);
+    cli_ok(&w, &["set", "-s", "vtmux-kitty-keys", "off"]);
+    cli_ok(&w, &["send-keys", "-t", "a", "Escape"]);
+    a.keys(b"\x03");
+    want.extend_from_slice(b"\x1b[27u\x1b[99;5u");
+    file_is(&out, &want);
+}
+
+/// D29's grant (spec, *Protocol extensions (D28)*): a pop back to 0, or a
+/// push made on the alternate screen and left with it, gives tmux's
+/// encoding back; a push made while the option is off stays ungranted
+/// after it is turned on; one made while it is on outlives turning it
+/// off; a respawn ends it. Each stage respawns the pane with a program
+/// that writes what it gets to its own file.
+#[test]
+fn kitty_keys_grant_follows_the_program() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    let stages: [(&str, &str, &str, &[u8]); 5] = [
+        ("popped", "on", "\\033[>1u\\033[<u", b"\x1b"),
+        (
+            "alternate",
+            "on",
+            "\\033[?1049h\\033[>1u\\033[?1049l",
+            b"\x1b",
+        ),
+        ("pushed off", "off", "\\033[>1u", b"\x1b"),
+        ("pushed on", "on", "\\033[>1u", b"\x1b[27u"),
+        ("respawned", "on", "", b"\x1b"),
+    ];
+    for (i, (what, option, push, want)) in stages.into_iter().enumerate() {
+        cli_ok(&w, &["set", "-s", "vtmux-kitty-keys", option]);
+        let out = w.home.path().join(format!("out{i}"));
+        let script = format!(
+            "stty raw -echo; printf '{push}R'; exec cat > {}",
+            out.display()
+        );
+        cli_ok(&w, &["respawn-pane", "-k", "-t", "a", "sh", "-c", &script]);
+        let end = Instant::now() + Duration::from_secs(10);
+        while pane_line(&w) != "R" {
+            assert!(Instant::now() < end, "{what}: {:?}", pane_line(&w));
+            thread::sleep(Duration::from_millis(20));
+        }
+        // The option flips after the program's push: neither way changes
+        // what it was granted.
+        let flipped = if option == "on" { "off" } else { "on" };
+        cli_ok(&w, &["set", "-s", "vtmux-kitty-keys", flipped]);
+        cli_ok(&w, &["send-keys", "-t", "a", "Escape"]);
+        cli_ok(&w, &["send-keys", "-t", "a", "-H", "2e"]);
+        let mut full = want.to_vec();
+        full.push(b'.');
+        file_is(&out, &full);
+    }
+}

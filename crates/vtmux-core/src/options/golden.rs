@@ -522,6 +522,35 @@ fn vtmux_persist_is_a_hidden_server_choice() {
     assert!(!sim.take().contains(NAME));
 }
 
+/// `vtmux-kitty-keys` (D29): a server flag, `off` until set, hidden from
+/// listings until set like every vtmux option (D28 rule 4).
+#[test]
+fn vtmux_kitty_keys_is_a_hidden_server_flag() {
+    const NAME: &str = "vtmux-kitty-keys";
+    let mut sim = Sim::new();
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+    for c in [
+        &["show", "-sv", NAME][..],
+        &["set", "-s", NAME, "on"],
+        &["show", "-s", NAME],
+        &["set", "-s", NAME],
+        &["show", "-sv", NAME],
+        &["set", "-s", NAME, "maybe"],
+        &["set", "-su", NAME],
+        &["show", "-s", NAME],
+        &["set", "-g", "vtmux-kitty", "on"],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        format!("off\n{NAME} on\noff\nbad value: maybe\n{NAME} off\ninvalid option: vtmux-kitty\n")
+    );
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+}
+
 /// `vtmux-persist-drop` (D27, decision 30): a session array of globs,
 /// empty until set, assigned from one string as `update-environment` is,
 /// hidden from listings until set.

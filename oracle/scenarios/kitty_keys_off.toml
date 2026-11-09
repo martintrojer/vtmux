@@ -1,0 +1,26 @@
+# D29 off (spec, *Protocol extensions (D28)*): with `vtmux-kitty-keys` at
+# its default, a pane program's kitty keyboard push (`CSI > 1 u`), set
+# (`CSI = 5 ; 1 u`), pop (`CSI < u`) and query (`CSI ? u`) are ignored as
+# tmux 3.8 ignores them (its CSI table's only `u` entry has no prefix,
+# input.c:347): no reply (the program reads only the 4 bytes of its DSR's
+# answer, anything more would show in `cat -v`), nothing printed, and
+# Escape, C-c and Enter from `send-keys` and from the attached client
+# arrive as tmux sends them (input-keys.c `input_key`).
+name = "kitty_keys_off"
+size = [60, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "set", "-s", "escape-time", "0", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "sh", "-c", "stty raw -echo opost onlcr; printf 'a\\033[>1ub\\033[=5;1uc\\033[<ud\\033[?u\\033[>1u\\033[5n'; dd bs=1 count=4 of=/dev/null 2>/dev/null; printf '|'; tmux wait-for -S rdy; LC_ALL=C exec cat -v"] },
+  { wait_for = "rdy" },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["send-keys", "-t", "a", "Escape", "C-c", "Enter", "S-Enter", "C-i", "-"] },
+  { wait_pane = { pane = "%0", has = "abcd|^[^C^M^M\t-" } },
+  { attach = { session = "a" } },
+  { keys = "\u001b" },
+  { settle = {} },
+  { keys = "\u0003" },
+  { settle = {} },
+  { keys = "\r\u001b[13;2u\t+" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

@@ -223,6 +223,11 @@ const PENDING_MAX: usize = 1 << 20;
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Pops eight kitty keyboard entries, which empties the stack whole
+/// (`FlagStack.pop`, ghostty kitty/key.zig: `n >= len` resets it), after
+/// CAN, so Ghostty's parser starts from the ground state.
+const KITTY_EMPTY: &[u8] = b"\x18\x1b[<8u";
+
 /// How the pane wants modified keys reported (`#{pane_key_mode}`): tmux's
 /// `MODE_KEYS_EXTENDED` and `MODE_KEYS_EXTENDED_2`, which the program sets
 /// with xterm's modifyOtherKeys request `CSI > 4 ; Pv m`. Ghostty keeps
@@ -377,6 +382,12 @@ pub struct PaneTerm {
     scroll_on_clear: bool,
     /// tmux's `MODE_SYNC` ([`SyncHold`]).
     sync: SyncHold,
+    /// The server's `vtmux-kitty-keys` (D29) the next input is read under.
+    kitty_option: bool,
+    /// The kitty keyboard stack of the screen not in use was emptied
+    /// ([`PaneTerm::reset_kitty_keys`]) and Ghostty has it still: emptied
+    /// as that screen comes up, and exported empty.
+    kitty_stale: bool,
 }
 
 /// tmux's `MODE_SYNC` (screen-write.c:211-240).
@@ -545,6 +556,8 @@ impl PaneTerm {
             view: RefCell::default(),
             scroll_on_clear: true,
             sync: SyncHold::default(),
+            kitty_option: false,
+            kitty_stale: false,
         };
         pane.retain();
         Some(pane)
@@ -754,7 +767,19 @@ impl PaneTerm {
                     ScanEvent::Reset => {
                         self.term.vt_write(b"\x18");
                         self.reset_screen(self.scroll_on_clear);
+                        // D29: Ghostty's full reset empties both screens'
+                        // kitty stacks (Terminal.zig `fullReset`), so a
+                        // `reset` gives the shell tmux's keys back.
+                        self.reset_kitty_keys();
                     }
+                    // D29: a kitty keyboard push, pop, set or query reaches
+                    // Ghostty while `vtmux-kitty-keys` is on or the screen
+                    // is granted; otherwise it is dropped as tmux drops it
+                    // (no `u` entry with a prefix, input.c:347).
+                    ScanEvent::Kitty if self.kitty_option || self.kitty_granted() => {
+                        self.feed_piece(&bytes[i..=i]);
+                    }
+                    ScanEvent::Kitty => self.term.vt_write(b"\x18"),
                     // OSC 133 only marks the line in tmux (input.c
                     // `input_osc_133`): Ghostty's `133;A` would start a
                     // fresh line, and its prompt rows are erased on resize
@@ -817,6 +842,9 @@ impl PaneTerm {
                 }
                 if let ScanEvent::AltMode(set) = e {
                     self.alternate_links(set, alternate, restores_pen);
+                    if self.alternate_on() != alternate && std::mem::take(&mut self.kitty_stale) {
+                        self.term.vt_write(KITTY_EMPTY);
+                    }
                 }
                 if self.scan.take_resync() {
                     self.sync_pen();
@@ -1062,6 +1090,42 @@ impl PaneTerm {
     #[must_use]
     pub fn key_mode(&self) -> KeyMode {
         self.scan.key_mode
+    }
+
+    /// The server's `vtmux-kitty-keys` (D29) the next input is read under:
+    /// whether a kitty keyboard push, set or query that is not granted
+    /// reaches the terminal.
+    pub fn set_kitty_keys(&mut self, on: bool) {
+        self.kitty_option = on;
+    }
+
+    /// The kitty keyboard flags the active screen's keys are encoded with
+    /// ([`crate::kitty_keys::encode`]): the screen's own, of those vtmux
+    /// applies. 0 for a screen not granted, whose keys are tmux's.
+    #[must_use]
+    pub fn kitty_keys(&self) -> u8 {
+        self.kitty_flags() & crate::kitty_keys::APPLIED
+    }
+
+    /// The active screen's kitty keyboard flags as Ghostty keeps them
+    /// (`Terminal::kitty_keyboard_flags`, the top of the screen's stack).
+    fn kitty_flags(&self) -> u8 {
+        self.term.kitty_keyboard_flags().map_or(0, |f| f.bits())
+    }
+
+    /// D29's grant: the active screen's program set non-zero flags while
+    /// the option was on (nothing else reaches the stack, so its flags are
+    /// non-zero exactly while it is granted), and they stay its own until
+    /// its stack is back to 0, whatever the option says.
+    fn kitty_granted(&self) -> bool {
+        self.kitty_flags() != 0
+    }
+
+    /// Empty both screens' kitty keyboard stacks, ending any grant: a
+    /// respawn and RIS. The screen not in use is emptied when it comes up.
+    pub fn reset_kitty_keys(&mut self) {
+        self.term.vt_write(KITTY_EMPTY);
+        self.kitty_stale = true;
     }
 
     /// `input_reset(ictx, 1)` as `send-keys -R` calls it (input.c:929-949):
@@ -2763,6 +2827,9 @@ struct AltModeScanner {
     mouse: Rc<StdCell<MouseModes>>,
     /// The CSI began `CSI >` (tmux's `>` intermediate, input.c:577).
     gt: bool,
+    /// The CSI began with `>`, `<`, `=` or `?` and has had only numeric
+    /// parameters since: a `u` ends a kitty keyboard sequence (D29).
+    kitty: bool,
     key_mode: KeyMode,
     extended_keys: ExtendedKeys,
     /// The private mode sequence just ended set (`true`) or reset
@@ -3449,6 +3516,9 @@ enum ScanEvent {
     /// An SM or RM with modes tmux does not know: Ghostty gets CAN and
     /// [`AltModeScanner::rewrite`] before the final byte.
     Rewrite,
+    /// The `u` of a kitty keyboard push, pop, set or query (`CSI > u`,
+    /// `CSI < u`, `CSI = u`, `CSI ? u`), which tmux ignores (D29).
+    Kitty,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3699,6 +3769,7 @@ impl AltModeScanner {
                 self.state = ScanState::Csi;
                 self.private = false;
                 self.gt = false;
+                self.kitty = false;
                 self.other = false;
                 self.intermediate = None;
                 self.interm_count = 0;
@@ -3770,6 +3841,7 @@ impl AltModeScanner {
                     && self.interm_count == 0 =>
             {
                 self.private = true;
+                self.kitty = true;
             }
             // `CSI >` sequences are none of the others this scanner reads
             // (`other`); a second prefix byte is csi_ignore.
@@ -3781,6 +3853,18 @@ impl AltModeScanner {
             {
                 self.gt = true;
                 self.other = true;
+                self.kitty = true;
+            }
+            // tmux has no `<` or `=` prefix (csi_ignore); a kitty keyboard
+            // pop or set starts with one.
+            (ScanState::Csi, b'<' | b'=') => {
+                self.kitty = self.params.is_empty()
+                    && !self.private
+                    && !self.gt
+                    && self.interm_count == 0
+                    && !self.other;
+                self.other = true;
+                self.csi_ignored = true;
             }
             (ScanState::Csi, b'0'..=b'9' | b';' | b':') => {
                 // `param_buf[64]` keeps 63 bytes, then discards; a parameter
@@ -3794,6 +3878,7 @@ impl AltModeScanner {
                 // A sub-parameter is a string parameter to tmux, not a
                 // number (`input_split`): it stays out of the digit tests.
                 self.other |= b == b':';
+                self.kitty &= b != b':';
             }
             (ScanState::Csi, 0x40..=0x7e) => {
                 self.state = ScanState::Ground;
@@ -3805,6 +3890,7 @@ impl AltModeScanner {
             }
             (ScanState::Csi, 0x20..=0x2f) => {
                 self.other = true;
+                self.kitty = false;
                 self.intermediate = Some(b);
                 self.interm_count = self.interm_count.saturating_add(1);
             }
@@ -3813,6 +3899,7 @@ impl AltModeScanner {
             (ScanState::Csi, 0x7f..=0xff) => return Some(ScanEvent::Skip),
             (ScanState::Csi, _) => {
                 self.other = true;
+                self.kitty = false;
                 self.csi_ignored = true;
             }
         }
@@ -4063,6 +4150,9 @@ impl AltModeScanner {
 
     #[allow(clippy::too_many_lines)] // one arm per CSI final byte
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
+        if b == b'u' && self.kitty {
+            return Some(ScanEvent::Kitty);
+        }
         if let Some(e) = self
             .csi_tmux_lacks(b)
             .or_else(|| if b == b'r' { self.decstbm() } else { None })
@@ -4519,6 +4609,16 @@ fn tmux_reply(
                 let (x, y) = tmux_cursor(term);
                 Some(format!("\x1b[{};{}R", y + 1, x + 1).into_bytes())
             }
+            // D29: Ghostty answers `CSI ? u` only when the scanner let it
+            // through (`vtmux-kitty-keys` on, or the screen granted), with
+            // the flags vtmux applies.
+            b'u' => {
+                let flags: u8 = std::str::from_utf8(body.strip_prefix(b"?")?.strip_suffix(b"u")?)
+                    .ok()?
+                    .parse()
+                    .ok()?;
+                Some(format!("\x1b[?{}u", flags & crate::kitty_keys::APPLIED).into_bytes())
+            }
             _ => None,
         };
     }
@@ -4891,6 +4991,115 @@ mod tests {
             let r = replies_to(20, 5, q);
             assert!(r.is_empty() || r == b"\x1b[?2048;0$y", "{q:?} -> {r:?}");
         }
+    }
+
+    /// D29 off: tmux's CSI table has no `u` with a prefix (input.c:347), so
+    /// a kitty keyboard push, pop, set or query changes nothing, prints
+    /// nothing and gets no reply.
+    #[test]
+    fn kitty_keyboard_off_is_ignored() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"a\x1b[>1ub\x1b[=5;1uc\x1b[?ud\x1b[<ue\x1b[5n");
+        assert_eq!(t.take_replies(), b"\x1b[0n");
+        assert_eq!(t.kitty_keys(), 0);
+        assert_eq!(t.cursor(), (5, 0));
+        // Turned on later, the earlier push is not there: the program
+        // never had it.
+        t.set_kitty_keys(true);
+        t.feed(b"\x1b[?u");
+        assert_eq!(t.take_replies(), b"\x1b[?0u");
+        assert_eq!(t.kitty_keys(), 0);
+    }
+
+    /// D29 on: the query is answered with the active screen's flags, of
+    /// those vtmux applies (1, 4 and 8); push, pop and set follow Ghostty's
+    /// stack.
+    #[test]
+    fn kitty_keyboard_on_follows_the_stack() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_kitty_keys(true);
+        let step = |t: &mut PaneTerm, bytes: &[u8]| {
+            t.feed(bytes);
+            t.feed(b"\x1b[?u");
+            (String::from_utf8(t.take_replies()).unwrap(), t.kitty_keys())
+        };
+        assert_eq!(step(&mut t, b""), ("\x1b[?0u".into(), 0));
+        assert_eq!(step(&mut t, b"\x1b[>1u"), ("\x1b[?1u".into(), 1));
+        assert_eq!(step(&mut t, b"\x1b[>31u"), ("\x1b[?13u".into(), 13));
+        assert_eq!(step(&mut t, b"\x1b[=4;3u"), ("\x1b[?9u".into(), 9));
+        assert_eq!(step(&mut t, b"\x1b[<u"), ("\x1b[?1u".into(), 1));
+        assert_eq!(step(&mut t, b"\x1b[=8;2u"), ("\x1b[?9u".into(), 9));
+        assert_eq!(step(&mut t, b"\x1b[<u"), ("\x1b[?0u".into(), 0));
+        // Nothing printed, the cursor where it was.
+        assert_eq!(t.cursor(), (0, 0));
+    }
+
+    /// D29 rule 5: a granted screen keeps its flags, and its own push, pop
+    /// and set, after the option is turned off; once its stack is back to
+    /// 0 the grant is over and a push is ignored again.
+    #[test]
+    fn kitty_keyboard_grant_outlives_the_option() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_kitty_keys(true);
+        t.feed(b"\x1b[>1u");
+        t.set_kitty_keys(false);
+        assert_eq!(t.kitty_keys(), 1);
+        t.feed(b"\x1b[>9u\x1b[?u");
+        assert_eq!(t.take_replies(), b"\x1b[?9u");
+        t.feed(b"\x1b[<2u");
+        assert_eq!(t.kitty_keys(), 0);
+        t.feed(b"\x1b[>1u\x1b[?u\x1b[5n");
+        assert_eq!(t.take_replies(), b"\x1b[0n");
+        assert_eq!(t.kitty_keys(), 0);
+    }
+
+    /// D29: each screen has its own stack and grant (Ghostty's per-screen
+    /// `kitty_keyboard`), so leaving the alternate screen gives the shell
+    /// its own flags back; RIS empties both.
+    #[test]
+    fn kitty_keyboard_stack_per_screen_and_ris() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_kitty_keys(true);
+        t.feed(b"\x1b[>1u\x1b[?1049h");
+        assert_eq!(t.kitty_keys(), 0);
+        t.feed(b"\x1b[>8u");
+        assert_eq!(t.kitty_keys(), 8);
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.kitty_keys(), 1);
+        // Off, the alternate screen (still at 8) is granted, the primary
+        // too: RIS empties the screen in use and then the other as it
+        // comes up.
+        t.set_kitty_keys(false);
+        t.feed(b"\x1bc");
+        assert_eq!(t.kitty_keys(), 0);
+        t.feed(b"\x1b[?1049h");
+        assert_eq!(t.kitty_keys(), 0);
+        t.feed(b"\x1b[>1u\x1b[?u\x1b[5n");
+        assert_eq!(t.take_replies(), b"\x1b[0n");
+        assert_eq!(t.kitty_keys(), 0);
+    }
+
+    /// D29: a respawn's [`PaneTerm::reset_kitty_keys`] under the alternate
+    /// screen: the primary screen's stack, which Ghostty still holds, is
+    /// exported empty (a live upgrade carries no stale grant) and emptied
+    /// when the screen comes up.
+    #[test]
+    fn kitty_keyboard_reset_empties_the_other_screen() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_kitty_keys(true);
+        t.feed(b"\x1b[>1u\x1b[?1049h\x1b[>4u");
+        assert_eq!(t.export_state().primary.kitty_flags[1], 1);
+        t.reset_kitty_keys();
+        assert_eq!(t.kitty_keys(), 0);
+        let state = t.export_state();
+        assert_eq!(state.primary.kitty_flags, [0; 8]);
+        assert_eq!(state.alternate.as_ref().unwrap().kitty_flags, [0; 8]);
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.kitty_keys(), 0);
+        // A granted screen's stack goes through an export and import.
+        t.feed(b"\x1b[>5u");
+        let back = PaneTerm::import_state(&t.export_state()).unwrap();
+        assert_eq!(back.kitty_keys(), 5);
     }
 
     /// tmux's private DSR answers only 996 (input.c:1631-1637); Ghostty
@@ -5829,6 +6038,7 @@ mod tests {
                     | ScanEvent::Title
                     | ScanEvent::Answer
                     | ScanEvent::Rewrite
+                    | ScanEvent::Kitty
                     | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()

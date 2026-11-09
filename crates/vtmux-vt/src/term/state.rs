@@ -1108,7 +1108,7 @@ impl PaneTerm {
                 pen: StyleState::from_ffi(&pen),
             });
         let size = (raw.raw.cols, raw.raw.rows);
-        TermState {
+        let mut state = TermState {
             cols: raw.raw.cols,
             rows: raw.raw.rows,
             primary_size: Some(term.vtmux_primary_size().expect("primary size"))
@@ -1119,7 +1119,20 @@ impl PaneTerm {
             alternate_active: raw.raw.active_screen == 1,
             ghostty,
             pane: self.pane_state(),
+        };
+        // D29: a stack emptied while its screen was not in use goes empty.
+        if self.kitty_stale {
+            let inactive = if state.alternate_active {
+                Some(&mut state.primary)
+            } else {
+                state.alternate.as_mut()
+            };
+            if let Some(screen) = inactive {
+                screen.kitty_flags = [0; 8];
+                screen.kitty_index = 0;
+            }
         }
+        state
     }
 
     /// A copy of the pane whose primary screen, which the alternate one
