@@ -135,11 +135,6 @@ impl PaneIo {
         }
     }
 
-    #[must_use]
-    pub fn has_pending_output(&self) -> bool {
-        !self.out.is_empty()
-    }
-
     /// Tell the pane program its new size (`TIOCSWINSZ`; the kernel sends
     /// the foreground process group SIGWINCH).
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {

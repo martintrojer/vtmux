@@ -4352,20 +4352,6 @@ impl Server {
         self.status_message(id, text, None, flags);
     }
 
-    /// [`Self::status_message_set`] for every terminal client attached to
-    /// session `s`.
-    pub fn status_message_session(&mut self, s: SessionId, text: &str) {
-        let ids: Vec<_> = self
-            .clients
-            .iter()
-            .filter(|(_, c)| c.attached == Some(s) && c.control.is_none())
-            .map(|(id, _)| *id)
-            .collect();
-        for id in ids {
-            self.status_message_set(id, text.to_owned());
-        }
-    }
-
     /// `status_message_set` (status.c:339-390) in full: `delay_ms` `None`
     /// is the session's `display-time`, 0 waits for a key. A client with
     /// no session or a control client shows nothing.
@@ -4728,14 +4714,6 @@ impl Server {
         client
             .and_then(|id| self.clients.get(&id))
             .is_some_and(|c| c.control.is_some() && !c.flags.new_layouts)
-    }
-
-    /// Most recent attached client (`cmd_find_current_client`, M0 one client).
-    pub fn current_client(&self) -> Option<ClientId> {
-        self.clients
-            .iter()
-            .rev()
-            .find_map(|(&id, c)| c.attached.map(|_| id))
     }
 
     // ------------------------------------------------------------- config

@@ -671,8 +671,7 @@ impl Compositor {
             .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
         let Some(changed_rows) = self.changed_rows(&screen, &tags, same_size, caps.hyperlinks)
         else {
-            self.spare = Some(std::rc::Rc::new(screen));
-            self.spare_tags = tags;
+            self.recycle(screen, tags);
             return Vec::new();
         };
         let forced = std::mem::take(&mut self.forced);

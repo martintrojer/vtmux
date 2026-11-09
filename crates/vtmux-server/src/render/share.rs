@@ -295,8 +295,7 @@ impl Compositor {
     /// writes `frame`: the same state afterwards, without encoding it.
     pub fn take_frame(&mut self, screen: Snapshot, tags: Vec<u64>, frame: &[u8]) -> Vec<u8> {
         if frame.is_empty() {
-            self.spare = Some(Rc::new(screen));
-            self.spare_tags = tags;
+            self.recycle(screen, tags);
             return Vec::new();
         }
         self.forced.clear();
