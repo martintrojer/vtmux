@@ -75,7 +75,8 @@
       },
       {
         "settle": {
-          "quiet_ms": 1500
+          "quiet_ms": 1500,
+          "react": true
         }
       },
       {

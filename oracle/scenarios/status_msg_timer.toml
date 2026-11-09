@@ -26,7 +26,7 @@ steps = [
   # A later timed message re-arms the timer.
   { run = ["display-message", "-d", "1500", "-t", "a", "first"] },
   { run = ["display-message", "-d", "4500", "-t", "a", "third"] },
-  { settle = { quiet_ms = 2400 } },
+  { settle = { react = true, quiet_ms = 2400 } },
   { screen = {} },
   { settle = { quiet_ms = 3600 } },
   { screen = {} },

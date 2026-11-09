@@ -427,6 +427,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "progress": {
           "id": "b"
         }
@@ -882,7 +887,7 @@
       }
     },
     {
-      "step": 64,
+      "step": 65,
       "observation": {
         "kind": "cli",
         "stdout": "hidden|0\n",
@@ -891,7 +896,7 @@
       }
     },
     {
-      "step": 65,
+      "step": 66,
       "observation": {
         "kind": "screen",
         "rows": [

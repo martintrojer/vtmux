@@ -30,6 +30,7 @@ steps = [
   { screen = {} },
   { run = ["display", "-p", "#{pane_marked_set}"] },
   { keys = "Gm" },
+  { settle = {} },
   { run = ["display", "-p", "-t", "%3", "#{pane_marked}"] },
   { keys = "q" },
   { settle = { react = true } },

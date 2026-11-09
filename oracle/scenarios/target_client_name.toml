@@ -17,5 +17,6 @@ steps = [
   { run = ["display", "-p", "-t", "nonexistent", "#{session_name}"] },
   { run = ["run-shell", "tmux display-panes -d 0 -t \"$(tmux lsc -F '##{client_tty}')\""] },
   { run = ["list-panes", "-a", "-F", "#{pane_id} [#{pane_mode}]"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

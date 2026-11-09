@@ -75,6 +75,7 @@ steps = [
   { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "stty -echo; tmux wait-for -S up2; exec cat -"] },
   { wait_for = "up2" },
   { run = ["display", "-p", "-t", "%0", "#{pane_pb_state}|#{pane_pb_progress}"] },
+  { settle = { react = true } },
   { progress = { id = "b" } },
   { screen = { id = "b" } },
 ]

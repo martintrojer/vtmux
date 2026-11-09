@@ -62,6 +62,13 @@
         "wait_for": "p0"
       },
       {
+        "wait_screen": {
+          "has": [
+            "textG"
+          ]
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -147,6 +154,13 @@
         "wait_for": "p1"
       },
       {
+        "wait_screen": {
+          "has": [
+            "kept"
+          ]
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -162,6 +176,13 @@
       },
       {
         "wait_for": "p2"
+      },
+      {
+        "wait_screen": {
+          "has": [
+            "resetR"
+          ]
+        }
       },
       {
         "screen": {}
@@ -215,7 +236,7 @@
       }
     },
     {
-      "step": 6,
+      "step": 7,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -235,41 +256,32 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "",
         "stderr": "",
         "exit": 0
-      }
-    },
-    {
-      "step": 9,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "\\e[38;5;196m\\e[48;5;21mtext\\e[32mG\\e[39m",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
-        ],
-        "cursor": [
-          0,
-          1
-        ]
       }
     },
     {
       "step": 10,
       "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
+        "kind": "screen",
+        "rows": [
+          "\\e[38;5;196m\\e[48;5;21mtext\\e[32mG\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
       }
     },
     {
@@ -282,7 +294,16 @@
       }
     },
     {
-      "step": 13,
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -302,15 +323,6 @@
       }
     },
     {
-      "step": 14,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 15,
       "observation": {
         "kind": "cli",
@@ -320,7 +332,16 @@
       }
     },
     {
-      "step": 17,
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -340,15 +361,6 @@
       }
     },
     {
-      "step": 18,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 19,
       "observation": {
         "kind": "cli",
@@ -359,6 +371,15 @@
     },
     {
       "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -378,25 +399,25 @@
       }
     },
     {
-      "step": 21,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 22,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
       "observation": {
         "kind": "screen",
         "rows": [

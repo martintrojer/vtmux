@@ -24,7 +24,9 @@ use vtmux_vt::{CaptureOpts, PaneTerm, capture};
 use crate::reap;
 
 use super::normalize::Normalizer;
-use super::scenario::{Divergence, Observation, Scenario, Settle, Setup, Step, WaitScreen};
+use super::scenario::{
+    Divergence, Observation, Scenario, Settle, Setup, Step, WaitPane, WaitScreen,
+};
 
 /// An observation plus where it came from.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -476,6 +478,7 @@ impl<'a> Runner<'a> {
                     self.cli(i, &argv, &format!("wait_for {chan}"))?;
                 }
                 Step::WaitScreen(w) => self.wait_screen_step(i, w)?,
+                Step::WaitPane(w) => self.wait_pane(i, w)?,
                 Step::Screen(s) => {
                     let id = s.id.clone().unwrap_or_default();
                     self.observe_client(i, &id, ClientView::Screen)?;
@@ -519,7 +522,10 @@ impl<'a> Runner<'a> {
             && next.is_some_and(|s| {
                 !matches!(
                     s,
-                    Step::Settle(_) | Step::ControlWait(_) | Step::WaitScreen(_)
+                    Step::Settle(_)
+                        | Step::ControlWait(_)
+                        | Step::WaitScreen(_)
+                        | Step::WaitPane(_)
                 )
             })
         {
@@ -926,6 +932,32 @@ impl<'a> Runner<'a> {
             );
         }
         Ok(())
+    }
+
+    /// The `wait_pane` step: poll `capture-pane -p` until it prints `has`; a
+    /// `timeout` observation if it never does within `WAIT_SCREEN_LIMIT`.
+    fn wait_pane(&mut self, step: usize, w: &WaitPane) -> Result<()> {
+        let argv: Vec<String> = ["capture-pane", "-p", "-t", &w.pane]
+            .map(String::from)
+            .to_vec();
+        let start = Instant::now();
+        loop {
+            if let Some((out, _, 0)) = self.cli_raw(&argv, CLI_TIMEOUT)?
+                && out.contains(&w.has)
+            {
+                return Ok(());
+            }
+            if start.elapsed() > WAIT_SCREEN_LIMIT {
+                self.push(
+                    step,
+                    Observation::Timeout {
+                        what: format!("wait_pane {w:?}"),
+                    },
+                );
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Poll the client's screen until it shows every `has` and none of the

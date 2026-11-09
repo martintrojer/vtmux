@@ -19,5 +19,6 @@ steps = [
   { run = ["display", "-p", "-t", "%0", "#{synchronized_output_flag} #{copy_cursor_x}"] },
   { run = ["send-keys", "-t", "%0", "-X", "cursor-left"] },
   { run = ["display", "-p", "-t", "%0", "#{synchronized_output_flag} #{copy_cursor_x}"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

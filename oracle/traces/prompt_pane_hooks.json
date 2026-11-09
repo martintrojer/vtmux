@@ -112,6 +112,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -343,7 +348,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -363,7 +368,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -383,7 +388,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "abc\n",
@@ -392,19 +397,10 @@
       }
     },
     {
-      "step": 17,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 18,
       "observation": {
         "kind": "cli",
-        "stdout": "|o:search:%0:@0:pane-prompt-opened|c:search:%0\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -413,7 +409,7 @@
       "step": 19,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "|o:search:%0:@0:pane-prompt-opened|c:search:%0\n",
         "stderr": "",
         "exit": 0
       }
@@ -428,7 +424,16 @@
       }
     },
     {
-      "step": 22,
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -448,7 +453,7 @@
       }
     },
     {
-      "step": 24,
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -468,19 +473,10 @@
       }
     },
     {
-      "step": 25,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 26,
       "observation": {
         "kind": "cli",
-        "stdout": "|o:search:%0:@0:pane-prompt-opened|c:search:%0|o:command:%0:@0:pane-prompt-opened|c:command:%0\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -489,7 +485,7 @@
       "step": 27,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "|o:search:%0:@0:pane-prompt-opened|c:search:%0|o:command:%0:@0:pane-prompt-opened|c:command:%0\n",
         "stderr": "",
         "exit": 0
       }
@@ -504,7 +500,16 @@
       }
     },
     {
-      "step": 30,
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -524,7 +529,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 32,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -533,7 +538,7 @@
       }
     },
     {
-      "step": 33,
+      "step": 34,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -553,7 +558,7 @@
       }
     },
     {
-      "step": 34,
+      "step": 35,
       "observation": {
         "kind": "cli",
         "stdout": "|o:search:%0:@0:pane-prompt-opened|c:search:%0|o:command:%0:@0:pane-prompt-opened|c:command:%0|o:command:%1:@0:pane-prompt-opened\n",

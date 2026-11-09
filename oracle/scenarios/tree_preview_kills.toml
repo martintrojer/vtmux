@@ -23,7 +23,7 @@ steps = [
   { screen = {} },
   { run = ["kill-pane", "-t", "%5"] },
   { run = ["kill-pane", "-t", "%4"] },
-  { settle = {} },
+  { settle = { react = true } },
   { screen = {} },
   { keys = "<<<<" },
   { screen = {} },

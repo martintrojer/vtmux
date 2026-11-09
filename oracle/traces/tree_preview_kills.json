@@ -217,7 +217,9 @@
         ]
       },
       {
-        "settle": {}
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}

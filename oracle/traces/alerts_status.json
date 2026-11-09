@@ -166,6 +166,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -364,7 +369,7 @@
       }
     },
     {
-      "step": 22,
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -382,7 +387,7 @@
       }
     },
     {
-      "step": 23,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -391,7 +396,7 @@
       }
     },
     {
-      "step": 25,
+      "step": 26,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -409,7 +414,7 @@
       }
     },
     {
-      "step": 26,
+      "step": 27,
       "observation": {
         "kind": "cli",
         "stdout": "0\n1-\n2*\n",

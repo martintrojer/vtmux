@@ -22,5 +22,6 @@ steps = [
   { run = ["refresh-client", "-B", "x"] },
   { run = ["refresh-client", "-S"] },
   { run = ["refresh-client"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

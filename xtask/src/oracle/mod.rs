@@ -7,15 +7,19 @@
 //! - `live`    reference vs vtmux in memory; `live --self` reference vs
 //!   reference (a determinism check).
 //!
-//! All take `--only <glob>[,<glob>...]`; `*` and `?` match. `replay` and `live` take
+//! - `lint`    the scenario guards, no binary run: no pane started with a
+//!   one-word command (`pane_cmd`), no observation that races the step
+//!   before it (`sync_lint`). `cargo test -p xtask` runs them too.
+//!
+//! All but `lint` take `--only <glob>[,<glob>...]`; `*` and `?` match. `replay` and `live` take
 //! `--upgrade-every <n>`: vtmux also upgrades onto itself after every nth
 //! step, and every scenario must still match (live-upgrade spec, *Tests*).
 
 mod normalize;
-#[cfg(test)]
 mod pane_cmd;
 mod runner;
 mod scenario;
+mod sync_lint;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
@@ -65,7 +69,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Opts> {
         _ => {
             return fail(
                 "usage: cargo xtask oracle <record|replay|live [--self]> [--only <glob>[,<glob>...]] \
-                 [--upgrade-every <n>]",
+                 [--upgrade-every <n>]\n       cargo xtask oracle lint",
             );
         }
     };
@@ -222,9 +226,27 @@ fn parallel<T: Send>(scenarios: &[Scenario], f: impl Fn(&Scenario) -> T + Sync) 
         .collect()
 }
 
+/// `lint`: every scenario guard over every scenario; exit 1 on a finding.
+fn lint(root: &Path) -> Result<ExitCode> {
+    let mut found = pane_cmd::all_one_word_panes(root)?;
+    found.extend(sync_lint::all_races(root)?);
+    for f in &found {
+        println!("{f}");
+    }
+    println!("oracle lint: {} finding(s)", found.len());
+    Ok(if found.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
 fn run_inner() -> Result<ExitCode> {
-    let opts = parse_args(std::env::args().skip(2))?;
     let root = workspace_root();
+    if std::env::args().nth(2).as_deref() == Some("lint") {
+        return lint(&root);
+    }
+    let opts = parse_args(std::env::args().skip(2))?;
     let scenarios = load_scenarios(&root, opts.only.as_deref())?;
     let reference = runner::Opts::default();
     let vtmux = runner::Opts {

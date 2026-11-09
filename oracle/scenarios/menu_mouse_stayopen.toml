@@ -72,6 +72,7 @@ steps = [
   # A CLI menu with -O -M: the disabled item, highlighted and pressed,
   # stays open; "Two" runs.
   { run = ["display-menu", "-O", "-M", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "-Off", "o", "", "Two", "2", "set -g @c two"] },
+  { settle = { react = true } },
   { screen = {} },
   { keys = "\u001b[<35;5;6M" },
   { screen = {} },

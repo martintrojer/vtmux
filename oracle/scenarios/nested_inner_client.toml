@@ -9,6 +9,7 @@ steps = [
   { attach = { session = "o" } },
   { settle = { quiet_ms = 500 } },
   { run = ["run-shell", "tmux -L inner set -g status-right IR \\; set -g default-command 'cat -' \\; set -g window-status-format '##I' \\; set -g window-status-current-format '##I*' \\; select-pane -t i -T ip"] },
+  { wait_screen = { has = ["[i] 0*", "IR"] } },
   { screen = {} },
   { keys = "abc\r" },
   { screen = {} },
@@ -19,6 +20,6 @@ steps = [
   { keys = "\u0002\u0002\"" },
   { screen = {} },
   { run = ["run-shell", "tmux -L inner kill-server"] },
-  { settle = {} },
+  { wait_screen = { has = ["[exited]"] } },
   { screen = {} },
 ]

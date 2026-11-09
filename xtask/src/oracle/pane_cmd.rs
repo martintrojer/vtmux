@@ -75,6 +75,22 @@ pub fn one_word_panes(sc: &Scenario) -> Vec<String> {
     out
 }
 
+/// The one-word pane commands in every scenario under `root`, as
+/// `<scenario>: step N: <command>`.
+pub fn all_one_word_panes(
+    root: &std::path::Path,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut out = Vec::new();
+    for sc in super::load_scenarios(root, None)? {
+        out.extend(
+            one_word_panes(&sc)
+                .into_iter()
+                .map(|o| format!("{}: {o}", sc.name)),
+        );
+    }
+    Ok(out)
+}
+
 /// `argv` is a command or a `;`-separated list (a `-f file new ...` client
 /// prefix is skipped). Strings that are command lines themselves (hooks,
 /// `if-shell`, `bind-key`) are checked the same way.
@@ -247,19 +263,8 @@ mod tests {
 
     #[test]
     fn no_scenario_starts_a_pane_with_a_one_word_command() {
-        let dir = super::super::workspace_root().join("oracle/scenarios");
-        let mut offenders = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("oracle/scenarios exists") {
-            let path = entry.expect("readable entry").path();
-            if path.extension().is_some_and(|x| x == "toml") {
-                let sc = super::super::scenario::load(&path).expect("scenario loads");
-                offenders.extend(
-                    one_word_panes(&sc)
-                        .into_iter()
-                        .map(|o| format!("{}: {o}", sc.name)),
-                );
-            }
-        }
+        let offenders =
+            all_one_word_panes(&super::super::workspace_root()).expect("scenarios load");
         assert!(
             offenders.is_empty(),
             "one-word pane commands run as `$SHELL -c word`, which shows `sh` as the pane's \

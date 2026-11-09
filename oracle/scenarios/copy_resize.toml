@@ -48,6 +48,7 @@ steps = [
   { run = ["wait-for", "-S", "go"] },
   { wait_for = "done" },
   { run = ["display", "-p", "-t", "%0", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["splitw", "-d", "-h", "-t", "%0", "cat", "-"] },
   { settle = { react = true } },

@@ -113,7 +113,9 @@
         "wait_for": "done"
       },
       {
-        "settle": {}
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -182,7 +184,9 @@
         "wait_for": "done"
       },
       {
-        "settle": {}
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -251,7 +255,9 @@
         "wait_for": "done"
       },
       {
-        "settle": {}
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}

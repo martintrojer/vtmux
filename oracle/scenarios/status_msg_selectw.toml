@@ -7,6 +7,10 @@ steps = [
   { run = ["select-pane", "-t", "a:0", "-T", "t"] },
   { run = ["set", "-g", "status-right", "R"] },
   { attach = { session = "a" } },
+  # The terminal answers the device attributes query, so no start-timer
+  # redraw (tty.c tty_start_timer_callback, 5 s after the attach) shows the
+  # zoom flag a stale status line leaves out.
+  { keys = "\u001b[?62;22c" },
   { screen = {} },
   { run = ["resize-pane", "-Z", "-t", "a:1"] },
   { settle = { react = true } },
@@ -14,6 +18,7 @@ steps = [
   # cmd-select-window.c:136-139: session_select returns 1 for the current
   # window, so no server_redraw_session and the status stays stale.
   { run = ["select-window", "-t", "a:0"] },
+  { settle = { react = true } },
   { screen = {} },
   # new-window -d only redraws the status (server_status_session_group).
   { run = ["display-message", "-d", "5000", "-t", "a", "m"] },

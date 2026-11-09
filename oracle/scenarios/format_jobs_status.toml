@@ -15,7 +15,7 @@ steps = [
   { screen = {} },
   # No redraw is asked for, so the file's new content is not looked at.
   { run = ["run-shell", 'echo two > "$HOME/f"'] },
-  { settle = { quiet_ms = 1500 } },
+  { settle = { react = true, quiet_ms = 1500 } },
   { screen = {} },
   # refresh-client -S: FORMAT_FORCE (status.c:241-243), the job runs again.
   { run = ["refresh-client", "-S"] },

@@ -82,6 +82,11 @@
         "wait_for": "done"
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -207,7 +212,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -243,7 +248,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -252,7 +257,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -288,15 +293,6 @@
       }
     },
     {
-      "step": 14,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 15,
       "observation": {
         "kind": "cli",
@@ -306,7 +302,16 @@
       }
     },
     {
-      "step": 17,
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -342,7 +347,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "screen",
         "rows": [

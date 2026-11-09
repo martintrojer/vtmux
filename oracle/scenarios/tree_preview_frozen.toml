@@ -17,6 +17,8 @@ steps = [
   { screen = {} },
   { feed = { pane = "%1", bytes = "LIVE\r" } },
   { feed = { pane = "%2", bytes = "TWO\r" } },
+  { wait_pane = { pane = "%1", has = "LIVE\nLIVE\n" } },
+  { wait_pane = { pane = "%2", has = "TWO\nTWO\n" } },
   { run = ["capture-pane", "-p", "-t", "%1", "-E", "1"] },
   { settle = {} },
   { screen = {} },

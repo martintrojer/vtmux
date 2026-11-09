@@ -85,7 +85,11 @@
         ]
       },
       {
-        "settle": {}
+        "wait_screen": {
+          "has": [
+            "[server exited]"
+          ]
+        }
       },
       {
         "screen": {}

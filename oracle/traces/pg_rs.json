@@ -73,7 +73,11 @@
         "wait_for": "up"
       },
       {
-        "settle": {}
+        "wait_screen": {
+          "has": [
+            "┌────────┐"
+          ]
+        }
       },
       {
         "screen": {}

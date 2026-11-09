@@ -13,7 +13,7 @@ steps = [
   { screen = {} },
   { run = ["set", "-g", "display-time", "0"] },
   { run = ["display-message", "-t", "a", "sticky"] },
-  { settle = { quiet_ms = 2500 } },
+  { settle = { react = true, quiet_ms = 2500 } },
   { screen = {} },
   { keys = "x" },
   { screen = {} },

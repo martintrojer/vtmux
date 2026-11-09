@@ -52,6 +52,11 @@ pub enum Step {
     /// quiet time is long enough on a loaded host. Observes nothing; a
     /// screen that never gets there is a `timeout`.
     WaitScreen(WaitScreen),
+    /// Wait until `capture-pane -p -t <pane>` prints `has` (rows joined by
+    /// newlines). For a pane program's answer to input where no client
+    /// shows it (another window, a frozen preview). Observes nothing; a
+    /// pane that never gets there is a `timeout`.
+    WaitPane(WaitPane),
     /// Observe the attached client's screen (the one started with `id`,
     /// if given).
     Screen(ScreenSpec),
@@ -145,6 +150,13 @@ pub struct WaitScreen {
     pub has: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaitPane {
+    pub pane: String,
+    pub has: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

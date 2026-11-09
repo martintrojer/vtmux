@@ -21,6 +21,7 @@ steps = [
   { screen = {} },
   { run = ["show", "-gv", "@log"] },
   { run = ["command-prompt", "-b", "-P", "-p", "second", "set -g @y '%%'"] },
+  { settle = { react = true } },
   { screen = {} },
   { keys = "abc\r" },
   { screen = {} },

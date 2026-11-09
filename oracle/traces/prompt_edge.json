@@ -275,6 +275,9 @@
         "keys": "\u0003"
       },
       {
+        "settle": {}
+      },
+      {
         "run": [
           "set",
           "-g",
@@ -296,6 +299,9 @@
       },
       {
         "keys": "\u0003"
+      },
+      {
+        "settle": {}
       },
       {
         "run": [
@@ -753,7 +759,7 @@
       }
     },
     {
-      "step": 65,
+      "step": 66,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -762,7 +768,7 @@
       }
     },
     {
-      "step": 67,
+      "step": 68,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -780,7 +786,7 @@
       }
     },
     {
-      "step": 69,
+      "step": 70,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -798,7 +804,7 @@
       }
     },
     {
-      "step": 71,
+      "step": 73,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -807,7 +813,7 @@
       }
     },
     {
-      "step": 73,
+      "step": 75,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -825,7 +831,7 @@
       }
     },
     {
-      "step": 75,
+      "step": 77,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -843,7 +849,7 @@
       }
     },
     {
-      "step": 77,
+      "step": 79,
       "observation": {
         "kind": "screen",
         "rows": [

@@ -12,7 +12,7 @@ steps = [
   { settle = {} },
   { run = ["lsc", "-F", "#{client_flags}"] },
   { run = ["kill-server"] },
-  { settle = {} },
+  { wait_screen = { has = ["[server exited]"] } },
   { screen = {} },
   { control_close = { id = "k" } },
 ]

@@ -11,6 +11,7 @@ steps = [
   { settle = { react = true } },
   { run = ["wait-for", "-S", "go"] },
   { wait_for = "done" },
+  { settle = { react = true } },
   { screen = {} },
   # Leaving and entering copy mode redraw the pane after the command
   # returns: wait for that output (README, *Races under load*).

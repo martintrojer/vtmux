@@ -71,6 +71,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -118,6 +123,11 @@
           "a",
           "[#{pane_mode}] [#{pane_in_mode}]"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -169,6 +179,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -216,6 +231,11 @@
           "a",
           "[#{pane_mode}] [#{pane_in_mode}]"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -266,6 +286,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -311,6 +336,11 @@
           "a",
           "[#{pane_mode}] [#{pane_in_mode}]"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -468,7 +498,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -485,19 +515,10 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "cli",
         "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 10,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[] [0]\n",
         "stderr": "",
         "exit": 0
       }
@@ -506,7 +527,7 @@
       "step": 11,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "[] [0]\n",
         "stderr": "",
         "exit": 0
       }
@@ -524,13 +545,22 @@
       "step": 13,
       "observation": {
         "kind": "cli",
-        "stdout": "[clock-mode] [1]\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
     },
     {
       "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -547,25 +577,7 @@
       }
     },
     {
-      "step": 15,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 17,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[] [0]\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 18,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -577,7 +589,7 @@
       "step": 19,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "[] [0]\n",
         "stderr": "",
         "exit": 0
       }
@@ -586,13 +598,31 @@
       "step": 20,
       "observation": {
         "kind": "cli",
-        "stdout": "[clock-mode] [1]\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
     },
     {
       "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -609,34 +639,7 @@
       }
     },
     {
-      "step": 22,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 24,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[] [0]\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 25,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 26,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -648,13 +651,40 @@
       "step": 27,
       "observation": {
         "kind": "cli",
-        "stdout": "[clock-mode] [1]\n",
+        "stdout": "[] [0]\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
       "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -671,43 +701,7 @@
       }
     },
     {
-      "step": 29,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 31,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[] [0]\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 32,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 33,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 34,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -718,22 +712,23 @@
     {
       "step": 35,
       "observation": {
-        "kind": "screen",
-        "rows": [
-          "",
-          "",
-          "        <CLOCK>",
-          "",
-          ""
-        ],
-        "cursor": [
-          13,
-          2
-        ]
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
       }
     },
     {
       "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -751,25 +746,60 @@
       }
     },
     {
-      "step": 39,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 40,
       "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "        <CLOCK>",
+          "",
+          ""
+        ],
+        "cursor": [
+          13,
+          2
+        ]
       }
     },
     {
       "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
       "observation": {
         "kind": "cli",
         "stdout": "[clock-mode] [2]\n",
@@ -778,7 +808,7 @@
       }
     },
     {
-      "step": 42,
+      "step": 48,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -795,48 +825,12 @@
       }
     },
     {
-      "step": 43,
+      "step": 49,
       "observation": {
         "kind": "cli",
         "stdout": "",
         "stderr": "not in a mode\n",
         "exit": 1
-      }
-    },
-    {
-      "step": 44,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 46,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[copy-mode] [1]\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 47,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 49,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[] [0]\n",
-        "stderr": "",
-        "exit": 0
       }
     },
     {
@@ -849,19 +843,10 @@
       }
     },
     {
-      "step": 51,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 52,
       "observation": {
         "kind": "cli",
-        "stdout": "[clock-mode] [1]\n",
+        "stdout": "[copy-mode] [1]\n",
         "stderr": "",
         "exit": 0
       }
@@ -871,12 +856,57 @@
       "observation": {
         "kind": "cli",
         "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
         "stderr": "not in a mode\n",
         "exit": 1
       }
     },
     {
-      "step": 54,
+      "step": 60,
       "observation": {
         "kind": "cli",
         "stdout": "",

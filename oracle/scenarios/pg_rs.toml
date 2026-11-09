@@ -7,7 +7,7 @@ steps = [
   { run = ["bind", "b", "command-prompt", "-p", "ask", "display-message %%"] },
   { attach = { session = "a" } },
   { keys = "\u0002b" }, { screen = {} },
-  { run = ["run-shell", "-b", "tmux display-popup -w 10 -h 4 'tmux wait-for -S up; exec cat'; true"] }, { wait_for = "up" }, { settle = {} }, { screen = {} },
+  { run = ["run-shell", "-b", "tmux display-popup -w 10 -h 4 'tmux wait-for -S up; exec cat'; true"] }, { wait_for = "up" }, { wait_screen = { has = ["┌────────┐"] } }, { screen = {} },
   { keys = "z" }, { screen = {} },
   { keys = "\u001b" }, { screen = {} },
   { keys = "hi\r" }, { screen = {} },

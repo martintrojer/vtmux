@@ -53,8 +53,10 @@ steps = [
   { attach = { session = "stream" } },
   { run = ["copy-mode", "-t", "stream:"] },
   { run = ["send-keys", "-t", "stream:", "-X", "history-top"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["send-keys", "-t", "stream:", "-X", "cancel"] },
+  { settle = { react = true } },
   { screen = {} },
   # nohist: history-limit 0 keeps nothing, the rows above the region stay
   { run = ["set", "-g", "history-limit", "0"] },

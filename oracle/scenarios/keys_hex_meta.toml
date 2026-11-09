@@ -12,6 +12,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "0x01", "0x41", "0x7F", "0x263A"] },
   { run = ["bind", "-n", "M-k", "command-prompt", "-k", "-p", "key", "set -ga @k '%% '"] },
   { attach = { session = "a" } },
+  { wait_screen = { has = ["^AA^?M-bM-^XM-:"] } },
   { run = ["capture-pane", "-p", "-t", "a"] },
   { keys = "\u001bk" },
   { settle = {} },

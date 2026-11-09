@@ -150,6 +150,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       }
     ]
@@ -327,7 +332,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "screen",
         "rows": [

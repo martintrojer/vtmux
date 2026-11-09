@@ -12,7 +12,7 @@ steps = [
   { settle = { quiet_ms = 1500 } },
   { run = ["display", "-p", "-t", "a", "#{window_name}"] },
   { run = ["copy-mode", "-t", "a"] },
-  { settle = { quiet_ms = 1500 } },
+  { settle = { react = true, quiet_ms = 1500 } },
   { run = ["display", "-p", "-t", "a", "#{window_name}"] },
   { screen = {} },
   { run = ["send-keys", "-t", "a", "-X", "cursor-up"] },

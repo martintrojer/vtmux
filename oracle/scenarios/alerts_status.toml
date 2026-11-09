@@ -29,6 +29,7 @@ steps = [
   { screen = {} },
   { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
   { run = ["send-keys", "-t", "a:2", "Enter"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["next-window", "-a"] },
   { settle = { react = true } },
