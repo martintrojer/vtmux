@@ -63,6 +63,10 @@ pub(super) struct Pattern {
     text: String,
     /// `window_copy_is_lowercase`: match ignoring case.
     cis: bool,
+    /// The bytes of `text` when every cell is one character of one column
+    /// other than a tab, and there is at least one: the pattern a line
+    /// read as text ([`Grid::text`]) is searched for in.
+    bytes: Option<Vec<u8>>,
 }
 
 impl Pattern {
@@ -90,41 +94,28 @@ impl Pattern {
                 }
             }
         }
-        let text = cells.iter().map(|(t, _)| t.as_str()).collect();
+        let text: String = cells.iter().map(|(t, _)| t.as_str()).collect();
+        let narrow = !cells.is_empty()
+            && cells.iter().all(|(t, w)| {
+                let mut chars = t.chars();
+                *w == 1 && chars.next().is_some_and(|c| c != '\t') && chars.next().is_none()
+            });
         Self {
+            bytes: narrow.then(|| text.clone().into_bytes()),
             cells,
             text,
             cis: is_lowercase(s),
         }
     }
 
-    /// The pattern as bytes when every cell is one ASCII character other
-    /// than a tab, and there is at least one.
-    fn ascii_bytes(&self) -> Option<Vec<u8>> {
-        let bytes: Vec<u8> = self
-            .cells
-            .iter()
-            .map(|(t, w)| (*w == 1 && t.len() == 1 && t != "\t").then(|| t.as_bytes()[0]))
-            .collect::<Option<_>>()?;
-        (!bytes.is_empty()).then_some(bytes)
-    }
-
-    /// Whether a line of narrow ASCII characters and blanks cannot hold
-    /// this pattern as plain text: some cell is a tab, a padding cell or
-    /// a character past ASCII, which no such line has a cell to match
+    /// Whether a line read as text ([`Grid::text`], every cell one
+    /// character of one column or a blank; `ascii` when every one is
+    /// ASCII) cannot hold this pattern as plain text: some cell of it is a
+    /// tab, a padding cell or a cluster, or, in an ASCII line, a character
+    /// past ASCII, which such a line has no cell to match
     /// (`window_copy_search_compare`).
-    fn never_in_ascii(&self) -> bool {
-        !self.cells.is_empty() && self.ascii_bytes().is_none()
-    }
-
-    /// How a plain search reads an ASCII line's text (nothing for a regular
-    /// expression, which reads it whole): the pattern's bytes if it is
-    /// ASCII, and whether no such line can hold it ([`Self::never_in_ascii`]).
-    fn plain_in_ascii(&self, regex: bool) -> (Option<Vec<u8>>, bool) {
-        if regex {
-            return (None, false);
-        }
-        (self.ascii_bytes(), self.never_in_ascii())
+    fn never_in_text(&self, ascii: bool) -> bool {
+        !self.cells.is_empty() && self.bytes.as_ref().is_none_or(|b| ascii && !b.is_ascii())
     }
 
     /// `regcomp(REG_EXTENDED)`, `REG_ICASE` when matching ignoring case.
@@ -159,17 +150,19 @@ fn is_lowercase(s: &str) -> bool {
 /// compare them with the cell path.
 fn text_paths_off() -> bool {
     #[cfg(test)]
-    return tests::NO_ASCII_COUNT.with(std::cell::Cell::get);
+    return tests::NO_TEXT.with(std::cell::Cell::get);
     #[cfg(not(test))]
     false
 }
 
-/// Whether the ASCII pattern `pat` matches the line text `text` (a byte a
-/// cell) at column `ax`, entirely inside it: [`Grid::matches_at`] on a line
-/// of narrow ASCII cells that does not wrap, ignoring case as
-/// `window_copy_search_compare` does when `cis`.
-fn text_matches(text: &[u8], pat: &[u8], cis: bool, ax: usize) -> bool {
-    text.get(ax..ax + pat.len()).is_some_and(|t| {
+/// Whether the pattern's bytes `pat` ([`Pattern::bytes`]) match the line
+/// text `text` at byte `at`, the start of a cell, entirely inside it:
+/// [`Grid::matches_at`] on a line read as text ([`Grid::text`]) that does
+/// not wrap, ignoring case as `window_copy_search_compare` does when `cis`
+/// (only an ASCII pattern is matched so). The text is UTF-8, so bytes that
+/// match from a character's start are whole characters, a cell each.
+fn text_matches(text: &[u8], pat: &[u8], cis: bool, at: usize) -> bool {
+    text.get(at..at + pat.len()).is_some_and(|t| {
         t.iter().zip(pat).all(|(&c, &p)| {
             if cis {
                 c.to_ascii_lowercase() == p
@@ -178,6 +171,43 @@ fn text_matches(text: &[u8], pat: &[u8], cis: bool, ax: usize) -> bool {
             }
         })
     })
+}
+
+/// The first cell in `cells` (the last with `rev`) of a line read as text,
+/// `text` (a character a cell, `sx` of them), at which the pattern's bytes
+/// `pat` match ([`text_matches`]), entirely inside the line.
+fn text_find(
+    text: &str,
+    pat: &[u8],
+    cis: bool,
+    sx: usize,
+    cells: std::ops::RangeInclusive<usize>,
+    rev: bool,
+) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let at = |b: usize| {
+        #[cfg(test)]
+        tests::TEXT_SEARCHED.with(|n| n.set(n.get() + 1));
+        text_matches(bytes, pat, cis, b)
+    };
+    if bytes.len() == sx {
+        // ASCII: a byte a cell.
+        return if rev {
+            cells.rev().find(|&x| at(x))
+        } else {
+            cells.into_iter().find(|&x| at(x))
+        };
+    }
+    // A match starts at a character's first byte: a byte inside one is
+    // past ASCII and not a first byte, which the pattern's first byte is.
+    let byte = |x: usize| text.char_indices().nth(x).map_or(bytes.len(), |(b, _)| b);
+    let (lo, hi) = (byte(*cells.start()), byte(*cells.end()));
+    let found = if rev {
+        (lo..=hi).rev().find(|&b| at(b))
+    } else {
+        (lo..=hi).find(|&b| at(b))
+    }?;
+    Some(text[..found].chars().count())
 }
 
 /// tmux's `"^$*+()?[].\\"`: a search with none of these is plain text.
@@ -461,56 +491,55 @@ impl Grid {
     ) -> Option<(usize, usize)> {
         let sx = self.sx();
         let mut found = None;
-        // Most of a long history is plain ASCII lines, and reading one as
-        // cells costs many times what looking at its text does: a line of
-        // that kind the pattern cannot match is passed unread. For a plain
-        // pattern no ASCII line can hold that is every one of them; for a
-        // regular expression it is a line its text has no match in (the
-        // whole line, so not the first one searched from the middle going
-        // down: the text starting at the cursor can match what the whole
-        // does not, as for `\<`).
+        // Most of a long history is lines of characters of one column
+        // (plain or coloured log lines), and reading one as cells costs
+        // many times what looking at its text does: a line of that kind
+        // the pattern cannot match is passed unread. For a plain pattern
+        // that is every one of them that has no cell to match one of the
+        // pattern's ([`Pattern::never_in_text`]); for a regular expression
+        // it is a line its text has no match in (the whole line, so not
+        // the first one searched from the middle going down: the text
+        // starting at the cursor can match what the whole does not, as for
+        // `\<`).
         let skip_text = !text_paths_off();
-        // A plain ASCII pattern is looked for in such a line's text, which
-        // finds what comparing its cells finds (`window_copy_search_compare`
-        // compares a narrow ASCII cell's one byte, a blank as a space) at a
-        // fraction of the cost: a line that does not wrap holds a match
-        // only inside it (`window_copy_search_lr` fails one that runs past
-        // the last column).
-        let plain = re.is_none().then(|| pat.ascii_bytes()).flatten();
+        // A plain pattern of such characters is looked for in such a
+        // line's text, which finds what comparing its cells finds
+        // (`window_copy_search_compare` compares a cell's character, a
+        // blank as a space, and only ASCII ignoring case) at a fraction of
+        // the cost: a line that does not wrap holds a match only inside it
+        // (`window_copy_search_lr` fails one that runs past the last
+        // column).
+        let plain = re.is_none().then_some(pat.bytes.as_deref()).flatten();
         let mut text = String::new();
         // Whether line `y` is passed unread, and whether its text in `text`
-        // is the whole of it (narrow ASCII, not wrapped).
+        // is the whole of it (read as text, not wrapped).
         let read = |y: usize, whole: bool, text: &mut String| {
-            let ascii = skip_text && self.ascii_text(y, text) == Some(false);
-            let skip = ascii
+            let is_text = skip_text && self.text(y, text) == Some(false);
+            let skip = is_text
                 && match re {
-                    None => pat.never_in_ascii(),
+                    None => pat.never_in_text(text.len() == sx),
                     Some(re) => whole && matches!(re.span_with(text, false), Ok(None)),
                 };
             #[cfg(test)]
             if skip {
-                tests::ASCII_SKIPPED.with(|n| n.set(n.get() + 1));
+                tests::TEXT_SKIPPED.with(|n| n.set(n.get() + 1));
             }
-            (skip, ascii)
+            (skip, is_text)
         };
-        let in_text = |text: &str, ax: usize| {
-            #[cfg(test)]
-            tests::ASCII_SEARCHED.with(|n| n.set(n.get() + 1));
-            plain
-                .as_deref()
-                .is_some_and(|p| text_matches(text.as_bytes(), p, pat.cis, ax))
+        let find_in_text = |text: &str, cells: std::ops::RangeInclusive<usize>, rev: bool| {
+            text_find(text, plain?, pat.cis, sx, cells, rev)
         };
         if down {
             for i in fy..=endline {
-                let (skip, ascii) = read(i, fx == 0, &mut text);
+                let (skip, is_text) = read(i, fx == 0, &mut text);
                 if skip {
                     fx = 0;
                     continue;
                 }
                 found = match re {
                     Some(re) => self.search_lr_regex(re, i, fx, sx).map(|(px, _)| (px, i)),
-                    None if ascii && plain.is_some() => {
-                        (fx..sx).find(|&ax| in_text(&text, ax)).map(|px| (px, i))
+                    None if is_text && plain.is_some() => {
+                        find_in_text(&text, fx..=sx - 1, false).map(|px| (px, i))
                     }
                     None => self.search_lr(pat, i, fx, sx).map(|px| (px, i)),
                 };
@@ -522,7 +551,7 @@ impl Grid {
         } else {
             let mut i = fy + 1;
             while endline < i {
-                let (skip, ascii) = read(i - 1, true, &mut text);
+                let (skip, is_text) = read(i - 1, true, &mut text);
                 if skip {
                     fx = sx - 1;
                     i -= 1;
@@ -533,10 +562,9 @@ impl Grid {
                         .search_rl_regex(re, i - 1, 0, fx + 1)
                         .map(|m| self.search_back_overlap(re, m, i, endline))
                         .map(|(px, py)| (px, py - 1)),
-                    None if ascii && plain.is_some() => (0..=fx)
-                        .rev()
-                        .find(|&ax| in_text(&text, ax))
-                        .map(|px| (px, i - 1)),
+                    None if is_text && plain.is_some() => {
+                        find_in_text(&text, 0..=fx, true).map(|px| (px, i - 1))
+                    }
                     None => self.search_rl(pat, i - 1, 0, fx + 1).map(|px| (px, i - 1)),
                 };
                 if found.is_some() {
@@ -825,24 +853,17 @@ impl CopyMode {
         };
         let mut nfound = 0usize;
         let mut stopped = false;
-        // Lines out of view are only counted, and most are plain ASCII:
-        // those are counted from their text alone ([`Self::count_ascii`]).
+        // Lines out of view are only counted, and most are characters of
+        // one column: those are counted from their text alone
+        // ([`Self::count_text`]).
         let (shown_from, shown_to) = self.visible_lines();
-        let (plain, never) = pat.plain_in_ascii(re.is_some());
         let mut text = String::new();
         loop {
             self.search.marks = Some(vec![0; sx * sy]);
             self.search.generation = 1;
             for py in start..end {
                 if !(shown_from..shown_to).contains(&py)
-                    && let Some(n) = self.count_ascii(
-                        re.as_ref(),
-                        plain.as_deref(),
-                        never,
-                        pat.cis,
-                        py,
-                        &mut text,
-                    )
+                    && let Some(n) = self.count_text(re.as_ref(), pat, py, &mut text)
                 {
                     nfound += n;
                     let now = Instant::now();
@@ -920,36 +941,40 @@ impl CopyMode {
 
     /// How many matches line `py` has when it is out of view, counted as
     /// the loop of [`Self::search_marks`] counts them but from the line's
-    /// text: `None` unless the line is plain narrow ASCII, not wrapped, and
-    /// the search can be told from bytes (a regular expression, or a plain
-    /// pattern of single ASCII cells; `plain`). A cell is then a byte, so
-    /// a match's cell is its byte offset and its width its length
-    /// (`window_copy_cstrtocellpos` finds nothing else), and the next
-    /// search starts where the match ends with `REG_NOTBOL`
+    /// text: `None` unless the line reads as text ([`Grid::text`]: every
+    /// cell one character of one column or a blank, of any style), does
+    /// not wrap, and the search can be told from its bytes (a regular
+    /// expression, or a plain pattern of such characters,
+    /// [`Pattern::bytes`]). The line's text is then what
+    /// `window_copy_stringify` makes of its cells, a character a cell, so
+    /// a match found in it from a cell's first byte is the match the cells
+    /// give (`window_copy_cstrtocellpos` finds nothing else), and the next
+    /// search starts at the byte where the match ends, with `REG_NOTBOL`
     /// (`window_copy_search_lr_regex`), without building the cells.
-    fn count_ascii(
+    fn count_text(
         &self,
         re: Option<&Regex>,
-        plain: Option<&[u8]>,
-        never: bool,
-        cis: bool,
+        pat: &Pattern,
         py: usize,
         text: &mut String,
     ) -> Option<usize> {
         if text_paths_off() {
             return None;
         }
-        if re.is_none() && plain.is_none() && !never {
+        let never = |ascii| re.is_none() && pat.never_in_text(ascii);
+        if re.is_none() && pat.bytes.is_none() && !never(false) {
             return None;
         }
-        if self.backing.ascii_text(py, text)? {
+        if self.backing.text(py, text)? {
             return None;
         }
         #[cfg(test)]
-        tests::ASCII_COUNTED.with(|n| n.set(n.get() + 1));
-        if never {
+        tests::TEXT_COUNTED.with(|n| n.set(n.get() + 1));
+        if never(text.len() == self.backing.sx()) {
             return Some(0);
         }
+        let cis = pat.cis;
+        let plain = pat.bytes.as_deref();
         let (mut n, mut px) = (0, 0);
         while px < text.len() {
             let end = if let Some(re) = re {
@@ -1068,20 +1093,20 @@ mod tests {
 
     thread_local! {
         /// Count every line the slow way.
-        pub(super) static NO_ASCII_COUNT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-        /// Lines counted from their text ([`Grid::count_ascii`]).
-        pub(super) static ASCII_COUNTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static NO_TEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Lines counted from their text ([`CopyMode::count_text`]).
+        pub(super) static TEXT_COUNTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         /// Lines the jump passed from their text ([`Grid::search_from`]).
-        pub(super) static ASCII_SKIPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static TEXT_SKIPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         /// Columns the jump looked for a plain pattern at in a line's text.
-        pub(super) static ASCII_SEARCHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static TEXT_SEARCHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
-    /// `repeat` blocks of one line of each kind on a 40x6 pane: plain and
-    /// coloured ASCII (counted from the text), and lines that have to be
-    /// read as cells: accented, wide, with a tab, wrapped (a 100 character
-    /// line is two full rows and a short one). `kinds` is how many of each
-    /// block's eight lines count from the text.
+    /// `repeat` blocks of one line of each kind on a 40x6 pane: plain,
+    /// coloured and accented (counted from the text), and lines that have
+    /// to be read as cells: wide, with a tab, wrapped (a 100 character line
+    /// is two full rows and a short one). The second value is how many of
+    /// each block's eight lines count from the text.
     fn mixed(repeat: usize) -> (PaneTerm, usize) {
         let mut t = PaneTerm::new(40, 6, 2000);
         for i in 0..repeat {
@@ -1099,7 +1124,7 @@ mod tests {
                 t.feed(format!("{line}\r\n").as_bytes());
             }
         }
-        (t, 4)
+        (t, 5)
     }
 
     fn count(
@@ -1117,17 +1142,17 @@ mod tests {
             slider: None,
             dragging: false,
         };
-        NO_ASCII_COUNT.with(|f| f.set(slow));
-        let before = ASCII_COUNTED.with(std::cell::Cell::get);
+        NO_TEXT.with(|f| f.set(slow));
+        let before = TEXT_COUNTED.with(std::cell::Cell::get);
         let size = (usize::from(t.cols()), usize::from(t.rows()));
         let mut m = CopyMode::new(t, size, false, (false, false), false, None);
         m.command(&env, command, &[pattern.to_owned()], false)
             .unwrap();
         let info = m.search_info().2;
-        NO_ASCII_COUNT.with(|f| f.set(false));
+        NO_TEXT.with(|f| f.set(false));
         (
             info,
-            ASCII_COUNTED.with(std::cell::Cell::get) - before,
+            TEXT_COUNTED.with(std::cell::Cell::get) - before,
             m.cursor(),
         )
     }
@@ -1183,9 +1208,195 @@ mod tests {
             assert!(want.is_some_and(|(c, more)| c >= 0 && !more), "{want:?}");
             taken = taken.max(n);
         }
-        // Every plain and coloured line out of view was counted from its
-        // text (the pane shows the last six).
+        // Every plain, coloured and accented line out of view was counted
+        // from its text (the pane shows the last six).
         assert!(taken >= fast_lines * 12 - 6, "{taken}");
+    }
+
+    /// Random styled lines on a pane `cols` wide, most of them characters
+    /// of one column (coloured, bold, linked, with characters past ASCII)
+    /// and between them every kind a search reads from cells: wide
+    /// characters, clusters, tabs, line drawing, lines that wrap.
+    fn styled(seed: u64, lines: usize, cols: u16) -> PaneTerm {
+        use std::fmt::Write as _;
+        let mut x = seed;
+        let mut below = |n: u64| {
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            x.wrapping_mul(0x2545_f491_4f6c_dd1d) % n
+        };
+        let mut t = PaneTerm::new(cols, 6, 2000);
+        let mut out = String::new();
+        for i in 0..lines {
+            for _ in 0..=below(5) {
+                let _ = match below(22) {
+                    0 => write!(out, "\x1b[3{}m", below(8)),
+                    1 => write!(out, "\x1b[1;38;5;{}m", below(256)),
+                    2 => write!(out, "\x1b[m"),
+                    3 => write!(out, "\x1b[4{}m\x1b[K\x1b[m", below(8)),
+                    4 => write!(out, "caf\u{e9} "),
+                    5 => write!(out, "Caf\u{e9}s "),
+                    6 => write!(out, "\u{2500}\u{2500} "),
+                    7 => write!(out, "\u{fc}ber{} ", below(10)),
+                    8 => write!(out, "\u{2022}x "),
+                    9 => write!(out, "\x1b]8;;http://h/{i}\x1b\\l\u{e9}n\x1b]8;;\x1b\\ "),
+                    10 if below(4) == 0 => write!(out, "\u{4e2d}\u{6587} "),
+                    11 if below(4) == 0 => write!(out, "e\u{301} "),
+                    12 if below(4) == 0 => write!(out, "a\tb "),
+                    13 if below(4) == 0 => write!(out, "\x1b(0qx\x1b(B "),
+                    14 if below(4) == 0 => write!(out, "{:\u{e9}<1$}", "", usize::from(cols)),
+                    _ => write!(out, "w{} ", below(30)),
+                };
+            }
+            out.push_str("\x1b[m\r\n");
+        }
+        t.feed(out.as_bytes());
+        t
+    }
+
+    /// The search state after each step: `#{search_count}` and
+    /// `#{search_count_partial}`, the cursor and `#{search_match}`.
+    type Seen = Vec<(Option<(i64, bool)>, (usize, usize), String)>;
+
+    /// `command pattern`, then `search-again` and `search-reverse` twice
+    /// each, from a copy mode entered on `t`; with `slow` every line is
+    /// read as cells.
+    fn steps(t: &PaneTerm, command: &str, pattern: &str, slow: bool) -> Seen {
+        let env = Env {
+            vi: false,
+            line_numbers: 0,
+            separators: String::new(),
+            wrap_search: true,
+            mouse: false,
+            slider: None,
+            dragging: false,
+        };
+        NO_TEXT.with(|f| f.set(slow));
+        let size = (usize::from(t.cols()), usize::from(t.rows()));
+        let mut m = CopyMode::new(t, size, false, (false, false), false, None);
+        let mut seen = Vec::new();
+        for (cmd, args) in [
+            (command, vec![pattern.to_owned()]),
+            ("search-again", vec![]),
+            ("search-again", vec![]),
+            ("search-reverse", vec![]),
+            ("search-reverse", vec![]),
+        ] {
+            m.command(&env, cmd, &args, false).unwrap();
+            seen.push((m.search_info().2, m.cursor(), m.search_match()));
+        }
+        NO_TEXT.with(|f| f.set(false));
+        seen
+    }
+
+    /// Lines of styled characters of one column, past ASCII or not, are
+    /// searched from their text (task `perf_search_styled_history`: a
+    /// coloured log line with an `\u{e9}` was read as cells, which made a
+    /// search over 1M of them 3.4x tmux's time), and every search finds,
+    /// counts and jumps to what reading every line as cells does: plain
+    /// patterns with and without case, past ASCII, wide, clusters, tabs,
+    /// and regular expressions, up and down, again and reversed, over
+    /// random styled content.
+    #[test]
+    fn styled_lines_search_from_text_as_from_cells() {
+        let patterns = [
+            ("search-backward-text", "caf\u{e9}"),
+            ("search-forward-text", "caf\u{e9}"),
+            ("search-backward-text", "Caf\u{e9}"),
+            ("search-backward-text", "caf"),
+            ("search-forward-text", "\u{e9} "),
+            ("search-backward-text", "\u{e9}"),
+            ("search-backward-text", "\u{e9}\u{e9}\u{e9}"),
+            ("search-forward-text", "\u{2500}"),
+            ("search-backward-text", "\u{2022}x w"),
+            ("search-backward-text", "\u{fc}ber1"),
+            ("search-forward-text", "w1"),
+            ("search-backward-text", "W2"),
+            ("search-backward-text", "l\u{e9}n"),
+            ("search-backward-text", "\u{4e2d}"),
+            ("search-forward-text", "e\u{301}"),
+            ("search-backward-text", "\t"),
+            ("search-backward-text", "q"),
+            ("search-backward-text", "nowhere"),
+            ("search-backward", "caf\u{e9}s?"),
+            ("search-forward", "\u{e9}+"),
+            ("search-backward", "[\u{e9}\u{fc}]"),
+            ("search-backward", "^.\u{2500}"),
+            ("search-forward", "\u{2500} .$"),
+            ("search-backward", "\u{e9} *$"),
+            ("search-backward", "(\u{e9}|\u{fc})b"),
+            ("search-forward", "\\<caf"),
+            ("search-backward", "x*"),
+            ("search-backward", "[^ ]+\u{e9}"),
+            ("search-backward", "w[0-9]+ C"),
+            ("search-forward", "\u{4e2d}."),
+        ];
+        let mut counted = 0;
+        for (seed, cols) in [(1, 30), (7, 41), (99, 17)] {
+            let t = styled(seed, 150, cols);
+            for (command, pattern) in patterns {
+                let want = steps(&t, command, pattern, true);
+                let before = TEXT_COUNTED.with(std::cell::Cell::get);
+                let got = steps(&t, command, pattern, false);
+                counted = counted.max(TEXT_COUNTED.with(std::cell::Cell::get) - before);
+                assert_eq!(got, want, "seed {seed}: {command} {pattern:?}");
+                assert!(
+                    want[0].0.is_some_and(|(c, more)| c >= 0 && !more),
+                    "{want:?}"
+                );
+            }
+        }
+        // Most lines out of view were counted from their text (fewer than
+        // half are ASCII).
+        assert!(counted > 100, "{counted}");
+    }
+
+    /// A styled history of characters of one column, some past ASCII, is
+    /// passed by a jump and counted without reading a line as cells.
+    #[test]
+    fn a_styled_history_is_searched_without_reading_cells() {
+        let peeked = || crate::mode::grid::tests::ROWS_PEEKED.with(std::cell::Cell::get);
+        let mut t = PaneTerm::new(60, 4, 1000);
+        for i in 0..500 {
+            t.feed(
+                format!("\x1b[32m2026\x1b[m \x1b[1;34mINFO\x1b[m w[{i}] caf\u{e9} \u{2500}\x1b[44m\x1b[K\x1b[m\r\n")
+                    .as_bytes(),
+            );
+        }
+        let g = Grid::clone_of(&t, 60, 4, false).0;
+        let last = g.last();
+        let before = peeked();
+        for (pattern, regex) in [
+            ("nowhere", false),
+            ("caf\u{e9}s", false),
+            ("\u{e9}x+", true),
+        ] {
+            let pat = Pattern::new(pattern);
+            let re = regex.then(|| Regex::new(pattern, false).unwrap());
+            assert_eq!(
+                g.search_from(&pat, re.as_ref(), (59, last), 0, false, false),
+                None
+            );
+            assert_eq!(
+                g.search_from(&pat, re.as_ref(), (0, 0), last, false, true),
+                None
+            );
+        }
+        let pat = Pattern::new("w[123] caf\u{e9} \u{2500}");
+        assert_eq!(
+            g.search_from(&pat, None, (59, last), 0, false, false),
+            Some((10, 123))
+        );
+        assert!(
+            peeked() - before < 10,
+            "{} lines read as cells",
+            peeked() - before
+        );
+        let (got, counted, _) = count(&t, "search-backward-text", "caf\u{e9} \u{2500}", false);
+        assert_eq!(got, Some((500, false)));
+        assert!(counted >= 490, "{counted} lines counted from their text");
+        assert_eq!(g.kept_lines(), 0);
     }
 
     /// A plain pattern with a character past ASCII (task
@@ -1214,8 +1425,8 @@ mod tests {
         let g = Grid::clone_of(&t, 40, 4, false).0;
         let last = g.last();
         let pat = Pattern::new("\u{e9}t");
-        assert!(pat.never_in_ascii());
-        let skipped = || ASCII_SKIPPED.with(std::cell::Cell::get);
+        assert!(pat.never_in_text(true));
+        let skipped = || TEXT_SKIPPED.with(std::cell::Cell::get);
         let start = skipped();
         assert_eq!(
             g.search_from(&pat, None, (0, last), 0, false, false),
@@ -1297,9 +1508,9 @@ mod tests {
             let from = if down { (0, 0) } else { (39, last) };
             let end = if down { last } else { 0 };
             let got = g.search_from(&pat, None, from, end, false, down);
-            NO_ASCII_COUNT.with(|f| f.set(true));
+            NO_TEXT.with(|f| f.set(true));
             let cells = g.search_from(&pat, None, from, end, false, down);
-            NO_ASCII_COUNT.with(|f| f.set(false));
+            NO_TEXT.with(|f| f.set(false));
             assert_eq!(got, cells, "{pattern} down={down}");
             assert_eq!(got, want, "{pattern} down={down}");
         }

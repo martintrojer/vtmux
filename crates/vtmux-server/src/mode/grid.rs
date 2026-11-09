@@ -38,7 +38,7 @@ impl vtmux_vt::Lines for Grid {
     }
 
     /// A line still unread is the entry copy's row, while the copy is as
-    /// wide as the grid (as [`Grid::ascii_text`] reads it): a capture of
+    /// wide as the grid (as [`Grid::text`] reads it): a capture of
     /// all of history then keeps no row for each line.
     fn entry_row(&self, y: usize) -> Option<(&ScreenCopy, usize)> {
         let line = self.lines.get(y)?;
@@ -311,18 +311,19 @@ impl Grid {
         RowRef::Read(row)
     }
 
-    /// Line `y` as the text a search reads, a byte for each of the `sx`
-    /// cells, in `out`; whether it wraps onto the next line. `None` unless
-    /// the line is still the entry copy's, unread, and made of narrow ASCII
-    /// characters and blanks only ([`ScreenCopy::ascii_text`]): the line
-    /// then has to be read as a [`Row`] with [`Grid::peek`].
-    pub fn ascii_text(&self, y: usize, out: &mut String) -> Option<bool> {
+    /// Line `y` as the text a search reads, a character for each of the
+    /// `sx` cells (ASCII exactly when it is `sx` bytes long), in `out`;
+    /// whether it wraps onto the next line. `None` unless the line is
+    /// still the entry copy's, unread, and made of characters of one
+    /// column and blanks only, of any style ([`ScreenCopy::text`]): the
+    /// line then has to be read as a [`Row`] with [`Grid::peek`].
+    pub fn text(&self, y: usize, out: &mut String) -> Option<bool> {
         let line = self.lines.get(y)?;
         let (src, source) = (line.src?, self.source.as_ref()?);
         if line.row.get().is_some() || source.cols() != self.sx {
             return None;
         }
-        source.ascii_text(src, out)
+        source.text(src, out)
     }
 
     /// The hyperlink of the cell at `(x, y)`: from the pane's grid as it

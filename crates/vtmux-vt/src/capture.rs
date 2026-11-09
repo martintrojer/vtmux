@@ -966,6 +966,9 @@ pub struct ScreenCopy {
     /// The screen row of `term` read last, which the next read steps from
     /// (see [`row_ref_near`]). Read only through [`ScreenCopy::row_ref`].
     last: RefCell<LastRow<'static>>,
+    /// The cells and codepoints of the row [`ScreenCopy::text`] read
+    /// last, kept for the next: a search reads every row.
+    scratch: RefCell<(Vec<libghostty_vt::screen::Cell>, Vec<u32>)>,
 }
 
 impl std::fmt::Debug for ScreenCopy {
@@ -1040,29 +1043,40 @@ impl ScreenCopy {
     }
 
     /// Row `y` as the text a search reads (`window_copy_stringify`: a
-    /// space for a blank, one byte for each cell), appended to `out`
-    /// (cleared first), and whether the row wraps onto the next. `None`
-    /// when a cell is anything but a narrow ASCII character or a blank (a
-    /// wide, grapheme, tab or line-drawing cell, or any other character),
-    /// or the row cannot be read from the copy; the row then has to be
-    /// read with [`ScreenCopy::used_row`]. It costs one page-list walk and
-    /// one call for the cells, and builds no cell structures: a search
-    /// over a long history reads every line.
-    pub fn ascii_text(&self, y: usize, out: &mut String) -> Option<bool> {
+    /// space for a blank, the character of any other cell), appended to
+    /// `out` (cleared first), and whether the row wraps onto the next.
+    /// Every cell is one character of one column, so `out` holds `cols`
+    /// characters, and is ASCII exactly when it is `cols` bytes long.
+    /// `None` when a cell is anything else (a wide, grapheme, tab or
+    /// line-drawing cell: [`CellBits::plain`]), or the row cannot be read
+    /// from the copy; the row then has to be read with
+    /// [`ScreenCopy::used_row`]. Styles and links are not looked at. It
+    /// costs one step along the page list and one call for the cells, and
+    /// builds no cell structures: a search over a long history reads every
+    /// line.
+    pub fn text(&self, y: usize, out: &mut String) -> Option<bool> {
         out.clear();
         if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
             return None;
         }
         let row_ref = self.row_ref(y + self.retained - self.hsize)?;
         let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
-        let mut raw = Vec::new();
-        row_ref.row_cells(&mut raw).ok()?;
+        let (raw, codepoints) = &mut *self.scratch.borrow_mut();
+        row_ref.row_cells(raw).ok()?;
         // An incomplete reflow can leave the page narrower than the screen.
         raw.truncate(self.cols);
+        let kind = Plain {
+            any_style: true,
+            styled: false,
+            ascii: false,
+        };
+        plain_codepoints(raw, kind, codepoints)?;
         out.reserve(self.cols);
-        for cell in &raw {
-            out.push(CellBits(cell.bits()).ascii()?);
-        }
+        // A blank is a space; any other codepoint is a character.
+        out.extend(codepoints.iter().map(|&cp| match cp {
+            0 => ' ',
+            cp => char::from_u32(cp).unwrap_or(' '),
+        }));
         // A cell past the end of the row is a blank.
         out.extend(std::iter::repeat_n(
             ' ',
@@ -1169,6 +1183,7 @@ impl PaneTerm {
                 .collect(),
             marks: self.line_marks(),
             last: RefCell::new(None),
+            scratch: RefCell::default(),
         }
     }
 }
@@ -1592,27 +1607,47 @@ fn plain_cells(
     row_ref.row_cells(raw).ok()?;
     // An incomplete reflow can leave the page narrower than the screen.
     raw.truncate(cols);
-    out.clear();
-    // The usual row first, in two passes without a branch per cell: every
-    // cell the codepoint tag and an ASCII codepoint or none, nothing else
-    // that `kind` looks at.
-    let looked_at = !kind.ignored();
-    let ascii = raw.iter().fold(0, |acc, c| acc | (c.bits() & looked_at)) & !(0x7f << 2) == 0;
-    if ascii {
-        #[expect(clippy::cast_possible_truncation, reason = "below 0x80")]
-        out.extend(raw.iter().map(|c| ((c.bits() & looked_at) >> 2) as u32));
-    } else {
-        out.resize(raw.len(), 0);
-        for (o, cell) in out.iter_mut().zip(raw.iter()) {
-            *o = CellBits(cell.bits()).plain(kind)?;
-        }
-    }
+    plain_codepoints(raw, kind, out)?;
     if kind.styled {
         // As read_cells reads them: per-row flags let most cells skip
         // the style lookup.
         cell_styles(row_ref, raw, row.is_styled().unwrap_or(true), styles);
     }
     Some(wrapped)
+}
+
+/// The codepoint of each of the cells `raw`, 0 for a blank, in `out`, when
+/// every one is plain for `kind` ([`CellBits::plain`]); `None` when one is
+/// not. The usual rows go in two passes without a branch per cell: every
+/// cell the codepoint tag and a codepoint (ASCII, or any if `kind` takes
+/// any) or none, with nothing else that `kind` looks at; only another row
+/// is looked at cell by cell.
+fn plain_codepoints(
+    raw: &[libghostty_vt::screen::Cell],
+    kind: Plain,
+    out: &mut Vec<u32>,
+) -> Option<()> {
+    let looked_at = !kind.ignored();
+    // Used only once every cell's bits past the codepoint are known clear.
+    #[expect(clippy::cast_possible_truncation, reason = "21 bits")]
+    let codepoint = |c: &libghostty_vt::screen::Cell| ((c.bits() & looked_at) >> 2) as u32;
+    out.clear();
+    let bits = raw.iter().fold(0, |acc, c| acc | (c.bits() & looked_at));
+    let max: u64 = if kind.ascii { 0x7f } else { 0x1f_ffff };
+    if bits & !(max << 2) == 0
+        && (bits < 0x80 << 2
+            || raw
+                .iter()
+                .fold(true, |ok, c| ok & char::from_u32(codepoint(c)).is_some()))
+    {
+        out.extend(raw.iter().map(codepoint));
+        return Some(());
+    }
+    out.resize(raw.len(), 0);
+    for (o, cell) in out.iter_mut().zip(raw) {
+        *o = CellBits(cell.bits()).plain(kind)?;
+    }
+    Some(())
 }
 
 /// The style of each of the plain cells `raw` of the row at `row_ref`, as
@@ -1772,28 +1807,6 @@ impl CellBits {
                 Some(0)
             }
             _ => None,
-        }
-    }
-
-    /// The cell as a search sees it when that is one ASCII byte: a blank
-    /// (nothing written, or only a colour) is a space. `None` for a wide,
-    /// spacer, tab or protected (line-drawing) cell, a grapheme cluster
-    /// and any codepoint past ASCII.
-    fn ascii(self) -> Option<char> {
-        if self.0 == 0 {
-            return Some(' ');
-        }
-        if self.field(42, 2) != 0 || self.tab() != 0 || self.is_protected() {
-            return None;
-        }
-        match self.content_tag() {
-            CellContentTag::Codepoint => match self.codepoint() {
-                0 => Some(' '),
-                c @ 1..=0x7f => char::from_u32(c),
-                _ => None,
-            },
-            CellContentTag::CodepointGrapheme => None,
-            CellContentTag::BgColorPalette | CellContentTag::BgColorRgb => Some(' '),
         }
     }
 }
@@ -2513,7 +2526,7 @@ mod tests {
         }
         let mut text = String::new();
         for y in (0..n).rev() {
-            let _ = copy.ascii_text(y, &mut text);
+            let _ = copy.text(y, &mut text);
         }
         // The first row, and row 0 again at the end (a lookup of it walks
         // nothing).
@@ -2587,8 +2600,8 @@ mod tests {
             // A fresh copy's first read is a lookup.
             let (mut text, mut fresh) = (String::new(), String::new());
             for &y in order.iter().step_by(97) {
-                let got = copy.ascii_text(y, &mut text);
-                let want = t.copy_screen().ascii_text(y, &mut fresh);
+                let got = copy.text(y, &mut text);
+                let want = t.copy_screen().text(y, &mut fresh);
                 assert_eq!((got, &text), (want, &fresh), "row {y}");
             }
             assert_eq!(t.rows_in(0..n).collect::<Vec<_>>(), want);
@@ -2618,6 +2631,73 @@ mod tests {
             assert_eq!(copy.hyperlink(0, y), links[y], "row {y}");
         }
         assert!(links.iter().flatten().count() > 2000);
+    }
+
+    /// A copy's row as text ([`ScreenCopy::text`]) is what a search makes
+    /// of its cells (`window_copy_stringify`: a blank, or a column past the
+    /// row's last cell, a space; any other cell its character) for every
+    /// row whose cells are all one character of one column, of any style,
+    /// colour or link, past ASCII or not; and nothing for any other row.
+    /// A few rows of such cells are read from cells too: a tab a resize cut
+    /// and the column a wrapped wide character left read as blanks, but
+    /// are not plain in Ghostty's cell. Over random content: resident,
+    /// compressed, and the alternate screen (the primary history it hides
+    /// is read from cells).
+    #[test]
+    fn a_copy_row_as_text_is_its_cells() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let (mut texts, mut others, mut past_ascii, mut declined) = (0, 0, 0, 0);
+        for round in 0..3 {
+            let cols = 12 + rng.below(30);
+            let mut t = PaneTerm::new(u16::try_from(cols).unwrap(), 6, 3000);
+            t.feed(&random_output(&mut rng, 2500, cols));
+            if round == 1 {
+                t.compress_all();
+                assert!(t.compressed_pages() > 0);
+            }
+            if round == 2 {
+                t.feed(b"\x1b[?1049h");
+                t.feed(&random_output(&mut rng, 4, cols));
+            }
+            let copy = t.copy_screen();
+            let cols = usize::try_from(cols).unwrap();
+            let mut text = String::new();
+            for y in 0..copy.history_size() + 6 {
+                let got = copy.text(y, &mut text);
+                if round == 2 && y < copy.history_size() {
+                    assert_eq!(got, None, "row {y}");
+                    continue;
+                }
+                let row = copy.used_row(y);
+                let narrow = row
+                    .cells
+                    .iter()
+                    .all(|c| c.width == 1 && !c.tab && !c.acs && c.text.chars().nth(1).is_none());
+                if !narrow {
+                    assert_eq!(got, None, "round {round} row {y}: {row:?}");
+                    others += 1;
+                    continue;
+                }
+                let want: String = (0..cols)
+                    .map(|x| match row.cells.get(x) {
+                        Some(c) if !c.text.is_empty() => c.text.as_str(),
+                        _ => " ",
+                    })
+                    .collect();
+                let Some(wrapped) = got else {
+                    declined += 1;
+                    continue;
+                };
+                assert_eq!(wrapped, row.wrapped, "round {round} row {y}");
+                assert_eq!(text, want, "round {round} row {y}");
+                texts += 1;
+                past_ascii += usize::from(!text.is_ascii());
+            }
+        }
+        assert!(
+            texts > 1000 && others > 1000 && past_ascii > 100 && declined < texts / 20,
+            "{texts} as text ({past_ascii} past ASCII), {others} not, {declined} declined"
+        );
     }
 
     /// The column a wide character that did not fit left at the end of a
