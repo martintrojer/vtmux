@@ -1379,20 +1379,34 @@ fn the_reattach_wait_counts_from_the_rebuild() {
 /// `hyperlinks_next_external_id`): the snapshot holds a number past every
 /// link made so far, status line and popup links included (a pane's own
 /// are also kept with its terminal), and the server rebuilt from one
-/// numbers on from it, so a link drawn after a live upgrade never takes a
-/// number still on screen.
+/// numbers on from it, its panes too, so a link drawn after a live upgrade
+/// never takes a number still on screen. A snapshot reads the counter and
+/// moves it not (two are the same, and persist sees no change), and the
+/// counter is the server's: another server's links move it not.
 #[test]
 fn the_link_counter_crosses_a_snapshot() {
     let dir = temp_dir("linkno");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    let made = vtmux_vt::Link::fresh("http://made-before").number();
+    let made = a.link_numbers.fresh("http://made-before").number();
     let mut s = a.to_snapshot(snap::Meta::default());
     assert!(s.server.link_number > made, "{}", s.server.link_number);
+    let other = vtmux_vt::LinkNumbers::default();
+    for _ in 0..3 {
+        let _ = other.fresh("http://another-server");
+    }
+    assert_eq!(
+        a.to_snapshot(snap::Meta::default()).server.link_number,
+        s.server.link_number
+    );
     let far = s.server.link_number + 10_000;
     s.server.link_number = far;
     let b = from_snapshot(&dir, &s).unwrap();
-    assert!(vtmux_vt::Link::fresh("http://after").number() >= far);
+    assert_eq!(b.link_numbers.next(), far);
+    let pane = &b.model.panes[&vtmux_core::ids::PaneId(0)].term;
+    assert!(pane.link_numbers().same(&b.link_numbers));
+    assert!(!b.link_numbers.same(&a.link_numbers));
+    assert_eq!(b.link_numbers.fresh("http://after").number(), far);
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }

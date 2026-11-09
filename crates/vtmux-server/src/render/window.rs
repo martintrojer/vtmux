@@ -84,6 +84,8 @@ pub struct Source<'a> {
     pub keys: &'a vtmux_core::keys::KeyBindings,
     /// The client the window is drawn for, if any.
     pub client: Option<DrawnFor<'a>>,
+    /// The server's link counter ([`Theme::links`]).
+    pub links: &'a vtmux_vt::LinkNumbers,
 }
 
 /// `options_string_to_style` + `style_apply` of option text `text`, run
@@ -363,11 +365,14 @@ impl Source<'_> {
         if let Some(t) = self.themes.0.borrow().as_ref()
             && (t.generation, t.colours, t.light) == (generation, caps.colours, caps.light_theme)
         {
-            return t.theme;
+            return t.theme.clone();
         }
         let option = self.model.number_option(TreeId::Server, "theme");
         if option == 1 {
-            return Theme(TERMINAL.map(Color::Palette));
+            return Theme {
+                colours: TERMINAL.map(Color::Palette),
+                links: self.links.clone(),
+            };
         }
         let light = option == 2 || (option != 3 && caps.light_theme);
         let prefix = if light { "light" } else { "dark" };
@@ -380,11 +385,11 @@ impl Source<'_> {
                 == (option, &values, caps.colours, caps.light_theme)
         {
             t.generation = generation;
-            return t.theme;
+            return t.theme.clone();
         }
         let ctx = self.ctx(Found::default(), caps);
         let mut slots = values.iter();
-        let theme = Theme([(); 10].map(|()| {
+        let colours = [(); 10].map(|()| {
             let value = slots.next().map_or("", String::as_str);
             // server_client_update_theme_colours (server-client.c:1293):
             // FORMAT_NOJOBS.
@@ -392,14 +397,18 @@ impl Source<'_> {
                 None | Some(Colour::Theme(_)) => Color::Default,
                 Some(c) => Theme::default().colour(c),
             }
-        }));
+        });
+        let theme = Theme {
+            colours,
+            links: self.links.clone(),
+        };
         *self.themes.0.borrow_mut() = Some(ThemeInputs {
             generation,
             option,
             values,
             colours: caps.colours,
             light: caps.light_theme,
-            theme,
+            theme: theme.clone(),
         });
         theme
     }

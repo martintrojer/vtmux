@@ -1310,7 +1310,7 @@ mod tests {
         let mut screen = erased(4);
         screen.cells[0].text = "x".into();
         let _ = c.frame(screen.clone(), caps);
-        let link = vtmux_vt::Link::fresh("http://l");
+        let link = vtmux_vt::LinkNumbers::default().fresh("http://l");
         screen.cells[0].link = Some(std::sync::Arc::clone(&link));
         let frame = String::from_utf8(c.frame(screen, caps)).unwrap();
         let want = format!(
@@ -1362,8 +1362,9 @@ mod tests {
         for (c, t) in screen.cells.iter_mut().zip("SAMELINK".chars()) {
             c.text = t.to_string().as_str().into();
         }
+        let numbers = vtmux_vt::LinkNumbers::default();
         let relink = |screen: &mut Snapshot| {
-            let link = vtmux_vt::Link::fresh("http://l");
+            let link = numbers.fresh("http://l");
             for c in &mut screen.cells {
                 c.link = Some(std::sync::Arc::clone(&link));
             }

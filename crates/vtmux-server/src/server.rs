@@ -560,6 +560,10 @@ pub struct Server {
     pub global_env: Environ,
     /// The theme colours last worked out ([`crate::render::window::Source::theme`]).
     pub(crate) themes: crate::render::window::ThemeCache,
+    /// The counter of OSC 8 links' external ids (tmux's
+    /// `hyperlinks_next_external_id`), shared with every pane and popup
+    /// terminal and every theme.
+    pub(crate) link_numbers: vtmux_vt::LinkNumbers,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
     /// Nesting of `source-file`: with no client (cmd-source-file.c
@@ -862,6 +866,7 @@ impl Server {
             info,
             global_env,
             themes: crate::render::window::ThemeCache::default(),
+            link_numbers: vtmux_vt::LinkNumbers::default(),
             shutdown: false,
             source_depths: BTreeMap::new(),
             focus_stale: std::collections::BTreeSet::new(),
@@ -4507,6 +4512,7 @@ impl Server {
             themes: &self.themes,
             keys: &self.key_bindings,
             client: None,
+            links: &self.link_numbers,
         }
     }
 
@@ -5214,6 +5220,7 @@ impl Server {
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
         let mut term = PaneTerm::new(cols, rows, history_limit);
+        term.number_links_from(&self.link_numbers);
         term.set_colour_names(vtmux_core::colour::x11_rgb);
         // screen_init: the new screen's key mode follows `extended-keys`.
         term.set_extended_keys(self.model.extended_keys());

@@ -1231,6 +1231,20 @@ impl PaneTerm {
         self.links.borrow().by_uri(uri)
     }
 
+    /// The counter this pane's links take their numbers from.
+    #[must_use]
+    pub fn link_numbers(&self) -> crate::LinkNumbers {
+        self.links.borrow().numbers.clone()
+    }
+
+    /// Number this pane's links from `numbers` (the server's, tmux's one
+    /// counter), which moves past every number the pane has given.
+    pub fn number_links_from(&mut self, numbers: &crate::LinkNumbers) {
+        let mut links = self.links.borrow_mut();
+        numbers.reach(links.numbers.next());
+        links.numbers = numbers.clone();
+    }
+
     /// Copy the grid (see [`ScreenCopy`]). Compressed history pages are
     /// copied compressed: the pane's stay so, the copy decodes a page on
     /// its first read.

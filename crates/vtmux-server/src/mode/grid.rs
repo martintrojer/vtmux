@@ -382,7 +382,7 @@ impl Grid {
         let mut link = |uri: &str| {
             let link = known.entry(uri.to_owned()).or_insert_with(|| {
                 pane.drawn_link_of(uri)
-                    .unwrap_or_else(|| vtmux_vt::Link::fresh(uri))
+                    .unwrap_or_else(|| pane.link_numbers().fresh(uri))
             });
             std::sync::Arc::clone(link)
         };

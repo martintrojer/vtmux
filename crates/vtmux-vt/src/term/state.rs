@@ -1076,7 +1076,8 @@ impl PaneTerm {
             return false;
         }
         match Self::import_state(&state) {
-            Ok(term) => {
+            Ok(mut term) => {
+                term.number_links_from(&self.link_numbers());
                 *self = term;
                 true
             }

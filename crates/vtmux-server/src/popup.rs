@@ -319,6 +319,7 @@ impl Server {
         }
         // screen_set_default_cursor and no history: a popup keeps none.
         let mut term = PaneTerm::new(jx.max(1), jy.max(1), 0);
+        term.number_links_from(&self.link_numbers);
         // screen_init: the popup's key mode follows `extended-keys` too.
         term.set_extended_keys(self.model.extended_keys());
         term.reset_key_mode();

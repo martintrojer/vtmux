@@ -230,7 +230,7 @@ mod tests {
         styled.style.underline = vt::Underline::Curly;
         styled.acs = true;
         let mut linked = cell("l", 1);
-        let link = vt::Link::fresh("http://x");
+        let link = vt::LinkNumbers::default().fresh("http://x");
         linked.link = Some(std::sync::Arc::clone(&link));
         let mut tab = cell("   ", 3);
         tab.tab = true;
@@ -287,14 +287,15 @@ mod tests {
                 rest: "\u{303}".into(),
             },
         ];
-        let (back, _) = row_in(&row, &mut |uri| vt::Link::fresh(uri));
+        let numbers = vt::LinkNumbers::default();
+        let (back, _) = row_in(&row, &mut |uri| numbers.fresh(uri));
         let texts: Vec<&str> = back.cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(texts, ["e\u{300}", "e", "e\u{301}"]);
 
         let linked = |text: &str| vt::Cell {
             text: text.into(),
             width: 1,
-            link: Some(vt::Link::fresh("http://l")),
+            link: Some(numbers.fresh("http://l")),
             ..vt::Cell::default()
         };
         let row = vt::Row {

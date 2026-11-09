@@ -6880,6 +6880,35 @@ mod tests {
         }
     }
 
+    /// Panes given one counter (the server's) number their links from it
+    /// in the order they are drawn; a pane on its own numbers apart, and
+    /// one that joins a counter moves it past what it gave. `clear-history
+    /// -H`, which rebuilds the pane, keeps its counter.
+    #[test]
+    fn panes_number_links_from_the_counter_they_are_given() {
+        let link = |t: &PaneTerm, y| t.drawn_link((0, y)).unwrap().number();
+        let numbers = crate::LinkNumbers::default();
+        let (mut a, mut b) = (PaneTerm::new(20, 3, 100), PaneTerm::new(20, 3, 100));
+        a.number_links_from(&numbers);
+        b.number_links_from(&numbers);
+        a.feed(b"\x1b]8;;http://a\x07A\x1b]8;;\x07");
+        b.feed(b"\x1b]8;;http://b\x07B\x1b]8;;\x07");
+        assert_eq!((link(&a, 0), link(&b, 0)), (1, 2));
+        assert!(b.reset_hyperlinks());
+        assert!(b.link_numbers().same(&numbers));
+        b.feed(b"\r\n\x1b]8;;http://c\x07C\x1b]8;;\x07");
+        assert_eq!(link(&b, 1), 3);
+
+        let mut alone = PaneTerm::new(20, 3, 100);
+        alone.feed(b"\x1b]8;;http://d\x07D\r\n\x1b]8;;http://e\x07E\x1b]8;;\x07");
+        assert_eq!((link(&alone, 0), link(&alone, 1)), (1, 2));
+        alone.number_links_from(&numbers);
+        assert_eq!(numbers.next(), 4);
+        let joined = crate::LinkNumbers::default();
+        alone.number_links_from(&joined);
+        assert_eq!(joined.next(), 4);
+    }
+
     /// `clear-history -H` (cmd-capture-pane.c:427-428,
     /// `screen_reset_hyperlinks`): the screen in use forgets its links and
     /// the one open at the cursor, whatever else it holds stays, and a

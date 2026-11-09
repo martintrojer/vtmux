@@ -507,7 +507,7 @@ impl StatusLine {
             screen_rows.saturating_sub(n)
         };
         let theme = source.theme(caps);
-        let key = (self.drawn, over, theme, caps.clear());
+        let key = (self.drawn, over, theme.clone(), caps.clear());
         let shown = match self.shown.take() {
             Some(shown) if shown.key == key && shown.rows.iter().all(|r| r.len() == cols) => shown,
             _ => {

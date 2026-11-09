@@ -4,7 +4,8 @@
 //! tmux keeps a tree of links per screen, a link being its URI and OSC 8
 //! id (one without an id is its own), and gives each new one an external
 //! id from a counter of the whole server, `tmux` and the number in hex
-//! (`hyperlinks_next_external_id`). The outer terminal is told
+//! (`hyperlinks_next_external_id`): here a [`LinkNumbers`], which the
+//! server shares with each of its panes. The outer terminal is told
 //! `OSC 8 ; id=tmuxN ; URI`, so cells of one link are one link there too,
 //! a link without an id included, across lines and wraps.
 //!
@@ -14,12 +15,12 @@
 //! parsed, so a link that scrolls away before anything draws it takes a
 //! number in tmux and none here (D-068). A `link=` style's link is one per
 //! URI (style.c `style_hyperlinks`, which uses the URI as the id):
-//! [`format_link`].
+//! [`LinkNumbers::format_link`].
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use libghostty_vt::screen::HyperlinkId;
 
@@ -52,21 +53,11 @@ impl Link {
         &self.uri
     }
 
-    /// A link of its own with the next external id; `uri` as Ghostty
-    /// holds it.
-    #[must_use]
-    pub fn fresh(uri: &str) -> Arc<Self> {
-        Arc::new(Self {
-            number: NEXT.fetch_add(1, Ordering::Relaxed),
-            uri: crate::vis_link(uri).into(),
-        })
-    }
-
     /// A link with a given number (a snapshot's), `uri` as [`Link::uri`]
-    /// gave it; the counter moves past it.
+    /// gave it. No counter moves: the [`LinkNumbers`] that gave the number
+    /// is restored on its own ([`LinkNumbers::reach`]).
     #[must_use]
     pub fn restored(number: u64, uri: &str) -> Arc<Self> {
-        NEXT.fetch_max(number.saturating_add(1), Ordering::Relaxed);
         Arc::new(Self {
             number,
             uri: uri.into(),
@@ -74,19 +65,89 @@ impl Link {
     }
 }
 
-/// tmux's `hyperlinks_next_external_id`: one counter for the server.
-static NEXT: AtomicU64 = AtomicU64::new(1);
+/// tmux's `hyperlinks_next_external_id`, one counter for the server, and
+/// `style_hyperlinks`, the server's `link=` style links by URI
+/// ([`LinkNumbers::format_link`]). A handle: clones share one counter. The
+/// server holds one and gives each pane it makes or restores a clone
+/// ([`crate::PaneTerm::number_links_from`]); a pane on its own numbers
+/// from one of its own. Not a global, so two servers in one process (the
+/// tests) number apart, and a snapshot reads it without moving it.
+#[derive(Clone, Debug, Default)]
+pub struct LinkNumbers(Rc<Numbers>);
 
-/// The next external id's number, for a snapshot.
-#[must_use]
-pub fn next_link_number() -> u64 {
-    NEXT.load(Ordering::Relaxed)
+#[derive(Debug)]
+struct Numbers {
+    next: Cell<u64>,
+    format: RefCell<HashMap<String, Arc<Link>>>,
 }
 
-/// Move the counter on to at least `n`, from a snapshot: links made after a
-/// live upgrade never take a number one still on screen has.
-pub fn restore_link_number(n: u64) {
-    NEXT.fetch_max(n, Ordering::Relaxed);
+impl Default for Numbers {
+    fn default() -> Self {
+        Self {
+            next: Cell::new(1),
+            format: RefCell::default(),
+        }
+    }
+}
+
+impl LinkNumbers {
+    /// The number the next link takes, for a snapshot.
+    #[must_use]
+    pub fn next(&self) -> u64 {
+        self.0.next.get()
+    }
+
+    /// Move the counter on to at least `n` (a snapshot's, or one past a
+    /// number a restored link holds): links made after a live upgrade
+    /// never take a number one still on screen has.
+    pub fn reach(&self, n: u64) {
+        self.0.next.set(self.0.next.get().max(n));
+    }
+
+    fn take(&self) -> u64 {
+        let n = self.0.next.get();
+        self.0.next.set(n.saturating_add(1));
+        n
+    }
+
+    /// Whether `self` and `other` are one counter.
+    #[must_use]
+    pub fn same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// A link of its own with the next external id; `uri` as Ghostty
+    /// holds it.
+    #[must_use]
+    pub fn fresh(&self, uri: &str) -> Arc<Link> {
+        Arc::new(Link {
+            number: self.take(),
+            uri: crate::vis_link(uri).into(),
+        })
+    }
+
+    /// The link of a `link=URI` style (format-draw.c `format_draw`): the
+    /// URI is its id, so every cell with it is one link. tmux puts the URI
+    /// in two trees, each giving it an external id: `style_parse`'s
+    /// `style_hyperlinks`, which only the parse sees, then the drawn
+    /// screen's, whose id the terminal is told; so the first draw of a URI
+    /// takes two numbers. tmux's screens (each client's status line, each
+    /// pane's border line, ...) each number it once more; here it is one
+    /// link everywhere.
+    #[must_use]
+    pub fn format_link(&self, uri: &str) -> Arc<Link> {
+        let mut links = self.0.format.borrow_mut();
+        if let Some(link) = links.get(uri) {
+            return Arc::clone(link);
+        }
+        if links.len() >= PRUNE_AT {
+            links.retain(|_, l| Arc::strong_count(l) > 1);
+        }
+        self.take();
+        let link = self.fresh(uri);
+        links.insert(uri.to_owned(), Arc::clone(&link));
+        link
+    }
 }
 
 /// How tmux tells a link's cells apart from another's: its id, or for one
@@ -102,6 +163,8 @@ pub enum LinkKeyId {
 #[derive(Debug, Default)]
 pub struct Links {
     map: HashMap<(String, LinkKeyId), Arc<Link>>,
+    /// The counter new links take their numbers from.
+    pub(crate) numbers: LinkNumbers,
 }
 
 /// Entries past which [`Links`] drops the links no cell holds any more
@@ -129,7 +192,7 @@ impl Links {
         if self.map.len() >= PRUNE_AT {
             self.map.retain(|_, l| Arc::strong_count(l) > 1);
         }
-        let link = Link::fresh(uri);
+        let link = self.numbers.fresh(uri);
         self.map.insert(key, Arc::clone(&link));
         Some(link)
     }
@@ -155,44 +218,17 @@ impl Links {
         out
     }
 
-    /// The links [`Links::export`] gave.
+    /// The links [`Links::export`] gave; the counter moves past them.
     pub fn import(&mut self, links: &[(String, LinkKeyId, u64)]) {
         self.map = links
             .iter()
             .map(|(uri, id, n)| {
+                self.numbers.reach(n.saturating_add(1));
                 let link = Link::restored(*n, &crate::vis_link(uri));
                 ((uri.clone(), id.clone()), link)
             })
             .collect();
     }
-}
-
-thread_local! {
-    /// `style_hyperlinks` (style.c): a `link=` style's link by URI.
-    static FORMAT_LINKS: RefCell<HashMap<String, Arc<Link>>> = RefCell::default();
-}
-
-/// The link of a `link=URI` style (format-draw.c `format_draw`): the URI
-/// is its id, so every cell with it is one link. tmux puts the URI in two
-/// trees, each giving it an external id: `style_parse`'s
-/// `style_hyperlinks`, which only the parse sees, then the drawn screen's,
-/// whose id the terminal is told; so the first draw of a URI takes two
-/// numbers. tmux's screens (each client's status line, each pane's border
-/// line, ...) each number it once more; here it is one link everywhere.
-#[must_use]
-pub fn format_link(uri: &str) -> Arc<Link> {
-    FORMAT_LINKS.with_borrow_mut(|links| {
-        if let Some(link) = links.get(uri) {
-            return Arc::clone(link);
-        }
-        if links.len() >= PRUNE_AT {
-            links.retain(|_, l| Arc::strong_count(l) > 1);
-        }
-        NEXT.fetch_add(1, Ordering::Relaxed);
-        let link = Link::fresh(uri);
-        links.insert(uri.to_owned(), Arc::clone(&link));
-        link
-    })
 }
 
 #[cfg(test)]
@@ -250,7 +286,7 @@ mod tests {
     #[test]
     fn import_keeps_numbers() {
         let mut l = Links::default();
-        let far = next_link_number() + 1000;
+        let far = l.numbers.next() + 1000;
         l.import(&[("http://a".into(), LinkKeyId::Explicit(b"i".to_vec()), far)]);
         assert_eq!(
             l.export(),
@@ -260,17 +296,36 @@ mod tests {
             .get("http://a", &HyperlinkId::Explicit(b"i".to_vec()), false)
             .unwrap();
         assert_eq!(a.number(), far);
-        assert!(next_link_number() > far);
+        assert_eq!(l.numbers.next(), far + 1);
     }
 
-    /// One link per URI, and the first draw of one takes two numbers.
+    /// One link per URI, and the first draw of one takes two numbers, as
+    /// in tmux: `tmux2`, then `tmux4`.
     #[test]
     fn a_format_link_is_one_per_uri() {
-        let before = next_link_number();
-        let f = format_link("https://f");
-        assert!(f.number() > before);
-        assert!(Arc::ptr_eq(&f, &format_link("https://f")));
-        assert_ne!(f, format_link("https://g"));
-        assert!(next_link_number() >= before + 4);
+        let n = LinkNumbers::default();
+        let f = n.format_link("https://f");
+        assert_eq!(f.number(), 2);
+        assert!(Arc::ptr_eq(&f, &n.format_link("https://f")));
+        assert_eq!(n.format_link("https://g").number(), 4);
+        assert_eq!(n.next(), 5);
+    }
+
+    /// Clones are one counter; another counter numbers on its own, and a
+    /// read moves none.
+    #[test]
+    fn link_numbers_are_shared_by_clones_only() {
+        let server = LinkNumbers::default();
+        let pane = server.clone();
+        assert!(pane.same(&server));
+        assert_eq!(server.fresh("http://a").number(), 1);
+        assert_eq!(pane.fresh("http://b").number(), 2);
+        let other = LinkNumbers::default();
+        assert!(!other.same(&server));
+        assert_eq!(other.fresh("http://c").number(), 1);
+        assert_eq!((server.next(), server.next()), (3, 3));
+        server.reach(10);
+        server.reach(7);
+        assert_eq!(pane.next(), 10);
     }
 }

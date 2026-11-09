@@ -152,11 +152,13 @@ impl Server {
             let size = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
             let search = pane.search.clone();
             let vi = self.model.mode_keys_vi(p);
+            let numbers = self.link_numbers.clone();
             self.model.push_mode(
                 p,
                 is_view,
                 |model| {
                     let mut m = ViewMode::new(size, vi, search);
+                    m.term.number_links_from(&numbers);
                     m.copy.key_mode = screen_key_mode(model);
                     Mode::View(Box::new(m))
                 },

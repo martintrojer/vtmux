@@ -8,8 +8,8 @@
 pub mod capture;
 mod dcs;
 pub mod kitty_keys;
-pub mod notify;
 pub mod link;
+pub mod notify;
 pub mod palette;
 pub mod progress;
 pub mod snapshot;
@@ -20,7 +20,7 @@ pub use capture::{
     CaptureOpts, LineRef, Lines, Row, ScreenCopy, capture, capture_alternate, capture_grid,
     capture_lines, history_bytes, history_counts, vis_link,
 };
-pub use link::{Link, LinkKeyId, format_link};
+pub use link::{Link, LinkKeyId, LinkNumbers};
 pub use palette::{OscEnd, Reply, Rgb, colour_reply};
 pub use snapshot::{Cell, Color, ScreenView, Snapshot, Style, Underline, snapshot};
 pub use text::CellText;

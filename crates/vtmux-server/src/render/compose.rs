@@ -20,9 +20,23 @@ use super::palette::{Dim, Palette};
 use super::scene::{Junction, Lines, Scene, SceneCell, glyph};
 
 /// A client's ten `theme*` colours (`c->theme_colours`,
-/// server-client.c `server_client_update_theme_colours`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Theme(pub [Color; 10]);
+/// server-client.c `server_client_update_theme_colours`), and the
+/// server's link counter a `link=` style is numbered from
+/// ([`vtmux_vt::LinkNumbers::format_link`]).
+#[derive(Clone, Debug, Default)]
+pub struct Theme {
+    pub colours: [Color; 10],
+    pub links: vtmux_vt::LinkNumbers,
+}
+
+/// One server's themes are the same theme when their colours are.
+impl PartialEq for Theme {
+    fn eq(&self, other: &Self) -> bool {
+        self.colours == other.colours && self.links.same(&other.links)
+    }
+}
+
+impl Eq for Theme {}
 
 impl Theme {
     /// Colour as the terminal sees it (colour.c `colour_toescape`).
@@ -35,7 +49,11 @@ impl Theme {
             Colour::Palette(n) => Color::Palette(n).in_form(true),
             Colour::Bright(n) => Color::Palette(8 + n),
             Colour::Rgb(r, g, b) => Color::Rgb(r, g, b),
-            Colour::Theme(i) => self.0.get(usize::from(i)).copied().unwrap_or_default(),
+            Colour::Theme(i) => self
+                .colours
+                .get(usize::from(i))
+                .copied()
+                .unwrap_or_default(),
         }
     }
 
@@ -86,7 +104,11 @@ impl Theme {
             width: c.width,
             style: self.style(&c.style),
             acs: c.style.attrs.contains(Attrs::ACS),
-            link: c.style.link.as_deref().map(vtmux_vt::format_link),
+            link: c
+                .style
+                .link
+                .as_deref()
+                .map(|uri| self.links.format_link(uri)),
             tab: false,
         }
     }
@@ -294,7 +316,7 @@ pub fn compose_cached(
     rows: u16,
 ) -> bool {
     let rows = scene.rows.min(rows);
-    let key = DrawKey::of(d, *theme, cols, rows);
+    let key = DrawKey::of(d, theme.clone(), cols, rows);
     let same = cache.scene.as_ref().is_some_and(|s| Rc::ptr_eq(s, scene))
         && cache.key.as_ref() == Some(&key);
     if !same {
@@ -1089,7 +1111,7 @@ mod tests {
         let red = Color::Palette(1);
         for mark in [
             |c: &mut Cell| c.acs = true,
-            |c: &mut Cell| c.link = Some(vtmux_vt::Link::fresh("http://l")),
+            |c: &mut Cell| c.link = Some(vtmux_vt::LinkNumbers::default().fresh("http://l")),
         ] {
             let mut row: Vec<Cell> = (0..12)
                 .map(|_| text_cell(" ", red, Color::Default))

@@ -485,8 +485,10 @@ pub(crate) fn restore_term(
         if (term.cols(), term.rows()) != (cols, rows) {
             return Err(invalid(format!("%{}: terminal not the pane's size", p.id)));
         }
-        // The colour-name table is the server's, not terminal state.
+        // The colour-name table is the server's, not terminal state; so
+        // is the link counter.
         term.set_colour_names(vtmux_core::colour::x11_rgb);
+        term.number_links_from(&server.link_numbers);
         return Ok(term);
     }
     fresh_term(server, p)
@@ -503,6 +505,7 @@ fn fresh_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
     )
     .ok_or_else(|| invalid(format!("%{}: no terminal of {cols}x{rows}", p.id)))?;
     term.set_colour_names(vtmux_core::colour::x11_rgb);
+    term.number_links_from(&server.link_numbers);
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
     if p.empty {
@@ -525,7 +528,10 @@ fn restore_popup_term(
     ghostty_patches: &str,
 ) -> io::Result<PaneTerm> {
     if let Some(t) = &p.term {
-        return term_from_snapshot(t, ghostty_patches).map_err(|e| invalid(format!("popup: {e}")));
+        let mut term =
+            term_from_snapshot(t, ghostty_patches).map_err(|e| invalid(format!("popup: {e}")))?;
+        term.number_links_from(&server.link_numbers);
+        return Ok(term);
     }
     fresh_popup_term(server, popup)
 }
@@ -536,6 +542,7 @@ fn fresh_popup_term(server: &Server, popup: &crate::popup::Popup) -> io::Result<
     let (jx, jy) = popup.inner();
     let mut term = PaneTerm::try_new(jx.max(1), jy.max(1), 0)
         .ok_or_else(|| invalid(format!("no popup terminal of {jx}x{jy}")))?;
+    term.number_links_from(&server.link_numbers);
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
     Ok(term)
@@ -960,7 +967,7 @@ impl Server {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             persist_hold: self.persist.kept.hold(),
-            link_number: vtmux_vt::link::next_link_number(),
+            link_number: self.link_numbers.next(),
             server_options: tree((0, 0)),
             session_options: tree((1, 0)),
             window_options: tree((2, 0)),
@@ -1509,7 +1516,7 @@ impl Server {
         server.global_env = env_in(&s.environment);
         server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
         server.persist.kept = super::persist::Kept::from_hold(s.persist_hold);
-        vtmux_vt::link::restore_link_number(s.link_number);
+        server.link_numbers.reach(s.link_number);
 
         // Options: every tree, then the hook bookkeeping.
         let mut trees = vec![
