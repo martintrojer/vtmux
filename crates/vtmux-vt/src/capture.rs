@@ -1510,18 +1510,24 @@ fn ref_kept(row_ref: &GridRef<'_>) -> LineKept {
 /// a row of the active area is read as one, at a cost that does not grow
 /// with the history.
 fn row_ref_at<'t>(term: &'t Terminal<'_, '_>, y: usize) -> Option<GridRef<'t>> {
+    #[cfg(test)]
+    tests::LOOKUPS.with(|n| n.set(n.get() + 1));
+    term.grid_ref(screen_point(term, 0, y)).ok()
+}
+
+/// Ghostty's point for cell `x` of screen row `y`, as [`row_ref_at`]
+/// looks it up: a history row as a screen point, an active row as an
+/// active one.
+fn screen_point(term: &Terminal<'_, '_>, x: u16, y: usize) -> Point {
     let (at, y): (fn(PointCoordinate) -> Point, usize) =
         match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
             Some(active) => (Point::Active, active),
             None => (Point::Screen, y),
         };
-    #[cfg(test)]
-    tests::LOOKUPS.with(|n| n.set(n.get() + 1));
-    term.grid_ref(at(PointCoordinate {
-        x: 0,
+    at(PointCoordinate {
+        x,
         y: u32::try_from(y).unwrap_or(u32::MAX),
-    }))
-    .ok()
+    })
 }
 
 /// Read one row of the active screen, spacer cells included: one page-list
@@ -1926,26 +1932,10 @@ fn hyperlink_at(term: &Terminal<'_, '_>, y: usize, x: usize) -> Option<String> {
     if !cells[x].link {
         return None;
     }
-    let (at, y): (fn(PointCoordinate) -> Point, usize) =
-        match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
-            Some(active) => (Point::Active, active),
-            None => (Point::Screen, y),
-        };
     let gr = term
-        .grid_ref(at(PointCoordinate {
-            x: u16::try_from(x).ok()?,
-            y: u32::try_from(y).ok()?,
-        }))
+        .grid_ref(screen_point(term, u16::try_from(x).ok()?, y))
         .ok()?;
-    let mut buf = vec![0u8; 256];
-    let n = loop {
-        match gr.hyperlink_uri(&mut buf) {
-            Ok(n) => break n,
-            Err(Error::OutOfSpace { required }) if required > buf.len() => buf.resize(required, 0),
-            Err(_) => return None,
-        }
-    };
-    (n > 0).then(|| String::from_utf8_lossy(&buf[..n]).into_owned())
+    hyperlink_uri(&gr)
 }
 
 /// The cell's cluster as tmux stores it: a combining character that would
