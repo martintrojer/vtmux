@@ -444,6 +444,16 @@ fn signal_exit_restores_terminal_modes() {
             let w = World::new(bin.clone());
             let mut a = w.attach(&["new", "-s", "a", "cat"]);
             a.wait(|a| a.text().contains("\x1b[?1049h"));
+            // tmux's server writes the terminal itself, so the client may
+            // not have had MSG_READY yet, and a signal before it exits 0
+            // (client.c `client_signal` while `!client_attached`). A redraw
+            // at a new size needs the client's MSG_RESIZE, which it sends
+            // once attached (MSG_READY, or SIGWINCH after it).
+            a.resize(40, 11);
+            a.wait(|a| {
+                let text = String::from_utf8(capture(&a.screen(), CaptureOpts::default())).unwrap();
+                text.lines().nth(10).is_some_and(|row| row.contains("[a]"))
+            });
             a.signal(signal);
             a.exited(1);
             a.wait(|a| a.text().contains("\x1b[?1049l"));
