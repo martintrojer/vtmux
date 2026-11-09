@@ -6317,8 +6317,7 @@ mod tests {
     /// frozen frames and nothing else (protocol module docs).
     #[test]
     fn a_frozen_client_is_sent_frozen_frames_only() {
-        use std::io::Read as _;
-        use vtmux_core::protocol::{ServerMsg, Speaks, decode};
+        use vtmux_core::protocol::{ServerMsg, Speaks};
         let (mut server, _, _, _, dir) = setup();
         let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
         let id = super::ClientId(server.next_client);
@@ -6338,18 +6337,7 @@ mod tests {
         for m in &sent {
             server.send(id, m);
         }
-        let mut wire = Vec::new();
-        let mut buf = [0u8; 4096];
-        while let Ok(n @ 1..) = peer.read(&mut buf) {
-            wire.extend_from_slice(&buf[..n]);
-        }
-        let mut got = Vec::new();
-        let mut at = 0;
-        while at < wire.len() {
-            let (m, used) = decode::<ServerMsg>(&wire[at..]).unwrap();
-            got.push(m);
-            at += used;
-        }
+        let got = crate::server::snapshot::tests::messages(&mut server, id, &mut peer);
         let frozen: Vec<ServerMsg> = sent.into_iter().filter(ServerMsg::is_frozen).collect();
         assert_eq!(got, frozen);
         std::fs::remove_dir_all(dir).unwrap();
@@ -6779,7 +6767,20 @@ mod tests {
         s: vtmux_core::ids::SessionId,
         dir: &std::path::Path,
         term: &str,
+        size: (u32, u32),
+    ) -> (super::ClientId, mio::net::UnixStream) {
+        let env = [("COLORTERM".into(), "truecolor".into())];
+        attach_with(server, s, dir, term, size, &env)
+    }
+
+    /// [`attach_as`] with the client environment `env`.
+    fn attach_with(
+        server: &mut super::Server,
+        s: vtmux_core::ids::SessionId,
+        dir: &std::path::Path,
+        term: &str,
         (cols, rows): (u32, u32),
+        env: &[(String, String)],
     ) -> (super::ClientId, mio::net::UnixStream) {
         use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
         let (ours, peer) = mio::net::UnixStream::pair().unwrap();
@@ -6792,7 +6793,7 @@ mod tests {
             pid: 1,
             argv: Vec::new(),
             cwd: dir.to_path_buf(),
-            env: vec![("COLORTERM".into(), "truecolor".into())],
+            env: env.to_vec(),
             tty: Some(TtyInfo {
                 name: "/dev/null".into(),
                 term: term.into(),
@@ -7465,7 +7466,6 @@ mod tests {
     #[test]
     fn plain_frame_skip_sends_nothing_unless_something_changed() {
         use vtmux_core::options::{TreeId, Value};
-        use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
         let (mut server, p, s, _, dir) = setup();
         server.reset_mode(p);
         // No status line: its clock and host name would change the frame.
@@ -7473,29 +7473,7 @@ mod tests {
             .model
             .options
             .set_table_value(TreeId::GlobalSession, "status", Value::Choice(0));
-        let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
-        let id = super::ClientId(server.next_client);
-        server.next_client += 1;
-        let mut client = super::Client::new(ours, 0);
-        client.hello = Some(Hello {
-            version: vtmux_core::protocol::PROTOCOL_VERSION,
-            invocation: vtmux_core::socket::Invocation::Vtmux,
-            pid: 1,
-            argv: Vec::new(),
-            cwd: dir.clone(),
-            env: Vec::new(),
-            tty: Some(TtyInfo {
-                name: "/dev/null".into(),
-                term: "xterm-256color".into(),
-                cols: 40,
-                rows: 10,
-                features: Vec::new(),
-            }),
-            flags: ClientFlags::default(),
-            ext: vtmux_core::protocol::HelloExt::default(),
-        });
-        server.clients.insert(id, client);
-        server.attach_client(id, s).unwrap();
+        let (id, mut peer) = attach_with(&mut server, s, &dir, "xterm-256color", (40, 10), &[]);
         // The attach frames: startup, the first drawing, the modes.
         let sent: Vec<usize> = (0..4)
             .map(|_| {
@@ -7542,36 +7520,13 @@ mod tests {
     #[test]
     fn plain_frames_copy_and_diff_only_changed_rows() {
         use vtmux_core::options::{TreeId, Value};
-        use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
         let (mut server, p, s, _, dir) = setup();
         server.reset_mode(p);
         server
             .model
             .options
             .set_table_value(TreeId::GlobalSession, "status", Value::Choice(0));
-        let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
-        let id = super::ClientId(server.next_client);
-        server.next_client += 1;
-        let mut client = super::Client::new(ours, 0);
-        client.hello = Some(Hello {
-            version: vtmux_core::protocol::PROTOCOL_VERSION,
-            invocation: vtmux_core::socket::Invocation::Vtmux,
-            pid: 1,
-            argv: Vec::new(),
-            cwd: dir.clone(),
-            env: Vec::new(),
-            tty: Some(TtyInfo {
-                name: "/dev/null".into(),
-                term: "xterm-256color".into(),
-                cols: 40,
-                rows: 10,
-                features: Vec::new(),
-            }),
-            flags: ClientFlags::default(),
-            ext: vtmux_core::protocol::HelloExt::default(),
-        });
-        server.clients.insert(id, client);
-        server.attach_client(id, s).unwrap();
+        let (id, mut peer) = attach_with(&mut server, s, &dir, "xterm-256color", (40, 10), &[]);
         for _ in 0..4 {
             server.render_clients();
             frames(&mut server, id, &mut peer);
