@@ -4,6 +4,14 @@ vtmux's version is the tmux release it is tested against: `3.8-beta1` is the fir
 
 ## Unreleased
 
+Next is `3.8-beta2`.
+
+**Your terminal.** Most of ncurses 6.6's terminal database (2,663 names in vtmux's table: `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm` among them) attaches with the features, colours and capabilities tmux 3.8 gives it, on hosts that have no terminfo for it. Hardcopy terminals are refused with tmux's message. 163 8-bit terminals (`vt220-8bit`, `ansi.sys`) are refused where tmux takes them. The binary grows by 0.3 MB, to 10.0 MB.
+
+**Pixel sizes, as tmux gives them.** A pane's terminal reports its size in pixels from your terminal's cell size (`ws_xpixel`, `CSI 14 t`, `#{window_cell_width}`), so image tools size their output; 16x32 per cell until a client gives one.
+
+**Formats.** `#{pane_last_output_time}`, the second of the pane's last output, as tmux sets it.
+
 **Fixes.** A split or respawned pane's window is named after its command, as a new window's is, not after the process caught before it execs (the server binary, `vtmux-<sha>`, on macOS).
 
 **vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s). A live upgrade with it up costs what one without does, and moving back onto an older build keeps the history it hides.
@@ -12,11 +20,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta1` is the fir
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
-**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 418 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
-
-**Your terminal.** Every `TERM` in ncurses 6.6's database (2,663, `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm` among them) attaches with the features, colours and capabilities tmux 3.8 gives it, on hosts that have no terminfo for it. Hardcopy terminals are refused with tmux's message.
-
-**Pixel sizes, as tmux gives them.** A pane's terminal reports its size in pixels from your terminal's cell size (`ws_xpixel`, `CSI 14 t`, `#{window_cell_width}`), so image tools size their output; 16x32 per cell until a client gives one.
+**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 415 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
 
 **Ghostty's emulator.** Each pane is a [libghostty-vt](https://github.com/ghostty-org/ghostty) terminal, with tmux's quirks kept where scripts can see them.
 
@@ -32,13 +36,13 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 **Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself.
 
-**crates.io ready.** All eight crates package and build from their `.crate` files alone, so `cargo install --locked vtmux` works once they are published (Zig 0.17 on `PATH`). The patched libghostty-rs ships as `vtmux-ghostty-vt-sys` and `vtmux-ghostty-vt`, whose build downloads the pinned Ghostty and checks its hash (`GHOSTTY_SOURCE_TARBALL` for offline builds), and stops with what to install when Zig is missing or the wrong version. How to release: [docs/RELEASING.md](docs/RELEASING.md).
+**crates.io ready.** All eight crates package and build from their `.crate` files alone, published as 3.8.0-beta.1: `cargo install --locked vtmux@3.8.0-beta.1` (a beta: cargo needs the version named; Zig 0.17 on `PATH`). The patched libghostty-rs ships as `vtmux-ghostty-vt-sys` and `vtmux-ghostty-vt`, whose build downloads the pinned Ghostty and checks its hash (`GHOSTTY_SOURCE_TARBALL` for offline builds), and stops with what to install when Zig is missing or the wrong version. How to release: [docs/RELEASING.md](docs/RELEASING.md).
 
 **In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Live upgrades keep the grant, and a downgrade that would drop it is refused.
 
 Every opt-in is tmux 3.8, byte for byte, while off.
 
-**Built for speed.** Whole-program LTO: 6-18% less server CPU for agent panes and many clients, key echo 12% faster, a 10.0 MB stripped binary (the terminal table is 0.3 MB of it).
+**Built for speed.** Whole-program LTO: 7-18% less server CPU on render-bound work, key echo 12% faster, a 9.8 MB stripped binary (was 10.7).
 
 **Lean where it counts** ([numbers](docs/PERFORMANCE.md)):
 

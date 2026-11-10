@@ -35,7 +35,7 @@ set -s vtmux-persist full
 
 A grant (kitty keys, in-band resize) outlives the option being turned off, and a live upgrade keeps it. Kitty keys end with the program that asked; in-band resize at `?2048l`, a reset or a respawn.
 
-`vtmux-upgrade [-b binary]` is a command, not an option: bind it like any other. Without `-b` it takes the path the server started from.
+`vtmux-upgrade [-b binary]` is a command, not an option: bind it like any other. Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary.
 
 ## How vtmux options stay invisible
 

@@ -142,9 +142,9 @@ The release profile is fat LTO in one codegen unit, stripped. Against cargo's de
 
 | | default | vtmux's profile |
 |---|---|---|
-| stripped binary (tmux 3.8: 1.3 MB) | 10.7 MB | 9.8 MB |
+| stripped binary (tmux 3.8: 1.3 MB) | 10.7 MB | 10.0 MB |
 | gzipped, in the release tarball | 4.41 MB | 4.28 MB |
-| server CPU, agent panes and many clients | | 6-18% less |
+| server CPU, agent panes and many clients | | 7-18% less |
 | key echo p50 | 0.43 ms | 0.38 ms |
 | output parsing (Ghostty's, untouched by LTO) | | flat |
 | build after touching `vtmux-core` | 108 s | 118 s |

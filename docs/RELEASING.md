@@ -50,4 +50,4 @@ mise exec -- bash scripts/publish.sh --publish
 
 ### What `cargo install vtmux` gets
 
-The binary as built from the crates, with cargo's default release profile: the workspace's `[profile.release]` (fat LTO, one codegen unit, stripped) is not part of a published crate, so it is not used. `CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=true cargo install --locked vtmux` builds what the tarballs ship. The build downloads Ghostty's source (about 40 MB) and Zig's packages for it.
+The binary as built from the crates, with cargo's default release profile: the workspace's `[profile.release]` (fat LTO, one codegen unit, stripped) is not part of a published crate, so it is not used. `CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=true cargo install --locked vtmux@3.8.0-beta.1` (the current version: a pre-release needs it named) builds what the tarballs ship. The build downloads Ghostty's source (about 40 MB) and Zig's packages for it.
