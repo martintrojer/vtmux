@@ -331,7 +331,9 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     }
     server.cmd_client = item.client;
     server.cmd_mouse.clone_from(&item.mouse);
+    follow_client_session(server, item);
     let result = run_one(server, item, call);
+    follow_client_session(server, item);
     server.close_dropped();
     server.cmd_client = None;
     server.cmd_mouse = None;
@@ -380,6 +382,18 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     // command (server_client_handle_key_after), so after its guard.
     server.handle_injected_keys(item.step);
     result.is_ok()
+}
+
+/// `cmd_find_from_client` reads the client's session as it is when the
+/// command runs (cmd-find.c:888-898), so a `switch-client -n` earlier in
+/// the list moves the default target of the commands after it.
+fn follow_client_session(server: &Server, item: &mut Item) {
+    if item.borrow_client {
+        return;
+    }
+    if let Some(s) = item.client.and_then(|c| server.client_session(c)) {
+        item.origin.attached = Some(s);
+    }
 }
 
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {

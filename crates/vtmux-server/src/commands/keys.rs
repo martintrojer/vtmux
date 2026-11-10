@@ -240,6 +240,11 @@ pub fn switch_client(server: &mut Server, item: &mut Item, args: &Args) -> Resul
         }
         let s = found.session.ok_or(EdgeError::NoCurrentTarget)?;
         select_target(server, found, Some(args.flag('Z')));
+        // cmd-switch-client.c:153-156: the commands after this one start
+        // from the session taken (`cmd_find_from_session(current, s)`).
+        if found.index.is_some() {
+            item.new_current = Some(Found::from_session(&server.model, s));
+        }
         s
     };
     if !args.flag('E') {

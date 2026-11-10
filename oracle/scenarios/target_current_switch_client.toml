@@ -1,0 +1,33 @@
+name = "target_current_switch_client"
+# switch-client and the commands after it in the same list. `-t` moves the
+# queue's current state to the session taken (cmd-switch-client.c:153-156);
+# `-n`/`-p`/`-l` leave it, so with no current state the next command reads
+# the client's new session (cmd_find_from_client), but a key binding's
+# commands start from the client as it was (server-client.c:1495-1496).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "b:", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "switch-client -n ; display -p 'n=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "switch-client -l ; display -p 'l=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "switch-client -p ; display -p 'p=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "switch-client -t a:0 ; new-window -d -t b: -n w cat - ; display -p 't=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "switch-client -t b:1 ; display -p 't=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["bind", "-n", "F1", "switch-client -n ; rename-window K1"] },
+  { run = ["bind", "-n", "F2", "switch-client -t a ; rename-window K2"] },
+  { attach = { session = "a" } },
+  { keys = "\u001bOP" },
+  { settle = {} },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_name}"] },
+  { keys = "\u001bOQ" },
+  { settle = {} },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_name}"] },
+]

@@ -1,0 +1,312 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "target_current_switch_client",
+  "inputs": {
+    "name": "target_current_switch_client",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "b:",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -n ; display -p 'n=#{session_name}:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -l ; display -p 'l=#{session_name}:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -p ; display -p 'p=#{session_name}:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -t a:0 ; new-window -d -t b: -n w cat - ; display -p 't=#{session_name}:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -t b:1 ; display -p 't=#{session_name}:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "F1",
+          "switch-client -n ; rename-window K1"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "F2",
+          "switch-client -t a ; rename-window K2"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001bOP"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_name}"
+        ]
+      },
+      {
+        "keys": "\u001bOQ"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_name}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%session-changed $1 b",
+          "%begin <TIME> #3 1",
+          "n=b:0",
+          "%end <TIME> #3 1",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%session-changed $0 a",
+          "%begin <TIME> #5 1",
+          "l=a:0",
+          "%end <TIME> #5 1",
+          "%begin <TIME> #6 1",
+          "%end <TIME> #6 1",
+          "%session-changed $1 b",
+          "%begin <TIME> #7 1",
+          "p=b:0",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "%end <TIME> #8 1",
+          "%session-changed $0 a",
+          "%begin <TIME> #9 1",
+          "%end <TIME> #9 1",
+          "%unlinked-window-add @3",
+          "%begin <TIME> #10 1",
+          "t=a:0",
+          "%end <TIME> #10 1",
+          "%begin <TIME> #11 1",
+          "%end <TIME> #11 1",
+          "%session-window-changed $1 @2",
+          "%session-changed $1 b",
+          "%begin <TIME> #12 1",
+          "t=b:1",
+          "%end <TIME> #12 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 K1\nb:0 w\nb:1 w\nb:2 w\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 K2\nb:0 w\nb:1 w\nb:2 w\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

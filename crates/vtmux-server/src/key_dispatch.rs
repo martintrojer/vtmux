@@ -329,10 +329,19 @@ impl Server {
         // key_bindings_dispatch(..., event, &fs): a mouse key's commands
         // start from the mouse's target (cmdq_new_state's current) and see
         // its event.
+        // server-client.c:1495-1496: from the mouse, else from the client
+        // as it is now; a `switch-client -n` in the binding leaves it.
+        let current = current
+            .filter(|f| f.still_valid(&self.model))
+            .or_else(|| {
+                c.attached
+                    .map(|s| crate::target::Found::from_session(&self.model, s))
+            })
+            .filter(|f| f.still_valid(&self.model));
         item.origin = Origin {
             attached: c.attached,
             inside_pane: None,
-            current: current.filter(|f| f.still_valid(&self.model)),
+            current,
             mouse: mouse.map(|m| m.target),
         };
         item.mouse = mouse.cloned();
