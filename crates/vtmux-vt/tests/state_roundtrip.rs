@@ -399,6 +399,45 @@ fn foreign_blobs_are_refused() {
 }
 
 #[test]
+fn pending_sequences_resize_and_round_trip() {
+    // window.c window_pane_resize leaves the input context intact;
+    // write_screen_moves preserves Ghostty's pending sequence too.
+    for seed in fuzz_seeds() {
+        let mut f = Fuzz(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+        let cols = 8 + u16::try_from(f.below(60)).unwrap();
+        let rows = 4 + u16::try_from(f.below(18)).unwrap();
+        let size = (
+            8 + u16::try_from(f.below(60)).unwrap(),
+            2 + u16::try_from(f.below(20)).unwrap(),
+        );
+        for (head, tail) in [
+            (b"\x1b[3".as_slice(), b"1mX".as_slice()),
+            (b"\x1b]2;ab", b"cd\x07"),
+            (b"\x1bP1$q", b"m\x1b\\"),
+            (b"\x1b(", b"0q\x1b(B"),
+        ] {
+            let mut a = pane(
+                cols,
+                rows,
+                50,
+                b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H",
+            );
+            a.feed(head);
+            a.resize(size.0, size.1);
+            assert_eq!(a.pending_input(), head, "seed {seed}");
+            let mut rest = tail.to_vec();
+            rest.extend_from_slice(PROBE);
+            round_trip(
+                &mut a,
+                CompressedPages::Rows,
+                &rest,
+                &format!("seed {seed} {size:?} {head:?}"),
+            );
+        }
+    }
+}
+
+#[test]
 fn fuzzed_escape_sequences_round_trip() {
     for seed in fuzz_seeds() {
         let mut f = Fuzz(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
@@ -414,9 +453,8 @@ fn fuzzed_escape_sequences_round_trip() {
         let cut = f.below(head.len() + 1);
         let mut a = PaneTerm::new(cols, rows, limit);
         a.feed(&head[..cut]);
-        // A resize writes its own sequences to Ghostty, which would break
-        // a half-parsed one (a resize mid-sequence desyncs Ghostty's parser
-        // from tmux's in `PaneTerm` itself, import or not).
+        // Seed 57 changes reflowed row flags on import; a pending C0
+        // also replays on import. The test above covers pending CSI/strings.
         if f.below(4) == 0 && a.pending_input().is_empty() {
             a.resize(
                 8 + u16::try_from(f.below(60)).unwrap(),
