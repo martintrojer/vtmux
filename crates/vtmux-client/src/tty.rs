@@ -73,10 +73,21 @@ mod tests {
     /// A terminal as a shell leaves it, with the settings `cfmakeraw`
     /// would reset: a BREAK that interrupts, parity checking, 7 bits.
     fn cooked() -> Termios {
-        let pty =
+        // The slave side: macOS refuses `tcgetattr` on a master that has
+        // no slave open (ENOTTY), Linux does not.
+        let master =
             rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
                 .unwrap();
-        let mut t = termios::tcgetattr(&pty).unwrap();
+        rustix::pty::grantpt(&master).unwrap();
+        rustix::pty::unlockpt(&master).unwrap();
+        let name = rustix::pty::ptsname(&master, Vec::new()).unwrap();
+        let slave = rustix::fs::open(
+            name.as_c_str(),
+            rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        let mut t = termios::tcgetattr(&slave).unwrap();
         t.input_modes |= InputModes::BRKINT | InputModes::INPCK | InputModes::ICRNL;
         t.input_modes.remove(InputModes::IGNBRK);
         t.control_modes |= ControlModes::PARENB;
