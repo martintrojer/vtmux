@@ -17,8 +17,6 @@
 //! `E` re-expands; `T` re-expands after a strftime pass.
 //! Bare `t` formats a time variable as `ctime` text. [`expand_time`] runs
 //! strftime over the template first. Escapes and `#[style]` pass through.
-//! Unsupported modifiers become [`Node::Deferred`] and expand to nothing;
-//! [`Parsed::deferred`] lists them so the server can log them.
 //! `#(cmd)` is [`Node::Job`]: the command is expanded (no jobs, no cycles, no strftime),
 //! handed to [`FormatContext::job`], and the last line of what that returns is expanded
 //! again. Running and caching jobs is the server's business (D9); the default hook
@@ -331,9 +329,6 @@ pub struct Format {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parsed {
     pub ast: Format,
-    /// Constructs that parsed but are not evaluated yet: each modifier name of
-    /// every unsupported modifier list.
-    pub deferred: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,8 +338,6 @@ enum Node {
         value: Value,
         post: Box<Post>,
     },
-    /// An unsupported modifier list (first modifier named); expands to nothing.
-    Deferred(String),
     /// `#(cmd)`: the command as written, and as a template.
     Job(String, Format),
     /// tmux stops expanding here and returns what it has so far.
@@ -508,11 +501,10 @@ struct CondArm {
 /// tmux's lenient rules (see [`Node::Abort`]).
 #[must_use]
 pub fn parse(template: &str) -> Parsed {
-    let mut deferred = Vec::new();
     // tmux works on C strings: a NUL ends the template.
     let template = crate::rawstr::c_str(template);
-    let ast = parse::template(template, 0, &mut deferred);
-    Parsed { ast, deferred }
+    let ast = parse::template(template, 0);
+    Parsed { ast }
 }
 
 /// [`parse`], remembered: the status line, borders and fill expand the
@@ -688,14 +680,9 @@ mod tests {
     }
 
     #[test]
-    fn deferred_modifiers_are_reported() {
+    fn modifier_lists_expand() {
         let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}#{m:a,b}#{t/p:@n}");
-        assert_eq!(p.deferred, Vec::<String>::new());
         assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv0");
-        assert_eq!(
-            parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
-            Vec::<String>::new()
-        );
     }
 
     /// Reference (TZ=UTC, `set -gF @out FMT; show -gv @out`): `#{t:@t}` with
@@ -747,7 +734,6 @@ mod tests {
             "[][zz][100000-001]"
         );
         assert_eq!(e("[#{t:@bad}][#{t/f/zz:@bad}][#{t/p:@bad}]"), "[][][]");
-        assert_eq!(parse("#{t:@t}").deferred, Vec::<String>::new());
     }
 
     /// Reference: `display -p '%H %%'` at 20:xx prints `20 %`; a template
@@ -814,7 +800,6 @@ mod tests {
         assert_eq!(ctx.calls(), [("echo hi".to_owned(), "echo hi".to_owned())]);
         // The default hook is empty; the template parses without deferrals.
         assert_eq!(expand_str("a[#(echo hi)]b", &map(&[])), "a[]b");
-        assert_eq!(parse("#(echo hi)").deferred, Vec::<String>::new());
     }
 
     /// Reference: `#(echo "##{session_name}")` gives `s`: the command expands to
@@ -985,7 +970,6 @@ mod tests {
         // NOCYCLE inside #(): the command and the output.
         let ctx = status(Some(0));
         assert_eq!(e(&ctx, "#(x#{A:a,b}y)|#(#{@x})"), "xy|X");
-        assert_eq!(parse("#{A:a}").deferred, Vec::<String>::new());
     }
 
     /// format.c:6304-6327: `I` asks the client with the raw name; the

@@ -14,29 +14,19 @@ pub(super) struct Substitute {
     args: Vec<Format>,
 }
 
-pub(super) fn build_match(
-    m: &RawMod,
-    body: &str,
-    depth: usize,
-    deferred: &mut Vec<String>,
-) -> Option<Value> {
+pub(super) fn build_match(m: &RawMod, body: &str, depth: usize) -> Option<Value> {
     let comma = parse::skip(body, 0, b",")?;
     Some(Value::Match(PatternMatch {
         flags: m
             .args
             .first()
-            .map(|s| parse::template(&parse::unescape(s), depth, deferred)),
-        left: parse::template(&body[..comma], depth, deferred),
-        right: parse::template(&body[comma + 1..], depth, deferred),
+            .map(|s| parse::template(&parse::unescape(s), depth)),
+        left: parse::template(&body[..comma], depth),
+        right: parse::template(&body[comma + 1..], depth),
     }))
 }
 
-pub(super) fn add_substitutions(
-    post: &mut Post,
-    list: &[RawMod],
-    depth: usize,
-    deferred: &mut Vec<String>,
-) {
+pub(super) fn add_substitutions(post: &mut Post, list: &[RawMod], depth: usize) {
     post.substitutions = list
         .iter()
         .filter(|m| m.name == "s" && m.args.len() >= 2)
@@ -44,7 +34,7 @@ pub(super) fn add_substitutions(
             args: m
                 .args
                 .iter()
-                .map(|s| parse::template(&parse::unescape(s), depth, deferred))
+                .map(|s| parse::template(&parse::unescape(s), depth))
                 .collect(),
         })
         .collect();
@@ -78,8 +68,8 @@ impl Eval<'_> {
         // format_build_modifiers expands once; format_replace expands pattern
         // and replacement a second time at the done label (flags only once).
         let args: Vec<String> = s.args.iter().map(|f| self.expand(f, depth)).collect();
-        let pattern = self.expand(&parse::template(&args[0], depth, &mut Vec::new()), depth);
-        let with = self.expand(&parse::template(&args[1], depth, &mut Vec::new()), depth);
+        let pattern = self.expand(&parse::template(&args[0], depth), depth);
+        let with = self.expand(&parse::template(&args[1], depth), depth);
         regsub(
             &pattern,
             &with,

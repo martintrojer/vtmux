@@ -44,7 +44,7 @@ impl Eval<'_> {
                 return String::new();
             };
             if text != **src {
-                let ast = parse::template(&text, depth, &mut Vec::new());
+                let ast = parse::template(&text, depth);
                 return self.expand_nodes(&ast, depth);
             }
         }
@@ -56,7 +56,6 @@ impl Eval<'_> {
         for node in &fmt.nodes {
             match node {
                 Node::Text(t) => out.push_str(t),
-                Node::Deferred(_) => {}
                 Node::Abort => break,
                 Node::Job(raw, cmd) => out.push_str(&self.job(raw, cmd, depth + 1)),
                 Node::Replace { value, post } => match self.replace(value, post, depth) {
@@ -81,7 +80,7 @@ impl Eval<'_> {
         (self.time_mode, self.nojobs, self.nocycle) = (false, true, true);
         let cmd = self.expand(cmd, depth);
         let out = self.ctx.job(raw, &cmd);
-        let out = parse::template(last_line(&out), depth, &mut Vec::new());
+        let out = parse::template(last_line(&out), depth);
         let out = self.expand(&out, depth);
         (self.time_mode, self.nojobs, self.nocycle) = saved;
         out
@@ -104,7 +103,7 @@ impl Eval<'_> {
             // as a time-aware expansion, which stays on for everything nested.
             let saved = self.time_mode;
             self.time_mode |= post.reexpand == Reexpand::T;
-            let ast = parse::template(&v, inner, &mut Vec::new());
+            let ast = parse::template(&v, inner);
             v = self.expand(&ast, inner);
             self.time_mode = saved;
         }

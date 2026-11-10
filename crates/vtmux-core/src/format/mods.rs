@@ -8,21 +8,13 @@ use super::loops::{LoopKind, SortMod};
 use super::parse::{RawMod, skip, template, unescape};
 use super::{CmpOp, CondArm, Format, Post, Reexpand, Value, VarMods};
 
-/// The modifiers this module (and the evaluator) implements; any other modifier makes
-/// the whole `#{...}` a [`super::Node::Deferred`].
-pub(super) const SUPPORTED: &[&str] = &[
-    "E", "T", "||", "&&", "==", "!=", "<", ">", "<=", ">=", "!", "!!", "e", "l", "a", "b", "d",
-    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s", "S", "W", "P", "L", "O", "I",
-    "A",
-];
-
 /// An argument as a template (`format_unescape` then `format_expand1`, at expansion).
-fn arg(s: &str, depth: usize, deferred: &mut Vec<String>) -> Format {
-    template(&unescape(s), depth, deferred)
+fn arg(s: &str, depth: usize) -> Format {
+    template(&unescape(s), depth)
 }
 
-fn first_arg(m: &RawMod, depth: usize, deferred: &mut Vec<String>) -> Option<Format> {
-    m.args.first().map(|a| arg(a, depth, deferred))
+fn first_arg(m: &RawMod, depth: usize) -> Option<Format> {
+    m.args.first().map(|a| arg(a, depth))
 }
 
 /// `format_choose` without expansion: split at the first top-level comma.
@@ -34,14 +26,9 @@ fn choose(body: &str) -> Option<(&str, &str)> {
 /// Build the value and the post-processing of a modifier list over `body`. `inner` is
 /// the depth at which sub-templates are expanded. `None` is tmux's "failed", which ends
 /// the enclosing expansion.
-pub(super) fn build(
-    list: &[RawMod],
-    body: &str,
-    inner: usize,
-    deferred: &mut Vec<String>,
-) -> Option<(Value, Post)> {
-    let post = post(list, inner, deferred);
-    let vm = var_mods(list, inner, deferred);
+pub(super) fn build(list: &[RawMod], body: &str, inner: usize) -> Option<(Value, Post)> {
+    let post = post(list, inner);
+    let vm = var_mods(list, inner);
     let value = if list.iter().any(|m| m.name == "I" && !m.args.is_empty()) {
         // format.c:6304: the client lookups come first; the body is the raw name.
         // Which flags apply is only known once the arguments are expanded, so the
@@ -50,25 +37,19 @@ pub(super) fn build(
             flags: list
                 .iter()
                 .filter(|m| m.name == "I")
-                .filter_map(|m| first_arg(m, inner, deferred))
+                .filter_map(|m| first_arg(m, inner))
                 .collect(),
             name: body.to_owned(),
-            fallback: rest(list, &vm, body, inner, &mut Vec::new()).map(Box::new),
+            fallback: rest(list, &vm, body, inner).map(Box::new),
         }
     } else {
-        rest(list, &vm, body, inner, deferred)?
+        rest(list, &vm, body, inner)?
     };
     Some((value, post))
 }
 
 /// [`build`] after the `I` lookups: `A`, `l`, `a`, `c`, then [`chain`].
-fn rest(
-    list: &[RawMod],
-    vm: &VarMods,
-    body: &str,
-    inner: usize,
-    deferred: &mut Vec<String>,
-) -> Option<Value> {
+fn rest(list: &[RawMod], vm: &VarMods, body: &str, inner: usize) -> Option<Value> {
     let has = |n: &str| list.iter().any(|m| m.name == n);
     Some(if has("A") {
         // format.c:6329: the frames are the raw body, neither unescaped nor
@@ -77,25 +58,25 @@ fn rest(
             count: list
                 .iter()
                 .rfind(|m| m.name == "A" && !m.args.is_empty())
-                .and_then(|m| first_arg(m, inner, deferred)),
+                .and_then(|m| first_arg(m, inner)),
             frames: body.to_owned(),
         }
     } else if has("l") {
         // format.c:6334: the raw body, unescaped.
         Value::Literal(unescape(body))
     } else if has("a") {
-        Value::Char(template(body, inner, deferred))
+        Value::Char(template(body, inner))
     } else if has("c") {
         Value::Colour {
             flags: list
                 .iter()
                 .filter(|m| m.name == "c")
-                .filter_map(|m| first_arg(m, inner, deferred))
+                .filter_map(|m| first_arg(m, inner))
                 .collect(),
-            body: template(body, inner, deferred),
+            body: template(body, inner),
         }
     } else {
-        chain(list, vm, body, inner, deferred, true)?
+        chain(list, vm, body, inner, true)?
     })
 }
 
@@ -107,14 +88,13 @@ fn chain(
     vm: &VarMods,
     body: &str,
     inner: usize,
-    deferred: &mut Vec<String>,
     with_names: bool,
 ) -> Option<Value> {
     let has = |n: &str| list.iter().any(|m| m.name == n);
     let last = |names: &[&str]| list.iter().rfind(|m| names.contains(&m.name.as_str()));
     macro_rules! sub {
         ($s:expr) => {
-            template($s, inner, deferred)
+            template($s, inner)
         };
     }
 
@@ -128,7 +108,7 @@ fn chain(
         let s = last(&["S", "W", "P", "L"])?;
         let sort = SortMod {
             kind: LoopKind::from_modifier(&s.name)?,
-            arg: first_arg(s, inner, deferred),
+            arg: first_arg(s, inner),
         };
         // format_choose without expansion; clients have no active form.
         let split = if kind == LoopKind::Clients {
@@ -152,7 +132,7 @@ fn chain(
     let loop_flags = list
         .iter()
         .rfind(|m| (m.name == "O" || m.name == "V") && m.args.len() == 1)
-        .map(|m| arg(&m.args[0], inner, deferred));
+        .map(|m| arg(&m.args[0], inner));
     if has("O") {
         return Some(Value::Options {
             flags: loop_flags,
@@ -163,26 +143,26 @@ fn chain(
         let flags = loop_flags;
         return Some(Value::Environ {
             flags,
-            body: template(body, inner, deferred),
+            body: template(body, inner),
         });
     }
     if with_names && has("N") {
         let flags = list
             .iter()
             .filter(|m| m.name == "N")
-            .map(|m| first_arg(m, inner, deferred))
+            .map(|m| first_arg(m, inner))
             .collect();
-        let fallback = chain(list, vm, body, inner, &mut Vec::new(), false).map(Box::new);
+        let fallback = chain(list, vm, body, inner, false).map(Box::new);
         return Some(Value::Name {
             flags,
-            body: template(body, inner, deferred),
+            body: template(body, inner),
             fallback,
         });
     }
     if let Some(c) = last(&["C"]) {
         return Some(Value::Search {
-            flags: first_arg(c, inner, deferred),
-            body: template(body, inner, deferred),
+            flags: first_arg(c, inner),
+            body: template(body, inner),
         });
     }
     if has("R") {
@@ -224,7 +204,7 @@ fn chain(
     }
     if let Some(op) = last(&["==", "!=", "<", ">", "<=", ">=", "m"]) {
         if op.name == "m" {
-            return super::matching::build_match(op, body, inner, deferred);
+            return super::matching::build_match(op, body, inner);
         }
         // format_choose: no comma is a syntax error.
         let (left, right) = choose(body)?;
@@ -274,7 +254,7 @@ fn chain(
         .iter()
         .rfind(|m| m.name == "e" && (1..=3).contains(&m.args.len()))
     {
-        let args = e.args.iter().map(|a| arg(a, inner, deferred)).collect();
+        let args = e.args.iter().map(|a| arg(a, inner)).collect();
         let operands = choose(body).map(|(l, r)| (sub!(l), sub!(r)));
         return Some(Value::Expr { args, operands });
     }
@@ -289,14 +269,14 @@ fn chain(
 }
 
 /// The modifiers `format_find` applies to a found variable: `t`, `b`, `d` and the `q` family.
-fn var_mods(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> VarMods {
+fn var_mods(list: &[RawMod], inner: usize) -> VarMods {
     VarMods {
         time: list
             .iter()
             .filter(|m| m.name == "t")
             .map(|m| super::time::TimeMod {
-                flags: first_arg(m, inner, deferred),
-                fmt: m.args.get(1).map(|a| arg(a, inner, deferred)),
+                flags: first_arg(m, inner),
+                fmt: m.args.get(1).map(|a| arg(a, inner)),
             })
             .collect(),
         basename: list.iter().any(|m| m.name == "b"),
@@ -304,13 +284,13 @@ fn var_mods(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> VarMod
         quote: list
             .iter()
             .filter(|m| m.name == "q")
-            .map(|m| first_arg(m, inner, deferred))
+            .map(|m| first_arg(m, inner))
             .collect(),
     }
 }
 
 /// What happens to the value after it is found (the `done:` label, format.c:6602-6682).
-fn post(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> Post {
+fn post(list: &[RawMod], inner: usize) -> Post {
     let mut p = Post::default();
     for m in list {
         match m.name.as_str() {
@@ -318,17 +298,17 @@ fn post(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> Post {
             "E" => p.reexpand = Reexpand::E,
             "T" if p.reexpand == Reexpand::No => p.reexpand = Reexpand::T,
             "=" if !m.args.is_empty() => {
-                p.limit = first_arg(m, inner, deferred);
+                p.limit = first_arg(m, inner);
                 if let Some(marker) = m.args.get(1) {
-                    p.marker = Some(arg(marker, inner, deferred));
+                    p.marker = Some(arg(marker, inner));
                 }
             }
-            "p" if !m.args.is_empty() => p.pad = first_arg(m, inner, deferred),
+            "p" if !m.args.is_empty() => p.pad = first_arg(m, inner),
             "n" => p.length = true,
             "w" => p.width = true,
             _ => {}
         }
     }
-    super::matching::add_substitutions(&mut p, list, inner, deferred);
+    super::matching::add_substitutions(&mut p, list, inner);
     p
 }

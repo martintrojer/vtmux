@@ -79,7 +79,7 @@ pub(super) fn skip(s: &str, start: usize, end: &[u8]) -> Option<usize> {
 /// evaluated at: anything at or past [`LOOP_LIMIT`] is always empty, which also
 /// bounds the recursion here.
 #[allow(clippy::too_many_lines)]
-pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> Format {
+pub(super) fn template(s: &str, depth: usize) -> Format {
     if depth >= LOOP_LIMIT {
         return Format::default();
     }
@@ -131,7 +131,7 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
                     out.node(Node::Abort);
                     break;
                 };
-                let cmd = template(&s[i..close], depth + 1, deferred);
+                let cmd = template(&s[i..close], depth + 1);
                 out.node(Node::Job(s[i..close].to_owned(), cmd));
                 i = close + 1;
             }
@@ -140,7 +140,7 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
                     out.node(Node::Abort);
                     break;
                 };
-                if let Some(node) = replace(&s[i..close], depth, deferred) {
+                if let Some(node) = replace(&s[i..close], depth) {
                     out.node(node);
                     i = close + 1;
                 } else {
@@ -190,23 +190,13 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
 
 /// One `#{key}`. `None` is tmux's "failed" return, which ends the enclosing
 /// expansion.
-fn replace(key: &str, depth: usize, deferred: &mut Vec<String>) -> Option<Node> {
+fn replace(key: &str, depth: usize) -> Option<Node> {
     let (list, body) = match modifiers(key) {
         Some((list, off)) => (list, &key[off..]),
         None => (Vec::new(), key),
     };
 
-    let unsupported: Vec<&str> = list
-        .iter()
-        .map(|m| m.name.as_str())
-        .filter(|m| !mods::SUPPORTED.contains(m))
-        .collect();
-    if let Some(first) = unsupported.first() {
-        let node = Node::Deferred((*first).to_owned());
-        deferred.extend(unsupported.into_iter().map(str::to_owned));
-        return Some(node);
-    }
-    let (value, post) = mods::build(&list, body, depth + 1, deferred)?;
+    let (value, post) = mods::build(&list, body, depth + 1)?;
     Some(Node::Replace {
         value,
         post: Box::new(post),
