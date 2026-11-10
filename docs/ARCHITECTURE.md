@@ -134,7 +134,7 @@ vtmux passes through a protocol tmux 3.8 drops only when libghostty-vt implement
 
 libghostty-vt runs inside the server, once per pane: the "grid follows Ghostty" half of D4. Where the two emulators differ, the difference is recorded with evidence in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md).
 
-It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, with 36 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
+It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, with 39 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
 
 - **tmux's grid shape:** wrap and pending-wrap bookkeeping, cells used, reflow as tmux does it, the alternate screen, clusters and widths, hyperlink ids, line flags, DECAWM, DECALN.
 - **Memory:** bounded, resumable page compression and resize without faulting blank pages; grid-reference bounds checked before native reads.

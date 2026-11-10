@@ -54,7 +54,7 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
-- `patches/0039-unicode-options-thread-safe.patch`: the width overrides
+- `patches/0041-unicode-options-thread-safe.patch`: the width overrides
   are one atomic pointer to an immutable table (ranges and the printer's
   narrow bound), never freed: setting the same ranges again reuses their
   table, so the memory kept is one table per distinct set. The clustering
@@ -82,7 +82,7 @@ Recorded per commit in git history; the list is kept current:
   C string. The generic getter previously fabricated a Rust `&str` with
   a zero length. Tests cover ASCII, empty and UTF-8 titles.
 
-- `patches/0038-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
+- `patches/0040-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
   coordinates against the page before any native reader dereferences a
   cell. `GridRef::with_x` remains safe; out-of-range readers return
   `InvalidValue` even in ReleaseFast. Both vtmux capture call sites take

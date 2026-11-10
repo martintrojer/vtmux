@@ -6,8 +6,8 @@ Base: main `0f384907`. Host: shared CentOS 9 devserver, 96 available CPUs.
 
 | Finding | Verdict | Evidence |
 |---|---|---|
-| Safe width setters/readers race with freed overrides | FIXED `ff7a9b6` | Two writers replacing/clearing ranges and two readers querying widths and printing caused SIGSEGV in an isolated subprocess. Patch 0039 locks every slice lookup and replacement/free; the empty fast path, narrow bound and clustering flags are atomic. Removing the patch reproduced SIGSEGV again. |
-| Safe `GridRef::with_x` reaches native memory outside its page | FIXED `bb18b2b` | The new test aborted at `page.zig:getRowAndCell` before the fix. Removing patch 0038 in ReleaseFast returned `Ok` at column 5 of a 5-column page and failed the assertion. Readers now reject 5 and 65535; column 4 still reads `e`. `row_cells` still ignores x. |
+| Safe width setters/readers race with freed overrides | FIXED `ff7a9b6` | Two writers replacing/clearing ranges and two readers querying widths and printing caused SIGSEGV in an isolated subprocess. Patch 0041 locks every slice lookup and replacement/free; the empty fast path, narrow bound and clustering flags are atomic. Removing the patch reproduced SIGSEGV again. |
+| Safe `GridRef::with_x` reaches native memory outside its page | FIXED `bb18b2b` | The new test aborted at `page.zig:getRowAndCell` before the fix. Removing patch 0040 in ReleaseFast returned `Ok` at column 5 of a 5-column page and failed the assertion. Readers now reject 5 and 65535; column 4 still reads `e`. `row_cells` still ignores x. |
 | By-value allocator adapter retains a destroyed parameter | FIXED `c5acc6d` | The callback-context address test failed before invoking any dangling callback. An owned-allocator compile-fail test also failed because it compiled. `From<&A>` ties the original context to the adapter lifetime; allocation/free/grow/shrink and both lifetime doctests pass. |
 | Growable key/mouse encoders reserve relative to capacity | FIXED `bc516d5` | Both new tests failed with `OutOfSpace` (3 bytes for ArrowUp, 9 for SGR mouse). Empty and prefixed vectors one byte short now preserve the prefix and append the full output. |
 | OSC window title requests `&str` instead of `const char **` | FIXED `a4b7f3e` | `2;hello` returned an empty title before. The getter now reads the parser-owned C pointer and validates UTF-8 under the exclusive parser borrow. ASCII, empty and UTF-8 title tests pass. |
@@ -17,7 +17,7 @@ The fixes change the published wrapper's safety/output, not tmux's command or sc
 ## Call sites and safety argument
 
 - `crates/vtmux-vt/src/lib.rs:36,48` exposes both setters safely. The fix is native, covering both width queries and terminal printing, not just the Rust setter or query. `crates/vtmux-server/src/commands/set_option.rs:227,231` uses them in the single-threaded loop. The matched semantics remain tmux `utf8.c: utf8_update_width_cache` and `screen-write.c: screen_write_combine`.
-- `crates/vtmux-vt/src/capture.rs:1596,1748` derives x from `row_cells`, already within the page. Patch 0038 validates both coordinates in `CGridRef.toPin`, before readers call `getRowAndCell`; ReleaseFast assertions are not the defense.
+- `crates/vtmux-vt/src/capture.rs:1596,1748` derives x from `row_cells`, already within the page. Patch 0040 validates both coordinates in `CGridRef.toPin`, before readers call `getRowAndCell`; ReleaseFast assertions are not the defense.
 - No vtmux call site enables `allocator_api`. The optional feature was executed here, not merely inspected. All context-dependent callbacks use the original `A`, not a temporary reference-to-reference. Allocator-backed objects are not Send/Sync.
 - `include/ghostty/vt/osc.h` specifies the title output as `const char **`, NUL-terminated and valid until another parser operation. Rust's exclusive parser borrow prevents that operation while the returned title lives.
 - A false atomic empty-table flag skips the table; a true flag acquires the native lock before reading it. A reader arriving after a clear finds an empty slice under the lock. Old memory is freed under that same lock. No bare reads of printer/clustering flags remain outside their atomic accessors/stores, including inside `unicode/main.zig`.
@@ -51,7 +51,7 @@ All cargo commands ran through `mise exec --` under muzzle and a `timeout -k 5` 
 | `ff7a9b6` code: `RF V --features allocator_api` | 0 / 79 s / 18 unit + 20 doctests / 3 ignored | Rebuilt native synchronization patch |
 | `ff7a9b6` enhanced test: `V --features allocator_api` | 0 / 26 s / 18 unit + 20 doctests / 3 ignored | Debug, including Latin-1, mode 2027, ZWJ and VS16 |
 | `ff7a9b6` + gate coverage: `muzzle run --class high --rule vtmux-check --run-timeout 3000 -- timeout -k 5 3000 mise exec -- env GHOSTTY_SOURCE_TARBALL=/tmp/panel-g3-ghostty.tar.gz bash scripts/check.sh` | 0 / 424 s / workspace 1565 passed, vendor 18 unit + 20 doctests; regress 171 normal passes + 2 flaky-marked passes + 1 xfail; oracle 417/417, upgrade-3 417/417, upgrade-1 9/9 | 96 CPUs, suites at once; 3 muzzle slots; native caches warm but workspace build cold; Linux, Rust 1.99.1, Zig 0.17.0 |
-| Native mutations: remove 0038, then remove 0039 separately; `RF V --features allocator_api grid_ref_readers` / `width_overrides_can_change`; restore both, `RF V --features allocator_api` | 0 / 242 s for the mutation script; each missing patch test exited 101 (unchecked read / SIGSEGV); restored suite 18 unit + 20 doctests / 3 ignored | Independent ReleaseFast rebuilds; traps restored the patches |
+| Native mutations: remove 0040, then remove 0041 separately; `RF V --features allocator_api grid_ref_readers` / `width_overrides_can_change`; restore both, `RF V --features allocator_api` | 0 / 242 s for the mutation script; each missing patch test exited 101 (unchecked read / SIGSEGV); restored suite 18 unit + 20 doctests / 3 ignored | Independent ReleaseFast rebuilds; traps restored the patches |
 | First stress admission: 52-slot muzzle run, wait for flock 180 s | 1 / 180 s / no tests ran / not a pass | Shared stress lock held by another worker's benchmark; no other worker interrupted |
 | Stress retry: 5x `RF V --features allocator_api` under `nproc/2` busy loops, then once with private POSIX `/bin/sh` | 0 / 6 s admitted / each run 18 unit + 20 doctests / 3 ignored per run | 48 busy loops, exclusive `/tmp/vtmux-stress.lock`, 52 muzzle slots, loop cleanup trap; sh substituted only in a private user/mount namespace with zsh 5.9's sh emulation |
 
@@ -63,7 +63,7 @@ The harness owned every server socket directory. No ad-hoc server was started. S
 
 ## Round 2: lock-free width table
 
-Review of `79056e8` found patch 0039's spin lock on the print hot path (every non-ASCII lookup, since vtmux's built-in overrides keep the table non-empty), the old slice freed under that lock, and the test module at the top of `unicode.rs`.
+Review of `79056e8` found patch 0041's spin lock on the print hot path (every non-ASCII lookup, since vtmux's built-in overrides keep the table non-empty), the old slice freed under that lock, and the test module at the top of `unicode.rs`.
 
 | Finding | Verdict | Evidence |
 |---|---|---|
@@ -75,7 +75,7 @@ Soundness: the race test still passes (Debug and ReleaseFast); a mutated setter 
 
 ### Speed
 
-Pinned parser test: a release binary (fat LTO, ReleaseFast Ghostty) sets vtmux's built-in width ranges (`grid_width_ranges`) and tmux clustering, enables mode 2027, and writes 64 MB of 70-column lines in 64 KB chunks to a 200x50 `Terminal`, no scrollback (ASCII words, or UTF-8 words mixing Latin-1, Greek, CJK and an emoji). `taskset -c 77`, 5 timed runs per process, median per process. Builds: `main` (`0f384907`), `r0` (this branch without 0039), `r1` (round 1, spin lock), `r2` (this round). Each binary was built at 4 code offsets (a 0/16/32/48-byte pad before Ghostty's code) and run twice, interleaved: 8 values each. The host is shared (load 15-50), so single values swing ±10%; medians and bests:
+Pinned parser test: a release binary (fat LTO, ReleaseFast Ghostty) sets vtmux's built-in width ranges (`grid_width_ranges`) and tmux clustering, enables mode 2027, and writes 64 MB of 70-column lines in 64 KB chunks to a 200x50 `Terminal`, no scrollback (ASCII words, or UTF-8 words mixing Latin-1, Greek, CJK and an emoji). `taskset -c 77`, 5 timed runs per process, median per process. Builds: `main` (`0f384907`), `r0` (this branch without 0041), `r1` (round 1, spin lock), `r2` (this round). Each binary was built at 4 code offsets (a 0/16/32/48-byte pad before Ghostty's code) and run twice, interleaved: 8 values each. The host is shared (load 15-50), so single values swing ±10%; medians and bests:
 
 | MB/s | main | r0 | r1 | r2 |
 |---|---|---|---|---|
