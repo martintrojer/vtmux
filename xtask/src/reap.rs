@@ -18,6 +18,7 @@
 //! `check.sh` diffs around the suites to catch a harness that leaks.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -277,8 +278,35 @@ fn orphans(procs: &[Proc], min_age: Duration, own: u32) -> Vec<u32> {
     v
 }
 
+/// Capture selected processes and their descendants before killing a server:
+/// its pane programs may ignore HUP and be reparented when it exits.
+/// Never include this process or its ancestors, even if a selector picks one.
+pub fn matching_tree(select: impl Fn(&str) -> Vec<u32>) -> Vec<u32> {
+    let procs = parse_procs(&ps_full());
+    let mut listing = String::new();
+    for p in &procs {
+        writeln!(listing, "{} {}", p.pid, p.args).unwrap();
+    }
+    let mut hit: HashSet<u32> = select(&listing).into_iter().collect();
+    descendants(&procs, &mut hit);
+    let mut at = std::process::id();
+    loop {
+        hit.remove(&at);
+        let Some(parent) = procs.iter().find(|p| p.pid == at).map(|p| p.ppid) else {
+            break;
+        };
+        if parent == 0 || parent == at {
+            break;
+        }
+        at = parent;
+    }
+    let mut pids: Vec<_> = hit.into_iter().collect();
+    pids.sort_unstable();
+    pids
+}
+
 /// Kill `pids` (children first is not needed: all die within the grace).
-fn kill_pids(pids: &[u32]) {
+pub fn kill_pids(pids: &[u32]) {
     kill_matching(|ps| {
         let alive: HashSet<u32> = pids_where(ps, 0, |_| true).into_iter().collect();
         pids.iter().copied().filter(|p| alive.contains(p)).collect()

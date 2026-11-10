@@ -410,7 +410,8 @@ fn label_is_of(label: &str, script_pid: u32) -> bool {
 /// private `TMUX_TMPDIR`, so that server's socket lands in
 /// `/tmp/{tmux,vtmux}-<uid>/` and outlives the server.
 fn reap_servers(tmux: &Path, script_pid: u32) {
-    reap::kill_matching(|ps| labelled_pids(ps, tmux, script_pid, std::process::id()));
+    let pids = reap::matching_tree(|ps| labelled_pids(ps, tmux, script_pid, std::process::id()));
+    reap::kill_pids(&pids);
     sweep_script_sockets(&reap::default_socket_dirs(), script_pid);
 }
 
@@ -1028,6 +1029,34 @@ mod tests {
         assert!(tmpdir.trim().starts_with("/tmp/vtr-"), "{tmpdir}");
         assert!(!Path::new(tmpdir.trim()).exists());
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn failing_script_leaves_no_stubborn_pane() {
+        let tmux = crate::ref_tmux::reference_tmux().unwrap();
+        let base = workspace_root()
+            .join("target")
+            .join(format!("regress-pane-leak-{}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("leak.sh"),
+            "\"$TEST_TMUX\" -LtestA$$ -f/dev/null new -d -s a -n w sh -c 'trap \"\" HUP TERM; echo $$ >pane; while :; do sleep 1000; done'\nwhile [ ! -s pane ]; do sleep 0.01; done\nexit 1\n"
+        ).unwrap();
+        let ran = run_one(&tmux, &base, &base, "leak.sh");
+        let pid = fs::read_to_string(base.join("pane")).unwrap();
+        let out = Command::new("ps")
+            .args(["-p", pid.trim(), "-o", "stat="])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&out.stdout);
+        let alive = !state.trim().is_empty() && !state.trim().starts_with('Z');
+        // The test also cleans up after the broken implementation.
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", pid.trim())])
+            .stderr(Stdio::null())
+            .status();
+        fs::remove_dir_all(base).unwrap();
+        assert!(!ran.outcome.passed());
+        assert!(!alive, "stubborn pane survived regress cleanup: {pid}");
     }
 
     /// A script's labelled servers can sit in the real socket directory

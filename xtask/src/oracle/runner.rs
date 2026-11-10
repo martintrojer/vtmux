@@ -210,6 +210,10 @@ pub struct Runner<'a> {
 
 impl Drop for Runner<'_> {
     fn drop(&mut self) {
+        // Capture the panes before kill-server reparents them. HUP alone
+        // need not stop a pane program (server.c server_send_exit).
+        let socket = self.socket.to_string_lossy().into_owned();
+        let mut pids = reap::matching_tree(|ps| socket_pids(ps, &socket, std::process::id()));
         // Best effort: stop the server this run started, then every client.
         let _ = self.cli_raw(&["kill-server".into()], Duration::from_secs(5));
         for c in self.controls.values_mut() {
@@ -221,9 +225,11 @@ impl Drop for Runner<'_> {
             let _ = a.child.wait();
         }
         // A wedged or unreachable server survives kill-server (it daemonized):
-        // kill whatever still holds this run's socket.
-        let socket = self.socket.to_string_lossy().into_owned();
-        reap::kill_matching(|ps| socket_pids(ps, &socket, std::process::id()));
+        // kill whatever still holds this run's socket, plus the captured panes.
+        pids.extend(reap::matching_tree(|ps| {
+            socket_pids(ps, &socket, std::process::id())
+        }));
+        reap::kill_pids(&pids);
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -1125,6 +1131,62 @@ mod tests {
         let socket = socket.unwrap();
         assert!(socket.starts_with(ROOT_BASE), "{}", socket.display());
         assert_eq!(socket.as_os_str().len(), "/tmp/vto-xxxxxx/s".len());
+    }
+
+    #[test]
+    fn teardown_kills_stubborn_panes_and_their_children() {
+        let bin = crate::ref_tmux::reference_tmux().unwrap();
+        let sc = Scenario {
+            name: "pane-cleanup".into(),
+            size: [80, 24],
+            steps: Vec::new(),
+        };
+        let runner = Runner::new(&bin, &sc, Opts::default()).unwrap();
+        let argv: Vec<String> = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c",
+            "trap '' HUP TERM; echo $$ >\"$HOME/pane\"; sh -c 'trap \"\" HUP TERM; echo $$ >\"$HOME/leaf\"; tmux wait-for -S ready; exec sleep 1000' & wait"
+        ].into_iter().map(str::to_string).collect();
+        assert_eq!(runner.cli_raw(&argv, WAIT_TIMEOUT).unwrap().unwrap().2, 0);
+        assert_eq!(
+            runner
+                .cli_raw(&["wait-for".into(), "ready".into()], WAIT_TIMEOUT)
+                .unwrap()
+                .unwrap()
+                .2,
+            0
+        );
+        let pids: Vec<u32> = ["pane", "leaf"]
+            .map(|name| {
+                fs::read_to_string(runner.root.join("home").join(name))
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap()
+            })
+            .to_vec();
+        drop(runner);
+        let alive: Vec<_> = pids
+            .iter()
+            .copied()
+            .filter(|pid| {
+                let out = Command::new("ps")
+                    .args(["-p", &pid.to_string(), "-o", "stat="])
+                    .output()
+                    .unwrap();
+                let state = String::from_utf8_lossy(&out.stdout);
+                !state.trim().is_empty() && !state.trim().starts_with('Z')
+            })
+            .collect();
+        // Cleanup is unconditional, including when testing the broken Drop.
+        for pid in &pids {
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .stderr(Stdio::null())
+                .status();
+        }
+        assert!(
+            alive.is_empty(),
+            "pane descendants survived teardown: {alive:?}"
+        );
     }
 
     #[test]
