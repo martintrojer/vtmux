@@ -46,7 +46,7 @@ cargo login                                     # once, with a crates.io token
 mise exec -- bash scripts/publish.sh --publish
 ```
 
-`cargo publish` runs for each crate in order and waits until crates.io serves it before the next one. If one fails part way, fix it and publish the rest: a version once published can't be replaced, only yanked. After the first publish, drop "once vtmux is on crates.io" from the README's install line.
+`cargo publish` runs for each crate in order and waits until crates.io serves it before the next one. If one fails part way (crates.io limits how many new crates an account publishes in a short time: a 429 says when to retry), run it again: it skips the crates already on crates.io at this version. A version once published can't be replaced, only yanked. After the first publish, drop "once vtmux is on crates.io" from the README's install line.
 
 ### What `cargo install vtmux` gets
 

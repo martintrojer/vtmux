@@ -6,7 +6,9 @@
 #       verify every crate, then install vtmux from the .crate files alone,
 #       offline, and run it. Publishes nothing.
 #   scripts/publish.sh --publish [cargo args]     `cargo publish` each crate in
-#       order. The owner's call, after a dry run of the same commit.
+#       order, skipping any already on crates.io at this version, so a rerun
+#       after a failure part way carries on. The owner's call, after a dry run
+#       of the same commit.
 #
 # Cargo args (`--allow-dirty` while trying it out) go to every `cargo package`
 # or `cargo publish`.
@@ -57,12 +59,38 @@ version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Car
   exit 1
 }
 
+# Whether crates.io already has this version of a crate (HTTP 200 from its
+# API; 404 when not). Publishing is idempotent: a rerun after a failure part
+# way (crates.io's new-crate rate limit, a network error) skips what is up.
+published() {
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    -A 'vtmux publish.sh (https://github.com/martintrojer/vtmux)' \
+    "https://crates.io/api/v1/crates/$1/$2")
+  case "$code" in
+  200) return 0 ;;
+  404) return 1 ;;
+  *)
+    echo "publish: crates.io answered $code for $1 $2; try again later" >&2
+    exit 1
+    ;;
+  esac
+}
+
 if [ "$mode" = publish ]; then
   for c in "${crates[@]}"; do
+    if published "$c" "$version"; then
+      echo "publish: $c $version is on crates.io already, skipped"
+      continue
+    fi
     echo "publish: $c $version"
     # Each waits until crates.io serves it, so the next one resolves it.
-    cargo publish --manifest-path "$(manifest "$c")" --target-dir target "$@"
+    if ! cargo publish --manifest-path "$(manifest "$c")" --target-dir target "$@"; then
+      echo "publish: $c failed; fix it (or wait out a 429 rate limit) and run this again: it skips what is published" >&2
+      exit 1
+    fi
   done
+  echo "publish: all ${#crates[@]} crates at $version are on crates.io"
   exit 0
 fi
 
