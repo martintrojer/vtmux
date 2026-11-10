@@ -458,6 +458,53 @@ fn commands_after_the_upgrade_in_its_queue_refuse_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Keys typed right after a key bound to `vtmux-upgrade` (in the same read,
+/// or while it waits) are not a reason to refuse: they have run nothing
+/// yet, so they go back to the client's input, which the snapshot carries
+/// for the image that serves next, and a refused or failed upgrade reads
+/// them again. (Before: refused with `keys pressed meanwhile after
+/// vtmux-upgrade would not run`.)
+#[test]
+fn keys_typed_after_a_bound_upgrade_do_not_refuse_it() {
+    let (mut server, dir) = setup("keys");
+    let binary = passing(&dir);
+    let b = binary.to_str().unwrap();
+    let bind = format!("vtmux-upgrade -b {b}");
+    for words in [
+        ["bind", "-n", "F5", &bind].as_slice(),
+        &["bind", "-n", "x", "set", "-g", "@x", "ran"],
+    ] {
+        st::ok(&mut server, &dir, words);
+    }
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    // F5 and `x` in one read: both are queued before the binding runs.
+    server.on_client_input(term, b"\x1b[15~x").unwrap();
+    for _ in 0..5 {
+        turns(&mut server, Instant::now());
+        server.cmdq_process();
+    }
+    // The exec was reached (the recorder fails it) with the key in the
+    // client's input, which the snapshot carries.
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let frame =
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b"x".to_vec()))
+            .unwrap();
+    assert_eq!(client.inbuf, frame);
+    // The exec failed: the server serves on and reads the key, which runs
+    // its binding.
+    assert!(server.upgrade.pending.is_none());
+    let shown = st::run(&mut server, &dir, &["show", "-gv", "@x"]);
+    assert!(shown.contains("\nran\n"), "{shown}");
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Decision 10: a `run-shell` job still running holds the upgrade; at the
 /// end of the wait it is refused, naming the job.
 #[test]

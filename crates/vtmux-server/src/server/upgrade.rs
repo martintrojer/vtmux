@@ -246,6 +246,10 @@ pub(crate) struct Upgrade {
     pub(crate) warnings: Vec<String>,
     /// The requester's answer, waiting for the clients re-attaching.
     pub(crate) answer: Option<LaterAnswer>,
+    /// The client whose requester had keys behind it, given back to its
+    /// input ([`Server::upgrade_behind`]): read again once the upgrade
+    /// has ended without an exec.
+    replay: Option<ClientId>,
 }
 
 impl Default for Upgrade {
@@ -255,6 +259,7 @@ impl Default for Upgrade {
             exec: crate::sys::upgrade::exec_in_place,
             warnings: Vec::new(),
             answer: None,
+            replay: None,
         }
     }
 }
@@ -420,6 +425,18 @@ impl Server {
     /// the dry run once nothing is, see whether it has ended, and once it
     /// has passed and nothing is in flight again, run the rest.
     pub(crate) fn upgrade_turn(&mut self, now: Instant) {
+        self.upgrade_pending_turn(now);
+        // The upgrade ended and the server serves on: the keys typed behind
+        // it are read now (an exec carries them in the client's input).
+        if self.upgrade.pending.is_none()
+            && let Some(id) = self.upgrade.replay.take()
+        {
+            self.client_readable(id);
+            self.cmdq_process();
+        }
+    }
+
+    fn upgrade_pending_turn(&mut self, now: Instant) {
         let Some(p) = self.upgrade.pending.as_ref() else {
             return;
         };
@@ -588,11 +605,33 @@ impl Server {
     /// that serves next answers the requester as its command list's end,
     /// so the commands after it in a list (`vtmux-upgrade ; set ...`), a
     /// file it is sourced from, or keys pressed while it waits would be
-    /// lost.
-    fn upgrade_behind(&self, requester: Requester) -> Option<String> {
-        let Requester::Command { step, .. } = requester else {
+    /// lost. Keys alone are not refused: they have run nothing yet, so they
+    /// go back to the client's input, which the exec carries and the image
+    /// that serves next reads (live-upgrade spec, *Sequence*, step 1).
+    fn upgrade_behind(&mut self, requester: Requester) -> Option<String> {
+        let Requester::Command { step, client } = requester else {
             return None;
         };
+        if let Some(id) = client
+            && self.clients.contains_key(&id)
+            && let Some(bytes) = self.cmdq.take_keys_after(step)
+            && !bytes.is_empty()
+        {
+            // Frames as a client sends them, of a size every reader takes.
+            let frames: Vec<u8> = bytes
+                .chunks(16 * 1024)
+                .flat_map(|chunk| {
+                    vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
+                        chunk.to_vec(),
+                    ))
+                    .expect("a chunk of keys fits a frame")
+                })
+                .collect();
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.inbuf.splice(0..0, frames);
+            }
+            self.upgrade.replay = Some(id);
+        }
         let mut what: Vec<&str> = Vec::new();
         for work in self.cmdq.queued_after(step) {
             let name = match work {

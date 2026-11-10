@@ -332,6 +332,50 @@ impl Cmdq {
             .collect()
     }
 
+    /// The keys queued behind step `id` taken out of its queue, as the
+    /// bytes they came in, in order: `Some` (empty when there are none)
+    /// only if nothing else is behind it (batch ends excepted) and every key still has its bytes (not a
+    /// mouse event or a paste mark, whose handling is not repeated from
+    /// bytes, nor one `send-keys -K` gave). A key waits behind a command
+    /// that waits, and has done nothing yet: given back as input, it is
+    /// read again later.
+    pub fn take_keys_after(&mut self, id: StepId) -> Option<Vec<u8>> {
+        use crate::key_dispatch::{KeyEvent, KeyKind};
+        let steps = self
+            .queues
+            .values_mut()
+            .find(|s| s.iter().any(|s| s.id == id))?;
+        let at = steps.iter().position(|s| s.id == id)?;
+        let own = steps[at].batch;
+        let mut bytes = Vec::new();
+        let mut keys: Vec<BatchId> = Vec::new();
+        for s in steps.iter().skip(at + 1) {
+            match &s.work {
+                Some(Work::Key(KeyEvent {
+                    kind: KeyKind::Key(_, raw),
+                    ..
+                })) if s.batch != own && !raw.is_empty() => {
+                    bytes.extend_from_slice(raw);
+                    keys.push(s.batch);
+                }
+                // The end of a batch that has no more to run (the key whose
+                // binding this is, the requester's own).
+                Some(Work::End(_)) | None => {}
+                Some(Work::SourceDone { failed: false }) if s.batch == own => {}
+                _ => return None,
+            }
+        }
+        let mut seen = 0;
+        steps.retain(|s| {
+            seen += 1;
+            seen <= at + 1 || !keys.contains(&s.batch)
+        });
+        for b in keys {
+            self.batches.remove(&b);
+        }
+        Some(bytes)
+    }
+
     /// The queue step `id` is in, while it is queued.
     #[must_use]
     pub fn queue_of(&self, id: StepId) -> Option<QueueId> {
