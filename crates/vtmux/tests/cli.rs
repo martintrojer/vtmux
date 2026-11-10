@@ -3590,6 +3590,29 @@ fn initial_window_name_is_the_command() {
     );
 }
 
+/// D-012 for a pane split into, or respawned in, a window whose name clock
+/// ran out long ago: the first check waits one name interval from the
+/// spawn, so it sees the command and not the child before it execs (the
+/// forked server, `vtmux-<sha>` on macOS, or `sh` before `exec sleep`),
+/// which a pane that prints nothing would keep. Reference probe, SHELL=
+/// /bin/sh: `new -d -s a cat; neww -d cat; sleep 1.2; splitw -t a:0 sh -c
+/// 'exec sleep 101'; respawnp -k -t a:1 sh -c 'exec sleep 102'; sleep 1.2;
+/// lsw -F '#{window_name} #{pane_current_command}'` is `tmux sleep` for 9
+/// of 10 windows over 5 runs (once `cat sleep`).
+#[test]
+fn split_and_respawned_pane_name_is_the_command() {
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "cat"]);
+    w.run(&["neww", "-d", "cat"]);
+    // Past both windows' first name checks.
+    std::thread::sleep(Duration::from_millis(1200));
+    w.run(&["splitw", "-t", "a:0", "sh", "-c", "exec sleep 101"]);
+    w.run(&["respawnp", "-k", "-t", "a:1", "sh", "-c", "exec sleep 102"]);
+    std::thread::sleep(Duration::from_millis(1500));
+    let names = w.run(&["lsw", "-F", "#{window_name} #{pane_current_command}"]);
+    assert_eq!(names.stdout, "sleep sleep\nsleep sleep\n");
+}
+
 /// Whether the reference's libc answers like glibc for bytes that are not
 /// UTF-8 and code points past U+10FFFF, as vtmux-core does on every system
 /// (compat/DIVERGENCES.md D-019). On macOS tmux 3.8 calls Darwin's

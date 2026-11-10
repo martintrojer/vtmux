@@ -4995,13 +4995,8 @@ impl Server {
             };
             parse_window_name(&from)
         };
+        // The name clock already started in spawn_pane (D-012).
         pane.changed = true;
-        // tmux's first check_window_name runs the turn it forked, when
-        // #{pane_current_command} is still the forked server ("tmux") or
-        // the shell before it execs: a race that goes differently every
-        // run. The name clock starts at creation instead, so the first
-        // check comes one NAME_INTERVAL later and sees the command (D-012).
-        pane.last_rename = Some(Instant::now());
         self.model.panes.insert(pane_id, pane);
         // spawn.c:601-609: the first pane goes through window_set_active_pane
         // (w->active is NULL even with -d), which stamps its active_point.
@@ -5239,7 +5234,14 @@ impl Server {
             changed: false,
             unseen_changes: false,
             output_at: None,
-            last_rename: None,
+            // tmux's first check_window_name runs the turn it forked, when
+            // #{pane_current_command} is still the forked server ("tmux")
+            // or the shell before it execs: a race that goes differently
+            // every run, and a pane that prints nothing keeps what it read.
+            // The name clock starts at the spawn instead (a new window, a
+            // split, a respawn), so the first check comes one NAME_INTERVAL
+            // later and sees the command (D-012).
+            last_rename: Some(Instant::now()),
             rect: ps.rect,
             history_limit,
             input_off: false,
@@ -5513,6 +5515,7 @@ impl Server {
         };
         pane.io = fresh.io;
         pane.empty = fresh.empty;
+        pane.last_rename = fresh.last_rename;
         // spawn.c:459-463: an empty respawn forks nothing and keeps the old
         // pid, so the old process's exit (server_child_exited matches by
         // pid, server.c:498) still destroys the pane.

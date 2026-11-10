@@ -26,7 +26,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-008](#d-008) | `respawn-window -k` on a zoomed window works; tmux crashes | tmux bug | open |
 | [D-009](#d-009) | A tab or `\001` in a config error shown at attach is dropped | Deferred | deferred |
 | [D-010](#d-010) | Copy mode redraws its whole screen, so no stale selection is left on screen | Deferred | deferred |
-| [D-012](#d-012) | A new window is named after its command from the start, never `tmux` by chance | tmux bug | open |
+| [D-012](#d-012) | A new window or pane is named after its command, never `tmux` by chance | tmux bug | open |
 | [D-013](#d-013) | Byte sequences that glibc decodes but that are not UTF-8 count as separate bytes | Deferred | deferred |
 | [D-014](#d-014) | Window pixel sizes are empty and panes get no pixel size | Deferred | deferred |
 | [D-015](#d-015) | The cell after a pane prompt's input is always styled (tmux: depends on width) | tmux bug | open |
@@ -362,17 +362,18 @@ Closed (vtmux now matches tmux):
   - A resize reflows a tab as tmux's `grid_reflow` does (the TAB cell's width plus one per padding cell): patch `0015-reflow-tab-as-tmux.patch`, goldens `cap_tab_resize_*`, oracle `rep_deccolm_tab_reflow`.
 
 <a id="d-012"></a>
-### D-012: a new window's first automatic-rename check waits one name interval
+### D-012: a new pane's first automatic-rename check waits one name interval
 
 - **Category:** Do not copy tmux bug: the name depends on a scheduler race.
-- **Test:** cli.rs `initial_window_name_is_the_command` (vtmux only: the reference's outcome is not repeatable, so it cannot be compared).
+- **Test:** cli.rs `initial_window_name_is_the_command` and `split_and_respawned_pane_name_is_the_command` (vtmux only: the reference's outcome is not repeatable, so it cannot be compared).
 - **tmux:**
   - `spawn_window` sets the name from `default_window_name` (the command's first word), and `check_window_name` (names.c) runs at the end of the same loop turn, with no `name_time` yet.
   - `#{pane_current_command}` then reads the foreground process of the new PTY. That is usually still the forked server (`tmux`), sometimes the shell before it execs, or the command itself.
   - So `new -d -s a cat; neww -d cat; neww -d cat` gives `tmux`, `cat` and `sh` in different runs. Out of 20 runs: 10 `tmux/tmux/tmux`, 6 `tmux/tmux/cat`, 2 `cat/cat/tmux`, 2 `tmux/cat/cat`.
   - `window-renamed` fires for the ones that lose, and a window that prints nothing keeps the wrong name.
+  - The same goes for `split-window` and `respawn-pane` in a window whose `name_time` is older than `NAME_INTERVAL`: the new pane is active and changed, so the check runs at once. `splitw sh -c 'exec sleep 101'` and `respawnp -k sh -c 'exec sleep 102'` named their windows `tmux` in 9 of 10 runs (once `cat`).
 - **vtmux:**
-  - The window's name clock starts at creation, so the first check comes one `NAME_INTERVAL` (500 ms) later, when the command has exec'd.
+  - A pane's name clock starts at its spawn (new window, split or respawn), so the first check comes one `NAME_INTERVAL` (500 ms) later, when the command has exec'd. Before this, a split or respawn was checked at once: `sh` on Linux, the server binary (`vtmux-<sha>`) on macOS.
   - The window keeps the name from `default_window_name` (`cat`) or settles on the command's `argv[0]` (`sleep` for `sh -c 'exec sleep 5'`).
   - No spurious `window-renamed` or `%window-renamed` fires at start.
 - **Evidence:** 30 runs of `new -d -s a cat; neww -d cat; neww -d; neww -d sleep 4; neww -d 'exec sleep 5'` with SHELL=/bin/sh give `cat/cat/sh/sleep/sleep` every time; before the change `sh/cat/...` mixes. Reference runs of the same script vary as above.
