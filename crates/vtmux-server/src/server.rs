@@ -6373,6 +6373,47 @@ mod tests {
         assert_eq!(osc_title(b"plain"), None);
     }
 
+    /// Two `wait-for -E -v` waiters on one event, the first one's socket
+    /// closed before the event fires: printing its payload drops that
+    /// client while the waiters are woken (`flush_client`). The second
+    /// still gets the payload and its exit, and nothing of the first is
+    /// left queued.
+    #[test]
+    fn an_event_waiter_dropped_while_woken_leaves_the_others_alone() {
+        use crate::server::snapshot::tests::{connect, hello, messages, ok};
+        use vtmux_core::protocol::{ControlMode, ServerMsg};
+        let (mut server, _, _, _, dir) = setup();
+        let wait = ["wait-for", "-E", "-v", "session-renamed"];
+        let (gone, peer) = connect(&mut server, hello(&wait, &dir, None, ControlMode::None));
+        drop(peer);
+        let (stays, mut peer) = connect(&mut server, hello(&wait, &dir, None, ControlMode::None));
+        ok(&mut server, &dir, &["rename-session", "b"]);
+        for (c, code) in std::mem::take(&mut server.pending_exits) {
+            server.finish_client(c, code);
+        }
+        let got = messages(&mut server, stays, &mut peer);
+        let out: Vec<u8> = got
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::Stdout(b) => Some(b.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(
+            String::from_utf8_lossy(&out).contains("new_name=b\n"),
+            "{got:?}"
+        );
+        assert!(
+            got.iter()
+                .any(|m| matches!(m, ServerMsg::Exit { code: 0, .. })),
+            "{got:?}"
+        );
+        assert!(!server.clients.contains_key(&gone));
+        assert_eq!(server.cmdq_batches_of(gone), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// A client of another protocol version (`Speaks::Frozen`) is sent the
     /// frozen frames and nothing else (protocol module docs).
     #[test]

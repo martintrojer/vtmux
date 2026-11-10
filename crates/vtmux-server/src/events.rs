@@ -799,14 +799,22 @@ impl Server {
     /// `cmd_wait_for_event_cb` (cmd-wait-for.c:224-252) for the waiters
     /// on this event.
     fn waits_event(&mut self, ev: &Event) {
-        let waiting: Vec<usize> = (0..self.event_waits.len())
-            .filter(|&i| self.event_waits[i].name == ev.name)
+        // Each waiter is found again by its step: printing the payload can
+        // drop a client (`flush_client`), and its waiters with it.
+        let waiting: Vec<StepId> = self
+            .event_waits
+            .iter()
+            .filter(|w| w.name == ev.name)
+            .map(|w| w.step)
             .collect();
-        let mut done = Vec::new();
-        for i in waiting {
-            let (step, client, verbose, filter) = {
-                let w = &self.event_waits[i];
-                (w.step, w.client, w.verbose, w.filter.clone())
+        for step in waiting {
+            let Some((client, verbose, filter)) = self
+                .event_waits
+                .iter()
+                .find(|w| w.step == step)
+                .map(|w| (w.client, w.verbose, w.filter.clone()))
+            else {
+                continue;
             };
             if verbose {
                 let lines: Vec<String> = ev
@@ -838,11 +846,10 @@ impl Server {
                     continue;
                 }
             }
-            done.push(i);
-        }
-        for i in done.into_iter().rev() {
-            let w = self.event_waits.remove(i);
-            self.cmdq_continue(w.step);
+            if let Some(i) = self.event_waits.iter().position(|w| w.step == step) {
+                self.event_waits.remove(i);
+                self.cmdq_continue(step);
+            }
         }
     }
 }

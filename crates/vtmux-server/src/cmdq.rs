@@ -490,7 +490,11 @@ impl Server {
         let mut item = self.cmdq.batches.remove(&batch)?;
         let r = f(self, &mut item);
         self.flush_item(&mut item);
-        self.cmdq.batches.insert(batch, item);
+        // Writing the output can drop its client (`flush_client`), whose
+        // steps go with it: then the batch does too.
+        if self.cmdq.batch_of(id) == Some(batch) {
+            self.cmdq.batches.insert(batch, item);
+        }
         Some(r)
     }
 
@@ -501,6 +505,16 @@ impl Server {
             let step = step.id;
             self.cmdq.continue_step(step);
         }
+    }
+
+    /// How many batches of client `id` are queued.
+    #[cfg(test)]
+    pub(crate) fn cmdq_batches_of(&self, id: ClientId) -> usize {
+        self.cmdq
+            .batches
+            .values()
+            .filter(|i| i.client == Some(id))
+            .count()
     }
 
     /// `cmdq_free` for a client that is gone: its steps never run.
