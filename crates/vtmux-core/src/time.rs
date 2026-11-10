@@ -54,6 +54,9 @@ impl WallClock for SystemWallClock {
     }
 
     fn local_time(&self, epoch: i64) -> Option<Tm> {
+        if let Some(zone) = std::env::var("TZ").ok().and_then(|tz| file_zone(&tz)) {
+            return zone.local_time(epoch);
+        }
         let Ok(tz) = TimeZone::try_system() else {
             // No zone jiff can read: UTC (glibc: offset 0), under the name glibc's
             // POSIX parser keeps from `TZ` when it has one.
@@ -69,6 +72,148 @@ impl WallClock for SystemWallClock {
         };
         Tm::in_zone(&tz, epoch)
     }
+}
+
+/// A zone read from a `TZif` file as glibc's `tzset` reads it, with the
+/// file's leap seconds, which jiff ignores.
+#[derive(Debug)]
+struct FileZone {
+    tz: TimeZone,
+    /// (transition, correction) pairs in the order of the file.
+    leaps: Vec<(i64, i64)>,
+}
+
+impl FileZone {
+    /// `__tz_convert` (time/tzset.c) with `__tzfile_compute`'s leap
+    /// correction: the time broken down at the zone's offset less the
+    /// seconds leapt so far, the inserted second itself as second 60.
+    fn local_time(&self, epoch: i64) -> Option<Tm> {
+        let tm = Tm::in_zone(&self.tz, epoch)?;
+        let Some(i) = self.leaps.iter().rposition(|&(at, _)| epoch >= at) else {
+            return Some(tm);
+        };
+        let (at, change) = self.leaps[i];
+        let mut hit = 0u8;
+        if epoch == at
+            && (if i == 0 {
+                change > 0
+            } else {
+                change > self.leaps[i - 1].1
+            })
+        {
+            hit = 1;
+            let mut j = i;
+            while j > 0
+                && self.leaps[j].0 == self.leaps[j - 1].0 + 1
+                && self.leaps[j].1 == self.leaps[j - 1].1 + 1
+            {
+                hit += 1;
+                j -= 1;
+            }
+        }
+        let offset = jiff::tz::Offset::from_seconds(tm.utc_offset).ok()?;
+        let mut shifted = Tm::in_zone(&TimeZone::fixed(offset), epoch.checked_sub(change)?)?;
+        shifted.second += hit;
+        shifted.zone = tm.zone;
+        shifted.epoch = epoch;
+        Some(shifted)
+    }
+}
+
+/// The zone glibc's `tzset` reads for `TZ` from a file (`tzset_internal`,
+/// `__tzfile_read`): a leading `:` dropped, a relative name under `TZDIR`
+/// (`/usr/share/zoneinfo`), so `posix/` and `right/` names too, which
+/// jiff's zone database skips. `None` when that is no `TZif` file (glibc
+/// then reads `TZ` as a POSIX rule): an empty name is UTC there. Read
+/// once per `TZ` value, as `localtime_r` initialises once.
+fn file_zone(tz: &str) -> Option<std::sync::Arc<FileZone>> {
+    type Cache = Option<(String, Option<std::sync::Arc<FileZone>>)>;
+    static CACHE: std::sync::Mutex<Cache> = std::sync::Mutex::new(None);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((key, zone)) = cache.as_ref()
+        && key == tz
+    {
+        return zone.clone();
+    }
+    let zone = read_file_zone(tz).map(std::sync::Arc::new);
+    *cache = Some((tz.to_owned(), zone.clone()));
+    zone
+}
+
+fn read_file_zone(tz: &str) -> Option<FileZone> {
+    let name = tz.strip_prefix(':').unwrap_or(tz);
+    if name.is_empty() {
+        // tzfile.c: "User specified the empty string; use UTC with no
+        // leap seconds".
+        return (!tz.is_empty()).then(|| FileZone {
+            tz: TimeZone::UTC,
+            leaps: Vec::new(),
+        });
+    }
+    let path = if name.starts_with('/') {
+        std::path::PathBuf::from(name)
+    } else {
+        let dir = std::env::var_os("TZDIR")
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| "/usr/share/zoneinfo".into());
+        std::path::Path::new(&dir).join(name)
+    };
+    let data = std::fs::read(path).ok()?;
+    Some(FileZone {
+        tz: TimeZone::tzif(name, &data).ok()?,
+        leaps: tzif_leaps(&data)?,
+    })
+}
+
+/// The leap second records of `TZif` `data` (RFC 8536): the 64-bit block's
+/// when the file has one, as glibc reads it, else the 32-bit block's.
+fn tzif_leaps(data: &[u8]) -> Option<Vec<(i64, i64)>> {
+    let u32_at = |at: usize| {
+        data.get(at..at + 4)
+            .map(|b| u32::from_be_bytes(b.try_into().expect("four bytes")))
+    };
+    let i32_at = |at: usize| u32_at(at).map(|n| i64::from(n.cast_signed()));
+    let i64_at = |at: usize| {
+        data.get(at..at + 8)
+            .map(|b| i64::from_be_bytes(b.try_into().expect("eight bytes")))
+    };
+    // Header: magic, version, 15 reserved bytes, six counts.
+    let header = |at: usize| -> Option<[usize; 6]> {
+        if data.get(at..at + 4)? != b"TZif" {
+            return None;
+        }
+        let mut counts = [0usize; 6];
+        for (i, c) in counts.iter_mut().enumerate() {
+            *c = usize::try_from(u32_at(at + 20 + 4 * i)?).ok()?;
+        }
+        Some(counts)
+    };
+    // isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt.
+    let block = |c: [usize; 6], time: usize| {
+        c[3] * time + c[3] + c[4] * 6 + c[5] + c[2] * (time + 4) + c[1] + c[0]
+    };
+    let v1 = header(0)?;
+    let (at, counts, time) = if *data.get(4)? >= b'2' {
+        let second = 44 + block(v1, 4);
+        (second, header(second)?, 8)
+    } else {
+        (0, v1, 4)
+    };
+    let [_, _, leapcnt, timecnt, typecnt, charcnt] = counts;
+    let start = at + 44 + timecnt * time + timecnt + typecnt * 6 + charcnt;
+    (0..leapcnt)
+        .map(|i| {
+            let rec = start + i * (time + 4);
+            let when = if time == 8 {
+                i64_at(rec)?
+            } else {
+                i32_at(rec)?
+            };
+            Some((when, i32_at(rec + time)?))
+        })
+        .collect()
 }
 
 /// The zone abbreviation glibc's `tzset` leaves for a `TZ` that is neither a
@@ -611,6 +756,68 @@ mod tests {
         let summer = london.local_time(1_782_000_000).expect("in range");
         assert_eq!((summer.zone.as_str(), summer.utc_offset), ("BST", 3600));
         assert!(FixedWallClock::new(0, "No/Such_Zone").is_none());
+    }
+
+    /// A `TZif` file with two leap seconds, as the `right/` zones have:
+    /// one 32-bit and one 64-bit block (RFC 8536) and a UTC footer.
+    fn leap_tzif() -> Vec<u8> {
+        let leaps: [(i64, i32); 2] = [(78_796_800, 1), (94_694_401, 2)];
+        let mut data = Vec::new();
+        for time in [4, 8] {
+            data.extend_from_slice(b"TZif2");
+            data.extend_from_slice(&[0; 15]);
+            // isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt.
+            for n in [0u32, 0, 2, 0, 1, 4] {
+                data.extend_from_slice(&n.to_be_bytes());
+            }
+            data.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+            data.extend_from_slice(b"UTC\0");
+            for (at, change) in leaps {
+                if time == 4 {
+                    data.extend_from_slice(&i32::try_from(at).unwrap().to_be_bytes());
+                } else {
+                    data.extend_from_slice(&at.to_be_bytes());
+                }
+                data.extend_from_slice(&change.to_be_bytes());
+            }
+        }
+        data.extend_from_slice(b"\nUTC0\n");
+        data
+    }
+
+    /// glibc's `__tzfile_compute` (reference tmux 3.8 under
+    /// `TZ=right/UTC`): times after a leap second are that much earlier,
+    /// and the leap second itself is second 60.
+    #[test]
+    fn a_zone_file_with_leap_seconds_corrects_by_them() {
+        let data = leap_tzif();
+        assert_eq!(
+            tzif_leaps(&data),
+            Some(vec![(78_796_800, 1), (94_694_401, 2)])
+        );
+        let zone = FileZone {
+            tz: TimeZone::tzif("right/UTC", &data).expect("TZif"),
+            leaps: tzif_leaps(&data).expect("leaps"),
+        };
+        let at = |epoch| {
+            let tm = zone.local_time(epoch).expect("in range");
+            (tm.month, tm.day, tm.hour, tm.minute, tm.second, tm.zone)
+        };
+        assert_eq!(at(78_796_799), (6, 30, 23, 59, 59, "UTC".into()));
+        assert_eq!(at(78_796_800), (6, 30, 23, 59, 60, "UTC".into()));
+        assert_eq!(at(78_796_801), (7, 1, 0, 0, 0, "UTC".into()));
+        assert_eq!(at(94_694_401), (12, 31, 23, 59, 60, "UTC".into()));
+        assert_eq!(at(94_694_402), (1, 1, 0, 0, 0, "UTC".into()));
+    }
+
+    /// `tzset_internal`: `TZ=:` names no file, which glibc reads as UTC;
+    /// a name that is no file is left to the POSIX parser.
+    #[test]
+    fn an_empty_zone_file_name_is_utc() {
+        let utc = read_file_zone(":").expect("UTC");
+        assert_eq!(utc.local_time(0).map(|tm| tm.zone), Some("UTC".into()));
+        assert!(read_file_zone("").is_none());
+        assert!(read_file_zone("/nonexistent/zone").is_none());
     }
 
     #[test]

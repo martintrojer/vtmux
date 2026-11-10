@@ -7771,9 +7771,11 @@ fn format_time_out_of_range() {
 /// A `TZ` that is neither a zoneinfo file nor a POSIX rule: glibc's `tzset`
 /// keeps the leading letters as the zone name with offset 0 (`%Z` of
 /// `TZ=Invalid/Zone` is `Invalid`, of `TZ=AB/x` empty, `<+03>/x` gives
-/// `+03`; compat/DIVERGENCES.md D-004). Each value gets its own server, as
-/// the zone is read from the server's environment. Linux only: Darwin's
-/// `tzset` parses these differently.
+/// `+03`; compat/DIVERGENCES.md D-004). Zone files under `TZDIR` that jiff's
+/// database skips are still files (`posix/Asia/Tokyo` is `JST`, `right/`
+/// zones count leap seconds), and `TZ=:` names none, which is UTC. Each
+/// value gets its own server, as the zone is read from the server's
+/// environment. Linux only: Darwin's `tzset` parses these differently.
 #[cfg(target_os = "linux")]
 #[test]
 fn format_time_unparseable_tz_name() {
@@ -7791,6 +7793,9 @@ fn format_time_unparseable_tz_name() {
             "<ab>x",
             "Europe/London",
             "EST5",
+            "posix/Asia/Tokyo",
+            ":right/Europe/London",
+            ":",
         ] {
             runs.push(w.raw_env(
                 &[
