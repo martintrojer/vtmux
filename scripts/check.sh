@@ -24,6 +24,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 bash scripts/socket-guard.sh record "$sockets_before"
 cargo fmt --all --check
+# The published Ghostty fork is outside the workspace, including its tests.
+ghostty_manifest=third_party/libghostty-rs/libghostty-vt/Cargo.toml
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
+cargo fmt --manifest-path "$ghostty_manifest" --check
 cargo clippy --workspace --all-targets -- -D warnings
 # Type-check the other platform too, so a Linux-only API (SOCK_CLOEXEC,
 # O_CLOEXEC on openpt) is caught before CI. Skipped where the target isn't
@@ -51,7 +55,7 @@ VTMUX_CHECK_HARNESS="${VTMUX_CHECK_HARNESS:-1}"
 # fresh: one that is not (a build script that reruns every time, two of them
 # that build target/debug/vtmux differently) would rewrite the binary under
 # the suites running meanwhile.
-builds=("test --workspace --no-run" "build -p xtask" "build -p vtmux")
+builds=("test --workspace --no-run" "test --manifest-path $ghostty_manifest --features allocator_api --no-run" "build -p xtask" "build -p vtmux")
 for b in "${builds[@]}"; do
   # shellcheck disable=SC2086 # the words of one cargo command
   cargo $b -q
@@ -100,6 +104,7 @@ suite() {
   starts+=("$start")
 }
 suite "cargo test" cargo test --workspace
+suite "Ghostty wrapper (allocator_api)" cargo test --manifest-path "$ghostty_manifest" --features allocator_api
 # The replay again with the server upgraded onto itself after every third
 # step (live-upgrade spec, *Tests*): every scenario must still match. Then
 # after every step, for the scenarios that once failed only so.
