@@ -281,7 +281,7 @@ Closed (vtmux now matches tmux):
   - Then `Eneks` and `Enfcs` are written as `tty_update_features` writes them. The client is redrawn only if a capability vtmux draws with changed (tmux always redraws; the screen is the same).
   - vtmux does not repeat the colour queries on a resize (`tty_repeat_requests` after `TTY_REQUEST_LIMIT`), only after a theme report.
   - A reply that arrives after its query was answered or timed out is swallowed, where tmux reads it as keys.
-  - The `hyperlinks` feature is tracked and listed, but the compositor does not yet write OSC 8. tmux writes a pane's links as `\E]8;id=tmuxN;URI\E\\` to a terminal with `Hls`.
+  - With the `hyperlinks` feature (`Hls`), frames write each cell's link as tmux does (`tty_hyperlink`): `\E]8;id=tmuxN;URI\E\\` when the link changes, nothing to a terminal without `Hls`. The numbering of `tmuxN` differs: [D-068](#d-068).
 - **Evidence:**
   - Reference tmux 3.8 `list-clients -F '#{client_termfeatures}|#{client_colours}|#{Ic:...}'` on a PTY client, for every row of `golden/cases.tsv`.
   - `Ms` probes in `term_features_cases.py` rows `xterm*:Ms=...`.
