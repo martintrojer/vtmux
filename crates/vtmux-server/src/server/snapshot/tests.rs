@@ -1492,13 +1492,18 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // first keeps its history for the editor above).
     ok(&mut a, &dir, &["set", "-g", "history-limit", "0"]);
     ok(&mut a, &dir, &["split-window", "-d", "-t", "s", "cat", "-"]);
-    a.pane_input(
-        vtmux_core::ids::PaneId(1),
-        b"\x1b[48;2;9;8;7m\x1b[S\x1b[m",
-        false,
-    );
+    let second = *a.model.panes.keys().max().unwrap();
+    a.pane_input(second, b"\x1b[48;2;9;8;7m\x1b[S\x1b[m", false);
     let scrolled = a.to_snapshot(snap::Meta::default());
-    let rows = &scrolled.panes[1].term.as_ref().unwrap().primary.rows;
+    let rows = &scrolled
+        .panes
+        .last()
+        .unwrap()
+        .term
+        .as_ref()
+        .unwrap()
+        .primary
+        .rows;
     assert!(rows.iter().any(|r| r.lacks.extended));
     assert_eq!(scrolled.meta.requires, Vec::<String>::new());
     let rebuilt = rebuild(&a, &dir, "b");
