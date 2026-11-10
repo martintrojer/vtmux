@@ -1458,7 +1458,6 @@ impl PaneTerm {
             // Back on the primary screen: tmux frees `saved_grid`
             // (screen.c `screen_alternate_off`), with history or without.
             if !self.alternate_on() {
-                self.frozen = None;
                 self.saved = None;
                 self.alt_entry = None;
                 self.clear_primary_history = false;
