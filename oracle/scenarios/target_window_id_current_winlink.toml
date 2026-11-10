@@ -1,0 +1,19 @@
+name = "target_window_id_current_winlink"
+# `session:@N` for a window linked more than once into the session takes
+# the session's current winlink when it is one of them, else the lowest
+# index (cmd_find_best_winlink_with_window, cmd-find.c:225-246).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:1", "-n", "w", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["link-window", "-s", "a:1", "-t", "a:5"] },
+  { run = ["display", "-p", "-t", "a:@1", "#{window_index}"] },
+  { run = ["select-window", "-t", "a:5"] },
+  { run = ["display", "-p", "-t", "a:@1", "#{window_index}"] },
+  { run = ["display", "-p", "-t", "a:@1.1", "#{window_index}.#{pane_index}"] },
+  { run = ["select-window", "-t", "a:@1", ";", "display", "-p", "#{window_index}"] },
+  { run = ["new-window", "-d", "-a", "-t", "a:@1", "-n", "w", "cat", "-"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_id}"] },
+  { run = ["select-window", "-t", "a:0"] },
+  { run = ["display", "-p", "-t", "a:@1", "#{window_index}"] },
+]

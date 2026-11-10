@@ -145,8 +145,14 @@ pub fn best_session(
 /// Window `w` in its best session (`cmd_find_best_session_with_window` +
 /// `cmd_find_best_winlink_with_window`).
 fn best_with_window(model: &Model, w: WindowId, prefer: Prefer<'_>) -> Option<Found> {
-    let s = best_session(model, Some(w), prefer)?;
-    let session = &model.sessions[&s];
+    best_winlink(model, best_session(model, Some(w), prefer)?, w)
+}
+
+/// `cmd_find_best_winlink_with_window` (cmd-find.c:225-246): window `w` in
+/// session `s` at the session's current index if it is there, else at its
+/// lowest.
+fn best_winlink(model: &Model, s: SessionId, w: WindowId) -> Option<Found> {
+    let session = model.sessions.get(&s)?;
     let index = if session.windows.get(&session.current) == Some(&w) {
         session.current
     } else {
@@ -310,9 +316,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
         })
     };
     if window.starts_with('@') {
-        let id: WindowId = window.parse().ok()?;
-        let index = *session.windows.iter().find(|(_, w)| **w == id)?.0;
-        return at(index);
+        return best_winlink(model, s, window.parse().ok()?);
     }
     let exact = part.exact;
     if !exact && (window.starts_with('+') || window.starts_with('-')) {
