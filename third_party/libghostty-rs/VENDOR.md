@@ -54,6 +54,10 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
+- `libghostty-vt/src/key.rs`, `mouse.rs`: growable encoders reserve the
+  required output length relative to the vector length, not its remaining
+  capacity. Tests cover empty and prefixed buffers one byte short.
+
 - `libghostty-vt/Cargo.toml`: `path` on the `libghostty-vt-sys` dependency.
 - Both `Cargo.toml`s: published as `vtmux-ghostty-vt-sys` and
   `vtmux-ghostty-vt` at vtmux's version, licence MIT, vtmux's repository,

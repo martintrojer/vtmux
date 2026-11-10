@@ -72,13 +72,11 @@ impl<'alloc> Encoder<'alloc> {
     /// keys typically don't generate escape sequences. Check the returned
     /// `usize` to determine if any data was written.
     pub fn encode_to_vec(&mut self, event: &Event, vec: &mut Vec<u8>) -> Result<()> {
-        let remaining = vec.capacity() - vec.len();
-
         let written = match self.encode_to_uninit_buf(event, vec.spare_capacity_mut()) {
             Ok(v) => Ok(v),
             Err(Error::OutOfSpace { required }) => {
                 // Retry with more capacity
-                vec.reserve(required - remaining);
+                vec.reserve(required);
                 self.encode_to_uninit_buf(event, vec.spare_capacity_mut())
             }
             Err(e) => Err(e),
@@ -389,4 +387,29 @@ pub enum Button {
     Nine = ffi::MouseButton::NINE,
     Ten = ffi::MouseButton::TEN,
     Eleven = ffi::MouseButton::ELEVEN,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn growable_encoding_uses_length_not_capacity_for_reserve() {
+        let mut encoder = Encoder::new().unwrap();
+        encoder
+            .set_tracking_mode(TrackingMode::Normal)
+            .set_format(Format::Sgr);
+        let mut event = Event::new().unwrap();
+        event
+            .set_action(Action::Press)
+            .set_button(Some(Button::Left));
+        let expected = b"\x1b[<0;1;1M";
+        for prefix in [b"".as_slice(), b"prefix"] {
+            let mut out = Vec::with_capacity(prefix.len() + expected.len() - 1);
+            out.extend_from_slice(prefix);
+            encoder.encode_to_vec(&event, &mut out).unwrap();
+            assert_eq!(&out[..prefix.len()], prefix);
+            assert_eq!(&out[prefix.len()..], expected);
+        }
+    }
 }

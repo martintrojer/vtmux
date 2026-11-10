@@ -66,13 +66,11 @@ impl<'alloc> Encoder<'alloc> {
     /// keys typically don't generate escape sequences. Check the returned
     /// `Vec` to determine if any data was written.
     pub fn encode_to_vec(&mut self, event: &Event, vec: &mut Vec<u8>) -> Result<()> {
-        let remaining = vec.capacity() - vec.len();
-
         let written = match self.encode_to_uninit_buf(event, vec.spare_capacity_mut()) {
             Ok(v) => Ok(v),
             Err(Error::OutOfSpace { required }) => {
                 // Retry with more capacity
-                vec.reserve(required - remaining);
+                vec.reserve(required);
                 self.encode_to_uninit_buf(event, vec.spare_capacity_mut())
             }
             Err(e) => Err(e),
@@ -655,5 +653,24 @@ bitflags::bitflags! {
         const REPORT_ASSOCIATED = ffi::KITTY_KEY_REPORT_ASSOCIATED;
         /// All Kitty keyboard protocol flags enabled
         const ALL = ffi::KITTY_KEY_ALL;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn growable_encoding_uses_length_not_capacity_for_reserve() {
+        let mut encoder = Encoder::new().unwrap();
+        let mut event = Event::new().unwrap();
+        event.set_key(Key::ArrowUp);
+        for prefix in [b"".as_slice(), b"prefix"] {
+            let mut out = Vec::with_capacity(prefix.len() + 2);
+            out.extend_from_slice(prefix);
+            encoder.encode_to_vec(&event, &mut out).unwrap();
+            assert_eq!(&out[..prefix.len()], prefix);
+            assert_eq!(&out[prefix.len()..], b"\x1b[A");
+        }
     }
 }
