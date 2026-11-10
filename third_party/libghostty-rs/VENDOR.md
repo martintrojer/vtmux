@@ -1358,7 +1358,7 @@ Recorded per commit in git history; the list is kept current:
   panes). Not an upstream candidate as is (vtmux's model), though a
   per-screen limit may be.
 - `patches/0041-kitty-graphics-bounds.patch` (`kitty/graphics_exec.zig`
-  `vtmuxReserve`, a `vtmux_over` field on `LoadingImage`;
+  `vtmuxReserve`, `vtmuxInit`, a `vtmux_over` field on `LoadingImage`;
   `c/vtmux_state.zig` `kitty_loading`, `drop_kitty_loading`, exported as
   `ghostty_vtmux_*`, declared in `vtmux_state.h`, bindings by hand, wrapped
   in `libghostty-vt/src/vtmux.rs`): D33's limit bounds loads in progress.
@@ -1366,11 +1366,17 @@ Recorded per commit in git history; the list is kept current:
   400 MB, `max_size`, whatever the limit): the chunk past it frees the
   load's data, its later chunks are dropped unanswered and its last one
   fails with `ENOMEM`, the answer for an image over the limit; its buffer
-  grows as `addData`'s would, capped at the limit. vtmux reads each
+  grows as `addData`'s would, capped at the limit. Its first chunk
+  (`LoadingImage.init`, unbounded there) is held the same way: one that
+  fits is copied into a buffer of its size, one past the limit is not
+  copied (alone it fails with `ENOMEM`, the first of several starts the
+  load over the limit). vtmux reads each
   screen's pending bytes to count them against `vtmux-graphics-limit`
   across panes, and drops a pending load as a delete command does. Rust
   tests: `vtmux-vt` `graphics::tests::a_pending_load_is_held_to_the_screens_limit`,
-  `vtmux-server` `pane_graphics::tests::a_chunked_load_past_the_limit_is_bounded`
+  `a_first_chunk_past_the_limit_is_not_held`,
+  `vtmux-server` `pane_graphics::tests::a_chunked_load_past_the_limit_is_bounded`,
+  `a_first_chunk_is_held_to_the_limit`
   and `pending_loads_count_and_the_oldest_goes_first`. Upstream candidate:
   the cap on a pending load (Ghostty's own limit is per screen too).
 - `libghostty-vt/src/kitty/graphics.rs`:

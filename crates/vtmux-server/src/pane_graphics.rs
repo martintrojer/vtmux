@@ -407,6 +407,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// D33: a load's first chunk costs its size, and one past the limit
+    /// (a command may carry a little more) is not held: neither evicts
+    /// %0's image.
+    #[test]
+    fn a_first_chunk_is_held_to_the_limit() {
+        let dir = temp_dir("graphicsfirst");
+        let mut a = server(&dir);
+        ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["split-window", "-t", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics-limit", "1"]);
+        let (p0, p1) = (PaneId(0), PaneId(1));
+        a.pane_input(p0, &image(1, 100, 300), false);
+        let first = |id, w, h| {
+            let load = String::from_utf8(image(id, w, h)).unwrap();
+            load.replace("q=2;", "q=2,m=1;").into_bytes()
+        };
+        // 900,000 bytes: 90,000 left for %0's image.
+        a.pane_input(p1, &first(2, 1000, 300), false);
+        assert_eq!(a.model.panes[&p1].term.graphics_pending(false), 900_000);
+        assert_eq!(held(&a), 990_000, "%0's image kept");
+        // One byte too many: it fails, and holds nothing.
+        a.pane_input(p1, b"\x1b_Gm=0,q=2;AA==\x1b\\", false);
+        assert_eq!(held(&a), 90_000);
+        // 1,002,000 bytes: past the limit, within one command.
+        a.pane_input(p1, &first(3, 1000, 334), false);
+        assert_eq!(a.model.panes[&p1].term.graphics_pending(false), 0);
+        assert_eq!(held(&a), 90_000, "%0's image kept");
+        drop(a);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// D33: pending loads count against the limit with the images. Over
     /// it, the pending load of a screen not just read goes first, the
     /// oldest first, before any image; the pane loading keeps its load.

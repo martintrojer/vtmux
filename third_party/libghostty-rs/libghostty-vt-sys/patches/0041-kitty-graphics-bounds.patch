@@ -21,7 +21,7 @@ diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -399,6 +399,8 @@ comptime {
+@@ -402,6 +402,8 @@ comptime {
          @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
          @export(&c.vtmux_kitty_storage, .{ .name = "ghostty_vtmux_kitty_storage" });
          @export(&c.vtmux_set_kitty_limit, .{ .name = "ghostty_vtmux_set_kitty_limit" });
@@ -33,7 +33,7 @@ diff --git a/src/lib_vt.zig b/src/lib_vt.zig
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -260,6 +260,8 @@ pub const vtmux_primary_size = vtmux_state.primary_size;
+@@ -263,6 +263,8 @@ pub const vtmux_primary_size = vtmux_state.primary_size;
  pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
  pub const vtmux_kitty_storage = vtmux_state.kitty_storage;
  pub const vtmux_set_kitty_limit = vtmux_state.set_kitty_limit;
@@ -111,7 +111,21 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
          loading.addData(alloc, cmd.data) catch |err| {
              encodeError(&result, err);
              return result;
-@@ -1005,6 +1015,43 @@ fn delete(
+@@ -525,12 +535,7 @@ fn transmitAnimationFrame(
+     };
+     result.id = img.id;
+ 
+-    var loading = LoadingImage.init(
+-        io,
+-        alloc,
+-        cmd,
+-        storage.image_limits,
+-    ) catch |err| {
++    var loading = vtmuxInit(io, alloc, storage, cmd) catch |err| {
+         encodeError(&result, err);
+         return result;
+     };
+@@ -1005,6 +1010,72 @@ fn delete(
      return .{};
  }
  
@@ -152,10 +166,39 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
 +    return error.OutOfMemory;
 +}
 +
++/// vtmux patch 0041: a load's first chunk (`LoadingImage.init`) held to
++/// its storage's limit as `vtmuxReserve` holds the chunks after it. A
++/// direct chunk that fits is copied into a buffer of its size; one past
++/// the limit is not copied: alone, it fails with `ENOMEM` (`addImage`'s
++/// answer); the first of several starts the load over the limit, holding
++/// nothing, and its last chunk fails.
++fn vtmuxInit(
++    io: std.Io,
++    alloc: Allocator,
++    storage: *ImageStorage,
++    cmd: *const Command,
++) !LoadingImage {
++    const t = cmd.transmission().?;
++    if (t.medium != .direct)
++        return try LoadingImage.init(io, alloc, cmd, storage.image_limits);
++    var empty = cmd.*;
++    empty.data = "";
++    var loading = try LoadingImage.init(io, alloc, &empty, storage.image_limits);
++    errdefer loading.deinit(alloc);
++    if (cmd.data.len <= storage.total_limit) {
++        try loading.data.ensureTotalCapacityPrecise(alloc, cmd.data.len);
++        try loading.addData(alloc, cmd.data);
++    } else {
++        if (!t.more_chunks) return error.OutOfMemory;
++        loading.vtmux_over = true;
++    }
++    return loading;
++}
++
  fn loadAndAddImage(
      io: std.Io,
      alloc: Allocator,
-@@ -1022,6 +1069,8 @@ fn loadAndAddImage(
+@@ -1022,6 +1093,8 @@ fn loadAndAddImage(
      var loading: LoadingImage = if (storage.loading) |loading| loading: {
          // Note: we do NOT want to call "cmd.toOwnedData" here because
          // we're _copying_ the data. We want the command data to be freed.
@@ -164,6 +207,15 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
          try loading.addData(alloc, cmd.data);
  
          // If we have more then we're done
+@@ -1046,7 +1119,7 @@ fn loadAndAddImage(
+             } });
+         }
+ 
+-        break :loading try .init(io, alloc, cmd, storage.image_limits);
++        break :loading try vtmuxInit(io, alloc, storage, cmd);
+     };
+ 
+     // We only want to deinit on error. If we're chunking, then we don't
 diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
 --- a/src/terminal/kitty/graphics_image.zig
 +++ b/src/terminal/kitty/graphics_image.zig

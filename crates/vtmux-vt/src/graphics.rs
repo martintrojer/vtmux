@@ -1084,6 +1084,32 @@ mod tests {
         assert_eq!(t.graphics_pending(false), 0);
     }
 
+    /// D33: a load's first chunk is held to its screen's limit too, though
+    /// one command may carry more (another screen's limit, or the share, is
+    /// larger). Past it, it is not kept: alone it fails at once, the first
+    /// of several fails at the last; one that fits costs its size.
+    #[test]
+    fn a_first_chunk_past_the_limit_is_not_held() {
+        let mut t = term_with(true);
+        t.feed(format!("\x1b_Ga=t,f=24,s=1,v=1,i=1;{RED}\x1b\\").as_bytes());
+        t.set_graphics_limit(false, 100_000);
+        t.take_replies();
+        let big = zero_chunks(300_000).concat();
+        t.feed(format!("\x1b_Ga=t,f=24,s=1000,v=100,i=2,m=1;{big}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"");
+        assert_eq!(t.graphics_pending(false), 0, "nothing held");
+        t.feed(format!("\x1b_Gm=1;{RED}\x1b\\").as_bytes());
+        assert_eq!((t.take_replies(), t.graphics_pending(false)), (vec![], 0));
+        t.feed(format!("\x1b_Gm=0;{RED}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"\x1b_Gi=2;ENOMEM: out of memory\x1b\\");
+        t.feed(format!("\x1b_Ga=t,f=24,s=1000,v=100,i=3;{big}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"\x1b_Gi=3;ENOMEM: out of memory\x1b\\");
+        assert_eq!(t.graphics_storage(false), (3, 100_000), "only image 1");
+        let fits = zero_chunks(50_001).concat();
+        t.feed(format!("\x1b_Ga=t,f=24,s=1000,v=100,i=4,m=1;{fits}\x1b\\").as_bytes());
+        assert_eq!(t.graphics_pending(false), 50_001, "a buffer of its size");
+    }
+
     /// A PNG (`f=100`) loads through the decoder vtmux installs.
     #[test]
     fn a_png_is_decoded() {
