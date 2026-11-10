@@ -1705,13 +1705,15 @@ fn cell_pixel_size_from_the_terminal_or_its_reply() {
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        a.wait(|a| a.text().contains("POPUP"));
+        a.wait(|a| pane_text(a).contains("POPUP"));
         let out = w.cli(&["display-popup", "-c", &name, "-b", "rounded"]);
         assert!(out.status.success(), "{out:?}");
         wait_cell(&w, &a, "0x16");
-        // Everything sent so far is in once the popup's echo is.
+        // Everything sent so far is in once the popup's echo is. On the
+        // screen: the echo can come in two frames (see
+        // `popup_osc52_and_passthrough_reach_its_client`).
         a.keys(b"END");
-        a.wait(|a| a.text().contains("END"));
+        a.wait(|a| pane_text(a).contains("POPUPEND"));
         assert_eq!(a.text().matches(QUERY).count(), 4, "{}", w.bin.display());
         let out = w.cli(&["display-popup", "-C", "-c", &name]);
         assert!(out.status.success(), "{out:?}");
@@ -4709,15 +4711,20 @@ fn popup_osc52_and_passthrough_reach_its_client() {
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .unwrap();
+            // The waits read the screen, not the bytes: a word the popup's
+            // program printed can reach the server in two reads and the
+            // client in two frames, with cursor and style sequences between
+            // its halves (vtmux writes each key to the popup on its own,
+            // so the echo of END can come back as E, then ND).
             // (the limits only end a hang)
             let limit = Duration::from_secs(30);
-            a.wait_for(limit, |a| a.text().contains("READY"));
+            a.wait_for(limit, |a| pane_text(a).contains("READY"));
             a.keys(b"\r");
-            a.wait_for(limit, |a| a.text().contains("POPUP"));
+            a.wait_for(limit, |a| pane_text(a).contains("POPUP"));
             // Everything before it is in once a later redraw is.
             w.cli(&["refresh-client", "-t", &name]);
             a.keys(b"END");
-            a.wait(|a| a.text().contains("END"));
+            a.wait_for(limit, |a| pane_text(a).contains("POPUPEND"));
             let text = a.text();
             let what = format!("{} {clip} {pass}", bin.display());
             assert_eq!(
