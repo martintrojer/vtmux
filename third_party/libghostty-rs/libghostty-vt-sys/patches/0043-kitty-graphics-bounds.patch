@@ -6,17 +6,17 @@ diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
                                                          uint64_t limit);
  
 +/** The bytes screen `screen`'s pending (chunked, unfinished) kitty load
-+ * holds, 0 for none (vtmux patch 0041). */
++ * holds, 0 for none (vtmux patch 0043). */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_loading(GhosttyTerminal terminal,
 +                                                      uint8_t screen,
 +                                                      uint64_t* bytes);
 +
-+/** Abandon screen `screen`'s pending kitty load (vtmux patch 0041). */
++/** Abandon screen `screen`'s pending kitty load (vtmux patch 0043). */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_drop_kitty_loading(GhosttyTerminal terminal,
 +                                                           uint8_t screen);
 +
  /** The current placement's top-left cell, its row relative to the active
-  * area's top (negative: in history), visible or not (vtmux patch 0040).
+  * area's top (negative: in history), visible or not (vtmux patch 0042).
   * GHOSTTY_NO_VALUE for a virtual placement. */
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
 --- a/src/lib_vt.zig
@@ -49,7 +49,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
      return .success;
  }
  
-+/// vtmux patch 0041: the bytes screen `key`'s (0 primary, 1 alternate)
++/// vtmux patch 0043: the bytes screen `key`'s (0 primary, 1 alternate)
 +/// pending kitty load holds, a chunked transmission not finished yet
 +/// (`ImageStorage.loading`): its buffer's capacity, what it costs. 0 for
 +/// none or a screen not initialized.
@@ -69,7 +69,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
 +    return .success;
 +}
 +
-+/// vtmux patch 0041: abandon screen `key`'s pending kitty load, as a
++/// vtmux patch 0043: abandon screen `key`'s pending kitty load, as a
 +/// delete command does (`graphics_exec.zig` `delete`). Its next chunk
 +/// starts a new transmission.
 +pub fn drop_kitty_loading(
@@ -129,7 +129,7 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
      return .{};
  }
  
-+/// vtmux patch 0041: a pending (chunked) load holds no more than its
++/// vtmux patch 0043: a pending (chunked) load holds no more than its
 +/// storage's limit, which no image it could complete to may exceed
 +/// (`addImage`). The chunk past it frees what the load holds, the chunks
 +/// after it are dropped unanswered (`.over`), and the last one ends the
@@ -166,7 +166,7 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
 +    return error.OutOfMemory;
 +}
 +
-+/// vtmux patch 0041: a load's first chunk (`LoadingImage.init`) held to
++/// vtmux patch 0043: a load's first chunk (`LoadingImage.init`) held to
 +/// its storage's limit as `vtmuxReserve` holds the chunks after it. A
 +/// direct chunk that fits is copied into a buffer of its size; one past
 +/// the limit is not copied: alone, it fails with `ENOMEM` (`addImage`'s
@@ -223,7 +223,7 @@ diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics
      /// being stored as an image.
      frame: ?FrameContext = null,
  
-+    /// vtmux patch 0041: the load went past its storage's limit; its data
++    /// vtmux patch 0043: the load went past its storage's limit; its data
 +    /// is freed and its chunks are dropped until the last, which fails.
 +    vtmux_over: bool = false,
 +

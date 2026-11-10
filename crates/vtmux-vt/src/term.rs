@@ -2448,7 +2448,7 @@ impl PaneTerm {
     /// D33: the bytes screen `alternate`'s pending load holds, a chunked
     /// transmission not finished yet. It is never more than the screen's
     /// limit: a chunk past it fails (`ENOMEM`) and adds nothing (patch
-    /// 0041).
+    /// 0043).
     #[must_use]
     pub fn graphics_pending(&self, alternate: bool) -> u64 {
         self.term

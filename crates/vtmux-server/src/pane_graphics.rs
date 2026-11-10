@@ -12,7 +12,7 @@
 //! together, with their pending (chunked, unfinished) loads. A granted
 //! screen's limit in Ghostty is what the others leave
 //! ([`Model::balance_graphics`]), and a pending load never holds more
-//! than its screen's limit (patch 0041); while a granted pane's output is
+//! than its screen's limit (patch 0043); while a granted pane's output is
 //! parsed its active screen may take the whole cap, and the excess is then
 //! dropped across the server: other screens' pending loads, then images,
 //! the screen that grew least recently first, each by lowering its limit

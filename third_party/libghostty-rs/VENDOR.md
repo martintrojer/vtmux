@@ -1341,7 +1341,7 @@ Recorded per commit in git history; the list is kept current:
   -Dapp-runtime=none` with `-Dtest-filter=vtmux` 233/233 and
   `-Dtest-filter=PageList` 701/701 (Debug). Oracle
   `reflow_line_flags_bulk`. Not an upstream candidate (tmux's model).
-- `patches/0040-kitty-graphics-vtmux.patch` (`c/vtmux_state.zig`
+- `patches/0042-kitty-graphics-vtmux.patch` (`c/vtmux_state.zig`
   `kitty_storage`, `set_kitty_limit`; `c/kitty_graphics.zig`
   `vtmux_placement_active_pos`; exported as `ghostty_vtmux_*`, declared in
   `vtmux_state.h`, bindings by hand in `bindings.rs`, wrapped in
@@ -1357,7 +1357,7 @@ Recorded per commit in git history; the list is kept current:
   `vtmux-server` `pane_graphics::tests` (the shared limit evicting across
   panes). Not an upstream candidate as is (vtmux's model), though a
   per-screen limit may be.
-- `patches/0041-kitty-graphics-bounds.patch` (`kitty/graphics_exec.zig`
+- `patches/0043-kitty-graphics-bounds.patch` (`kitty/graphics_exec.zig`
   `vtmuxReserve`, `vtmuxInit`, a `vtmux_over` field on `LoadingImage`;
   `c/vtmux_state.zig` `kitty_loading`, `drop_kitty_loading`, exported as
   `ghostty_vtmux_*`, declared in `vtmux_state.h`, bindings by hand, wrapped

@@ -306,7 +306,7 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Screen `screen`'s (0 primary, 1 alternate) kitty image storage:
-    /// the bytes its images hold and its limit (patch 0040). A screen not
+    /// the bytes its images hold and its limit (patch 0042). A screen not
     /// started yet holds nothing and has the primary's limit.
     pub fn vtmux_kitty_storage(&self, screen: u8) -> Result<(u64, u64)> {
         let (mut bytes, mut limit) = (0u64, 0u64);
@@ -322,7 +322,7 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Set screen `screen`'s kitty image storage limit alone (patch
-    /// 0040); lowering it evicts as Ghostty does (unused images first,
+    /// 0042); lowering it evicts as Ghostty does (unused images first,
     /// then the oldest), 0 deletes every image. A screen not started yet
     /// is left: it takes the primary's limit when it starts.
     pub fn vtmux_set_kitty_limit(&mut self, screen: u8, limit: u64) -> Result<()> {
@@ -332,7 +332,7 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// The bytes screen `screen`'s (0 primary, 1 alternate) pending kitty
-    /// load holds: a chunked transmission not finished yet (patch 0041).
+    /// load holds: a chunked transmission not finished yet (patch 0043).
     pub fn vtmux_kitty_loading(&self, screen: u8) -> Result<u64> {
         let mut bytes = 0u64;
         from_result(unsafe {
@@ -342,7 +342,7 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Abandon screen `screen`'s pending kitty load, as a delete command
-    /// does; its next chunk starts a new transmission (patch 0041).
+    /// does; its next chunk starts a new transmission (patch 0043).
     pub fn vtmux_drop_kitty_loading(&mut self, screen: u8) -> Result<()> {
         from_result(unsafe { ffi::ghostty_vtmux_drop_kitty_loading(self.inner.as_raw(), screen) })
     }

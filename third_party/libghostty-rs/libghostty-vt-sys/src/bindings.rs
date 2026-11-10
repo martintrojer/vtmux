@@ -6191,33 +6191,33 @@ unsafe extern "C" {
         terminal: Terminal,
         saved: *const VtmuxAltSaved,
     ) -> Result::Type;
-    #[doc = " Screen `screen`'s kitty image storage: bytes held and limit (vtmux patch 0040)."]
+    #[doc = " Screen `screen`'s kitty image storage: bytes held and limit (vtmux patch 0042)."]
     pub fn ghostty_vtmux_kitty_storage(
         terminal: Terminal,
         screen: u8,
         bytes: *mut u64,
         limit: *mut u64,
     ) -> Result::Type;
-    #[doc = " The current placement's top-left cell, its row relative to the active area's top (vtmux patch 0040)."]
+    #[doc = " The current placement's top-left cell, its row relative to the active area's top (vtmux patch 0042)."]
     pub fn ghostty_vtmux_kitty_placement_active_pos(
         iterator: KittyGraphicsPlacementIterator,
         terminal: Terminal,
         col: *mut i32,
         row: *mut i32,
     ) -> Result::Type;
-    #[doc = " Set screen `screen`'s kitty image storage limit alone (vtmux patch 0040)."]
+    #[doc = " Set screen `screen`'s kitty image storage limit alone (vtmux patch 0042)."]
     pub fn ghostty_vtmux_set_kitty_limit(
         terminal: Terminal,
         screen: u8,
         limit: u64,
     ) -> Result::Type;
-    #[doc = " The bytes screen `screen`'s pending kitty load holds (vtmux patch 0041)."]
+    #[doc = " The bytes screen `screen`'s pending kitty load holds (vtmux patch 0043)."]
     pub fn ghostty_vtmux_kitty_loading(
         terminal: Terminal,
         screen: u8,
         bytes: *mut u64,
     ) -> Result::Type;
-    #[doc = " Abandon screen `screen`'s pending kitty load (vtmux patch 0041)."]
+    #[doc = " Abandon screen `screen`'s pending kitty load (vtmux patch 0043)."]
     pub fn ghostty_vtmux_drop_kitty_loading(terminal: Terminal, screen: u8) -> Result::Type;
     #[doc = " The primary screen's size (vtmux patch 0028)."]
     pub fn ghostty_vtmux_primary_size(
