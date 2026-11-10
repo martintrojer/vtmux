@@ -1,0 +1,364 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "term_ncurses_terminals",
+  "inputs": {
+    "name": "term_ncurses_terminals",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "printf '\\033[1mb\\033[0m \\033[3mi\\033[0m \\033[4mu\\033[0m \\033[9ms\\033[0m \\033[4:3mcurly\\033[0m \\033[38;5;200mA\\033[0m \\033[38;2;10;20;30mB\\033[0m \\033[91;101mC\\033[0m\\n'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "wezterm",
+          "term": "wezterm"
+        }
+      },
+      {
+        "screen": {
+          "id": "wezterm"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "wezterm",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "foot",
+          "term": "foot"
+        }
+      },
+      {
+        "screen": {
+          "id": "foot"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "foot",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "foot-direct",
+          "term": "foot-direct"
+        }
+      },
+      {
+        "screen": {
+          "id": "foot-direct"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "foot-direct",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "contour",
+          "term": "contour"
+        }
+      },
+      {
+        "screen": {
+          "id": "contour"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "contour",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "rio",
+          "term": "rio"
+        }
+      },
+      {
+        "screen": {
+          "id": "rio"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "rio",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[1mb\\e[0m \\e[3mi\\e[0m \\e[4mu\\e[0m \\e[9ms\\e[0m \\e[4:3mcurly\\e[0m \\e[38;5;200mA\\e[39m \\e[38;5;233mB\\e[39m \\e[91m\\e[101mC\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "wezterm|bpaste,focus,title|16|1|1|1|0|1|1|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[1mb\\e[0m \\e[3mi\\e[0m \\e[4mu\\e[0m \\e[9ms\\e[0m \\e[4:3mcurly\\e[0m \\e[38;5;200mA\\e[39m \\e[38;5;233mB\\e[39m \\e[91m\\e[101mC\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "foot|bpaste,focus,title|16|1|1|1|0|1|1|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[1mb\\e[0m \\e[3mi\\e[0m \\e[4mu\\e[0m \\e[9ms\\e[0m \\e[4:3mcurly\\e[0m \\e[38;5;200mA\\e[39m \\e[38;2;10;20;30mB\\e[39m \\e[91m\\e[101mC\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;2;13;13;13m\\e[48;2;154;205;50m[a] \\e[4m0:w*\\e[0m\\e[48;2;154;205;50m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "foot-direct|bpaste,focus,RGB,title|16777216|1|1|1|1|1|1|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[1mb\\e[0m \\e[7mi\\e[0m \\e[4mu\\e[0m \\e[9ms\\e[0m \\e[4:3mcurly\\e[0m \\e[38;5;200mA\\e[39m \\e[38;5;233mB\\e[39m \\e[91m\\e[101mC\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "contour|bpaste,focus,title|16|1|1|1|0|1|0|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[1mb\\e[0m \\e[3mi\\e[0m \\e[4mu\\e[0m \\e[9ms\\e[0m \\e[4:3mcurly\\e[0m \\e[38;5;200mA\\e[39m \\e[38;5;233mB\\e[39m \\e[91m\\e[101mC\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "rio|bpaste,focus,title|16|1|1|1|0|1|1|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

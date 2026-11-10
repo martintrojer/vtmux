@@ -222,3 +222,2688 @@ linux	-	-	-	linux:XT:clear=\Ec	bpaste,focus,title|8|tsl fsl
 linux	truecolor	-	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb tsl fsl
 vt100	-	-	-	vt100:Tc	bpaste,focus,RGB,title|16777216|Tc setrgbf setrgbb tsl fsl
 xterm-kitty	-	-	-	xterm-kitty:Ms@:Sync@	bpaste,ccolour,clipboard,cstyle,focus,title|16777216|Tc setrgbf setrgbb Smulx Setulc Ss Se tsl fsl
+foot	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+foot-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+wezterm	truecolor	-	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+wezterm	-	-	wezterm*:RGB:hyperlinks	-	bpaste,hyperlinks,focus,RGB,title|16777216|setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+wezterm	-	-	-	wezterm*:colors=256	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+contour	truecolor	-	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb Smulx Ss Se tsl fsl
+contour	-	-	contour*:RGB:sync	-	bpaste,focus,RGB,sync,title|16777216|setrgbf setrgbb Sync Smulx Ss Se tsl fsl
+foot	-	-	-	foot*:Smulx@	bpaste,focus,title|16|Ss Se Ms tsl fsl
+ansi	-	256	-	-	256,bpaste,focus,title|256|tsl fsl
+ansi	-	RGB	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb tsl fsl
+Eterm	-	-	-	Eterm:Tc	bpaste,focus,RGB,title|16777216|Tc setrgbf setrgbb tsl fsl
+Eterm	truecolor	-	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb tsl fsl
+rio	-	-	rio*:RGB	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+xterm-direct2	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+xterm-direct256	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+1178	-	-	-	-	|2|
+2621	-	-	-	-	|2|
+2621-wl	-	-	-	-	|2|
+2621A	-	-	-	-	|2|
+2621a	-	-	-	-	|2|
+386at	-	-	-	-	bpaste,focus,title|8|tsl fsl
+3b1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+4025ex	-	-	-	-	!open terminal failed: terminal does not support cup
+4027ex	-	-	-	-	!open terminal failed: terminal does not support cup
+4410-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+5051	-	-	-	-	!open terminal failed: terminal does not support cup
+5410-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+5620	-	-	-	-	bpaste,focus,title|2|tsl fsl
+5630-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+5630DMD-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+6053	-	-	-	-	|2|
+6053-dg	-	-	-	-	|2|
+605x	-	-	-	-	|2|
+605x-dg	-	-	-	-	|2|
+630MTG-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+730MTG-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+730MTG-41	-	-	-	-	bpaste,focus,title|2|tsl fsl
+730MTG-41r	-	-	-	-	bpaste,focus,title|2|tsl fsl
+730MTGr	-	-	-	-	bpaste,focus,title|2|tsl fsl
+730MTGr-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+955-hb	-	-	-	-	|2|tsl fsl
+955-w	-	-	-	-	|2|tsl fsl
+9term	-	-	-	-	!open terminal failed: terminal does not support clear
+Apple_Terminal	-	-	-	-	bpaste,focus,title|16|tsl fsl
+Eterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+Eterm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+Eterm-88color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+Eterm-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+LFT-PC850	-	-	-	-	bpaste,focus,title|2|tsl fsl
+NCR260VT300WPP	-	-	-	-	bpaste,focus,title|2|tsl fsl
+NCRVT100WPP	-	-	-	-	bpaste,focus,title|2|tsl fsl
+P12	-	-	-	-	|2|tsl fsl
+P12-W	-	-	-	-	|2|tsl fsl
+P14	-	-	-	-	|2|tsl fsl
+P14-W	-	-	-	-	|2|tsl fsl
+P9	-	-	-	-	|2|tsl fsl
+P9-W	-	-	-	-	|2|tsl fsl
+Q310-vip-H	-	-	-	-	|2|tsl fsl
+Q310-vip-H-am	-	-	-	-	|2|tsl fsl
+Q310-vip-Hw	-	-	-	-	|2|tsl fsl
+Q310-vip-w	-	-	-	-	|2|tsl fsl
+Q310-vip-w-am	-	-	-	-	|2|tsl fsl
+X-hpterm	-	-	-	-	|2|
+X-hpterm-color2	-	-	-	-	|8|
+a210	-	-	-	-	|2|tsl fsl
+a80	-	-	-	-	|2|
+a980	-	-	-	-	|2|
+aa4080	-	-	-	-	|2|
+aaa	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa+dec	-	-	-	-	!open terminal failed: terminal does not support clear
+aaa+rv	-	-	-	-	!open terminal failed: terminal does not support clear
+aaa+unk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-18	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-18-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-20	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-22	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-24-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-26	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-28	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-rv-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-s-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-s-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-30-s-rv-ct	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-36	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-36-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-40	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-40-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-48	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-48-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-60	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-60-dec-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-60-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-60-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-60-s-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-db	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-rv-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-rv-unk	-	-	-	-	!open terminal failed: terminal does not support clear
+aaa-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-s-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-s-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-s-rv-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aaa-unk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aas1901	-	-	-	-	!open terminal failed: terminal does not support cup
+abm80	-	-	-	-	|2|
+abm85	-	-	-	-	|2|
+abm85e	-	-	-	-	|2|
+abm85h	-	-	-	-	|2|tsl fsl
+abm85h-old	-	-	-	-	|2|
+absolute	-	-	-	-	bpaste,focus,title|16|tsl fsl
+act4	-	-	-	-	|2|
+act5	-	-	-	-	|2|
+addrinfo	-	-	-	-	|2|
+adds200	-	-	-	-	|2|
+adds980	-	-	-	-	|2|
+addsviewpoint	-	-	-	-	|2|
+addsvp60	-	-	-	-	|2|
+adm+sgr	-	-	-	-	!open terminal failed: terminal does not support clear
+adm1	-	-	-	-	|2|
+adm11	-	-	-	-	|2|tsl fsl
+adm1178	-	-	-	-	|2|
+adm12	-	-	-	-	|2|
+adm1a	-	-	-	-	|2|
+adm2	-	-	-	-	|2|
+adm20	-	-	-	-	|2|
+adm21	-	-	-	-	|2|
+adm22	-	-	-	-	|2|
+adm3	-	-	-	-	!open terminal failed: terminal does not support cup
+adm31	-	-	-	-	|2|
+adm31-old	-	-	-	-	|2|
+adm36	-	-	-	-	bpaste,focus,title|2|tsl fsl
+adm3a	-	-	-	-	|2|
+adm3a+	-	-	-	-	|2|
+adm42	-	-	-	-	|2|
+adm42-ns	-	-	-	-	|2|
+adm5	-	-	-	-	|2|
+aepro	-	-	-	-	|2|
+aixterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+aixterm+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+aixterm-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+aixterm-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aixterm-m-old	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aj510	-	-	-	-	|2|
+alacritty+common	-	-	-	-	bpaste,focus,title|8|Smulx Ss Se Ms tsl fsl
+alt2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+alt3	-	-	-	-	bpaste,focus,title|2|tsl fsl
+alt4	-	-	-	-	|2|tsl fsl
+alt5	-	-	-	-	bpaste,focus,title|2|tsl fsl
+alt7	-	-	-	-	|2|
+alt7pc	-	-	-	-	|2|
+alto-h19	-	-	-	-	|2|tsl fsl
+alto-heath	-	-	-	-	|2|tsl fsl
+altoh19	-	-	-	-	|2|tsl fsl
+altoheath	-	-	-	-	|2|tsl fsl
+altos-2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos-3	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos-4	-	-	-	-	|2|tsl fsl
+altos-5	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos3	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos4	-	-	-	-	|2|tsl fsl
+altos5	-	-	-	-	bpaste,focus,title|2|tsl fsl
+altos7	-	-	-	-	|2|
+altos7pc	-	-	-	-	|2|
+ambas	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ambassador	-	-	-	-	bpaste,focus,title|2|tsl fsl
+amiga	-	-	-	-	bpaste,focus,title|2|tsl fsl
+amp219	-	-	-	-	bpaste,focus,title|2|tsl fsl
+amp219w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ampex-219	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ampex-219w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ampex-232	-	-	-	-	|2|
+ampex175	-	-	-	-	|2|
+ampex175-b	-	-	-	-	|2|
+ampex210	-	-	-	-	|2|tsl fsl
+ampex219	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ampex219w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ampex232	-	-	-	-	|2|
+ampex232w	-	-	-	-	|2|
+ampex80	-	-	-	-	|2|
+annarbor4080	-	-	-	-	|2|
+ansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi+apparrows	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+arrows	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+cpr	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+csr	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+cup	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+enq	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+erase	-	-	-	-	!open terminal failed: terminal does not support cup
+ansi+idc	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+idc1	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+idl	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+idl1	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+inittabs	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+local	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+local1	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+pp	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+rca	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+rca2	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+rep	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+sgr	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+sgrbold	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+sgrdim	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+sgrso	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+sgrul	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi+tabs	-	-	-	-	!open terminal failed: terminal does not support clear
+ansi-generic	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi-mini	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi-mr	-	-	-	-	!open terminal failed: terminal does not support cup
+ansi-mtabs	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi-nt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi.sys-old	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi43m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi77	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi80x25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x25-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi80x25-raw	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x30-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi80x43	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x43-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi80x50	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x50-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansi80x60	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansi80x60-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansil	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansil-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansis	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ansis-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansiterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ansiw	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ap-vm80	-	-	-	-	|2|
+apl	-	-	-	-	|2|
+apollo	-	-	-	-	|2|
+apollo+vt132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+apollo_15P	-	-	-	-	bpaste,focus,title|2|tsl fsl
+apollo_19L	-	-	-	-	bpaste,focus,title|2|tsl fsl
+apollo_color	-	-	-	-	bpaste,focus,title|2|tsl fsl
+apple-80	-	-	-	-	|2|
+apple-ae	-	-	-	-	|2|
+apple-soroc	-	-	-	-	|2|
+apple-uterm	-	-	-	-	|2|
+apple-uterm-vb	-	-	-	-	|2|
+apple-videx	-	-	-	-	|2|
+apple-videx2	-	-	-	-	|2|
+apple-videx3	-	-	-	-	|2|
+apple-vm80	-	-	-	-	|2|
+apple2e	-	-	-	-	!open terminal failed: terminal does not support cup
+apple2e-p	-	-	-	-	|2|
+apple80p	-	-	-	-	|2|
+appleII	-	-	-	-	|2|
+appleIIc	-	-	-	-	|2|
+appleIIe	-	-	-	-	|2|
+appleIIgs	-	-	-	-	|2|
+arm100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+arm100-am	-	-	-	-	bpaste,focus,title|8|tsl fsl
+arm100-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+arm100-wam	-	-	-	-	bpaste,focus,title|8|tsl fsl
+at	-	-	-	-	|2|
+at-color	-	-	-	-	|16|
+at-m	-	-	-	-	|2|
+at386	-	-	-	-	bpaste,focus,title|8|tsl fsl
+atari	-	-	-	-	|2|
+atari-color	-	-	-	-	|16|
+atari-m	-	-	-	-	|2|
+atari-old	-	-	-	-	|2|
+atari_st	-	-	-	-	|2|
+atari_st-color	-	-	-	-	|16|
+atarist-m	-	-	-	-	|2|
+aterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+att2300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att2350	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4410	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4410-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4410v1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4410v1-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4415+nl	-	-	-	-	!open terminal failed: terminal does not support clear
+att4418	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4418-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4420	-	-	-	-	|2|
+att4424	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4424-1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4424m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att4426	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att505	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att505-22	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att505-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att510a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att510d	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5310	-	-	-	-	!open terminal failed: terminal does not support clear
+att5320	-	-	-	-	!open terminal failed: terminal does not support clear
+att5410	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5410-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5410v1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5410v1-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5418	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5418-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5420+nl	-	-	-	-	!open terminal failed: terminal does not support clear
+att5420_2	-	-	-	-	|2|tsl fsl
+att5420_2-w	-	-	-	-	|2|tsl fsl
+att5430	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5620	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5620-1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5620-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5620-34	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att5620-s	-	-	-	-	|2|
+att605	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att605-pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att605-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att610	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att610+cvis	-	-	-	-	!open terminal failed: terminal does not support clear
+att610+cvis0	-	-	-	-	!open terminal failed: terminal does not support clear
+att610-103k	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att610-103k-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att610-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att615	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att615-103k	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att615-103k-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att615-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att620	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att620-103k	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att620-103k-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att620-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att630	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att630-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att6386	-	-	-	-	bpaste,focus,title|8|tsl fsl
+att700	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730-41	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att7300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730r	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730r-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+att730r-41	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avatar	-	-	-	-	!open terminal failed: terminal does not support clear
+avatar0	-	-	-	-	!open terminal failed: terminal does not support clear
+avatar0+	-	-	-	-	!open terminal failed: terminal does not support clear
+avatar1	-	-	-	-	!open terminal failed: terminal does not support clear
+avt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt+s	-	-	-	-	!open terminal failed: terminal does not support clear
+avt-ns	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-rv-ns	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-rv-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w-ns	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w-rv-ns	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w-rv-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+avt-w-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+aws	-	-	-	-	|2|
+awsc	-	-	-	-	|2|
+b-128	-	-	-	-	|2|
+bantam	-	-	-	-	|2|
+basic4	-	-	-	-	|2|
+basis	-	-	-	-	|2|
+bct510a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bct510d	-	-	-	-	bpaste,focus,title|2|tsl fsl
+beacon	-	-	-	-	|2|
+bee	-	-	-	-	|2|
+beehive	-	-	-	-	|2|
+beehive3	-	-	-	-	!open terminal failed: terminal does not support cup
+beehive4	-	-	-	-	!open terminal failed: terminal does not support cup
+beehiveIIIm	-	-	-	-	!open terminal failed: terminal does not support cup
+beterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+bg1.25	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg1.25nv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg1.25rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg2.0	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg2.0nv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg2.0rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg3.10	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg3.10nv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bg3.10rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bh3m	-	-	-	-	!open terminal failed: terminal does not support cup
+bh4	-	-	-	-	!open terminal failed: terminal does not support cup
+bitgraph	-	-	-	-	bpaste,focus,title|2|tsl fsl
+blit	-	-	-	-	|2|
+bobcat	-	-	-	-	|2|
+bq300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-pc-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-pc-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-pc-w-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bq300-w-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+bracketed+paste	-	-	-	-	!open terminal failed: terminal does not support clear
+bsdos-pc	-	-	-	-	|8|
+bsdos-pc-m	-	-	-	-	|2|
+bsdos-pc-mono	-	-	-	-	|2|
+bsdos-pc-nobold	-	-	-	-	|8|
+bsdos-ppc	-	-	-	-	|8|
+bsdos-sparc	-	-	-	-	|2|
+bterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+c100	-	-	-	-	|2|
+c100-1p	-	-	-	-	|2|
+c100-4p	-	-	-	-	|2|
+c100-rv	-	-	-	-	|2|
+c100-rv-4p	-	-	-	-	|2|
+c104	-	-	-	-	|2|
+c108	-	-	-	-	|2|tsl fsl
+c108-4p	-	-	-	-	|2|tsl fsl
+c108-8p	-	-	-	-	|2|tsl fsl
+c108-rv	-	-	-	-	|2|tsl fsl
+c108-rv-4p	-	-	-	-	|2|tsl fsl
+c108-rv-8p	-	-	-	-	|2|tsl fsl
+c108-w	-	-	-	-	|2|tsl fsl
+c108-w-8p	-	-	-	-	|2|tsl fsl
+c300	-	-	-	-	|2|
+c301	-	-	-	-	|2|
+c321	-	-	-	-	|2|
+ca22851	-	-	-	-	|2|
+cad68-2	-	-	-	-	!open terminal failed: terminal does not support cup
+cad68-3	-	-	-	-	!open terminal failed: terminal does not support cup
+cbblit	-	-	-	-	|2|
+cbunix	-	-	-	-	|2|
+cci	-	-	-	-	|2|
+cci1	-	-	-	-	|2|
+cdc456	-	-	-	-	|2|
+cdc721	-	-	-	-	|2|
+cdc721-esc	-	-	-	-	|2|
+cdc721ll	-	-	-	-	|2|
+cdc752	-	-	-	-	|2|
+cdc756	-	-	-	-	|2|
+cg7900	-	-	-	-	|2|
+cgc2	-	-	-	-	!open terminal failed: terminal does not support cup
+cgc3	-	-	-	-	!open terminal failed: terminal does not support cup
+chromatics	-	-	-	-	|2|
+cit-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101e	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101e-132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101e-n	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101e-n132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit101e-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit500	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cit80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+citc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+coco3	-	-	-	-	|2|
+coherent	-	-	-	-	|2|
+color_xterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+colorscan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+commodore	-	-	-	-	|2|
+concept	-	-	-	-	|2|
+concept-avt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+concept100	-	-	-	-	|2|
+concept100-rv	-	-	-	-	|2|
+concept108	-	-	-	-	|2|tsl fsl
+concept108-4p	-	-	-	-	|2|tsl fsl
+concept108-8p	-	-	-	-	|2|tsl fsl
+concept108-w-8	-	-	-	-	|2|tsl fsl
+concept108-w8p	-	-	-	-	|2|tsl fsl
+concept108rv4p	-	-	-	-	|2|tsl fsl
+cons25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25-debian	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25-iso-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons25-iso8859	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25-koi8-r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25-koi8r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons25-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons25l1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25l1-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons25r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons25r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons25w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons30-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons43	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons43-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons50	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons50-iso-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons50-iso8859	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons50-koi8r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons50-koi8r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons50-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons50l1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons50l1-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons50r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons50r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons60	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons60-iso	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons60-iso-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons60-koi8r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons60-koi8r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons60-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons60l1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons60l1-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cons60r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cons60r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+contel300	-	-	-	-	|2|
+contel301	-	-	-	-	|2|
+contel320	-	-	-	-	|2|
+contel321	-	-	-	-	|2|
+contour	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se tsl fsl
+contour-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se tsl fsl
+contour-latest	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se tsl fsl
+cops	-	-	-	-	|2|
+cops-10	-	-	-	-	|2|
+cops10	-	-	-	-	|2|
+crt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+crt-vt220	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cs10	-	-	-	-	bpaste,focus,title|2|tsl fsl
+cs10-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ct82	-	-	-	-	|2|
+ct8500	-	-	-	-	|2|
+ctrm	-	-	-	-	|8|
+cx	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cx100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cyb110	-	-	-	-	|2|
+cyb83	-	-	-	-	|2|
+cygwin	-	-	-	-	bpaste,focus,title|8|tsl fsl
+cygwinDBG	-	-	-	-	bpaste,focus,title|8|tsl fsl
+d132	-	-	-	-	|2|
+d2	-	-	-	-	|2|
+d2-dg	-	-	-	-	|2|
+d200	-	-	-	-	|2|
+d200-dg	-	-	-	-	|2|
+d210	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d210-dg	-	-	-	-	|2|
+d211-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d211-dg	-	-	-	-	|2|
+d214	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d214-dg	-	-	-	-	|2|
+d215-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d215-dg	-	-	-	-	|2|
+d216+	-	-	-	-	|2|
+d216+25	-	-	-	-	|2|
+d216+dg	-	-	-	-	|2|
+d216-dg	-	-	-	-	|2|
+d216-unix	-	-	-	-	|2|
+d216-unix-25	-	-	-	-	|2|
+d216e+	-	-	-	-	|2|
+d216e+dg	-	-	-	-	|2|
+d216e-dg	-	-	-	-	|2|
+d216e-unix	-	-	-	-	|2|
+d217-dg	-	-	-	-	|2|
+d217-unix	-	-	-	-	|2|
+d217-unix-25	-	-	-	-	|2|
+d220-7b	-	-	-	-	bpaste,focus,title|8|tsl fsl
+d220-dg	-	-	-	-	|8|
+d230	-	-	-	-	bpaste,focus,title|8|tsl fsl
+d230-dg	-	-	-	-	|8|
+d230c	-	-	-	-	bpaste,focus,title|8|tsl fsl
+d230c-dg	-	-	-	-	|8|
+d400	-	-	-	-	|2|
+d400-dg	-	-	-	-	|2|
+d410-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d410-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d410-dg	-	-	-	-	|2|
+d411-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d411-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d411-dg	-	-	-	-	|2|
+d412+	-	-	-	-	|2|
+d412+25	-	-	-	-	|2|
+d412+dg	-	-	-	-	|2|
+d412+s	-	-	-	-	|2|tsl fsl
+d412+sr	-	-	-	-	|2|
+d412+w	-	-	-	-	|2|
+d412-dg	-	-	-	-	|2|
+d412-unix	-	-	-	-	|2|
+d412-unix-25	-	-	-	-	|2|
+d412-unix-s	-	-	-	-	|2|tsl fsl
+d412-unix-sr	-	-	-	-	|2|
+d412-unix-w	-	-	-	-	|2|
+d413-dg	-	-	-	-	|2|
+d413-unix	-	-	-	-	|2|
+d413-unix-25	-	-	-	-	|2|
+d413-unix-s	-	-	-	-	|2|tsl fsl
+d413-unix-sr	-	-	-	-	|2|
+d413-unix-w	-	-	-	-	|2|
+d414-unix	-	-	-	-	|2|
+d414-unix-25	-	-	-	-	|2|
+d414-unix-s	-	-	-	-	|2|tsl fsl
+d414-unix-sr	-	-	-	-	|2|
+d414-unix-w	-	-	-	-	|2|
+d430-dg	-	-	-	-	|16|
+d430-dg-ccc	-	-	-	-	|16|
+d430-unix	-	-	-	-	|16|
+d430-unix-25	-	-	-	-	|16|
+d430-unix-25-ccc	-	-	-	-	|16|
+d430-unix-ccc	-	-	-	-	|16|
+d430-unix-s	-	-	-	-	|16|tsl fsl
+d430-unix-s-ccc	-	-	-	-	|16|tsl fsl
+d430-unix-sr	-	-	-	-	|16|
+d430-unix-sr-ccc	-	-	-	-	|16|
+d430-unix-w	-	-	-	-	|16|
+d430-unix-w-ccc	-	-	-	-	|16|
+d430c-dg	-	-	-	-	|16|
+d430c-dg-ccc	-	-	-	-	|16|
+d430c-unix	-	-	-	-	|16|
+d430c-unix-25	-	-	-	-	|16|
+d430c-unix-25-ccc	-	-	-	-	|16|
+d430c-unix-ccc	-	-	-	-	|16|
+d430c-unix-s	-	-	-	-	|16|tsl fsl
+d430c-unix-s-ccc	-	-	-	-	|16|tsl fsl
+d430c-unix-sr	-	-	-	-	|16|
+d430c-unix-sr-ccc	-	-	-	-	|16|
+d430c-unix-w	-	-	-	-	|16|
+d430c-unix-w-ccc	-	-	-	-	|16|
+d450	-	-	-	-	|2|
+d450-dg	-	-	-	-	|2|
+d460-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d460-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d460-dg	-	-	-	-	|2|
+d461-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d461-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d461-dg	-	-	-	-	|2|
+d462+	-	-	-	-	|2|
+d462+25	-	-	-	-	|2|
+d462+dg	-	-	-	-	|2|
+d462+s	-	-	-	-	|2|tsl fsl
+d462+sr	-	-	-	-	|2|
+d462+w	-	-	-	-	|2|
+d462-dg	-	-	-	-	|2|
+d462-unix	-	-	-	-	|2|
+d462-unix-25	-	-	-	-	|2|
+d462-unix-s	-	-	-	-	|2|tsl fsl
+d462-unix-sr	-	-	-	-	|2|
+d462-unix-w	-	-	-	-	|2|
+d462e-dg	-	-	-	-	|2|
+d463-dg	-	-	-	-	|2|
+d463-unix	-	-	-	-	|2|
+d463-unix-25	-	-	-	-	|2|
+d463-unix-s	-	-	-	-	|2|tsl fsl
+d463-unix-sr	-	-	-	-	|2|
+d463-unix-w	-	-	-	-	|2|
+d464-unix	-	-	-	-	|2|
+d464-unix-25	-	-	-	-	|2|
+d464-unix-s	-	-	-	-	|2|tsl fsl
+d464-unix-sr	-	-	-	-	|2|
+d464-unix-w	-	-	-	-	|2|
+d470-7b	-	-	-	-	bpaste,focus,title|16|tsl fsl
+d470-dg	-	-	-	-	|16|
+d470c-7b	-	-	-	-	bpaste,focus,title|16|tsl fsl
+d470c-dg	-	-	-	-	|16|
+d555-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d555-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d555-dg	-	-	-	-	|2|
+d577-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d577-7b-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d577-dg	-	-	-	-	|2|
+d578-7b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+d578-dg	-	-	-	-	|2|
+d80	-	-	-	-	|2|
+d800	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-100x37	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-100x37-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-112x37	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-112x37-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-128x40	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-128x40-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-128x48	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-128x48-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-144x48	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-144x48-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-160x64	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-160x64-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-200x64	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-200x64-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-200x75	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-200x75-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-256x96	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-256x96-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-80x25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-80x25-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-80x30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-80x30-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-90x30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-90x30-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-b	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-f	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-f2	-	-	-	-	bpaste,focus,title|8|tsl fsl
+darwin-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-m-b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-m-f	-	-	-	-	bpaste,focus,title|2|tsl fsl
+darwin-m-f2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+datagraphix	-	-	-	-	|2|
+datamedia2500	-	-	-	-	|2|
+datapoint	-	-	-	-	!open terminal failed: terminal does not support cup
+dataspeed40	-	-	-	-	!open terminal failed: terminal does not support cup
+dd5000	-	-	-	-	|2|
+ddr	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ddr3180	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dec+pp	-	-	-	-	!open terminal failed: terminal does not support clear
+dec+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+dec-vt100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dec-vt220	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dec-vt330	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dec-vt340	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dec-vt400	-	-	-	-	bpaste,focus,title|2|tsl fsl
+decansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+decid+cpr	-	-	-	-	!open terminal failed: terminal does not support clear
+decpro	-	-	-	-	|2|
+delta	-	-	-	-	|2|
+dg+ccc	-	-	-	-	!open terminal failed: terminal does not support clear
+dg+color	-	-	-	-	!open terminal failed: terminal does not support clear
+dg+color8	-	-	-	-	!open terminal failed: terminal does not support clear
+dg+fixed	-	-	-	-	!open terminal failed: terminal does not support clear
+dg-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dg-generic	-	-	-	-	|2|
+dg200	-	-	-	-	|2|
+dg210	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dg211	-	-	-	-	|2|
+dg450	-	-	-	-	|2|
+dg460-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dg6053	-	-	-	-	|2|
+dg605x	-	-	-	-	|2|
+dg6134	-	-	-	-	|2|
+dgkeys+11	-	-	-	-	!open terminal failed: terminal does not support clear
+dgkeys+15	-	-	-	-	!open terminal failed: terminal does not support clear
+dgkeys+7b	-	-	-	-	!open terminal failed: terminal does not support clear
+dgmode+color	-	-	-	-	!open terminal failed: terminal does not support clear
+dgmode+color8	-	-	-	-	!open terminal failed: terminal does not support clear
+dgunix+ccc	-	-	-	-	!open terminal failed: terminal does not support clear
+dgunix+fixed	-	-	-	-	!open terminal failed: terminal does not support clear
+dialogue	-	-	-	-	|2|
+dialogue80	-	-	-	-	|2|
+digilog	-	-	-	-	!open terminal failed: terminal does not support clear
+djgpp	-	-	-	-	bpaste,focus,title|8|tsl fsl
+djgpp203	-	-	-	-	!open terminal failed: terminal does not support clear
+djgpp204	-	-	-	-	bpaste,focus,title|8|tsl fsl
+dku7003	-	-	-	-	|2|
+dku7003-dumb	-	-	-	-	|2|
+dku7102	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dku7102-old	-	-	-	-	!open terminal failed: terminal does not support cup
+dku7102-sna	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dku7103-sna	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dku7202	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dm1520	-	-	-	-	|2|
+dm1521	-	-	-	-	|2|
+dm2500	-	-	-	-	|2|
+dm3025	-	-	-	-	|2|
+dm3045	-	-	-	-	|2|
+dm80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dm80w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmchat	-	-	-	-	|2|
+dmd	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmd-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmd-34	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmd1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmdt80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmdt80w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dmterm	-	-	-	-	|2|
+domterm	-	-	-	-	bpaste,focus,title|16|tsl fsl
+dp3360	-	-	-	-	!open terminal failed: terminal does not support cup
+dp8242	-	-	-	-	|2|
+ds40	-	-	-	-	!open terminal failed: terminal does not support cup
+ds40-2	-	-	-	-	!open terminal failed: terminal does not support cup
+dt-100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt-100w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt100w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt110	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dt80-sas	-	-	-	-	|2|
+dt80w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+dtc382	-	-	-	-	|2|
+dtterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+dvtm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+dvtm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+dwk	-	-	-	-	|2|
+dwk-vt	-	-	-	-	|2|
+ecma+color	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+index	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+italics	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+sgr	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+standout	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+strikeout	-	-	-	-	!open terminal failed: terminal does not support clear
+ecma+underline	-	-	-	-	!open terminal failed: terminal does not support clear
+elks	-	-	-	-	|2|
+elks-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+elks-glasstty	-	-	-	-	!open terminal failed: terminal does not support clear
+elks-vt52	-	-	-	-	|2|
+emots	-	-	-	-	bpaste,focus,title|8|tsl fsl
+emu	-	-	-	-	|8|
+emu-220	-	-	-	-	bpaste,focus,title|2|tsl fsl
+env230	-	-	-	-	bpaste,focus,title|2|tsl fsl
+envision230	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ep40	-	-	-	-	!open terminal failed: terminal does not support clear
+ep4000	-	-	-	-	!open terminal failed: terminal does not support clear
+ep4080	-	-	-	-	!open terminal failed: terminal does not support clear
+ep48	-	-	-	-	!open terminal failed: terminal does not support clear
+ergo4000	-	-	-	-	bpaste,focus,title|2|tsl fsl
+esprit	-	-	-	-	|2|
+esprit-am	-	-	-	-	|2|
+eterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+eterm-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ex155	-	-	-	-	|2|
+excel62	-	-	-	-	bpaste,focus,title|2|tsl fsl
+excel62-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+excel62-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+excel64	-	-	-	-	bpaste,focus,title|2|tsl fsl
+excel64-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+excel64-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+exec80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+f100	-	-	-	-	|2|tsl fsl
+f100-rv	-	-	-	-	|2|tsl fsl
+f110	-	-	-	-	|2|tsl fsl
+f110-14	-	-	-	-	|2|tsl fsl
+f110-14w	-	-	-	-	|2|tsl fsl
+f110-w	-	-	-	-	|2|tsl fsl
+f1720	-	-	-	-	bpaste,focus,title|2|tsl fsl
+f1720a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+f200	-	-	-	-	|2|tsl fsl
+f200-w	-	-	-	-	|2|tsl fsl
+f200vi	-	-	-	-	|2|tsl fsl
+f200vi-w	-	-	-	-	|2|tsl fsl
+falco	-	-	-	-	|2|
+falco-p	-	-	-	-	|2|
+fbterm	-	-	-	-	bpaste,focus,title|16|tsl fsl
+fenix	-	-	-	-	|2|
+fenixw	-	-	-	-	|2|
+fixterm	-	-	-	-	|2|
+foot+base	-	-	-	-	bpaste,focus,title|2|Smulx Ss Se Ms tsl fsl
+fortune	-	-	-	-	|2|
+fos	-	-	-	-	|2|
+fox	-	-	-	-	|2|
+freedom	-	-	-	-	|2|tsl fsl
+freedom-rv	-	-	-	-	|2|tsl fsl
+freedom100	-	-	-	-	|2|tsl fsl
+freedom110	-	-	-	-	|2|tsl fsl
+freedom200	-	-	-	-	|2|tsl fsl
+gator	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gator-52	-	-	-	-	|2|
+gator-52t	-	-	-	-	|2|
+gator-t	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gigi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+glasstty	-	-	-	-	!open terminal failed: terminal does not support cup
+gnome+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+gnome-2007	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-2008	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-2012	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-fc5	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-rh62	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-rh72	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-rh80	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gnome-rh90	-	-	-	-	bpaste,focus,title|8|tsl fsl
+go-225	-	-	-	-	bpaste,focus,title|2|tsl fsl
+go140	-	-	-	-	bpaste,focus,title|2|tsl fsl
+go140w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+go225	-	-	-	-	bpaste,focus,title|2|tsl fsl
+graphos	-	-	-	-	bpaste,focus,title|2|tsl fsl
+graphos-30	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gs5430	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gs5430-22	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gs5430-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+gs6300	-	-	-	-	bpaste,focus,title|8|tsl fsl
+gt100	-	-	-	-	|2|
+gt100a	-	-	-	-	|2|
+gt40	-	-	-	-	!open terminal failed: terminal does not support clear
+gt42	-	-	-	-	!open terminal failed: terminal does not support clear
+guru	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru+rv	-	-	-	-	!open terminal failed: terminal does not support clear
+guru+s	-	-	-	-	!open terminal failed: terminal does not support clear
+guru+unk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-33	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-33-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-33-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-44	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-44-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76-lp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76-w-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-76-wm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-lp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-nctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+guru-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h-100	-	-	-	-	|2|
+h-100bw	-	-	-	-	|2|
+h100	-	-	-	-	|2|
+h100bw	-	-	-	-	|2|
+h19	-	-	-	-	|2|tsl fsl
+h19-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h19-b	-	-	-	-	|2|tsl fsl
+h19-bs	-	-	-	-	|2|tsl fsl
+h19-g	-	-	-	-	|2|tsl fsl
+h19-smul	-	-	-	-	|2|tsl fsl
+h19-u	-	-	-	-	|2|tsl fsl
+h19-us	-	-	-	-	|2|tsl fsl
+h19a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h19g	-	-	-	-	|2|tsl fsl
+h19k	-	-	-	-	|2|tsl fsl
+h19kermit	-	-	-	-	|2|tsl fsl
+h19us	-	-	-	-	|2|tsl fsl
+h29a-kc-bc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h29a-kc-uc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h29a-nkc-bc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h29a-nkc-uc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+h80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ha8675	-	-	-	-	|2|
+ha8686	-	-	-	-	|2|
+hazel	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hds200	-	-	-	-	bpaste,focus,title|2|tsl fsl
+he80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+heath	-	-	-	-	|2|tsl fsl
+heath-19	-	-	-	-	|2|tsl fsl
+heath-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+heathkit	-	-	-	-	|2|tsl fsl
+heathkit-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hft	-	-	-	-	bpaste,focus,title|8|tsl fsl
+hft-c	-	-	-	-	bpaste,focus,title|8|tsl fsl
+hft-c-old	-	-	-	-	bpaste,focus,title|8|tsl fsl
+hft-old	-	-	-	-	bpaste,focus,title|8|tsl fsl
+hirez100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hirez100-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hmod1	-	-	-	-	|2|
+hp	-	-	-	-	|2|
+hp+arrows	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+color	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+labels	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+pfk+arrows	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+pfk+cr	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+pfk-cr	-	-	-	-	!open terminal failed: terminal does not support clear
+hp+printer	-	-	-	-	!open terminal failed: terminal does not support clear
+hp110	-	-	-	-	|2|
+hp150	-	-	-	-	|2|
+hp2	-	-	-	-	|2|
+hp236	-	-	-	-	|2|
+hp2382	-	-	-	-	|2|
+hp2382a	-	-	-	-	|2|
+hp2392	-	-	-	-	|2|
+hp2397	-	-	-	-	|16|
+hp2397a	-	-	-	-	|16|
+hp2621	-	-	-	-	|2|
+hp2621-48	-	-	-	-	|2|
+hp2621-a	-	-	-	-	|2|
+hp2621-ba	-	-	-	-	|2|
+hp2621-fl	-	-	-	-	|2|
+hp2621-k45	-	-	-	-	|2|
+hp2621-nl	-	-	-	-	|2|
+hp2621-nt	-	-	-	-	|2|
+hp2621-wl	-	-	-	-	|2|
+hp2621A	-	-	-	-	|2|
+hp2621a	-	-	-	-	|2|
+hp2621a-a	-	-	-	-	|2|
+hp2621b	-	-	-	-	|2|
+hp2621b-kx	-	-	-	-	|2|
+hp2621b-kx-p	-	-	-	-	|2|
+hp2621b-p	-	-	-	-	|2|
+hp2621k45	-	-	-	-	|2|
+hp2621p	-	-	-	-	|2|
+hp2621p-a	-	-	-	-	|2|
+hp2622	-	-	-	-	|2|
+hp2622a	-	-	-	-	|2|
+hp2623	-	-	-	-	|2|
+hp2623a	-	-	-	-	|2|
+hp2624	-	-	-	-	|2|
+hp2624-10p	-	-	-	-	|2|
+hp2624a	-	-	-	-	|2|
+hp2624a-10p	-	-	-	-	|2|
+hp2624b	-	-	-	-	|2|
+hp2624b-10p	-	-	-	-	|2|
+hp2624b-10p-p	-	-	-	-	|2|
+hp2624b-4p	-	-	-	-	|2|
+hp2624b-4p-p	-	-	-	-	|2|
+hp2624b-p	-	-	-	-	|2|
+hp2626	-	-	-	-	|2|
+hp2626-12	-	-	-	-	|2|
+hp2626-12-s	-	-	-	-	|2|tsl fsl
+hp2626-12x40	-	-	-	-	|2|
+hp2626-ns	-	-	-	-	|2|
+hp2626-s	-	-	-	-	|2|tsl fsl
+hp2626-x40	-	-	-	-	|2|
+hp2626a	-	-	-	-	|2|
+hp2626p	-	-	-	-	|2|
+hp2627a	-	-	-	-	|2|
+hp2627a-rev	-	-	-	-	|2|
+hp2627c	-	-	-	-	|2|
+hp262x	-	-	-	-	!open terminal failed: terminal does not support clear
+hp2640a	-	-	-	-	!open terminal failed: terminal does not support cup
+hp2640b	-	-	-	-	|2|
+hp2641a	-	-	-	-	|2|
+hp2644a	-	-	-	-	|2|
+hp2645	-	-	-	-	|2|
+hp2645a	-	-	-	-	|2|
+hp2647a	-	-	-	-	|2|
+hp2648	-	-	-	-	|2|
+hp2648a	-	-	-	-	|2|
+hp300h	-	-	-	-	|2|
+hp45	-	-	-	-	|2|
+hp700	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hp700-wy	-	-	-	-	|2|
+hp70092	-	-	-	-	|2|
+hp70092A	-	-	-	-	|2|
+hp70092a	-	-	-	-	|2|
+hp9837	-	-	-	-	|2|
+hp9845	-	-	-	-	|2|
+hp98550	-	-	-	-	|2|
+hp98550-color	-	-	-	-	|8|
+hp98550a	-	-	-	-	|2|
+hp98550a-color	-	-	-	-	|8|
+hp98720	-	-	-	-	|2|
+hp98721	-	-	-	-	|2|
+hpansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+hpex	-	-	-	-	|2|
+hpex2	-	-	-	-	|2|
+hpgeneric	-	-	-	-	|2|
+hpsub	-	-	-	-	!open terminal failed: terminal does not support cup
+hpterm	-	-	-	-	|2|
+hpterm-color	-	-	-	-	|16|
+hpterm-color2	-	-	-	-	|8|
+hterm	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+hterm-256color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+htx11	-	-	-	-	|2|tsl fsl
+hurd	-	-	-	-	|8|
+hz1000	-	-	-	-	!open terminal failed: terminal does not support cup
+hz1420	-	-	-	-	|2|
+hz1500	-	-	-	-	|2|
+hz1510	-	-	-	-	|2|
+hz1520	-	-	-	-	|2|
+hz1520-noesc	-	-	-	-	|2|
+hz1552	-	-	-	-	|2|
+hz1552-rv	-	-	-	-	|2|
+hz2000	-	-	-	-	|2|
+i100	-	-	-	-	|2|
+i3101	-	-	-	-	|2|
+i3164	-	-	-	-	|8|
+i400	-	-	-	-	bpaste,focus,title|2|tsl fsl
+iTerm.app	-	-	-	-	bpaste,focus,title|16|tsl fsl
+iTerm2.app	-	-	-	-	bpaste,focus,title|16|Smulx tsl fsl
+ibcs2	-	-	-	-	|2|
+ibm+16color	-	-	-	-	!open terminal failed: terminal does not support clear
+ibm+color	-	-	-	-	!open terminal failed: terminal does not support clear
+ibm-apl	-	-	-	-	|2|
+ibm-pc	-	-	-	-	!open terminal failed: terminal does not support cup
+ibm-system1	-	-	-	-	|2|
+ibm3101	-	-	-	-	|2|
+ibm3151	-	-	-	-	|2|
+ibm3161	-	-	-	-	|2|
+ibm3161-C	-	-	-	-	|2|
+ibm3162	-	-	-	-	|2|
+ibm3163	-	-	-	-	|2|
+ibm3164	-	-	-	-	|8|
+ibm5051	-	-	-	-	!open terminal failed: terminal does not support cup
+ibm5081	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm5151	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibm5154	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm6153	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibm6153-40	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibm6153-90	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibm6154	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm6155	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibm8503	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm8507	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm8512	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm8513	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm8514	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibm8604	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibmaed	-	-	-	-	|2|
+ibmpc3	-	-	-	-	|8|
+ibmpc3r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ibmpc3r-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ibmpcx	-	-	-	-	|2|
+ibmx	-	-	-	-	|2|
+icl6402	-	-	-	-	|2|
+icl6404	-	-	-	-	|2|
+icl6404-w	-	-	-	-	|2|
+ifmr	-	-	-	-	|2|
+illumos	-	-	-	-	|8|
+ims-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ims950	-	-	-	-	|2|tsl fsl
+ims950-b	-	-	-	-	|2|tsl fsl
+ims950-rv	-	-	-	-	|2|tsl fsl
+infoton	-	-	-	-	!open terminal failed: terminal does not support cup
+infoton2	-	-	-	-	|2|
+interix	-	-	-	-	bpaste,focus,title|8|tsl fsl
+interix-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+intertec	-	-	-	-	|2|
+intertube	-	-	-	-	|2|
+intertube2	-	-	-	-	|2|
+intext2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+intextii	-	-	-	-	bpaste,focus,title|2|tsl fsl
+iq120	-	-	-	-	|2|
+iq140	-	-	-	-	|2|
+iris-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+iris-ansi-ap	-	-	-	-	bpaste,focus,title|2|tsl fsl
+iris-ansi-net	-	-	-	-	bpaste,focus,title|2|tsl fsl
+iris-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+iris40	-	-	-	-	|2|
+iterm	-	-	-	-	bpaste,focus,title|16|tsl fsl
+iterm2-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx tsl fsl
+jaixterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+jaixterm-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+jerq	-	-	-	-	|2|
+jfbterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+k45	-	-	-	-	|2|
+kaypro	-	-	-	-	|2|
+kaypro2	-	-	-	-	|2|
+kds6402	-	-	-	-	|2|
+kds7372	-	-	-	-	|2|
+kds7372-w	-	-	-	-	|2|
+kermit	-	-	-	-	|2|
+kermit-am	-	-	-	-	|2|
+kitty+common	-	-	-	-	bpaste,focus,title|2|Smulx Ss Se Ms tsl fsl
+kitty+setal	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+acs	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+color	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+koi8acs	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+sgr	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+sgr-dumb	-	-	-	-	!open terminal failed: terminal does not support clear
+klone+sgr8	-	-	-	-	!open terminal failed: terminal does not support clear
+kon	-	-	-	-	bpaste,focus,title|8|tsl fsl
+kon2	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+konsole-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+konsole-base	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-linux	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-solaris	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-vt100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-vt420pc	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-xf3x	-	-	-	-	bpaste,focus,title|8|tsl fsl
+konsole-xf4x	-	-	-	-	bpaste,focus,title|8|tsl fsl
+kt7	-	-	-	-	|2|tsl fsl
+kt7ix	-	-	-	-	|2|tsl fsl
+kterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+kterm-co	-	-	-	-	bpaste,focus,title|8|tsl fsl
+kterm-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ktm	-	-	-	-	|2|
+kvt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+layer	-	-	-	-	|2|
+lft	-	-	-	-	bpaste,focus,title|2|tsl fsl
+lft-pc850	-	-	-	-	bpaste,focus,title|2|tsl fsl
+linux+decid	-	-	-	-	!open terminal failed: terminal does not support clear
+linux+kbs	-	-	-	-	!open terminal failed: terminal does not support clear
+linux+lockeys	-	-	-	-	!open terminal failed: terminal does not support clear
+linux+sfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+linux-basic	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-c	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-c-nc	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-koi8	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-koi8r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-lat	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+linux-m1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-m1b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+linux-m2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+linux-nic	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-s	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux2.2	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux2.6	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux2.6.26	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux3.0	-	-	-	-	bpaste,focus,title|8|tsl fsl
+lisa	-	-	-	-	|2|
+lisaterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+lisaterm-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+liswb	-	-	-	-	|2|
+luna	-	-	-	-	bpaste,focus,title|2|tsl fsl
+luna68k	-	-	-	-	bpaste,focus,title|2|tsl fsl
+m2-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mac	-	-	-	-	|2|
+mac-w	-	-	-	-	|2|
+mach	-	-	-	-	|2|
+mach-bold	-	-	-	-	|2|
+mach-color	-	-	-	-	|8|
+mach-gnu	-	-	-	-	|2|
+mach-gnu-color	-	-	-	-	|8|
+macintosh	-	-	-	-	|2|
+macterminal-w	-	-	-	-	|2|
+mai	-	-	-	-	|2|
+masscomp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+masscomp1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+masscomp2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mdl110	-	-	-	-	|2|
+megatek	-	-	-	-	!open terminal failed: terminal does not support clear
+memhp	-	-	-	-	|2|
+mgr	-	-	-	-	|2|
+mgr-linux	-	-	-	-	|2|
+mgr-sun	-	-	-	-	|2|
+mgt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mgterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+microb	-	-	-	-	|2|
+microbee	-	-	-	-	|2|
+microterm	-	-	-	-	|2|
+microterm5	-	-	-	-	|2|
+mime	-	-	-	-	|2|
+mime-3ax	-	-	-	-	|2|
+mime-fb	-	-	-	-	|2|
+mime-hb	-	-	-	-	|2|
+mime1	-	-	-	-	|2|
+mime2	-	-	-	-	|2|
+mime2a	-	-	-	-	|2|
+mime2a-s	-	-	-	-	|2|
+mime2a-v	-	-	-	-	|2|
+mime314	-	-	-	-	|2|
+mime340	-	-	-	-	|2|
+mime3a	-	-	-	-	|2|
+mime3ax	-	-	-	-	|2|
+mimei	-	-	-	-	|2|
+mimeii	-	-	-	-	|2|
+minitel	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minitel-2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minitel-2-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minitel1	-	-	-	-	|8|tsl fsl
+minitel1-nb	-	-	-	-	|2|tsl fsl
+minitel12-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minitel1b	-	-	-	-	|8|tsl fsl
+minitel1b-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minitel1b-nb	-	-	-	-	|2|tsl fsl
+minitel2-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minix	-	-	-	-	bpaste,focus,title|8|tsl fsl
+minix-1.5	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minix-1.7	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minix-3.0	-	-	-	-	bpaste,focus,title|8|tsl fsl
+minix-old	-	-	-	-	bpaste,focus,title|2|tsl fsl
+minix-old-am	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mintty+common	-	-	-	-	bpaste,focus,title|8|Smulx Ss Se Ms tsl fsl
+mintty+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+mintty-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+mlterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mlterm+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+mlterm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+mlterm-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb tsl fsl
+mlterm2	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mlterm3	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mm314	-	-	-	-	|2|
+mm340	-	-	-	-	|2|
+mod	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mod24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+modgraph	-	-	-	-	bpaste,focus,title|2|tsl fsl
+modgraph2	-	-	-	-	|2|
+modgraph48	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mosh	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mosh-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+mostlike	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mouse-sun	-	-	-	-	|2|
+mrxvt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+mrxvt-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+ms+terminal	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+ms-terminal-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+ms-vt-utf8	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ms-vt100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ms-vt100+	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ms-vt100-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+ms-vt100-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+msk227	-	-	-	-	|2|
+msk22714	-	-	-	-	|2|
+msk227am	-	-	-	-	|2|
+mskermit227	-	-	-	-	|2|
+mskermit22714	-	-	-	-	|2|
+mskermit227am	-	-	-	-	|2|
+mt-70	-	-	-	-	|2|
+mt4520-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mt70	-	-	-	-	|2|
+mterm	-	-	-	-	|2|
+mterm-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+mvterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+n7900	-	-	-	-	|2|
+ncr160vppp	-	-	-	-	|2|tsl fsl
+ncr160vpwpp	-	-	-	-	|2|tsl fsl
+ncr160vt100an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt100pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt100wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt100wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt200an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt200pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt200wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt200wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt300an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt300pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt300wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160vt300wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr160wy50+pp	-	-	-	-	|2|tsl fsl
+ncr160wy50+wpp	-	-	-	-	|2|tsl fsl
+ncr160wy60pp	-	-	-	-	|2|tsl fsl
+ncr160wy60wpp	-	-	-	-	|2|tsl fsl
+ncr260intan	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncr260intpp	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncr260intwan	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncr260intwpp	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncr260vp+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+ncr260vppp	-	-	-	-	|2|tsl fsl
+ncr260vpwpp	-	-	-	-	|2|tsl fsl
+ncr260vt+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+ncr260vt100an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt100pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt100wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt100wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt200an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt200pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt200wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt200wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt300an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt300pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt300wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260vt300wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncr260wy325pp	-	-	-	-	|16|tsl fsl
+ncr260wy325wpp	-	-	-	-	|16|tsl fsl
+ncr260wy350pp	-	-	-	-	|16|tsl fsl
+ncr260wy350wpp	-	-	-	-	|16|tsl fsl
+ncr260wy50+pp	-	-	-	-	|2|tsl fsl
+ncr260wy50+wpp	-	-	-	-	|2|tsl fsl
+ncr260wy60pp	-	-	-	-	|2|tsl fsl
+ncr260wy60wpp	-	-	-	-	|2|tsl fsl
+ncr7900	-	-	-	-	|2|
+ncr7900i	-	-	-	-	|2|
+ncr7900iv	-	-	-	-	|2|tsl fsl
+ncr7901	-	-	-	-	|2|
+ncrvt100an	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncrvt100pp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncrvt100wan	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncrvt100wpp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncsa	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncsa-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncsa-m-ns	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ncsa-ns	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncsa-vt220	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ncsa-vt220-8	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nd9500	-	-	-	-	|2|tsl fsl
+ndr9500	-	-	-	-	|2|tsl fsl
+ndr9500-25	-	-	-	-	|2|tsl fsl
+ndr9500-25-mc	-	-	-	-	|2|tsl fsl
+ndr9500-25-mc-nl	-	-	-	-	|2|
+ndr9500-25-nl	-	-	-	-	|2|
+ndr9500-mc	-	-	-	-	|2|tsl fsl
+ndr9500-mc-nl	-	-	-	-	|2|
+ndr9500-nl	-	-	-	-	|2|
+netbsd6	-	-	-	-	bpaste,focus,title|8|tsl fsl
+newhp	-	-	-	-	!open terminal failed: terminal does not support clear
+newhpkeyboard	-	-	-	-	!open terminal failed: terminal does not support clear
+news	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-29	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-29-euc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-29-sjis	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-33	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-33-euc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-33-sjis	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-42	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-42-euc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-42-sjis	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-old-unk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news-unk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news28	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news28-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news29	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news31	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news31-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news31-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news33	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news40	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news40-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news40-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+news42	-	-	-	-	bpaste,focus,title|2|tsl fsl
+newscbm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+newscbm-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+newscbm-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+newscbm33	-	-	-	-	bpaste,focus,title|2|tsl fsl
+next	-	-	-	-	|2|
+nextshell	-	-	-	-	!open terminal failed: terminal does not support clear
+no+brackets	-	-	-	-	!open terminal failed: terminal does not support clear
+northstar	-	-	-	-	|2|
+nsterm	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm+7	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm+acs	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm+c	-	-	-	-	!open terminal failed: terminal does not support clear
+nsterm+c41	-	-	-	-	!open terminal failed: terminal does not support clear
+nsterm+mac	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm+s	-	-	-	-	!open terminal failed: terminal does not support clear
+nsterm-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-7	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-7-c	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-7-c-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-7-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-7-m-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-7-s	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-acs	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-acs-c	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-acs-c-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-acs-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-acs-m-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-acs-s	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-bce	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build309	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build326	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build343	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build361	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build400	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-build440	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c-7	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c-acs	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c-s-7	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-c-s-acs	-	-	-	-	bpaste,focus,title|16|tsl fsl
+nsterm-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb tsl fsl
+nsterm-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-m-7	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-m-acs	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-m-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-m-s-7	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-m-s-acs	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nsterm-old	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-s	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-s-7	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nsterm-s-acs	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-100-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-25-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-25-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-25-w-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-35	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-35-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-35-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-50	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-50-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-50-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-60	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-60-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-60-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ntconsole-w-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+nwe501	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwe501-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwe501-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp-511	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp-517	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp-517-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp251-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp251-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp511	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp512	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp512-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp512-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp513	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp513-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp513-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp514	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp514-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp514-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp517	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp517-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp518	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp518-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nwp518-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+nxterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+o31	-	-	-	-	|2|
+o4112-nd	-	-	-	-	!open terminal failed: terminal does not support cup
+o85h	-	-	-	-	|2|
+oabm85h	-	-	-	-	|2|
+oblit	-	-	-	-	|2|
+oc100	-	-	-	-	|2|
+oconcept	-	-	-	-	|2|
+ojerq	-	-	-	-	|2|
+old-st	-	-	-	-	bpaste,focus,title|8|tsl fsl
+oldibmpc3	-	-	-	-	!open terminal failed: terminal does not support clear
+oldpc3	-	-	-	-	!open terminal failed: terminal does not support clear
+oldsun	-	-	-	-	|2|
+oldxterm+sm+1006	-	-	-	-	!open terminal failed: terminal does not support clear
+omron	-	-	-	-	!open terminal failed: terminal does not support cup
+opennt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-100-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-25-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-25-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-25-w-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-35	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-35-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-35-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-50	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-50-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-50-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-60	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-60-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-60-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-nti	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opennt-w-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+opus3n1+	-	-	-	-	|2|tsl fsl
+origibmpc3	-	-	-	-	|2|
+origpc3	-	-	-	-	|2|
+os9LII	-	-	-	-	|2|
+osborne	-	-	-	-	|2|
+osborne-w	-	-	-	-	|2|
+osborne1	-	-	-	-	|2|
+osborne1-w	-	-	-	-	|2|
+osexec	-	-	-	-	|2|
+otek4112	-	-	-	-	!open terminal failed: terminal does not support cup
+otek4113	-	-	-	-	!open terminal failed: terminal does not support cup
+otek4114	-	-	-	-	!open terminal failed: terminal does not support cup
+otek4115	-	-	-	-	bpaste,focus,title|2|tsl fsl
+owl	-	-	-	-	|2|
+p12	-	-	-	-	|2|tsl fsl
+p12-w	-	-	-	-	|2|tsl fsl
+p14	-	-	-	-	|2|tsl fsl
+p14-w	-	-	-	-	|2|tsl fsl
+p19	-	-	-	-	|2|tsl fsl
+p8gl	-	-	-	-	|2|
+p9	-	-	-	-	|2|tsl fsl
+p9-w	-	-	-	-	|2|tsl fsl
+pangoterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pangoterm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+pangoterm-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb tsl fsl
+pc-coherent	-	-	-	-	|2|
+pc-minix	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pc-venix	-	-	-	-	|2|
+pc3	-	-	-	-	|8|
+pc3-bold	-	-	-	-	|8|
+pc3r	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pc3r-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pc6300plus	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pc7300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi-25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi-25-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi-33	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi-33-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi-43	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi-43-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi-mono	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi25m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi33	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcansi33m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcansi43	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pccon	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pccon+base	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pccon+colors	-	-	-	-	!open terminal failed: terminal does not support clear
+pccon+keys	-	-	-	-	!open terminal failed: terminal does not support clear
+pccon+sgr+acs	-	-	-	-	!open terminal failed: terminal does not support clear
+pccon+sgr+acs0	-	-	-	-	!open terminal failed: terminal does not support clear
+pccon-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pccon0	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pccon0-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pccons	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcconsole	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcix	-	-	-	-	|2|
+pckermit	-	-	-	-	|2|
+pckermit12	-	-	-	-	|2|
+pckermit120	-	-	-	-	|2|
+pcmw	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcplot	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt25	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt25-color	-	-	-	-	bpaste,focus,title|8|tsl fsl
+pcvt25w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt28	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt28w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt35	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt35w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt40	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt40w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt43	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt43w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt50	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvt50w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcvtXX	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pcz19	-	-	-	-	|2|
+pe1100	-	-	-	-	|2|
+pe1200	-	-	-	-	|2|
+pe1251	-	-	-	-	|2|
+pe550	-	-	-	-	|2|
+pe6100	-	-	-	-	|2|
+pe6300	-	-	-	-	|2|
+pe6312	-	-	-	-	|2|
+pe7000c	-	-	-	-	|2|
+pe7000m	-	-	-	-	|2|
+pilot	-	-	-	-	|2|
+pmcons	-	-	-	-	!open terminal failed: terminal does not support cup
+pmconsole	-	-	-	-	!open terminal failed: terminal does not support cup
+prism12	-	-	-	-	|2|tsl fsl
+prism12-w	-	-	-	-	|2|tsl fsl
+prism14	-	-	-	-	|2|tsl fsl
+prism14-w	-	-	-	-	|2|tsl fsl
+prism2	-	-	-	-	|2|
+prism8gl	-	-	-	-	|2|
+prism9	-	-	-	-	|2|tsl fsl
+prism9-w	-	-	-	-	|2|tsl fsl
+pro350	-	-	-	-	|2|
+ps300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+psterm	-	-	-	-	|2|tsl fsl
+psterm-80x24	-	-	-	-	|2|tsl fsl
+psterm-90x28	-	-	-	-	|2|tsl fsl
+psterm-96x48	-	-	-	-	|2|tsl fsl
+psterm-basic	-	-	-	-	|2|tsl fsl
+psterm-fast	-	-	-	-	|2|tsl fsl
+psx_ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pt100	-	-	-	-	|2|
+pt100w	-	-	-	-	|2|
+pt200	-	-	-	-	|2|
+pt200w	-	-	-	-	|2|
+pt250	-	-	-	-	|2|
+pt250w	-	-	-	-	|2|
+pt505	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pt505-22	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pt505-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+pty	-	-	-	-	|2|
+putty+cursor	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+esc	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+linux	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+sco	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+vt100	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+vt400	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+fnkeys+xterm	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+putty+screen	-	-	-	-	!open terminal failed: terminal does not support clear
+putty-m1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+putty-m1b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+putty-m2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+putty-noapp	-	-	-	-	bpaste,focus,title|8|tsl fsl
+putty-sco	-	-	-	-	bpaste,focus,title|8|tsl fsl
+putty-screen	-	-	-	-	bpaste,focus,title|8|tsl fsl
+putty-vt100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qansi-g	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qansi-m	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qansi-t	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qansi-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+qdcons	-	-	-	-	|2|
+qdss	-	-	-	-	|2|
+qvt101	-	-	-	-	|2|tsl fsl
+qvt101+	-	-	-	-	|2|tsl fsl
+qvt101p	-	-	-	-	|2|tsl fsl
+qvt102	-	-	-	-	|2|tsl fsl
+qvt103	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt103-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt108	-	-	-	-	|2|tsl fsl
+qvt119	-	-	-	-	|2|tsl fsl
+qvt119+	-	-	-	-	|2|tsl fsl
+qvt119+-25	-	-	-	-	|2|tsl fsl
+qvt119+-25-w	-	-	-	-	|2|tsl fsl
+qvt119+-w	-	-	-	-	|2|tsl fsl
+qvt119-25-w	-	-	-	-	|2|tsl fsl
+qvt119-w	-	-	-	-	|2|tsl fsl
+qvt119p	-	-	-	-	|2|tsl fsl
+qvt119p-25	-	-	-	-	|2|tsl fsl
+qvt119p-25-w	-	-	-	-	|2|tsl fsl
+qvt119p-w	-	-	-	-	|2|tsl fsl
+qvt203	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt203+	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt203-25	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt203-25-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt203-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+qvt203-w-am	-	-	-	-	bpaste,focus,title|2|tsl fsl
+rbcomm	-	-	-	-	|2|
+rbcomm-nam	-	-	-	-	|2|
+rbcomm-w	-	-	-	-	|2|
+rca	-	-	-	-	|2|
+rcons	-	-	-	-	|2|
+rcons-color	-	-	-	-	|8|
+rebus3180	-	-	-	-	bpaste,focus,title|2|tsl fsl
+regent	-	-	-	-	!open terminal failed: terminal does not support cup
+regent100	-	-	-	-	|2|
+regent20	-	-	-	-	|2|
+regent200	-	-	-	-	|2|
+regent25	-	-	-	-	|2|
+regent40	-	-	-	-	|2|
+regent40+	-	-	-	-	|2|
+regent60	-	-	-	-	|2|
+report+da2	-	-	-	-	!open terminal failed: terminal does not support clear
+report+version	-	-	-	-	!open terminal failed: terminal does not support clear
+rio	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+rio-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+rlogin-color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+rt6221	-	-	-	-	bpaste,focus,title|2|tsl fsl
+rt6221-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+rxvt+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+rxvt-basic	-	-	-	-	bpaste,focus,ignorefkeys,title|2|tsl fsl
+rxvt-color	-	-	-	-	bpaste,focus,ignorefkeys,title|8|tsl fsl
+rxvt-cygwin	-	-	-	-	bpaste,focus,ignorefkeys,title|8|tsl fsl
+rxvt-cygwin-native	-	-	-	-	bpaste,focus,ignorefkeys,title|8|tsl fsl
+rxvt-xpm	-	-	-	-	bpaste,focus,ignorefkeys,title|8|tsl fsl
+s4	-	-	-	-	bpaste,focus,title|2|tsl fsl
+sb1	-	-	-	-	|2|
+sb2	-	-	-	-	|2|
+sb3	-	-	-	-	|2|
+sbi	-	-	-	-	|2|
+sbobcat	-	-	-	-	|2|
+sc410	-	-	-	-	|2|
+sc415	-	-	-	-	|2|
+scanset	-	-	-	-	|2|
+sclp	-	-	-	-	bpaste,focus,title|8|tsl fsl
+scoansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+scoansi-new	-	-	-	-	bpaste,focus,title|8|tsl fsl
+scoansi-old	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen+fkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+screen+italics	-	-	-	-	!open terminal failed: terminal does not support clear
+screen-16color-bce	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-16color-bce-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-16color-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-256color-bce	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-256color-bce-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-256color-s	-	-	-	-	bpaste,focus,title|16|tsl fsl
+screen-base	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.Eterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.gnome	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.konsole	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.linux	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.mrxvt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.rxvt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-bce.xterm-new	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+screen-s	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.linux-m1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.linux-m1b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.linux-m2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.minitel1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.minitel1-nb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.minitel12-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.minitel1b	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.minitel1b-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.minitel1b-nb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.minitel2-80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.putty-m1	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.putty-m1b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen.putty-m2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen3	-	-	-	-	bpaste,focus,title|2|tsl fsl
+screen4	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen5	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screwpoint	-	-	-	-	|2|
+scrhp	-	-	-	-	|2|
+scrt	-	-	-	-	bpaste,focus,title|16|tsl fsl
+securecrt	-	-	-	-	bpaste,focus,title|16|tsl fsl
+sibo	-	-	-	-	|2|
+simpleterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+simterm	-	-	-	-	|2|
+soroc	-	-	-	-	|2|
+soroc120	-	-	-	-	|2|
+soroc140	-	-	-	-	|2|
+st-0.6	-	-	-	-	bpaste,focus,title|8|Ss Se tsl fsl
+st-0.7	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+st-0.8	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+st-0.8.5	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+st-16color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+st52	-	-	-	-	|2|
+st52-color	-	-	-	-	|16|
+st52-m	-	-	-	-	|2|
+st52-old	-	-	-	-	|2|
+stterm	-	-	-	-	bpaste,focus,title|8|Ss Se Ms tsl fsl
+stterm-16color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+stterm-256color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+stv52	-	-	-	-	|2|
+stv52pc	-	-	-	-	|2|
+sun	-	-	-	-	|2|
+sun+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+sun-1	-	-	-	-	|2|tsl fsl
+sun-12	-	-	-	-	|2|
+sun-16color	-	-	-	-	|16|
+sun-17	-	-	-	-	|2|
+sun-24	-	-	-	-	|2|
+sun-256color	-	-	-	-	|16|
+sun-34	-	-	-	-	|2|
+sun-48	-	-	-	-	|2|
+sun-c	-	-	-	-	|2|
+sun-cgsix	-	-	-	-	|2|
+sun-cmd	-	-	-	-	|2|
+sun-color	-	-	-	-	|8|
+sun-direct	-	-	-	-	RGB|16777216|RGB setrgbf setrgbb
+sun-e	-	-	-	-	|2|
+sun-e-s	-	-	-	-	|2|tsl fsl
+sun-il	-	-	-	-	|2|
+sun-nic	-	-	-	-	|2|
+sun-s	-	-	-	-	|2|tsl fsl
+sun-s-e	-	-	-	-	|2|tsl fsl
+sun-ss5	-	-	-	-	|2|
+sun-type4	-	-	-	-	|2|
+sun1	-	-	-	-	|2|
+sun2	-	-	-	-	|2|
+sune	-	-	-	-	|2|
+superbee	-	-	-	-	|2|
+superbrain	-	-	-	-	|2|
+sv80	-	-	-	-	bpaste,focus,title|2|tsl fsl
+swtp	-	-	-	-	|2|
+synertek	-	-	-	-	|2|
+synertek380	-	-	-	-	|2|
+system1	-	-	-	-	|2|
+t10	-	-	-	-	|2|
+t1061	-	-	-	-	|2|
+t1061f	-	-	-	-	|2|
+t16	-	-	-	-	bpaste,focus,title|2|tsl fsl
+t3700	-	-	-	-	!open terminal failed: terminal does not support cup
+t3800	-	-	-	-	|2|
+t653x	-	-	-	-	|2|tsl fsl
+tab	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tab132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tab132-15	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tab132-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tab132-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tab132-w-rv	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tandem6510	-	-	-	-	|2|
+tandem653	-	-	-	-	|2|tsl fsl
+tek	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4012	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4013	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4014	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4014-sm	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4015	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4015-sm	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4023	-	-	-	-	|2|
+tek4024	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025-17	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025-17-ws	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025-cr	-	-	-	-	|2|
+tek4025-ex	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025a	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4025ex	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4027	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4027-ex	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4105	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4105-30	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4105a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4106brl	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4107	-	-	-	-	|2|
+tek4107brl	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4109	-	-	-	-	|2|
+tek4109brl	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4112	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4112-5	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4112-nd	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4113	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4113-34	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4113-nd	-	-	-	-	!open terminal failed: terminal does not support cup
+tek4114	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4115	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4125	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4205	-	-	-	-	bpaste,focus,title|8|tsl fsl
+tek4207	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tek4207-s	-	-	-	-	|2|tsl fsl
+tek4404	-	-	-	-	bpaste,focus,title|2|tsl fsl
+teken	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teken-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+teken-2018	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teken-2022	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teken-sc	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teken-sc+fkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+teken-vt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teken-vt+fkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+teleray	-	-	-	-	|2|
+teletec	-	-	-	-	!open terminal failed: terminal does not support cup
+teraterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teraterm-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+teraterm2.3	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teraterm4.59	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teraterm4.97	-	-	-	-	bpaste,focus,title|8|tsl fsl
+teraterm5.0	-	-	-	-	bpaste,focus,title|8|tsl fsl
+terminator	-	-	-	-	bpaste,focus,title|16|tsl fsl
+terminology	-	-	-	-	bpaste,focus,title|16|Ss Se tsl fsl
+terminology-0.6.1	-	-	-	-	bpaste,focus,title|16|tsl fsl
+terminology-1.0.0	-	-	-	-	bpaste,focus,title|16|tsl fsl
+terminology-1.8.1	-	-	-	-	bpaste,focus,title|16|Ss Se tsl fsl
+termite	-	-	-	-	bpaste,focus,title|16|tsl fsl
+tgtelnet	-	-	-	-	|2|
+ti916	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti916-132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti916-220-7	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti924	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti924w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti926	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ti928	-	-	-	-	bpaste,focus,title|8|tsl fsl
+ti931	-	-	-	-	|2|
+ti_ansi	-	-	-	-	bpaste,focus,title|8|tsl fsl
+tkterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+trs16	-	-	-	-	|2|
+trs2	-	-	-	-	|2|
+trs80II	-	-	-	-	|2|
+trsII	-	-	-	-	|2|
+ts-1	-	-	-	-	|2|
+ts-1p	-	-	-	-	|2|
+ts1	-	-	-	-	|2|
+ts100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ts100-ctxt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ts100-sp	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ts1p	-	-	-	-	|2|
+tt	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tt52	-	-	-	-	|16|
+tty40	-	-	-	-	!open terminal failed: terminal does not support cup
+tty4420	-	-	-	-	|2|
+tty4424	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty4424-1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty4424m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty4426	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5410	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5410-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5410v1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5410v1-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5420+nl	-	-	-	-	!open terminal failed: terminal does not support clear
+tty5620	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5620-1	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5620-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5620-34	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tty5620-s	-	-	-	-	|2|
+ttydmd	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tvi803	-	-	-	-	|2|tsl fsl
+tvi9065	-	-	-	-	|2|tsl fsl
+tvi910	-	-	-	-	|2|
+tvi910+	-	-	-	-	|2|
+tvi912	-	-	-	-	|2|
+tvi912b	-	-	-	-	|2|
+tvi912b+2p	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi912b+dim	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi912b+mc	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi912b+printer	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi912b+vb	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi912b-2p	-	-	-	-	|2|
+tvi912b-2p-mc	-	-	-	-	|2|
+tvi912b-2p-p	-	-	-	-	|2|
+tvi912b-2p-unk	-	-	-	-	|2|
+tvi912b-mc	-	-	-	-	|2|
+tvi912b-mc-2p	-	-	-	-	|2|
+tvi912b-mc-vb	-	-	-	-	|2|
+tvi912b-p	-	-	-	-	|2|
+tvi912b-p-2p	-	-	-	-	|2|
+tvi912b-p-vb	-	-	-	-	|2|
+tvi912b-unk	-	-	-	-	|2|
+tvi912b-unk-2p	-	-	-	-	|2|
+tvi912b-unk-vb	-	-	-	-	|2|
+tvi912b-vb	-	-	-	-	|2|
+tvi912b-vb-mc	-	-	-	-	|2|
+tvi912b-vb-p	-	-	-	-	|2|
+tvi912b-vb-unk	-	-	-	-	|2|
+tvi912c	-	-	-	-	|2|
+tvi912c-2p	-	-	-	-	|2|
+tvi912c-2p-mc	-	-	-	-	|2|
+tvi912c-2p-p	-	-	-	-	|2|
+tvi912c-2p-unk	-	-	-	-	|2|
+tvi912c-mc	-	-	-	-	|2|
+tvi912c-mc-2p	-	-	-	-	|2|
+tvi912c-mc-vb	-	-	-	-	|2|
+tvi912c-p	-	-	-	-	|2|
+tvi912c-p-2p	-	-	-	-	|2|
+tvi912c-p-vb	-	-	-	-	|2|
+tvi912c-unk	-	-	-	-	|2|
+tvi912c-unk-2p	-	-	-	-	|2|
+tvi912c-unk-vb	-	-	-	-	|2|
+tvi912c-vb	-	-	-	-	|2|
+tvi912c-vb-mc	-	-	-	-	|2|
+tvi912c-vb-p	-	-	-	-	|2|
+tvi912c-vb-unk	-	-	-	-	|2|
+tvi912cc	-	-	-	-	!open terminal failed: terminal does not support cup
+tvi914	-	-	-	-	|2|
+tvi920	-	-	-	-	|2|
+tvi920b	-	-	-	-	|2|
+tvi920b+fn	-	-	-	-	!open terminal failed: terminal does not support clear
+tvi920b-2p	-	-	-	-	|2|
+tvi920b-2p-mc	-	-	-	-	|2|
+tvi920b-2p-p	-	-	-	-	|2|
+tvi920b-2p-unk	-	-	-	-	|2|
+tvi920b-mc	-	-	-	-	|2|
+tvi920b-mc-2p	-	-	-	-	|2|
+tvi920b-mc-vb	-	-	-	-	|2|
+tvi920b-p	-	-	-	-	|2|
+tvi920b-p-2p	-	-	-	-	|2|
+tvi920b-p-vb	-	-	-	-	|2|
+tvi920b-unk	-	-	-	-	|2|
+tvi920b-unk-2p	-	-	-	-	|2|
+tvi920b-unk-vb	-	-	-	-	|2|
+tvi920b-vb	-	-	-	-	|2|
+tvi920b-vb-mc	-	-	-	-	|2|
+tvi920b-vb-p	-	-	-	-	|2|
+tvi920b-vb-unk	-	-	-	-	|2|
+tvi920c	-	-	-	-	|2|
+tvi920c-2p	-	-	-	-	|2|
+tvi920c-2p-mc	-	-	-	-	|2|
+tvi920c-2p-p	-	-	-	-	|2|
+tvi920c-2p-unk	-	-	-	-	|2|
+tvi920c-mc	-	-	-	-	|2|
+tvi920c-mc-2p	-	-	-	-	|2|
+tvi920c-mc-vb	-	-	-	-	|2|
+tvi920c-p	-	-	-	-	|2|
+tvi920c-p-2p	-	-	-	-	|2|
+tvi920c-p-vb	-	-	-	-	|2|
+tvi920c-unk	-	-	-	-	|2|
+tvi920c-unk-2p	-	-	-	-	|2|
+tvi920c-unk-vb	-	-	-	-	|2|
+tvi920c-vb	-	-	-	-	|2|
+tvi920c-vb-mc	-	-	-	-	|2|
+tvi920c-vb-p	-	-	-	-	|2|
+tvi920c-vb-unk	-	-	-	-	|2|
+tvi921	-	-	-	-	|2|tsl fsl
+tvi924	-	-	-	-	|2|tsl fsl
+tvi925	-	-	-	-	|2|tsl fsl
+tvi925-hi	-	-	-	-	|2|tsl fsl
+tvi92B	-	-	-	-	|2|tsl fsl
+tvi92D	-	-	-	-	|2|tsl fsl
+tvi950	-	-	-	-	|2|tsl fsl
+tvi950-2p	-	-	-	-	|2|tsl fsl
+tvi950-4p	-	-	-	-	|2|tsl fsl
+tvi950-rv	-	-	-	-	|2|tsl fsl
+tvi950-rv-2p	-	-	-	-	|2|tsl fsl
+tvi950-rv-4p	-	-	-	-	|2|tsl fsl
+tvi955	-	-	-	-	|2|tsl fsl
+tvi955-hb	-	-	-	-	|2|tsl fsl
+tvi955-w	-	-	-	-	|2|tsl fsl
+tvi970	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tvi970-2p	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tvi970-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tvipt	-	-	-	-	|2|
+tw100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+tw52	-	-	-	-	|16|
+tw52-color	-	-	-	-	|16|
+tw52-m	-	-	-	-	|2|
+tws-generic	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tws2102-sna	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tws2103	-	-	-	-	bpaste,focus,title|2|tsl fsl
+tws2103-sna	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ultima2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+ultimaII	-	-	-	-	bpaste,focus,title|2|tsl fsl
+uniterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+uniterm49	-	-	-	-	bpaste,focus,title|2|tsl fsl
+unixpc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+uts30	-	-	-	-	|2|tsl fsl
+uwin	-	-	-	-	bpaste,focus,title|8|tsl fsl
+v200-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+v320n	-	-	-	-	bpaste,focus,title|2|tsl fsl
+v3220	-	-	-	-	bpaste,focus,title|2|tsl fsl
+v5410	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vanilla	-	-	-	-	!open terminal failed: terminal does not support clear
+vapple	-	-	-	-	|2|
+vc103	-	-	-	-	!open terminal failed: terminal does not support cup
+vc203	-	-	-	-	!open terminal failed: terminal does not support cup
+vc303	-	-	-	-	!open terminal failed: terminal does not support cup
+vc303a	-	-	-	-	!open terminal failed: terminal does not support cup
+vc403a	-	-	-	-	!open terminal failed: terminal does not support cup
+vc404	-	-	-	-	|2|
+vc404-s	-	-	-	-	|2|
+vc414	-	-	-	-	|2|
+vc414h	-	-	-	-	|2|
+vc415	-	-	-	-	|2|
+venix	-	-	-	-	|2|
+versaterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vi200	-	-	-	-	|2|
+vi200-f	-	-	-	-	|2|
+vi200-rv	-	-	-	-	|2|
+vi300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vi300-old	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vi50	-	-	-	-	|2|
+vi500	-	-	-	-	|2|
+vi50adm	-	-	-	-	|2|
+vi55	-	-	-	-	|2|
+vi550	-	-	-	-	|2|
+vi603	-	-	-	-	bpaste,focus,title|2|tsl fsl
+viewdata	-	-	-	-	|2|
+viewdata-o	-	-	-	-	|2|
+viewdata-rv	-	-	-	-	|2|
+viewpoint	-	-	-	-	|2|
+viewpoint3a+	-	-	-	-	|2|
+viewpoint60	-	-	-	-	|2|
+viewpoint90	-	-	-	-	|2|
+vip	-	-	-	-	|2|tsl fsl
+vip-H	-	-	-	-	|2|tsl fsl
+vip-Hw	-	-	-	-	|2|tsl fsl
+vip-w	-	-	-	-	|2|tsl fsl
+vip7800-H	-	-	-	-	|2|tsl fsl
+vip7800-Hw	-	-	-	-	|2|tsl fsl
+vip7800-w	-	-	-	-	|2|tsl fsl
+visa50	-	-	-	-	bpaste,focus,title|2|tsl fsl
+visual603	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vitty	-	-	-	-	|2|
+vk100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vp3a+	-	-	-	-	|2|
+vp60	-	-	-	-	|2|
+vp90	-	-	-	-	|2|
+vremote	-	-	-	-	|2|
+vs100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vs100-x10	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vsc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vscode	-	-	-	-	bpaste,focus,title|16|tsl fsl
+vscode-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb tsl fsl
+vt-61	-	-	-	-	|2|
+vt-utf8	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vt100+	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vt100+4bsd	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100+enq	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+fnkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+noapp	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+noapp+pc	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+pf1-pf4	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100+pfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+vt100-am	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-bm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-bm-o	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-bot-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-nam-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-nav	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-nav-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-putty	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-s-bot	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-s-top	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-top-s	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-w-am	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-w-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100-w-nav	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt100nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt102+enq	-	-	-	-	!open terminal failed: terminal does not support clear
+vt102-nsgr	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt102-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt125	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt131	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt132	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt200	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt200-js	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt200-old	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt200-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220+cvis	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220+pcedit	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220+sfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220+ufkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220+vtedit	-	-	-	-	!open terminal failed: terminal does not support clear
+vt220-base	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220-js	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220-old	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220d	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt300	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt300-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt300-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt300-w-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320-k3	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320-k311	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320-w-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt320nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt330	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt340	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt400	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt400-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt420	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt420+lrmm	-	-	-	-	!open terminal failed: terminal does not support clear
+vt420f	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt420pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt420pcdos	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt50	-	-	-	-	!open terminal failed: terminal does not support cup
+vt50h	-	-	-	-	|2|
+vt510	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt510pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt510pcdos	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt52	-	-	-	-	|2|
+vt52+arrows	-	-	-	-	!open terminal failed: terminal does not support clear
+vt52+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+vt52-basic	-	-	-	-	|2|
+vt520	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt520-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt520ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt525	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vt525-w	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vt61	-	-	-	-	|2|
+vt61.5	-	-	-	-	|2|
+vte+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+vte-2007	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vte-2008	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vte-2012	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vte-2014	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vte-2017	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vte-2018	-	-	-	-	bpaste,focus,title|8|Smulx Ss Se Ms tsl fsl
+vte-2022	-	-	-	-	bpaste,focus,title|8|Smulx Ss Se Ms tsl fsl
+vtnt	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vv100	-	-	-	-	bpaste,focus,title|8|tsl fsl
+vwmterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+wezterm	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+winconsole	-	-	-	-	bpaste,focus,title|8|tsl fsl
+wren	-	-	-	-	|2|
+wrenw	-	-	-	-	|2|
+wsiris	-	-	-	-	|2|
+wsvt25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+wsvt25m	-	-	-	-	bpaste,focus,title|8|tsl fsl
+wy-75ap	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy-99fgt	-	-	-	-	|2|tsl fsl
+wy-99fgta	-	-	-	-	|2|tsl fsl
+wy100	-	-	-	-	|2|tsl fsl
+wy100q	-	-	-	-	|2|
+wy120	-	-	-	-	|2|tsl fsl
+wy120-25	-	-	-	-	|2|tsl fsl
+wy120-25-w	-	-	-	-	|2|tsl fsl
+wy120-vb	-	-	-	-	|2|tsl fsl
+wy120-w	-	-	-	-	|2|tsl fsl
+wy120-w-vb	-	-	-	-	|2|tsl fsl
+wy120-wvb	-	-	-	-	|2|tsl fsl
+wy150	-	-	-	-	|2|tsl fsl
+wy150-25	-	-	-	-	|2|tsl fsl
+wy150-25-w	-	-	-	-	|2|tsl fsl
+wy150-vb	-	-	-	-	|2|tsl fsl
+wy150-w	-	-	-	-	|2|tsl fsl
+wy150-w-vb	-	-	-	-	|2|tsl fsl
+wy160	-	-	-	-	|2|tsl fsl
+wy160-25	-	-	-	-	|2|tsl fsl
+wy160-25-w	-	-	-	-	|2|tsl fsl
+wy160-42	-	-	-	-	|2|tsl fsl
+wy160-42-w	-	-	-	-	|2|tsl fsl
+wy160-43	-	-	-	-	|2|tsl fsl
+wy160-43-w	-	-	-	-	|2|tsl fsl
+wy160-tek	-	-	-	-	|2|
+wy160-vb	-	-	-	-	|2|tsl fsl
+wy160-w	-	-	-	-	|2|tsl fsl
+wy160-w-vb	-	-	-	-	|2|tsl fsl
+wy160-wvb	-	-	-	-	|2|tsl fsl
+wy185	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy185-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy185-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy185-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy185-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy30	-	-	-	-	|2|tsl fsl
+wy30-mc	-	-	-	-	|2|tsl fsl
+wy30-vb	-	-	-	-	|2|tsl fsl
+wy325	-	-	-	-	|2|tsl fsl
+wy325-25	-	-	-	-	|2|tsl fsl
+wy325-25w	-	-	-	-	|2|tsl fsl
+wy325-42	-	-	-	-	|2|tsl fsl
+wy325-42w	-	-	-	-	|2|tsl fsl
+wy325-42w-vb	-	-	-	-	|2|tsl fsl
+wy325-42wvb	-	-	-	-	|2|tsl fsl
+wy325-43	-	-	-	-	|2|tsl fsl
+wy325-43w	-	-	-	-	|2|tsl fsl
+wy325-43w-vb	-	-	-	-	|2|tsl fsl
+wy325-43wvb	-	-	-	-	|2|tsl fsl
+wy325-80	-	-	-	-	|2|tsl fsl
+wy325-vb	-	-	-	-	|2|tsl fsl
+wy325-w	-	-	-	-	|2|tsl fsl
+wy325-w-vb	-	-	-	-	|2|tsl fsl
+wy325-wvb	-	-	-	-	|2|tsl fsl
+wy325w-24	-	-	-	-	|2|tsl fsl
+wy350	-	-	-	-	|8|tsl fsl
+wy350-vb	-	-	-	-	|8|tsl fsl
+wy350-w	-	-	-	-	|8|tsl fsl
+wy350-wvb	-	-	-	-	|8|tsl fsl
+wy370	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-101k	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-105k	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-EPC	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-nk	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-rv	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-tek	-	-	-	-	|2|
+wy370-vb	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-w	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy370-wvb	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wy50	-	-	-	-	|2|tsl fsl
+wy50-mc	-	-	-	-	|2|tsl fsl
+wy50-vb	-	-	-	-	|2|tsl fsl
+wy50-w	-	-	-	-	|2|tsl fsl
+wy50-wvb	-	-	-	-	|2|tsl fsl
+wy520	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-36	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-36pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-36w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-36wpc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-48	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-48pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-48w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-48wpc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-epc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-epc-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-epc-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-epc-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-epc-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy520-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy60	-	-	-	-	|2|tsl fsl
+wy60-25	-	-	-	-	|2|tsl fsl
+wy60-25-w	-	-	-	-	|2|tsl fsl
+wy60-316X	-	-	-	-	|2|
+wy60-42	-	-	-	-	|2|tsl fsl
+wy60-42-w	-	-	-	-	|2|tsl fsl
+wy60-43	-	-	-	-	|2|tsl fsl
+wy60-43-w	-	-	-	-	|2|tsl fsl
+wy60-AT	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy60-vb	-	-	-	-	|2|tsl fsl
+wy60-w	-	-	-	-	|2|tsl fsl
+wy60-w-vb	-	-	-	-	|2|tsl fsl
+wy60-wvb	-	-	-	-	|2|tsl fsl
+wy75	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy75-mc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy75-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy75-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy75-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy75ap	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy85	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy85-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy85-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy85-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy99-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy99a-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wy99f	-	-	-	-	|2|tsl fsl
+wy99fa	-	-	-	-	|2|tsl fsl
+wy99fgt	-	-	-	-	|2|tsl fsl
+wy99fgta	-	-	-	-	|2|tsl fsl
+wy99gt	-	-	-	-	|2|tsl fsl
+wy99gt-25	-	-	-	-	|2|tsl fsl
+wy99gt-25-w	-	-	-	-	|2|tsl fsl
+wy99gt-tek	-	-	-	-	|2|
+wy99gt-vb	-	-	-	-	|2|tsl fsl
+wy99gt-w	-	-	-	-	|2|tsl fsl
+wy99gt-w-vb	-	-	-	-	|2|tsl fsl
+wy99gt-wvb	-	-	-	-	|2|tsl fsl
+wyse+cvis	-	-	-	-	!open terminal failed: terminal does not support clear
+wyse+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+wyse-325	-	-	-	-	|2|tsl fsl
+wyse-75ap	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse-vp	-	-	-	-	|2|
+wyse120	-	-	-	-	|2|tsl fsl
+wyse120-25	-	-	-	-	|2|tsl fsl
+wyse120-25-w	-	-	-	-	|2|tsl fsl
+wyse120-vb	-	-	-	-	|2|tsl fsl
+wyse120-w	-	-	-	-	|2|tsl fsl
+wyse120-wvb	-	-	-	-	|2|tsl fsl
+wyse150	-	-	-	-	|2|tsl fsl
+wyse150-25	-	-	-	-	|2|tsl fsl
+wyse150-25-w	-	-	-	-	|2|tsl fsl
+wyse150-vb	-	-	-	-	|2|tsl fsl
+wyse150-w	-	-	-	-	|2|tsl fsl
+wyse150-w-vb	-	-	-	-	|2|tsl fsl
+wyse160	-	-	-	-	|2|tsl fsl
+wyse160-25	-	-	-	-	|2|tsl fsl
+wyse160-25-w	-	-	-	-	|2|tsl fsl
+wyse160-42	-	-	-	-	|2|tsl fsl
+wyse160-42-w	-	-	-	-	|2|tsl fsl
+wyse160-43	-	-	-	-	|2|tsl fsl
+wyse160-43-w	-	-	-	-	|2|tsl fsl
+wyse160-vb	-	-	-	-	|2|tsl fsl
+wyse160-w	-	-	-	-	|2|tsl fsl
+wyse160-wvb	-	-	-	-	|2|tsl fsl
+wyse185	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse185-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse185-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse185-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse185-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse30	-	-	-	-	|2|tsl fsl
+wyse30-mc	-	-	-	-	|2|tsl fsl
+wyse30-vb	-	-	-	-	|2|tsl fsl
+wyse325	-	-	-	-	|2|tsl fsl
+wyse325-25	-	-	-	-	|2|tsl fsl
+wyse325-25w	-	-	-	-	|2|tsl fsl
+wyse325-42	-	-	-	-	|2|tsl fsl
+wyse325-42w	-	-	-	-	|2|tsl fsl
+wyse325-43	-	-	-	-	|2|tsl fsl
+wyse325-43w	-	-	-	-	|2|tsl fsl
+wyse325-vb	-	-	-	-	|2|tsl fsl
+wyse325-w	-	-	-	-	|2|tsl fsl
+wyse325-wvb	-	-	-	-	|2|tsl fsl
+wyse350	-	-	-	-	|8|tsl fsl
+wyse350-vb	-	-	-	-	|8|tsl fsl
+wyse350-w	-	-	-	-	|8|tsl fsl
+wyse350-wvb	-	-	-	-	|8|tsl fsl
+wyse370	-	-	-	-	bpaste,focus,title|16|tsl fsl
+wyse50	-	-	-	-	|2|tsl fsl
+wyse50-mc	-	-	-	-	|2|tsl fsl
+wyse50-vb	-	-	-	-	|2|tsl fsl
+wyse50-w	-	-	-	-	|2|tsl fsl
+wyse50-wvb	-	-	-	-	|2|tsl fsl
+wyse520	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-36	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-36pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-36w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-36wpc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-48	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-48pc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-48w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-48wpc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-epc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-epc-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-p-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-pc-24	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-pc-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse520-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse60	-	-	-	-	|2|tsl fsl
+wyse60-25	-	-	-	-	|2|tsl fsl
+wyse60-25-w	-	-	-	-	|2|tsl fsl
+wyse60-316X	-	-	-	-	|2|
+wyse60-42	-	-	-	-	|2|tsl fsl
+wyse60-42-w	-	-	-	-	|2|tsl fsl
+wyse60-43	-	-	-	-	|2|tsl fsl
+wyse60-43-w	-	-	-	-	|2|tsl fsl
+wyse60-AT	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse60-vb	-	-	-	-	|2|tsl fsl
+wyse60-w	-	-	-	-	|2|tsl fsl
+wyse60-wvb	-	-	-	-	|2|tsl fsl
+wyse75	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse75-mc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse75-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse75-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse75-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse75ap	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse85	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse85-vb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse85-w	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse85-wvb	-	-	-	-	bpaste,focus,title|2|tsl fsl
+wyse99gt	-	-	-	-	|2|tsl fsl
+wyse99gt-25	-	-	-	-	|2|tsl fsl
+wyse99gt-25-w	-	-	-	-	|2|tsl fsl
+wyse99gt-vb	-	-	-	-	|2|tsl fsl
+wyse99gt-w	-	-	-	-	|2|tsl fsl
+wyse99gt-wvb	-	-	-	-	|2|tsl fsl
+x10term	-	-	-	-	bpaste,focus,title|2|tsl fsl
+x10term+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+x68k	-	-	-	-	bpaste,focus,title|2|tsl fsl
+x68k-ite	-	-	-	-	bpaste,focus,title|2|tsl fsl
+x820	-	-	-	-	|2|
+xdku	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xenix	-	-	-	-	|2|
+xerox820	-	-	-	-	|2|
+xfce	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xgterm	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xiterm	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xl83	-	-	-	-	|2|
+xnuppc	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc+100x37	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+112x37	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+128x40	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+128x48	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+144x48	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+160x64	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+200x64	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+200x75	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+256x96	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+80x25	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+80x30	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+90x30	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc+basic	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc+c	-	-	-	-	!open terminal failed: terminal does not support clear
+xnuppc+f	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc+f2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-100x37	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-100x37-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-112x37	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-112x37-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-128x40	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-128x40-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-128x48	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-128x48-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-144x48	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-144x48-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-160x64	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-160x64-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-200x64	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-200x64-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-200x75	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-200x75-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-256x96	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-256x96-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-80x25	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-80x25-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-80x30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-80x30-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-90x30	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-90x30-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-b	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-f	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-f2	-	-	-	-	bpaste,focus,title|8|tsl fsl
+xnuppc-m	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-m-b	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-m-f	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xnuppc-m-f2	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xtalk	-	-	-	-	bpaste,focus,title|2|tsl fsl
+xterm+256color	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+256color2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+256setaf	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+256setaf2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+88color	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+88color2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+acs	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+alt+title	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+alt1049	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+alt47	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+app	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+app+pc	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+decedit	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+direct	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+direct16	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+direct2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+direct256	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+edit	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+focus	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+indirect	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+kbs	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+keypad	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+meta	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+noalt	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+noapp	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+nofkeys	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm+nopcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+osc104	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pc+edit	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcc0	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcc1	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcc2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcc3	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pce2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcf0	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcf2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+pcfkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+r5+fkeys	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+r5+lockeys	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+r6f2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sl	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sl-alt	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sl-twm	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sm+1002	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sm+1003	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sm+1005	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+sm+1006	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+titlestack	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+tmux	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+tmux2	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+vt+edit	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+x10mouse	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+x11hilite	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm+x11mouse	-	-	-	-	!open terminal failed: terminal does not support clear
+xterm-1002	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-1003	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-1005	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-1006	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-24	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-basic	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-bold	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-direct16	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+xterm-direct2	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+xterm-direct256	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+xterm-hp	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-nic	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-noapp	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-old	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-p370	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-p371	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-pcolor	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-r5	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-r6	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-sco	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-sun	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-utf8	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-vt220	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-vt52	-	-	-	-	ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-x10mouse	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-x11hilite	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-x11mouse	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v32	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v33	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v333	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v40	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v43	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xf86-v44	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xfree86	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm-xi	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xterm.js	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
+xterm1	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xtermc	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xtermm	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterms	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterms-sun	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+xwsh	-	-	-	-	bpaste,focus,title|8|tsl fsl
+z-100	-	-	-	-	|2|
+z-100bw	-	-	-	-	|2|
+z100	-	-	-	-	|2|
+z100bw	-	-	-	-	|2|
+z110	-	-	-	-	|2|
+z110bw	-	-	-	-	|2|
+z19	-	-	-	-	|2|tsl fsl
+z29	-	-	-	-	|2|tsl fsl
+z29a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z29a-kc-bc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z29a-kc-uc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z29a-nkc-bc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z29a-nkc-uc	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z29b	-	-	-	-	|2|tsl fsl
+z30	-	-	-	-	|2|
+z340	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z340-nam	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z39-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z39a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+z50	-	-	-	-	|2|
+z8001	-	-	-	-	|2|
+zen30	-	-	-	-	|2|
+zen50	-	-	-	-	|2|
+zen8001	-	-	-	-	|2|
+zenith	-	-	-	-	|2|tsl fsl
+zenith29	-	-	-	-	|2|tsl fsl
+zenith39-a	-	-	-	-	bpaste,focus,title|2|tsl fsl
+zenith39-ansi	-	-	-	-	bpaste,focus,title|2|tsl fsl
+zt-1	-	-	-	-	|2|tsl fsl
+ztx	-	-	-	-	|2|tsl fsl
+ztx-1-a	-	-	-	-	|2|tsl fsl
+ztx11	-	-	-	-	|2|tsl fsl
+1730-lm	-	-	-	-	!can't use hardcopy terminal: 1730-lm
+630-lm	-	-	-	-	!can't use hardcopy terminal: 630-lm
+8510	-	-	-	-	!can't use hardcopy terminal: 8510
+aj	-	-	-	-	!can't use hardcopy terminal: aj
+aj830	-	-	-	-	!can't use hardcopy terminal: aj830
+aj832	-	-	-	-	!can't use hardcopy terminal: aj832
+ci8510	-	-	-	-	!can't use hardcopy terminal: ci8510
+citoh	-	-	-	-	!can't use hardcopy terminal: citoh
+citoh-6lpi	-	-	-	-	!can't use hardcopy terminal: citoh-6lpi
+citoh-8lpi	-	-	-	-	!can't use hardcopy terminal: citoh-8lpi
+citoh-comp	-	-	-	-	!can't use hardcopy terminal: citoh-comp
+citoh-elite	-	-	-	-	!can't use hardcopy terminal: citoh-elite
+citoh-pica	-	-	-	-	!can't use hardcopy terminal: citoh-pica
+citoh-prop	-	-	-	-	!can't use hardcopy terminal: citoh-prop
+citoh-ps	-	-	-	-	!can't use hardcopy terminal: citoh-ps
+decwriter	-	-	-	-	!can't use hardcopy terminal: decwriter
+diablo	-	-	-	-	!can't use hardcopy terminal: diablo
+diablo-lm	-	-	-	-	!can't use hardcopy terminal: diablo-lm
+diablo1620	-	-	-	-	!can't use hardcopy terminal: diablo1620
+diablo1620-m8	-	-	-	-	!can't use hardcopy terminal: diablo1620-m8
+diablo1640	-	-	-	-	!can't use hardcopy terminal: diablo1640
+diablo1640-lm	-	-	-	-	!can't use hardcopy terminal: diablo1640-lm
+diablo1640-m8	-	-	-	-	!can't use hardcopy terminal: diablo1640-m8
+diablo1720	-	-	-	-	!can't use hardcopy terminal: diablo1720
+diablo1730	-	-	-	-	!can't use hardcopy terminal: diablo1730
+diablo1740	-	-	-	-	!can't use hardcopy terminal: diablo1740
+diablo1740-lm	-	-	-	-	!can't use hardcopy terminal: diablo1740-lm
+diablo450	-	-	-	-	!can't use hardcopy terminal: diablo450
+diablo630	-	-	-	-	!can't use hardcopy terminal: diablo630
+dtc300s	-	-	-	-	!can't use hardcopy terminal: dtc300s
+dumb-emacs-ansi	-	-	-	-	!can't use hardcopy terminal: dumb-emacs-ansi
+dw	-	-	-	-	!can't use hardcopy terminal: dw
+dw1	-	-	-	-	!can't use hardcopy terminal: dw1
+dw2	-	-	-	-	!can't use hardcopy terminal: dw2
+dw3	-	-	-	-	!can't use hardcopy terminal: dw3
+dw4	-	-	-	-	!can't use hardcopy terminal: dw4
+gsi	-	-	-	-	!can't use hardcopy terminal: gsi
+ips	-	-	-	-	!can't use hardcopy terminal: ips
+ipsi	-	-	-	-	!can't use hardcopy terminal: ipsi
+la120	-	-	-	-	!can't use hardcopy terminal: la120
+ln03	-	-	-	-	!can't use hardcopy terminal: ln03
+ln03-w	-	-	-	-	!can't use hardcopy terminal: ln03-w
+lpr	-	-	-	-	!can't use hardcopy terminal: lpr
+nec	-	-	-	-	!can't use hardcopy terminal: nec
+nec5520	-	-	-	-	!can't use hardcopy terminal: nec5520
+printer	-	-	-	-	!can't use hardcopy terminal: printer
+pt210	-	-	-	-	!can't use hardcopy terminal: pt210
+qume	-	-	-	-	!can't use hardcopy terminal: qume
+qume5	-	-	-	-	!can't use hardcopy terminal: qume5
+spinwriter	-	-	-	-	!can't use hardcopy terminal: spinwriter
+terminet	-	-	-	-	!can't use hardcopy terminal: terminet
+terminet1200	-	-	-	-	!can't use hardcopy terminal: terminet1200
+terminet300	-	-	-	-	!can't use hardcopy terminal: terminet300
+ti700	-	-	-	-	!can't use hardcopy terminal: ti700
+ti703	-	-	-	-	!can't use hardcopy terminal: ti703
+ti703-w	-	-	-	-	!can't use hardcopy terminal: ti703-w
+ti707	-	-	-	-	!can't use hardcopy terminal: ti707
+ti707-w	-	-	-	-	!can't use hardcopy terminal: ti707-w
+ti733	-	-	-	-	!can't use hardcopy terminal: ti733
+ti735	-	-	-	-	!can't use hardcopy terminal: ti735
+ti745	-	-	-	-	!can't use hardcopy terminal: ti745
+ti800	-	-	-	-	!can't use hardcopy terminal: ti800
+tn1200	-	-	-	-	!can't use hardcopy terminal: tn1200
+tn300	-	-	-	-	!can't use hardcopy terminal: tn300
+tty33	-	-	-	-	!can't use hardcopy terminal: tty33
+tty35	-	-	-	-	!can't use hardcopy terminal: tty35
+tty37	-	-	-	-	!can't use hardcopy terminal: tty37
+tty43	-	-	-	-	!can't use hardcopy terminal: tty43
+x1700	-	-	-	-	!can't use hardcopy terminal: x1700
+x1700-lm	-	-	-	-	!can't use hardcopy terminal: x1700-lm
+x1720	-	-	-	-	!can't use hardcopy terminal: x1720
+x1750	-	-	-	-	!can't use hardcopy terminal: x1750
+xerox	-	-	-	-	!can't use hardcopy terminal: xerox
+xerox-lm	-	-	-	-	!can't use hardcopy terminal: xerox-lm
+xerox1720	-	-	-	-	!can't use hardcopy terminal: xerox1720
+unknown	-	-	-	-	!missing or unsuitable terminal: unknown
+ibm327x	-	-	-	-	!missing or unsuitable terminal: ibm327x

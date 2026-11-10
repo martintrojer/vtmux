@@ -9,7 +9,8 @@ tmux 3.8, reimplemented in Rust on [libghostty-vt](https://github.com/ghostty-or
 vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them. Run as `tmux`, `tmux -V` prints `tmux 3.8`, so plugins' version checks pass.
 
 - **tmux's own test suite:** 173 of its 174 regress tests pass (1 expected failure, recorded).
-- **A behaviour oracle:** 415 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, also with a live upgrade inserted between steps.
+- **A behaviour oracle:** 416 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, also with a live upgrade inserted between steps.
+- **Your terminal:** every `TERM` in ncurses 6.6's database (2,663: `wezterm`, `contour`, `foot`, `rio`, `ghostty`, `xterm-direct`, `ansi`...) attaches with the features, colours and capabilities tmux 3.8 gives it (each checked against tmux). `TERM=wezterm tmux new` works on a host with no wezterm terminfo.
 - **Your setup:** a real `.tmux.conf` with TPM plugins gives the same options, key bindings, hooks and screens as tmux 3.8 on macOS and Linux.
 - **Where it differs on purpose:** real tmux bugs (data loss, hangs) are fixed and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md); everything else vtmux adds is opt-in.
 
@@ -22,7 +23,7 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 | **Big scrollback** | 1M lines settle at 103 MB vs 622 MB. 20 panes streaming nonstop at a 100k limit: 217 MB vs 1.25 GB. Searching or capturing all of a 1M-line history takes 0.2-0.55x tmux's time. |
 | **CPU** | Pane output costs 0.37-0.54x tmux's server CPU, 0.42-0.62x with a client attached, 0.06-0.19x with 8 clients. An idle server with a real config (TPM, a status poller): 0.28x. 100 agent panes: 0.7x. |
 | **Rendering** | One frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. A redraw-heavy benchmark sends 0.07 MB where tmux sends 10.1 MB, at 0.3x the CPU. |
-| **What it costs** | An idle server uses 9.0 MB vs 4.2 MB, each idle pane 18 KB vs 5.4 KB, the binary is 9.8 MB vs 1.3 MB. A key's echo takes 0.38 ms vs 0.26 ms. A few agent TUIs with two clients attached cost up to 1.25x tmux's CPU. Opening vim or less over a 1M-line history holds the server for 2-4 s (10-20 ms at the default 2000 lines). |
+| **What it costs** | An idle server uses 9.0 MB vs 4.2 MB, each idle pane 18 KB vs 5.4 KB, the binary is 10.0 MB vs 1.3 MB. A key's echo takes 0.38 ms vs 0.26 ms. A few agent TUIs with two clients attached cost up to 1.25x tmux's CPU. Opening vim or less over a 1M-line history holds the server for 2-4 s (10-20 ms at the default 2000 lines). |
 
 ## What tmux can't do
 

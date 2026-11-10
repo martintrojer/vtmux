@@ -11,7 +11,7 @@ This page is how the runs are made: the method, the scenarios, how to run them, 
 - Speed and memory are claimed only where a recorded run measures them (D24 in the [spec](../specs/2026-10-29-vtmux.md)). Every number in PERFORMANCE.md comes from a run in this directory.
 - Most rows come from the runs of 2026-11-05 in [`2026-11-05-perf-refresh.md`](2026-11-05-perf-refresh.md): commands, load and raw output, with the JSON next to it.
 - That run measured vtmux main `ada47ba` (release build) against tmux 3.8 from `cargo xtask ref-tmux`. `bench.py` rows are the median of 3 runs.
-- Later runs, each in its own record: hidden panes after `8a7d31f` (in the refresh record, *Agent panes fixed*), many streaming panes (2026-11-06), live upgrade (2026-11-07), the hot paths and the 1M-line search (2026-11-08), capture, styled copy mode, many clients and the release profile (2026-11-09).
+- Later runs, each in its own record: hidden panes after `8a7d31f` (in the refresh record, *Agent panes fixed*), many streaming panes (2026-11-06), live upgrade (2026-11-07), the hot paths and the 1M-line search (2026-11-08), capture, styled copy mode, many clients and the release profile (2026-11-09); the terminal table's size (2026-11-10).
 - The 2026-11-09 release-profile run is the latest for agent panes, many clients, key echo and throughput; rows before it were built with cargo's default release profile, which is 7-18% slower on render-bound work.
 - The injected-regression check of the guard (below) is a separate scratch run.
 

@@ -5,16 +5,45 @@
 /// A capability name.
 type Cap = &'static str;
 
+/// The `tty_term_codes` names an entry has: bit `i` is `ALL[i]`.
+pub(super) type Names = [u64; 4];
+
+/// An entry with no names.
+pub(super) const NO_NAMES: Names = [0; 4];
+
 /// One terminal's entry.
 pub(super) struct Entry {
     /// The `tty_term_codes` names it has.
-    pub(super) names: &'static [Cap],
+    pub(super) names: Names,
     /// The flags among them that are false.
     pub(super) off: &'static [Cap],
     /// `colors`.
     pub(super) colours: Option<u32>,
-    /// The strings vtmux writes or decodes, padding removed (`tty_term_strip`).
-    pub(super) strings: &'static [(Cap, &'static str)],
+    /// The strings vtmux writes or decodes, padding removed (`tty_term_strip`):
+    /// indices into `POOL`.
+    pub(super) strings: &'static [u16],
+}
+
+impl Entry {
+    /// Whether the entry has the capability.
+    pub(super) fn has(&self, name: &str) -> bool {
+        ALL.iter()
+            .position(|(n, _)| *n == name)
+            .is_some_and(|i| self.names[i / 64] >> (i % 64) & 1 == 1)
+    }
+
+    /// The names it has, in `tty_term_codes` order.
+    pub(super) fn names(&self) -> impl Iterator<Item = Cap> + '_ {
+        ALL.iter()
+            .enumerate()
+            .filter(|(i, _)| self.names[i / 64] >> (i % 64) & 1 == 1)
+            .map(|(_, (n, _))| *n)
+    }
+
+    /// The strings it keeps, by capability name.
+    pub(super) fn strings(&self) -> impl Iterator<Item = (Cap, &'static str)> + '_ {
+        self.strings.iter().map(|&i| POOL[usize::from(i)])
+    }
 }
 
 /// Every name in `tty_term_codes` with its type: an override naming
@@ -269,1730 +298,5050 @@ pub(super) enum Kind {
 /// The terminals, by name.
 #[rustfmt::skip]
 pub(super) const TERMINALS: &[(&str, Entry)] = &[
-    ("alacritty", Entry { names: NAMES_ALACRITTY, off: &[], colours: Some(256), strings: STRINGS_ALACRITTY }),
-    ("alacritty-direct", Entry { names: NAMES_ALACRITTY_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_ALACRITTY }),
-    ("dumb", Entry { names: NAMES_DUMB, off: &["bce"], colours: None, strings: STRINGS_DUMB }),
-    // not in the generating host's terminfo: xterm-256color's entry
-    ("foot", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(256), strings: STRINGS_XTERM_256COLOR }),
-    // not in the generating host's terminfo: xterm-direct's entry
-    ("foot-direct", Entry { names: NAMES_XTERM_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_XTERM_256COLOR }),
-    ("ghostty", Entry { names: NAMES_GHOSTTY, off: &[], colours: Some(256), strings: STRINGS_GHOSTTY }),
-    ("gnome", Entry { names: NAMES_GNOME, off: &[], colours: Some(8), strings: STRINGS_GNOME }),
-    ("gnome-256color", Entry { names: NAMES_GNOME, off: &[], colours: Some(256), strings: STRINGS_GNOME }),
-    ("iterm2", Entry { names: NAMES_ITERM2, off: &[], colours: Some(256), strings: STRINGS_ITERM2 }),
-    ("kitty", Entry { names: NAMES_KITTY, off: &["bce"], colours: Some(256), strings: STRINGS_KITTY }),
-    ("kitty-direct", Entry { names: NAMES_KITTY_DIRECT, off: &["bce"], colours: Some(16_777_216), strings: STRINGS_KITTY }),
-    ("konsole", Entry { names: NAMES_KONSOLE, off: &[], colours: Some(8), strings: STRINGS_GNOME }),
-    ("konsole-256color", Entry { names: NAMES_KONSOLE, off: &[], colours: Some(256), strings: STRINGS_GNOME }),
-    ("konsole-direct", Entry { names: NAMES_KONSOLE_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_GNOME }),
-    ("linux", Entry { names: NAMES_LINUX, off: &[], colours: Some(8), strings: STRINGS_LINUX }),
-    ("linux-16color", Entry { names: NAMES_LINUX, off: &[], colours: Some(16), strings: STRINGS_LINUX }),
-    ("mintty", Entry { names: NAMES_MINTTY, off: &[], colours: Some(256), strings: STRINGS_MINTTY }),
-    ("ms-terminal", Entry { names: NAMES_MS_TERMINAL, off: &[], colours: Some(256), strings: STRINGS_MS_TERMINAL }),
-    ("putty", Entry { names: NAMES_PUTTY, off: &[], colours: Some(8), strings: STRINGS_PUTTY }),
-    ("putty-256color", Entry { names: NAMES_PUTTY, off: &[], colours: Some(256), strings: STRINGS_PUTTY }),
-    ("rxvt", Entry { names: NAMES_RXVT, off: &[], colours: Some(8), strings: STRINGS_RXVT }),
-    ("rxvt-16color", Entry { names: NAMES_RXVT, off: &[], colours: Some(16), strings: STRINGS_RXVT }),
-    ("rxvt-256color", Entry { names: NAMES_RXVT, off: &[], colours: Some(256), strings: STRINGS_RXVT }),
-    ("rxvt-88color", Entry { names: NAMES_RXVT, off: &[], colours: Some(88), strings: STRINGS_RXVT }),
-    ("rxvt-unicode", Entry { names: NAMES_RXVT_UNICODE, off: &[], colours: Some(88), strings: STRINGS_RXVT_UNICODE }),
-    ("rxvt-unicode-256color", Entry { names: NAMES_RXVT_UNICODE, off: &[], colours: Some(256), strings: STRINGS_RXVT_UNICODE }),
-    ("screen", Entry { names: NAMES_SCREEN, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
-    ("screen-16color", Entry { names: NAMES_SCREEN_16COLOR, off: &["bce"], colours: Some(16), strings: STRINGS_SCREEN }),
-    ("screen-256color", Entry { names: NAMES_SCREEN_16COLOR, off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN }),
-    ("screen.Eterm", Entry { names: NAMES_SCREEN_ETERM, off: &[], colours: Some(8), strings: STRINGS_SCREEN_ETERM }),
-    ("screen.gnome", Entry { names: NAMES_SCREEN_GNOME, off: &[], colours: Some(8), strings: STRINGS_SCREEN_GNOME }),
-    ("screen.konsole", Entry { names: NAMES_SCREEN_KONSOLE, off: &[], colours: Some(8), strings: STRINGS_SCREEN_GNOME }),
-    ("screen.konsole-256color", Entry { names: NAMES_SCREEN_KONSOLE, off: &[], colours: Some(256), strings: STRINGS_SCREEN_GNOME }),
-    ("screen.linux", Entry { names: NAMES_SCREEN_LINUX, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_LINUX }),
-    ("screen.linux-s", Entry { names: NAMES_SCREEN_LINUX, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_LINUX }),
-    ("screen.mlterm", Entry { names: NAMES_SCREEN_MLTERM, off: &[], colours: Some(8), strings: STRINGS_SCREEN_MLTERM }),
-    ("screen.mlterm-256color", Entry { names: NAMES_SCREEN_MLTERM, off: &[], colours: Some(256), strings: STRINGS_SCREEN_MLTERM }),
-    ("screen.mrxvt", Entry { names: NAMES_SCREEN_MRXVT, off: &[], colours: Some(8), strings: STRINGS_SCREEN_MRXVT }),
-    ("screen.putty", Entry { names: NAMES_PUTTY, off: &[], colours: Some(8), strings: STRINGS_SCREEN_PUTTY }),
-    ("screen.putty-256color", Entry { names: NAMES_PUTTY, off: &[], colours: Some(256), strings: STRINGS_SCREEN_PUTTY }),
-    ("screen.rxvt", Entry { names: NAMES_SCREEN_RXVT, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_RXVT }),
-    ("screen.teraterm", Entry { names: NAMES_SCREEN_16COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
-    ("screen.vte", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(8), strings: STRINGS_SCREEN_VTE }),
-    ("screen.vte-256color", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(256), strings: STRINGS_SCREEN_VTE }),
-    ("screen.xterm-256color", Entry { names: NAMES_SCREEN_XTERM_256COLOR, off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN_XTERM_256COLOR }),
-    ("screen.xterm-new", Entry { names: NAMES_SCREEN_XTERM_256COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_XTERM_256COLOR }),
-    ("screen.xterm-r6", Entry { names: NAMES_SCREEN_XTERM_R6, off: &["bce"], colours: None, strings: STRINGS_SCREEN_XTERM_R6 }),
-    ("screen.xterm-xfree86", Entry { names: NAMES_SCREEN_XTERM_256COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_XTERM_256COLOR }),
-    ("st", Entry { names: NAMES_ST, off: &[], colours: Some(8), strings: STRINGS_ST }),
-    ("st-256color", Entry { names: NAMES_ST, off: &[], colours: Some(256), strings: STRINGS_ST }),
-    ("st-direct", Entry { names: NAMES_ST_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_ST }),
-    ("tmux", Entry { names: NAMES_TMUX, off: &["bce"], colours: Some(8), strings: STRINGS_TMUX }),
-    ("tmux-256color", Entry { names: NAMES_TMUX, off: &["bce"], colours: Some(256), strings: STRINGS_TMUX }),
-    ("tmux-direct", Entry { names: NAMES_TMUX_DIRECT, off: &["bce"], colours: Some(16_777_216), strings: STRINGS_TMUX }),
-    ("vt100", Entry { names: NAMES_VT100, off: &["bce"], colours: None, strings: STRINGS_VT100 }),
-    ("vt102", Entry { names: NAMES_VT102, off: &["bce"], colours: None, strings: STRINGS_VT100 }),
-    ("vt220", Entry { names: NAMES_VT220, off: &["bce"], colours: None, strings: STRINGS_VT220 }),
-    ("vte", Entry { names: NAMES_VTE, off: &[], colours: Some(8), strings: STRINGS_VTE }),
-    ("vte-256color", Entry { names: NAMES_VTE, off: &[], colours: Some(256), strings: STRINGS_VTE }),
-    ("vte-direct", Entry { names: NAMES_VTE_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_VTE }),
-    ("xterm", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(8), strings: STRINGS_XTERM_256COLOR }),
-    ("xterm-16color", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(16), strings: STRINGS_XTERM_256COLOR }),
-    ("xterm-256color", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(256), strings: STRINGS_XTERM_256COLOR }),
-    ("xterm-88color", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(88), strings: STRINGS_XTERM_256COLOR }),
-    ("xterm-color", Entry { names: NAMES_XTERM_COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_XTERM_COLOR }),
-    ("xterm-direct", Entry { names: NAMES_XTERM_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_XTERM_256COLOR }),
-    ("xterm-ghostty", Entry { names: NAMES_GHOSTTY, off: &[], colours: Some(256), strings: STRINGS_GHOSTTY }),
-    ("xterm-kitty", Entry { names: NAMES_XTERM_KITTY, off: &["bce"], colours: Some(256), strings: STRINGS_XTERM_KITTY }),
-    ("xterm-mono", Entry { names: NAMES_XTERM_MONO, off: &["bce"], colours: None, strings: STRINGS_XTERM_COLOR }),
-    ("xterm-new", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(8), strings: STRINGS_XTERM_256COLOR }),
-];
-
-const NAMES_XTERM_256COLOR: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "home", "hpa", "ich", "il1",
-    "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3",
-    "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND",
-    "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14",
-    "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25",
-    "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36",
-    "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47",
-    "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58",
-    "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3",
-    "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7",
-    "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT",
-    "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6",
-    "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4",
-    "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab",
-    "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "smul", "smxx", "Ss", "vpa",
-    "XT",
-];
-
-const STRINGS_XTERM_256COLOR: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-];
-
-const NAMES_XTERM_DIRECT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "home", "hpa", "ich", "il1",
-    "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3",
-    "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND",
-    "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14",
-    "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25",
-    "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36",
-    "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47",
-    "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58",
-    "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3",
-    "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7",
-    "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT",
-    "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6",
-    "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4",
-    "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "RGB", "rin", "ri", "rmacs", "rmcup", "rmkx",
-    "setab", "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "smul", "smxx", "Ss",
-    "vpa", "XT",
-];
-
-const NAMES_ALACRITTY: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "fsl", "home", "hpa", "ich",
-    "il1", "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3",
-    "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND",
-    "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14",
-    "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25",
-    "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36",
-    "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47",
-    "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58",
-    "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3",
-    "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7",
-    "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT",
-    "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6",
-    "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4",
-    "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab",
-    "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "Smulx", "smul", "smxx", "Ss",
-    "tsl", "vpa", "XT",
-];
-
-const STRINGS_ALACRITTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[0 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-    ("Smulx", "\x1b[4:%p1%dm"),
-];
-
-const NAMES_ALACRITTY_DIRECT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "fsl", "home", "hpa", "ich",
-    "il1", "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3",
-    "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND",
-    "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14",
-    "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25",
-    "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36",
-    "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47",
-    "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58",
-    "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3",
-    "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7",
-    "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT",
-    "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6",
-    "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4",
-    "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "RGB", "rin", "ri", "rmacs", "rmcup", "rmkx",
-    "setab", "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "Smulx", "smul",
-    "smxx", "Ss", "tsl", "vpa", "XT",
-];
-
-const NAMES_DUMB: &[Cap] = &["am", "bce", "bel", "cud1", "ind"];
-
-const STRINGS_DUMB: &[(&str, &str)] = &[("ind", "\x0a")];
-
-const NAMES_GHOSTTY: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "Clmg", "Cmg", "cnorm",
-    "colors", "csr", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "Dsmg", "E3", "ech", "ed", "el1", "el", "Enmg", "fsl",
-    "home", "hpa", "ich1", "ich", "il1", "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1",
-    "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3",
-    "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend",
-    "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20",
-    "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31",
-    "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42",
-    "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53",
-    "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6",
-    "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC",
-    "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5",
-    "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp",
-    "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5",
-    "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op", "rev",
-    "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "setrgbb", "setrgbf", "Setulc", "Se",
-    "sgr0", "sitm", "smacs", "smcup", "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "Ss",
-    "Sync", "Tc", "tsl", "vpa", "XT",
-];
-
-const STRINGS_GHOSTTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[0 q"),
-    ("Smulx", "\x1b[4:%p1%dm"),
-    (
-        "Setulc",
-        "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m",
-    ),
-    ("Smol", "\x1b[53m"),
-];
-
-const NAMES_GNOME: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1", "dl", "ech",
-    "ed", "el", "enacs", "home", "hpa", "il1", "il", "ind", "invis", "kcbt", "kcub1", "kcud1",
-    "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3",
-    "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend",
-    "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20",
-    "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31",
-    "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42",
-    "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53",
-    "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6",
-    "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC",
-    "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5",
-    "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp",
-    "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5",
-    "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op", "rev", "ri",
-    "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso",
-    "smul", "vpa", "XT",
-];
-
-const STRINGS_GNOME: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_ITERM2: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ed", "el1", "el", "enacs", "fsl", "home", "hpa", "ich1", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kDN3", "kDN4", "kDN5", "kDN6",
-    "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24",
-    "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5",
-    "kHOM6", "kHOM7", "khome", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kmous", "knp",
-    "kNXT3", "kpp", "kPRV3", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kri", "kUP3", "kUP4",
-    "kUP5", "kUP6", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0",
-    "sitm", "smacs", "smcup", "smkx", "smso", "smul", "tsl", "vpa",
-];
-
-const STRINGS_ITERM2: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-];
-
-const NAMES_KITTY: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "Cr", "csr", "Cs",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ech", "ed", "el1", "el", "fsl", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6",
-    "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4",
-    "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16",
-    "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27",
-    "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf3", "kf4",
-    "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7",
-    "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3",
-    "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6",
-    "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4",
-    "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "Se", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "smso", "smul", "smxx", "Ss", "tsl", "vpa",
-];
-
-const STRINGS_KITTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h"),
-    ("rmkx", "\x1b[?1l"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-];
-
-const NAMES_KITTY_DIRECT: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "Cr", "csr", "Cs",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ech", "ed", "el1", "el", "fsl", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6",
-    "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4",
-    "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16",
-    "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27",
-    "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf3", "kf4",
-    "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7",
-    "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3",
-    "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6",
-    "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4",
-    "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op",
-    "rev", "RGB", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "Se", "sgr0", "sitm",
-    "smacs", "smcup", "smkx", "smso", "smul", "smxx", "Ss", "tsl", "vpa",
-];
-
-const NAMES_KONSOLE: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ech", "ed", "el", "enacs", "home", "hpa", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "smso", "smul", "smxx", "vpa", "XT",
-];
-
-const NAMES_KONSOLE_DIRECT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ech", "ed", "el", "enacs", "home", "hpa", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "RGB", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "smso", "smul", "smxx", "vpa", "XT",
-];
-
-const NAMES_LINUX: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "enacs", "home", "hpa", "ich1", "ich",
-    "il1", "il", "ind", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10",
-    "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2",
-    "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kmous", "knp", "kpp", "op",
-    "rev", "ri", "rmacs", "setab", "setaf", "sgr0", "smacs", "smso", "smul", "U8", "vpa",
-];
-
-const STRINGS_LINUX: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("cnorm", "\x1b[?25h\x1b[?0c"),
-    ("civis", "\x1b[?25l\x1b[?1c"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1b[[A"),
-    ("kf2", "\x1b[[B"),
-    ("kf3", "\x1b[[C"),
-    ("kf4", "\x1b[[D"),
-    ("kf5", "\x1b[[E"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?25h\x1b[?8c"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_MINTTY: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "home", "hpa", "ich", "il1",
-    "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3",
-    "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND",
-    "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14",
-    "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25",
-    "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36",
-    "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47",
-    "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58",
-    "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3",
-    "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7",
-    "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT",
-    "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6",
-    "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4",
-    "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab",
-    "setaf", "setal", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "Smol", "smso", "Smulx",
-    "smul", "smxx", "Ss", "vpa", "XT",
-];
-
-const STRINGS_MINTTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-];
-
-const NAMES_MS_TERMINAL: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "E3", "ech", "ed", "el1", "el", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "invis", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6",
-    "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4",
-    "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16",
-    "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27",
-    "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38",
-    "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49",
-    "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5",
-    "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5",
-    "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind",
-    "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4",
-    "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT",
-    "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6",
-    "kUP7", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm",
-    "smacs", "smcup", "smkx", "smso", "smul", "vpa", "XT",
-];
-
-const STRINGS_MS_TERMINAL: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h"),
-    ("rmkx", "\x1b[?1l"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-];
-
-const NAMES_PUTTY: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl",
-    "E3", "ech", "ed", "el1", "el", "enacs", "fsl", "home", "hpa", "il1", "il", "ind", "indn",
-    "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2", "kf3", "kf4", "kf5",
-    "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kind", "kmous", "knp", "kpp", "kri", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup",
-    "smkx", "smso", "smul", "tsl", "U8", "vpa", "XT",
-];
-
-const STRINGS_PUTTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]0;"),
-    ("fsl", "\x07"),
-    ("kf1", "\x1b[11~"),
-    ("kf2", "\x1b[12~"),
-    ("kf3", "\x1b[13~"),
-    ("kf4", "\x1b[14~"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_RXVT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dl1", "dl", "ed", "el1",
-    "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "kcbt", "kcub1", "kcud1", "kcuf1",
-    "kcuu1", "kDC", "kDC5", "kDC6", "kdch1", "kDN", "kDN5", "kEND", "kEND5", "kEND6", "kend",
-    "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20",
-    "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31",
-    "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42",
-    "kf43", "kf44", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM5", "kHOM6", "khome",
-    "kIC", "kIC5", "kIC6", "kich1", "kind", "kLFT", "kLFT5", "kmous", "knp", "kNXT", "kNXT5",
-    "kNXT6", "kpp", "kPRV", "kPRV5", "kPRV6", "kRIT", "kRIT5", "kri", "kUP", "kUP5", "op", "rev",
-    "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso",
-    "smul", "vpa", "XT",
-];
-
-const STRINGS_RXVT: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b="),
-    ("rmkx", "\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1b[11~"),
-    ("kf2", "\x1b[12~"),
-    ("kf3", "\x1b[13~"),
-    ("kf4", "\x1b[14~"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[7~"),
-    ("kend", "\x1b[8~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_RXVT_UNICODE: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dl1", "dl", "ech", "ed", "el1", "el", "enacs", "fsl", "home", "hpa", "ich1", "ich", "il1",
-    "il", "ind", "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kdch1", "kEND",
-    "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1",
-    "kf20", "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "khome", "kIC",
-    "kich1", "kLFT", "kmous", "knp", "kNXT", "kpp", "kPRV", "kRIT", "op", "rev", "rin", "ri",
-    "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso",
-    "smul", "tsl", "vpa",
-];
-
-const STRINGS_RXVT_UNICODE: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[r\x1b[?1049l"),
-    ("smkx", "\x1b="),
-    ("rmkx", "\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("kf1", "\x1b[11~"),
-    ("kf2", "\x1b[12~"),
-    ("kf3", "\x1b[13~"),
-    ("kf4", "\x1b[14~"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[7~"),
-    ("kend", "\x1b[8~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_SCREEN: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10", "kf11", "kf12",
-    "kf1", "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kmous",
-    "knp", "kpp", "op", "rev", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs",
-    "smcup", "smkx", "smso", "smul", "U8", "vpa",
-];
-
-const STRINGS_SCREEN: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[34h\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[34l"),
-    ("smso", "\x1b[3m"),
-];
-
-const NAMES_SCREEN_16COLOR: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10", "kf11", "kf12",
-    "kf1", "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kmous",
-    "knp", "kpp", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0",
-    "smacs", "smcup", "smkx", "smso", "smul", "U8", "vpa",
-];
-
-const NAMES_SCREEN_ETERM: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl",
-    "ech", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "kcub1", "kcud1",
-    "kcuf1", "kcuu1", "kDC", "kDC5", "kDC6", "kdch1", "kDN", "kDN5", "kEND", "kEND5", "kEND6",
-    "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1",
-    "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30",
-    "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41",
-    "kf42", "kf43", "kf44", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM5", "kHOM6",
-    "khome", "kIC", "kIC5", "kIC6", "kich1", "kind", "kLFT", "kLFT5", "kmous", "knp", "kNXT5",
-    "kNXT6", "kpp", "kPRV5", "kPRV6", "kRIT", "kRIT5", "kri", "kUP", "kUP5", "op", "rev", "ri",
-    "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-    "vpa", "XT",
-];
-
-const STRINGS_SCREEN_ETERM: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", ""),
-    ("rmkx", ""),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_SCREEN_GNOME: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1", "dl", "ech",
-    "ed", "el", "enacs", "home", "hpa", "il1", "il", "ind", "invis", "kcbt", "kcub1", "kcud1",
-    "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3",
-    "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend",
-    "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20",
-    "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31",
-    "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42",
-    "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53",
-    "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6",
-    "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC",
-    "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5",
-    "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp",
-    "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5",
-    "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op", "rev", "ri",
-    "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-    "vpa", "XT",
-];
-
-const STRINGS_SCREEN_GNOME: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_SCREEN_KONSOLE: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ech", "ed", "el", "enacs", "home", "hpa", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup",
-    "smkx", "smso", "smul", "smxx", "vpa", "XT",
-];
-
-const NAMES_SCREEN_LINUX: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2", "kf3", "kf4", "kf5",
-    "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kmous", "knp", "kpp", "op", "rev", "rin", "ri",
-    "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-    "U8", "vpa",
-];
-
-const STRINGS_SCREEN_LINUX: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[34h\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("cvvis", "\x1b[34l"),
-    ("smso", "\x1b[3m"),
-];
-
-const NAMES_SCREEN_MLTERM: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl",
-    "ech", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "indn", "invis",
-    "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7",
-    "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5",
-    "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17",
-    "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28",
-    "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39",
-    "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4",
-    "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60",
-    "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "smso", "smul", "smxx", "vpa", "XT",
-];
-
-const STRINGS_SCREEN_MLTERM: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_SCREEN_MRXVT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dl1", "dl", "ed", "el1",
-    "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "kcbt", "kcub1", "kcud1", "kcuf1",
-    "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5",
-    "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11",
-    "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22",
-    "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33",
-    "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44",
-    "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55",
-    "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8",
-    "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4",
-    "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7",
-    "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3",
-    "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri",
-    "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op", "rev", "ri", "rmacs", "rmcup", "rmkx",
-    "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso", "smul", "vpa", "XT",
-];
-
-const STRINGS_SCREEN_MRXVT: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b="),
-    ("rmkx", "\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const STRINGS_SCREEN_PUTTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]0;"),
-    ("fsl", "\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_SCREEN_RXVT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "indn", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC5", "kDC6", "kdch1", "kDN", "kDN5", "kEND",
-    "kEND5", "kEND6", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17",
-    "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28",
-    "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39",
-    "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9",
-    "kHOM", "kHOM5", "kHOM6", "khome", "kIC", "kIC5", "kIC6", "kich1", "kind", "kLFT", "kLFT5",
-    "kmous", "knp", "kNXT", "kNXT5", "kNXT6", "kpp", "kPRV", "kPRV5", "kPRV6", "kRIT", "kRIT5",
-    "kri", "kUP", "kUP5", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf",
-    "sgr0", "smacs", "smcup", "smkx", "smso", "smul", "U8", "vpa", "XT",
-];
-
-const STRINGS_SCREEN_RXVT: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[34h\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[3m"),
-];
-
-const NAMES_SCREEN_VTE: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1", "dl", "ech",
-    "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup",
-    "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "vpa", "XT",
-];
-
-const STRINGS_SCREEN_VTE: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-    ("Smulx", "\x1b[4:%p1%dm"),
-    ("Smol", "\x1b[53m"),
-];
-
-const NAMES_SCREEN_XTERM_256COLOR: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "ech", "ed", "el1", "el", "home", "hpa", "ich", "il1", "il",
-    "ind", "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5",
-    "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3",
-    "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15",
-    "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26",
-    "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37",
-    "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48",
-    "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59",
-    "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4",
-    "kHOM5", "kHOM6", "kHOM7", "khome", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind",
-    "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4",
-    "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "Se", "sgr0", "smacs", "smcup",
-    "smkx", "smso", "smul", "smxx", "Ss", "vpa", "XT",
-];
-
-const STRINGS_SCREEN_XTERM_256COLOR: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
-    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?12l\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-];
-
-const NAMES_SCREEN_XTERM_R6: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "clear", "csr", "cub1", "cub", "cud1", "cud", "cuf1",
-    "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl", "ed", "el", "enacs", "home", "il1",
-    "il", "ind", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kend", "kf10", "kf11", "kf12",
-    "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2", "kf3", "kf4",
-    "kf5", "kf6", "kf7", "kf8", "kf9", "khome", "kich1", "kmous", "knp", "kpp", "rev", "ri",
-    "rmacs", "rmcup", "rmkx", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-];
-
-const STRINGS_SCREEN_XTERM_R6: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_ST: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ech", "ed", "el1", "el", "enacs", "fsl", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "invis", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kdch1", "kDN3", "kDN5", "kEND",
-    "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1",
-    "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30",
-    "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41",
-    "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52",
-    "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63",
-    "kf6", "kf7", "kf8", "kf9", "kHOM", "khome", "kIC", "kich1", "kind", "kLFT", "kLFT3", "kLFT5",
-    "kmous", "knp", "kNXT", "kNXT3", "kNXT5", "kpp", "kPRV", "kPRV3", "kPRV5", "kRIT", "kRIT3",
-    "kRIT5", "kri", "kUP3", "kUP5", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx",
-    "setab", "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "smul", "smxx", "Ss",
-    "tsl", "vpa", "XT",
-];
-
-const STRINGS_ST: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]0;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-];
-
-const NAMES_ST_DIRECT: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "csr",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1",
-    "dl", "ech", "ed", "el1", "el", "enacs", "fsl", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "invis", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kdch1", "kDN3", "kDN5", "kEND",
-    "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1",
-    "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30",
-    "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41",
-    "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52",
-    "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63",
-    "kf6", "kf7", "kf8", "kf9", "kHOM", "khome", "kIC", "kich1", "kind", "kLFT", "kLFT3", "kLFT5",
-    "kmous", "knp", "kNXT", "kNXT3", "kNXT5", "kpp", "kPRV", "kPRV3", "kPRV5", "kRIT", "kRIT3",
-    "kRIT5", "kri", "kUP3", "kUP5", "Ms", "op", "rev", "RGB", "rin", "ri", "rmacs", "rmcup",
-    "rmkx", "setab", "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "smul",
-    "smxx", "Ss", "tsl", "vpa", "XT",
-];
-
-const NAMES_TMUX: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ed", "el1", "el", "enacs", "fsl", "home", "hpa",
-    "ich", "il1", "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC",
-    "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7",
-    "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24",
-    "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35",
-    "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46",
-    "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57",
-    "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM",
-    "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6",
-    "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp",
-    "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5",
-    "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3",
-    "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "ri", "rmacs", "rmcup", "rmkx", "setab",
-    "setaf", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "Smulx", "smul", "smxx", "Ss",
-    "tsl", "U8", "vpa",
-];
-
-const STRINGS_TMUX: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[34h\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("E3", "\x1b[3J"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]0;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1b[1~"),
-    ("kend", "\x1b[4~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[34l"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-    ("Smulx", "\x1b[4:%p1%dm"),
-];
-
-const NAMES_TMUX_DIRECT: &[Cap] = &[
-    "acsc", "am", "AX", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "colors", "Cr",
-    "csr", "Cs", "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis",
-    "dch1", "dch", "dim", "dl1", "dl", "E3", "ed", "el1", "el", "enacs", "fsl", "home", "hpa",
-    "ich", "il1", "il", "ind", "indn", "invis", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC",
-    "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7",
-    "kEND", "kEND3", "kEND4", "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24",
-    "kf25", "kf26", "kf27", "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35",
-    "kf36", "kf37", "kf38", "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46",
-    "kf47", "kf48", "kf49", "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57",
-    "kf58", "kf59", "kf5", "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM",
-    "kHOM3", "kHOM4", "kHOM5", "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6",
-    "kIC7", "kich1", "kind", "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp",
-    "kNXT", "kNXT3", "kNXT4", "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5",
-    "kPRV6", "kPRV7", "kRIT", "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3",
-    "kUP4", "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "RGB", "ri", "rmacs", "rmcup", "rmkx",
-    "setab", "setaf", "setal", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "Smulx",
-    "smul", "smxx", "Ss", "tsl", "U8", "vpa",
-];
-
-const NAMES_VT100: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "clear", "csr", "cub1", "cub", "cud1", "cud",
-    "cuf1", "cuf", "cup", "cuu1", "cuu", "ed", "el1", "el", "enacs", "home", "ind", "kcub1",
-    "kcud1", "kcuf1", "kcuu1", "kf10", "kf1", "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8",
-    "kf9", "rev", "ri", "rmacs", "rmkx", "sgr0", "smacs", "smkx", "smso", "smul",
-];
-
-const STRINGS_VT100: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1bOt"),
-    ("kf6", "\x1bOu"),
-    ("kf7", "\x1bOv"),
-    ("kf8", "\x1bOl"),
-    ("kf9", "\x1bOw"),
-    ("kf10", "\x1bOx"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_VT102: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "clear", "csr", "cub1", "cub", "cud1", "cud",
-    "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dl1", "ed", "el1", "el", "enacs", "home", "il1",
-    "ind", "kcub1", "kcud1", "kcuf1", "kcuu1", "kf10", "kf1", "kf2", "kf3", "kf4", "kf5", "kf6",
-    "kf7", "kf8", "kf9", "rev", "ri", "rmacs", "rmkx", "sgr0", "smacs", "smkx", "smso", "smul",
-];
-
-const NAMES_VT220: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "blink", "bold", "civis", "clear", "cnorm", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl", "ech", "ed",
-    "el1", "el", "enacs", "home", "ich", "il1", "il", "ind", "kcub1", "kcud1", "kcuf1", "kcuu1",
-    "kdch1", "kf10", "kf11", "kf12", "kf13", "kf14", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2",
-    "kf3", "kf4", "kf6", "kf7", "kf8", "kf9", "kich1", "knp", "kpp", "rev", "ri", "rmacs", "sgr0",
-    "smacs", "smso", "smul",
-];
-
-const STRINGS_VT220: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[J"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x1bD"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_VTE: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1", "dl", "ech",
-    "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "vpa", "XT",
-];
-
-const STRINGS_VTE: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("cnorm", "\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("smso", "\x1b[7m"),
-    ("Smulx", "\x1b[4:%p1%dm"),
-    ("Smol", "\x1b[53m"),
-];
-
-const NAMES_VTE_DIRECT: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "csr", "cub1", "cub",
-    "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dim", "dl1", "dl", "ech",
-    "ed", "el1", "el", "enacs", "home", "hpa", "ich", "il1", "il", "ind", "indn", "invis", "kcbt",
-    "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6", "kDC7", "kdch1",
-    "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4", "kEND5", "kEND6",
-    "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16", "kf17", "kf18",
-    "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27", "kf28", "kf29",
-    "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38", "kf39", "kf3",
-    "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49", "kf4", "kf50",
-    "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5", "kf60", "kf61",
-    "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5", "kHOM6",
-    "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind", "kLFT",
-    "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4", "kNXT5",
-    "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT", "kRIT3",
-    "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
-    "rev", "RGB", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
-    "smcup", "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "vpa", "XT",
-];
-
-const NAMES_XTERM_COLOR: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "clear", "colors", "csr", "cub1", "cub", "cud1", "cud",
-    "cuf1", "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl", "ed", "el", "enacs", "home",
-    "il1", "il", "ind", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kf10", "kf11", "kf12",
-    "kf13", "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2", "kf3", "kf4",
-    "kf5", "kf6", "kf7", "kf8", "kf9", "kich1", "kmous", "knp", "kpp", "op", "rev", "ri", "rmacs",
-    "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-];
-
-const STRINGS_XTERM_COLOR: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b7\x1b[?47h"),
-    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
-    ("smkx", "\x1b[?1h\x1b="),
-    ("rmkx", "\x1b[?1l\x1b>"),
-    ("ind", "\x0a"),
-    ("kf1", "\x1b[11~"),
-    ("kf2", "\x1b[12~"),
-    ("kf3", "\x1b[13~"),
-    ("kf4", "\x1b[14~"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("smso", "\x1b[7m"),
-];
-
-const NAMES_XTERM_KITTY: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "civis", "clear", "cnorm", "colors", "Cr", "csr", "Cs",
-    "cub1", "cub", "cud1", "cud", "cuf1", "cuf", "cup", "cuu1", "cuu", "cvvis", "dch1", "dch",
-    "dim", "dl1", "dl", "ech", "ed", "el1", "el", "fsl", "home", "hpa", "ich", "il1", "il", "ind",
-    "indn", "kcbt", "kcub1", "kcud1", "kcuf1", "kcuu1", "kDC", "kDC3", "kDC4", "kDC5", "kDC6",
-    "kDC7", "kdch1", "kDN", "kDN3", "kDN4", "kDN5", "kDN6", "kDN7", "kEND", "kEND3", "kEND4",
-    "kEND5", "kEND6", "kEND7", "kend", "kf10", "kf11", "kf12", "kf13", "kf14", "kf15", "kf16",
-    "kf17", "kf18", "kf19", "kf1", "kf20", "kf21", "kf22", "kf23", "kf24", "kf25", "kf26", "kf27",
-    "kf28", "kf29", "kf2", "kf30", "kf31", "kf32", "kf33", "kf34", "kf35", "kf36", "kf37", "kf38",
-    "kf39", "kf3", "kf40", "kf41", "kf42", "kf43", "kf44", "kf45", "kf46", "kf47", "kf48", "kf49",
-    "kf4", "kf50", "kf51", "kf52", "kf53", "kf54", "kf55", "kf56", "kf57", "kf58", "kf59", "kf5",
-    "kf60", "kf61", "kf62", "kf63", "kf6", "kf7", "kf8", "kf9", "kHOM", "kHOM3", "kHOM4", "kHOM5",
-    "kHOM6", "kHOM7", "khome", "kIC", "kIC3", "kIC4", "kIC5", "kIC6", "kIC7", "kich1", "kind",
-    "kLFT", "kLFT3", "kLFT4", "kLFT5", "kLFT6", "kLFT7", "kmous", "knp", "kNXT", "kNXT3", "kNXT4",
-    "kNXT5", "kNXT6", "kNXT7", "kpp", "kPRV", "kPRV3", "kPRV4", "kPRV5", "kPRV6", "kPRV7", "kRIT",
-    "kRIT3", "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6",
-    "kUP7", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "setrgbb",
-    "setrgbf", "Setulc", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "smso", "Smulx", "smul",
-    "smxx", "Ss", "Sync", "Tc", "tsl", "vpa",
-];
-
-const STRINGS_XTERM_KITTY: &[(&str, &str)] = &[
-    ("clear", "\x1b[H\x1b[2J"),
-    ("smcup", "\x1b[?1049h"),
-    ("rmcup", "\x1b[?1049l"),
-    ("smkx", "\x1b[?1h"),
-    ("rmkx", "\x1b[?1l"),
-    ("cnorm", "\x1b[?12h\x1b[?25h"),
-    ("civis", "\x1b[?25l"),
-    ("ind", "\x0a"),
-    ("tsl", "\x1b]2;"),
-    ("fsl", "\x07"),
-    ("Ms", "\x1b]52;%p1%s;%p2%s\x1b\\"),
-    ("kf1", "\x1bOP"),
-    ("kf2", "\x1bOQ"),
-    ("kf3", "\x1bOR"),
-    ("kf4", "\x1bOS"),
-    ("kf5", "\x1b[15~"),
-    ("kf6", "\x1b[17~"),
-    ("kf7", "\x1b[18~"),
-    ("kf8", "\x1b[19~"),
-    ("kf9", "\x1b[20~"),
-    ("kf10", "\x1b[21~"),
-    ("kf11", "\x1b[23~"),
-    ("kf12", "\x1b[24~"),
-    ("kich1", "\x1b[2~"),
-    ("kdch1", "\x1b[3~"),
-    ("khome", "\x1bOH"),
-    ("kend", "\x1bOF"),
-    ("knp", "\x1b[6~"),
-    ("kpp", "\x1b[5~"),
-    ("kcbt", "\x1b[Z"),
-    ("cvvis", "\x1b[?12;25h"),
-    ("smso", "\x1b[7m"),
-    ("Ss", "\x1b[%p1%d q"),
-    ("Se", "\x1b[2 q"),
-    ("Cs", "\x1b]12;%p1%s\x07"),
-    ("Cr", "\x1b]112\x07"),
-];
-
-const NAMES_XTERM_MONO: &[Cap] = &[
-    "acsc", "am", "bce", "bel", "bold", "clear", "csr", "cub1", "cub", "cud1", "cud", "cuf1",
-    "cuf", "cup", "cuu1", "cuu", "dch1", "dch", "dl1", "dl", "ed", "el", "enacs", "home", "il1",
-    "il", "ind", "kcub1", "kcud1", "kcuf1", "kcuu1", "kdch1", "kf10", "kf11", "kf12", "kf13",
-    "kf14", "kf15", "kf16", "kf17", "kf18", "kf19", "kf1", "kf20", "kf2", "kf3", "kf4", "kf5",
-    "kf6", "kf7", "kf8", "kf9", "kich1", "kmous", "knp", "kpp", "rev", "ri", "rmacs", "rmcup",
-    "rmkx", "sgr0", "smacs", "smcup", "smkx", "smso", "smul",
-];
+    ("1178", Entry { names: [0x3144_0280_4daa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_1178 }),
+    ("2621", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("2621-wl", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("2621A", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("2621a", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("386at", Entry { names: [0xfffc_02c0_fbfe_33db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a03_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_386AT }),
+    ("3b1", Entry { names: [0xfdd4_0280_ebfe_13da, 0x8010_0200_4008_2041, 0x2083_0607_060b_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_3B1 }),
+    ("4025ex", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_3000_c000], off: &["bce"], colours: None, strings: STRINGS_4025EX }),
+    ("4027ex", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_3000_c000], off: &["bce"], colours: None, strings: STRINGS_4025EX }),
+    ("4410-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("5051", Entry { names: [0x2104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_5051 }),
+    ("5410-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("5620", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("5630-24", Entry { names: [0xfbf4_0380_fbfe_025a, 0x0000_000f_bff0_0040, 0x0000_0001_0204_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5630_24 }),
+    ("5630DMD-24", Entry { names: [0xfbf4_0380_fbfe_025a, 0x0000_000f_bff0_0040, 0x0000_0001_0204_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5630_24 }),
+    ("6053", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("6053-dg", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("605x", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("605x-dg", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("630MTG-24", Entry { names: [0xfbf4_0380_fbfe_025a, 0x0000_000f_bff0_0040, 0x0000_0001_0204_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5630_24 }),
+    ("730MTG-24", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("730MTG-41", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("730MTG-41r", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("730MTGr", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("730MTGr-24", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("955-hb", Entry { names: [0xfc55_0280_4daa_13db, 0x8010_0200_4030_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_955_HB }),
+    ("955-w", Entry { names: [0xfc55_0280_6daa_135b, 0x8010_0200_4030_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_955_HB }),
+    ("9term", Entry { names: [0x0000_0000_0008_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_9TERM }),
+    ("Apple_Terminal", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f280], off: &[], colours: Some(256), strings: STRINGS_APPLE_TERMINAL }),
+    ("Eterm", Entry { names: [0xf1ec_07c0_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_ETERM }),
+    ("Eterm-256color", Entry { names: [0xf1ec_07c0_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(256), strings: STRINGS_ETERM }),
+    ("Eterm-88color", Entry { names: [0xf1ec_07c0_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(88), strings: STRINGS_ETERM }),
+    ("Eterm-color", Entry { names: [0xf1ec_07c0_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_ETERM }),
+    ("LFT-PC850", Entry { names: [0xffec_02c0_dbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_LFT_PC850 }),
+    ("NCR260VT300WPP", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("NCRVT100WPP", Entry { names: [0xf1c5_0780_dbfe_82db, 0x8010_0200_4000_0000, 0x0080_0004_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCRVT100WPP }),
+    ("P12", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("P12-W", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("P14", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("P14-W", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("P9", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("P9-W", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("Q310-vip-H", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("Q310-vip-H-am", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("Q310-vip-Hw", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("Q310-vip-w", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("Q310-vip-w-am", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("X-hpterm", Entry { names: [0xf148_0280_69aa_029b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_X_HPTERM }),
+    ("X-hpterm-color2", Entry { names: [0xf14c_0280_69aa_229b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_ba00_f280], off: &["bce"], colours: Some(8), strings: STRINGS_X_HPTERM_COLOR2 }),
+    ("a210", Entry { names: [0xf055_0280_49a2_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_A210 }),
+    ("a80", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_A80 }),
+    ("a980", Entry { names: [0x0140_0000_40aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_A980 }),
+    ("aa4080", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AA4080 }),
+    ("aaa", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA }),
+    ("aaa+dec", Entry { names: [0x0000_0400_0000_800b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("aaa+rv", Entry { names: [0x0400_0000_0000_00ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_AAA_RV }),
+    ("aaa+unk", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_UNK }),
+    ("aaa-18", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_18 }),
+    ("aaa-18-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_18_RV }),
+    ("aaa-20", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_20 }),
+    ("aaa-22", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_22 }),
+    ("aaa-24", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_24 }),
+    ("aaa-24-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_24_RV }),
+    ("aaa-26", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_26 }),
+    ("aaa-28", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_28 }),
+    ("aaa-30", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA }),
+    ("aaa-30-ctxt", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_CTXT }),
+    ("aaa-30-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_RV }),
+    ("aaa-30-rv-ctxt", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_RV_CTXT }),
+    ("aaa-30-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S }),
+    ("aaa-30-s-ctxt", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_CTXT }),
+    ("aaa-30-s-rv", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_RV }),
+    ("aaa-30-s-rv-ct", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_RV_CT }),
+    ("aaa-36", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_36 }),
+    ("aaa-36-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_36_RV }),
+    ("aaa-40", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_40 }),
+    ("aaa-40-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_40_RV }),
+    ("aaa-48", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_48 }),
+    ("aaa-48-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_48_RV }),
+    ("aaa-60", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_UNK }),
+    ("aaa-60-dec-rv", Entry { names: [0xfdfd_0680_dbfe_82db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_AAA_60_DEC_RV }),
+    ("aaa-60-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_60_RV }),
+    ("aaa-60-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_60_S }),
+    ("aaa-60-s-rv", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_60_DEC_RV }),
+    ("aaa-ctxt", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_CTXT }),
+    ("aaa-db", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA }),
+    ("aaa-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_RV }),
+    ("aaa-rv-ctxt", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_RV_CTXT }),
+    ("aaa-rv-unk", Entry { names: [0x0404_0000_0000_00ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_AAA_RV }),
+    ("aaa-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S }),
+    ("aaa-s-ctxt", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_CTXT }),
+    ("aaa-s-rv", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_RV }),
+    ("aaa-s-rv-ctxt", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA_30_S_RV_CT }),
+    ("aaa-unk", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_AAA_UNK }),
+    ("aas1901", Entry { names: [0x3104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("abm80", Entry { names: [0x0044_0280_41aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ABM80 }),
+    ("abm85", Entry { names: [0xf040_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_ABM85 }),
+    ("abm85e", Entry { names: [0xf040_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ABM85 }),
+    ("abm85h", Entry { names: [0xf041_0280_6daa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ABM85H }),
+    ("abm85h-old", Entry { names: [0xf040_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ABM85 }),
+    ("absolute", Entry { names: [0xffec_03e0_fffe_b3df, 0xffff_ffff_fff8_0040, 0x0001_0301_0207_ffff, 0x0000_0c02_ba03_fa80], off: &[], colours: Some(256), strings: STRINGS_ABSOLUTE }),
+    ("act4", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("act5", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("addrinfo", Entry { names: [0x0104_0080_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("adds200", Entry { names: [0xf944_0280_49aa_021b, 0x8010_0200_4000_0040, 0x0000_0001_0203_8400, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_ADDS200 }),
+    ("adds980", Entry { names: [0x0140_0000_40aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_A980 }),
+    ("addsviewpoint", Entry { names: [0xf100_0280_45aa_121a, 0x8010_0200_0000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVIEWPOINT }),
+    ("addsvp60", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVP60 }),
+    ("adm+sgr", Entry { names: [0x0400_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_ADM_SGR }),
+    ("adm1", Entry { names: [0x0104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM1 }),
+    ("adm11", Entry { names: [0xf405_0280_01aa_025a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ADM11 }),
+    ("adm1178", Entry { names: [0x3144_0280_4daa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_1178 }),
+    ("adm12", Entry { names: [0xf454_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ADM12 }),
+    ("adm1a", Entry { names: [0x0104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM1 }),
+    ("adm2", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM2 }),
+    ("adm20", Entry { names: [0x0054_0280_49a2_021a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADM20 }),
+    ("adm21", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ADM21 }),
+    ("adm22", Entry { names: [0xf054_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADM22 }),
+    ("adm3", Entry { names: [0x0100_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("adm31", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADM31 }),
+    ("adm31-old", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADM31_OLD }),
+    ("adm36", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("adm3a", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("adm3a+", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("adm42", Entry { names: [0xf140_0280_4daa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ADM42 }),
+    ("adm42-ns", Entry { names: [0xf140_0280_4daa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ADM42_NS }),
+    ("adm5", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM5 }),
+    ("aepro", Entry { names: [0x0004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("aixterm", Entry { names: [0xffcd_02c0_cbfe_229b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8a03_2a80], off: &["bce"], colours: Some(8), strings: STRINGS_AIXTERM }),
+    ("aixterm+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AIXTERM_SL }),
+    ("aixterm-16color", Entry { names: [0xffcd_02c0_cbfe_229b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8a03_2a80], off: &["bce"], colours: Some(16), strings: STRINGS_AIXTERM }),
+    ("aixterm-m", Entry { names: [0xffcd_02c0_cbfe_029b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8200_0a00], off: &["bce"], colours: None, strings: STRINGS_AIXTERM }),
+    ("aixterm-m-old", Entry { names: [0xffcd_02c0_cbfe_029b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8200_0a00], off: &["bce"], colours: None, strings: STRINGS_AIXTERM }),
+    ("aj510", Entry { names: [0xf050_0280_49a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_9000_4000], off: &["bce"], colours: None, strings: STRINGS_AJ510 }),
+    ("alacritty", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be83_fa9f], off: &[], colours: Some(256), strings: STRINGS_ALACRITTY }),
+    ("alacritty+common", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_ALACRITTY }),
+    ("alacritty-direct", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_ALACRITTY }),
+    ("alt2", Entry { names: [0xf954_0280_49aa_020a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("alt3", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("alt4", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("alt5", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("alt7", Entry { names: [0xfd44_0280_69aa_02cb, 0x81ff_f200_4000_0040, 0x0001_0202_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ALT7 }),
+    ("alt7pc", Entry { names: [0xfd44_0280_69aa_02cb, 0x81ff_f200_4008_0040, 0x0001_0202_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ALT7PC }),
+    ("alto-h19", Entry { names: [0xf145_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("alto-heath", Entry { names: [0xf145_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("altoh19", Entry { names: [0xf145_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("altoheath", Entry { names: [0xf145_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("altos-2", Entry { names: [0xf954_0280_49aa_020a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos-3", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos-4", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("altos-5", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos2", Entry { names: [0xf954_0280_49aa_020a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos3", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos4", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("altos5", Entry { names: [0xf954_0280_49aa_024a, 0x81ff_f200_4000_0040, 0x0000_0002_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ALT2 }),
+    ("altos7", Entry { names: [0xfd44_0280_69aa_02cb, 0x81ff_f200_4000_0040, 0x0001_0202_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ALT7 }),
+    ("altos7pc", Entry { names: [0xfd44_0280_69aa_02cb, 0x81ff_f200_4008_0040, 0x0001_0202_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ALT7PC }),
+    ("ambas", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA }),
+    ("ambassador", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_AAA }),
+    ("amiga", Entry { names: [0xf7f4_0280_fbfe_13db, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_AMIGA }),
+    ("amp219", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("amp219w", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("ampex-219", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("ampex-219w", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("ampex-232", Entry { names: [0xf050_0280_49aa_130a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_AMPEX_232 }),
+    ("ampex175", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0001_0200_0000, 0x0000_0002_9000_4000], off: &["bce"], colours: None, strings: STRINGS_AMPEX175 }),
+    ("ampex175-b", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0001_0200_0000, 0x0000_0002_9000_4000], off: &["bce"], colours: None, strings: STRINGS_AMPEX175 }),
+    ("ampex210", Entry { names: [0xf055_0280_49a2_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_A210 }),
+    ("ampex219", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("ampex219w", Entry { names: [0xf104_0280_25aa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_AMP219 }),
+    ("ampex232", Entry { names: [0xf050_0280_49aa_130a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_AMPEX_232 }),
+    ("ampex232w", Entry { names: [0xf050_0280_49aa_130a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_AMPEX_232 }),
+    ("ampex80", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_A80 }),
+    ("annarbor4080", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AA4080 }),
+    ("ansi", Entry { names: [0xffec_03c0_dbfe_22df, 0x0000_0000_0000_0000, 0x0000_0001_0200_0000, 0x0000_0402_8a03_2a80], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI }),
+    ("ansi+apparrows", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_APPARROWS }),
+    ("ansi+arrows", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_ARROWS }),
+    ("ansi+cpr", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+csr", Entry { names: [0x0000_0000_0000_800a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+cup", Entry { names: [0x0004_0000_0080_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+enq", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+erase", Entry { names: [0x0000_0280_0000_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_ERASE }),
+    ("ansi+idc", Entry { names: [0x0030_0000_1800_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+idc1", Entry { names: [0x0010_0000_0800_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+idl", Entry { names: [0x00c0_0000_c000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+idl1", Entry { names: [0x0040_0000_4000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+inittabs", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+local", Entry { names: [0x0000_0000_037e_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+local1", Entry { names: [0x0000_0000_012a_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+pp", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+rca", Entry { names: [0x0008_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+rca2", Entry { names: [0x0008_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+rep", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+sgr", Entry { names: [0x0400_0000_0000_004a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+sgrbold", Entry { names: [0x0400_0000_0000_00ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("ansi+sgrdim", Entry { names: [0x0400_0000_2000_004a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("ansi+sgrso", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("ansi+sgrul", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi+tabs", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ansi-generic", Entry { names: [0xf5fc_0280_dbfe_82da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("ansi-m", Entry { names: [0xffec_03c0_dbfe_02db, 0x0000_0000_0000_0000, 0x0000_0001_0200_0000, 0x0000_0402_8a00_2a00], off: &["bce"], colours: None, strings: STRINGS_ANSI }),
+    ("ansi-mini", Entry { names: [0x0104_0280_0088_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("ansi-mono", Entry { names: [0xffec_03c0_dbfe_02db, 0x0000_0000_0000_0000, 0x0000_0001_0200_0000, 0x0000_0402_8a00_2a00], off: &["bce"], colours: None, strings: STRINGS_ANSI }),
+    ("ansi-mr", Entry { names: [0x0100_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("ansi-mtabs", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("ansi-nt", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ANSI_NT }),
+    ("ansi.sys-old", Entry { names: [0xf404_0200_01aa_22cb, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_SYS_OLD }),
+    ("ansi43m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("ansi77", Entry { names: [0xf144_0280_49aa_821a, 0x8000_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_ANSI77 }),
+    ("ansi80x25", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x25-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansi80x25-raw", Entry { names: [0xfbfc_02c0_fffe_32da, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x30", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x30-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansi80x43", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x43-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansi80x50", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x50-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansi80x60", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansi80x60-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansil", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansil-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansis", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ansis-mono", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ansiterm", Entry { names: [0xf5fc_0280_dbfe_82da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("ansiw", Entry { names: [0xfbfc_02c0_fffe_32da, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ap-vm80", Entry { names: [0x0004_0280_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("apl", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APL }),
+    ("apollo", Entry { names: [0x0148_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_9000_5000], off: &["bce"], colours: None, strings: STRINGS_APOLLO }),
+    ("apollo+vt132", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("apollo_15P", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("apollo_19L", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("apollo_color", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("apple-80", Entry { names: [0x0004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("apple-ae", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_APPLE_AE }),
+    ("apple-soroc", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_SOROC }),
+    ("apple-uterm", Entry { names: [0x0004_0280_01a0_020b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_UTERM }),
+    ("apple-uterm-vb", Entry { names: [0x0004_0280_01a0_020b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_UTERM }),
+    ("apple-videx", Entry { names: [0x7004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_VIDEX }),
+    ("apple-videx2", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_VIDEX2 }),
+    ("apple-videx3", Entry { names: [0xf004_0200_01aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_VIDEX3 }),
+    ("apple-vm80", Entry { names: [0x0004_0280_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("apple2e", Entry { names: [0xf104_0280_010a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_APPLE_AE }),
+    ("apple2e-p", Entry { names: [0xf104_0280_018a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_APPLE_AE }),
+    ("apple80p", Entry { names: [0x1004_0280_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE80P }),
+    ("appleII", Entry { names: [0x6004_0280_05aa_120a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_APPLEII }),
+    ("appleIIc", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_APPLEIIC }),
+    ("appleIIe", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_APPLEIIC }),
+    ("appleIIgs", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_APPLEIIC }),
+    ("arm100", Entry { names: [0xf504_0780_03fe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_ARM100 }),
+    ("arm100-am", Entry { names: [0xf504_0780_03fe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_ARM100 }),
+    ("arm100-w", Entry { names: [0xf504_0780_03fe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_ARM100 }),
+    ("arm100-wam", Entry { names: [0xf504_0780_03fe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_ARM100 }),
+    ("at", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("at-color", Entry { names: [0xf144_0380_41aa_331a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8203_1200], off: &[], colours: Some(16), strings: STRINGS_AT }),
+    ("at-m", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("at386", Entry { names: [0xfffc_02c0_fbfe_33db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a03_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_386AT }),
+    ("atari", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("atari-color", Entry { names: [0xf144_0380_41aa_331a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8203_1200], off: &[], colours: Some(16), strings: STRINGS_AT }),
+    ("atari-m", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("atari-old", Entry { names: [0xf040_0280_41aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_ATARI_OLD }),
+    ("atari_st", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("atari_st-color", Entry { names: [0xf144_0380_41aa_331a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8203_1200], off: &[], colours: Some(16), strings: STRINGS_AT }),
+    ("atarist-m", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("aterm", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_ATERM }),
+    ("att2300", Entry { names: [0xf9e4_0380_dbfe_021a, 0x8010_0200_47f0_0040, 0x0000_0001_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ATT2300 }),
+    ("att2350", Entry { names: [0xf9e4_0380_dbfe_021a, 0x8010_0200_47f0_0040, 0x0000_0001_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ATT2300 }),
+    ("att4410", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att4410-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att4410v1", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att4410v1-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att4415+nl", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("att4418", Entry { names: [0xf1f4_0280_fbfe_025b, 0x0010_020f_f3f0_0000, 0x0000_0000_0207_8000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT4418 }),
+    ("att4418-w", Entry { names: [0xf1f4_0280_fbfe_025b, 0x0010_020f_f3f0_0000, 0x0000_0000_0207_8000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT4418 }),
+    ("att4420", Entry { names: [0xf944_0280_49aa_021a, 0x0010_0000_0000_0040, 0x2000_0003_0200_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ATT4420 }),
+    ("att4424", Entry { names: [0xf1f4_0280_fbfe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ATT4424 }),
+    ("att4424-1", Entry { names: [0xf1f4_0280_fbfe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ATT4424_1 }),
+    ("att4424m", Entry { names: [0xf150_0200_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_ATT4424M }),
+    ("att4426", Entry { names: [0xfbfc_0280_dbfe_029b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT4426 }),
+    ("att505", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("att505-22", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("att505-24", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("att510a", Entry { names: [0xf9c4_0780_fffe_13db, 0x8010_0200_47f0_0000, 0x2080_0006_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_ATT510A }),
+    ("att510d", Entry { names: [0xffec_0780_fffe_12db, 0x8010_0200_47f0_0000, 0x2080_0006_0007_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_ATT510D }),
+    ("att5310", Entry { names: [0x0008_0000_0178_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("att5320", Entry { names: [0x0008_0000_0178_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("att5410", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att5410-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att5410v1", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att5410v1-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("att5418", Entry { names: [0xf1f4_0280_fbfe_025b, 0x0010_020f_f3f0_0000, 0x0000_0000_0207_8000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT4418 }),
+    ("att5418-w", Entry { names: [0xf1f4_0280_fbfe_025b, 0x0010_020f_f3f0_0000, 0x0000_0000_0207_8000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT4418 }),
+    ("att5420+nl", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("att5420_2", Entry { names: [0xfffd_03c0_fffe_924b, 0x8010_0200_4008_0040, 0x2001_0203_0203_8400, 0x0000_0502_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_ATT5420_2 }),
+    ("att5420_2-w", Entry { names: [0xfffd_03c0_fffe_924b, 0x8010_0200_4008_0040, 0x2001_0203_0203_8400, 0x0000_0502_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_ATT5420_2 }),
+    ("att5430", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("att5620", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("att5620-1", Entry { names: [0xf3f4_0280_d9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_1800], off: &["bce"], colours: None, strings: STRINGS_ATT5620_1 }),
+    ("att5620-24", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("att5620-34", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("att5620-s", Entry { names: [0xf140_0200_418a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ATT5620_S }),
+    ("att605", Entry { names: [0xfd71_0380_f9aa_02db, 0x8fff_ffff_fff8_0040, 0x0081_0207_0207_8400, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT605 }),
+    ("att605-pc", Entry { names: [0xfd71_0380_f9aa_02db, 0x8fff_ffff_fff8_0040, 0x0081_0207_0207_8400, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT605_PC }),
+    ("att605-w", Entry { names: [0xfd71_0380_f9aa_02db, 0x8fff_ffff_fff8_0040, 0x0081_0207_0207_8400, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT605 }),
+    ("att610", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_41f0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att610+cvis", Entry { names: [0x0000_0000_0400_110a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ATT610_CVIS }),
+    ("att610+cvis0", Entry { names: [0x0000_0000_0000_110a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ATT610_CVIS0 }),
+    ("att610-103k", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att610-103k-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att610-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_41f0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att615", Entry { names: [0xffe5_0380_fffe_93db, 0x8fff_ffff_fff0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att615-103k", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att615-103k-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att615-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8fff_ffff_fff0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att620", Entry { names: [0xffe5_0380_fffe_93db, 0x8fff_ffff_fff0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att620-103k", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att620-103k-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8010_0200_4008_2041, 0x2083_0607_0203_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610_103K }),
+    ("att620-w", Entry { names: [0xffe5_0380_fffe_93db, 0x8fff_ffff_fff0_0000, 0x2080_0006_0207_8400, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT610 }),
+    ("att630", Entry { names: [0xfbf4_0380_fbfe_025a, 0x0000_000f_bff0_0040, 0x0000_0001_0204_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5630_24 }),
+    ("att630-24", Entry { names: [0xfbf4_0380_fbfe_025a, 0x0000_000f_bff0_0040, 0x0000_0001_0204_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5630_24 }),
+    ("att6386", Entry { names: [0xfffc_02c0_fbfe_33db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a03_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_386AT }),
+    ("att700", Entry { names: [0xfde5_0780_fffe_93db, 0x8fff_ffff_fff8_0040, 0x0081_0205_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ATT700 }),
+    ("att730", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("att730-24", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("att730-41", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("att7300", Entry { names: [0xfdd4_0280_ebfe_13da, 0x8010_0200_4008_2041, 0x2083_0607_060b_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_3B1 }),
+    ("att730r", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("att730r-24", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("att730r-41", Entry { names: [0xfde5_0780_fffe_93db, 0xbfff_ffff_fff0_0000, 0x2080_0007_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_730MTG_24 }),
+    ("avatar", Entry { names: [0x0540_0200_4daa_11cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &[], colours: None, strings: STRINGS_AVATAR }),
+    ("avatar0", Entry { names: [0x0500_0200_01aa_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &[], colours: None, strings: STRINGS_AVATAR0 }),
+    ("avatar0+", Entry { names: [0x0500_0200_09aa_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &[], colours: None, strings: STRINGS_AVATAR0 }),
+    ("avatar1", Entry { names: [0x0540_0200_4daa_11cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &[], colours: None, strings: STRINGS_AVATAR }),
+    ("avt", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT }),
+    ("avt+s", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_AVT_S }),
+    ("avt-ns", Entry { names: [0xf5fc_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_NS }),
+    ("avt-rv", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT }),
+    ("avt-rv-ns", Entry { names: [0xf5fc_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_NS }),
+    ("avt-rv-s", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT }),
+    ("avt-s", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT }),
+    ("avt-w", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W }),
+    ("avt-w-ns", Entry { names: [0xf5fc_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W_NS }),
+    ("avt-w-rv", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W }),
+    ("avt-w-rv-ns", Entry { names: [0xf5fc_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W_NS }),
+    ("avt-w-rv-s", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W }),
+    ("avt-w-s", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT_W }),
+    ("aws", Entry { names: [0xf158_0280_49a8_020b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_8800_3000], off: &["bce"], colours: None, strings: STRINGS_AWS }),
+    ("awsc", Entry { names: [0xf000_0280_01a8_020b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8800_2000], off: &["bce"], colours: None, strings: STRINGS_AWSC }),
+    ("b-128", Entry { names: [0xf054_0200_49a8_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_B_128 }),
+    ("bantam", Entry { names: [0x0104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_BANTAM }),
+    ("basic4", Entry { names: [0xf144_0280_4daa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_BASIC4 }),
+    ("basis", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_BASIS }),
+    ("bct510a", Entry { names: [0xf9c4_0780_fffe_13db, 0x8010_0200_47f0_0000, 0x2080_0006_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_ATT510A }),
+    ("bct510d", Entry { names: [0xffec_0780_fffe_12db, 0x8010_0200_47f0_0000, 0x2080_0006_0007_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_ATT510D }),
+    ("beacon", Entry { names: [0x0154_0200_49aa_025a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_BEACON }),
+    ("bee", Entry { names: [0xf844_0280_49aa_020a, 0x0000_0000_0000_0040, 0x0000_0001_0200_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_BEE }),
+    ("beehive", Entry { names: [0xf844_0280_49aa_020a, 0x0000_0000_0000_0040, 0x0000_0001_0200_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_BEE }),
+    ("beehive3", Entry { names: [0x0144_0280_412a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_BEEHIVE3 }),
+    ("beehive4", Entry { names: [0x0104_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BEEHIVE4 }),
+    ("beehiveIIIm", Entry { names: [0x0144_0280_412a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_BEEHIVE3 }),
+    ("beterm", Entry { names: [0xf1fc_03c0_dbfe_a29a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_a203_9280], off: &["bce"], colours: Some(8), strings: STRINGS_BETERM }),
+    ("bg1.25", Entry { names: [0xf140_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG1_25 }),
+    ("bg1.25nv", Entry { names: [0xf140_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG1_25 }),
+    ("bg1.25rv", Entry { names: [0xf140_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG1_25 }),
+    ("bg2.0", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bg2.0nv", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bg2.0rv", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bg3.10", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bg3.10nv", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bg3.10rv", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("bh3m", Entry { names: [0x0144_0280_412a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_BEEHIVE3 }),
+    ("bh4", Entry { names: [0x0104_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BEEHIVE4 }),
+    ("bitgraph", Entry { names: [0xf140_0280_41aa_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_8000], off: &["am", "bce"], colours: None, strings: STRINGS_BG2_0 }),
+    ("blit", Entry { names: [0xf1f0_0200_d9aa_021a, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BLIT }),
+    ("bobcat", Entry { names: [0xf148_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_BOBCAT }),
+    ("bq300", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8000, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300 }),
+    ("bq300-pc", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300_PC }),
+    ("bq300-pc-rv", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300_PC }),
+    ("bq300-pc-w", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300_PC }),
+    ("bq300-pc-w-rv", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300_PC }),
+    ("bq300-rv", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8000, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300 }),
+    ("bq300-w", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8000, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300 }),
+    ("bq300-w-rv", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8000, 0x0000_0102_9a00_f200], off: &["bce"], colours: None, strings: STRINGS_BQ300 }),
+    ("bracketed+paste", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("bsdos-pc", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("bsdos-pc-m", Entry { names: [0xf5c4_0280_c3fe_02db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_PC }),
+    ("bsdos-pc-mono", Entry { names: [0xf5c4_0280_c3fe_02db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_PC }),
+    ("bsdos-pc-nobold", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("bsdos-ppc", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("bsdos-sparc", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("bterm", Entry { names: [0xf904_0280_008a_338b, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_BTERM }),
+    ("c100", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("c100-1p", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("c100-4p", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("c100-rv", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100_RV }),
+    ("c100-rv-4p", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100_RV }),
+    ("c104", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("c108", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108 }),
+    ("c108-4p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_4P }),
+    ("c108-8p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108 }),
+    ("c108-rv", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_RV }),
+    ("c108-rv-4p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_RV_4P }),
+    ("c108-rv-8p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_RV }),
+    ("c108-w", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_W }),
+    ("c108-w-8p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_W }),
+    ("c300", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("c301", Entry { names: [0x0144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("c321", Entry { names: [0x0144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("ca22851", Entry { names: [0xb104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CA22851 }),
+    ("cad68-2", Entry { names: [0xf004_0000_0122_020a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_2 }),
+    ("cad68-3", Entry { names: [0x0004_0000_0122_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("cbblit", Entry { names: [0xf1e0_0280_d9aa_021a, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CBBLIT }),
+    ("cbunix", Entry { names: [0xf150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CBUNIX }),
+    ("cci", Entry { names: [0xf404_0280_25aa_924a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_CCI }),
+    ("cci1", Entry { names: [0xf404_0280_25aa_924a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_CCI }),
+    ("cdc456", Entry { names: [0x0144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CDC456 }),
+    ("cdc721", Entry { names: [0xf004_0200_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CDC721 }),
+    ("cdc721-esc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_CDC721_ESC }),
+    ("cdc721ll", Entry { names: [0xf004_0200_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CDC721 }),
+    ("cdc752", Entry { names: [0x0104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CDC752 }),
+    ("cdc756", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CDC756 }),
+    ("cg7900", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_9000_4000], off: &["bce"], colours: None, strings: STRINGS_CG7900 }),
+    ("cgc2", Entry { names: [0xf004_0000_0122_020a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_2 }),
+    ("cgc3", Entry { names: [0x0004_0000_0122_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("chromatics", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_9000_4000], off: &["bce"], colours: None, strings: STRINGS_CG7900 }),
+    ("cit-80", Entry { names: [0xf100_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_CIT_80 }),
+    ("cit101", Entry { names: [0xf050_0280_4daa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_8000], off: &["bce"], colours: None, strings: STRINGS_CIT101 }),
+    ("cit101e", Entry { names: [0xf040_0280_4daa_920b, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_a800_b000], off: &["bce"], colours: None, strings: STRINGS_CIT101E }),
+    ("cit101e-132", Entry { names: [0xf040_0280_4daa_920b, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_a800_b000], off: &["bce"], colours: None, strings: STRINGS_CIT101E }),
+    ("cit101e-n", Entry { names: [0xf040_0280_4daa_920b, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_a800_b000], off: &["am", "bce"], colours: None, strings: STRINGS_CIT101E_N }),
+    ("cit101e-n132", Entry { names: [0xf040_0280_4daa_920b, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_a800_b000], off: &["am", "bce"], colours: None, strings: STRINGS_CIT101E_N }),
+    ("cit101e-rv", Entry { names: [0xf3fc_0280_dffe_93da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_9200_5a00], off: &["bce"], colours: None, strings: STRINGS_CIT101E_RV }),
+    ("cit500", Entry { names: [0xf9c4_0280_cbfe_82db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_CIT500 }),
+    ("cit80", Entry { names: [0xf100_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_CIT_80 }),
+    ("citc", Entry { names: [0xf050_0280_4daa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_8000], off: &["bce"], colours: None, strings: STRINGS_CIT101 }),
+    ("coco3", Entry { names: [0xf044_0280_41aa_13da, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_COCO3 }),
+    ("coherent", Entry { names: [0xf104_0280_09aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_COHERENT }),
+    ("color_xterm", Entry { names: [0xf1e4_0780_dbfe_a29f, 0x8010_0200_4078_0000, 0x0001_0301_0207_8400, 0x0000_0802_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_COLOR_XTERM }),
+    ("colorscan", Entry { names: [0xf100_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_COLORSCAN }),
+    ("commodore", Entry { names: [0xf054_0200_49a8_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_B_128 }),
+    ("concept", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("concept-avt", Entry { names: [0xf5fd_0280_effe_92db, 0x8010_0200_4000_0040, 0x0000_0001_0200_0000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_AVT }),
+    ("concept100", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("concept100-rv", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100_RV }),
+    ("concept108", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108 }),
+    ("concept108-4p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_4P }),
+    ("concept108-8p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108 }),
+    ("concept108-w-8", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_W }),
+    ("concept108-w8p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_W }),
+    ("concept108rv4p", Entry { names: [0xfd41_0280_6daa_125b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0102_ba00_e200], off: &["bce"], colours: None, strings: STRINGS_C108_RV_4P }),
+    ("cons25", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons25-debian", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_CONS25_DEBIAN }),
+    ("cons25-iso-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons25-iso8859", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons25-koi8-r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons25-koi8r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons25-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons25l1", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons25l1-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons25r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons25r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons25w", Entry { names: [0xfbfc_02c0_fffe_32da, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons30", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons30-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons43", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons43-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons50", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons50-iso-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons50-iso8859", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons50-koi8r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons50-koi8r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons50-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons50l1", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons50l1-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons50r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons50r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons60", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons60-iso", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons60-iso-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons60-koi8r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons60-koi8r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons60-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons60l1", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons60l1-m", Entry { names: [0xfbfc_02c0_dffe_125b, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("cons60r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("cons60r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("contel300", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("contel301", Entry { names: [0x0144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("contel320", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("contel321", Entry { names: [0x0144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_C300 }),
+    ("contour", Entry { names: [0xfffd_03e0_fbff_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_fa83_fa8f], off: &[], colours: Some(256), strings: STRINGS_CONTOUR }),
+    ("contour-direct", Entry { names: [0xfffd_03e0_fbff_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_fa83_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_CONTOUR }),
+    ("contour-latest", Entry { names: [0xfffd_03e0_fbff_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_fa83_fa8f], off: &[], colours: Some(256), strings: STRINGS_CONTOUR }),
+    ("cops", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_COPS }),
+    ("cops-10", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_COPS }),
+    ("cops10", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_COPS }),
+    ("crt", Entry { names: [0xf1e4_07c0_dbfe_a2df, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_CRT }),
+    ("crt-vt220", Entry { names: [0xf1e4_07c0_dbfe_a2df, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_CRT }),
+    ("cs10", Entry { names: [0xf100_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_COLORSCAN }),
+    ("cs10-w", Entry { names: [0xf100_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_COLORSCAN }),
+    ("ct82", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_CT82 }),
+    ("ct8500", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_CT8500 }),
+    ("ctrm", Entry { names: [0xf148_0280_49aa_22da, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_a200_8280], off: &[], colours: Some(8), strings: STRINGS_CTRM }),
+    ("cx", Entry { names: [0xf1e4_0780_dbfe_a29f, 0x8010_0200_4078_0000, 0x0001_0301_0207_8400, 0x0000_0802_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_COLOR_XTERM }),
+    ("cx100", Entry { names: [0xf1e4_0780_dbfe_a29f, 0x8010_0200_4078_0000, 0x0001_0301_0207_8400, 0x0000_0802_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_COLOR_XTERM }),
+    ("cyb110", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CYB110 }),
+    ("cyb83", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("cygwin", Entry { names: [0xf5fd_0380_dbfe_229b, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_CYGWIN }),
+    ("cygwinDBG", Entry { names: [0xfdfc_0380_fbfe_33db, 0x8010_0200_fff8_0040, 0x0003_0601_0207_8400, 0x0000_0402_8a03_3280], off: &["bce"], colours: Some(8), strings: STRINGS_CYGWINDBG }),
+    ("d132", Entry { names: [0x3154_0000_0daa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_D132 }),
+    ("d2", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("d2-dg", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("d200", Entry { names: [0xf100_0200_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d200-dg", Entry { names: [0xf100_0200_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d210", Entry { names: [0xf104_0380_23fe_02da, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D210 }),
+    ("d210-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d211-7b", Entry { names: [0xf104_0380_23fe_02da, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D210 }),
+    ("d211-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d214", Entry { names: [0xf104_0380_23fe_02da, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D210 }),
+    ("d214-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d215-7b", Entry { names: [0xf104_0380_23fe_02da, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D210 }),
+    ("d215-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d216+", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d216+25", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d216+dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d216-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d216-unix", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d216-unix-25", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d216e+", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d216e+dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d216e-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d216e-unix", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d217-dg", Entry { names: [0xf100_0280_21aa_02da, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_D200 }),
+    ("d217-unix", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d217-unix-25", Entry { names: [0xf10c_0280_21aa_02db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_D216_ }),
+    ("d220-7b", Entry { names: [0xf134_0780_3bfe_33db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_D220_7B }),
+    ("d220-dg", Entry { names: [0xf118_0280_29aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_D220_DG }),
+    ("d230", Entry { names: [0xf134_0380_3bfe_33db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_D230 }),
+    ("d230-dg", Entry { names: [0xf118_0280_29aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_D220_DG }),
+    ("d230c", Entry { names: [0xf134_0380_3bfe_33db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_D230 }),
+    ("d230c-dg", Entry { names: [0xf118_0280_29aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_D220_DG }),
+    ("d400", Entry { names: [0xf15c_0680_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d400-dg", Entry { names: [0xf15c_0680_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d410-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d410-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d410-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d411-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d411-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d411-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d412+", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412+25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412+dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d412+s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d412+sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412+w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d412-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d412-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d412-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d413-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d413-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d413-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d413-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d413-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d413-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d414-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d414-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d414-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d414-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d414-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d430-dg", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_DG }),
+    ("d430-dg-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D220_DG }),
+    ("d430-unix", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430-unix-25", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430-unix-25-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430-unix-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430-unix-s", Entry { names: [0xf15d_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_S }),
+    ("d430-unix-s-ccc", Entry { names: [0xf15d_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_S }),
+    ("d430-unix-sr", Entry { names: [0xf15c_0280_68a2_b3db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430-unix-sr-ccc", Entry { names: [0xf15c_0280_68a2_b3db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430-unix-w", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430-unix-w-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430c-dg", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_DG }),
+    ("d430c-dg-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D220_DG }),
+    ("d430c-unix", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430c-unix-25", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430c-unix-25-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430c-unix-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430c-unix-s", Entry { names: [0xf15d_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_S }),
+    ("d430c-unix-s-ccc", Entry { names: [0xf15d_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_S }),
+    ("d430c-unix-sr", Entry { names: [0xf15c_0280_68a2_b3db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430c-unix-sr-ccc", Entry { names: [0xf15c_0280_68a2_b3db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d430c-unix-w", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D412_ }),
+    ("d430c-unix-w-ccc", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3280], off: &[], colours: Some(52), strings: STRINGS_D412_ }),
+    ("d450", Entry { names: [0xf15c_0680_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d450-dg", Entry { names: [0xf15c_0680_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d460-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d460-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d460-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d461-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d461-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d461-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d462+", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462+25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462+dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d462+s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d462+sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462+w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d462-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d462-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d462e-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d463-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d463-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d463-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d463-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d463-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d463-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d464-unix", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d464-unix-25", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d464-unix-s", Entry { names: [0xf15d_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_S }),
+    ("d464-unix-sr", Entry { names: [0xf15c_0280_68a2_93db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d464-unix-w", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D412_ }),
+    ("d470-7b", Entry { names: [0xf1f4_0780_fbfe_33db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_7B }),
+    ("d470-dg", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_DG }),
+    ("d470c-7b", Entry { names: [0xf1f4_0780_fbfe_33db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_7B }),
+    ("d470c-dg", Entry { names: [0xf15c_0280_69aa_33db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_D220_DG }),
+    ("d555-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d555-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d555-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d577-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d577-7b-w", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d577-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d578-7b", Entry { names: [0xf1f4_0780_fbfe_13db, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_7B }),
+    ("d578-dg", Entry { names: [0xf15c_0280_69aa_13db, 0xffff_ffff_fff0_0000, 0x0080_0004_020f_8fff, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_D220_DG }),
+    ("d80", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_A80 }),
+    ("d800", Entry { names: [0xf100_0280_05aa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_D800 }),
+    ("darwin", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-100x37", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-100x37-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-112x37", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-112x37-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-128x40", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-128x40-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-128x48", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-128x48-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-144x48", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-144x48-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-160x64", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-160x64-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-200x64", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-200x64-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-200x75", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-200x75-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-256x96", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-256x96-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-80x25", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-80x25-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-80x30", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-80x30-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-90x30", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-90x30-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-b", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("darwin-f", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN_F }),
+    ("darwin-f2", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN_F2 }),
+    ("darwin-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-m-b", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("darwin-m-f", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F }),
+    ("darwin-m-f2", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F2 }),
+    ("datagraphix", Entry { names: [0x3154_0000_0daa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_D132 }),
+    ("datamedia2500", Entry { names: [0x0154_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DATAMEDIA2500 }),
+    ("datapoint", Entry { names: [0x0104_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DATAPOINT }),
+    ("dataspeed40", Entry { names: [0x1154_0080_492a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_DATASPEED40 }),
+    ("dd5000", Entry { names: [0x0104_0200_09aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DD5000 }),
+    ("ddr", Entry { names: [0xf104_0280_01aa_82ca, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_DDR }),
+    ("ddr3180", Entry { names: [0xf104_0280_01aa_82ca, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_DDR }),
+    ("dec+pp", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("dec+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DEC_SL }),
+    ("dec-vt100", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("dec-vt220", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("dec-vt330", Entry { names: [0xf1e5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("dec-vt340", Entry { names: [0xf1e5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("dec-vt400", Entry { names: [0xf1f5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("decansi", Entry { names: [0xf7dc_06c0_fbfe_b3db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0402_aa03_ba80], off: &["bce"], colours: Some(8), strings: STRINGS_DECANSI }),
+    ("decid+cpr", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("decpro", Entry { names: [0xf004_0280_01aa_020b, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0002_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DECPRO }),
+    ("delta", Entry { names: [0x0104_0200_09aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DD5000 }),
+    ("dg+ccc", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0080], off: &["am"], colours: Some(52), strings: STRINGS_9TERM }),
+    ("dg+color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("dg+color8", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("dg+fixed", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("dg-ansi", Entry { names: [0xf004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DG_ANSI }),
+    ("dg-generic", Entry { names: [0xf100_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("dg200", Entry { names: [0xf104_0200_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DG200 }),
+    ("dg210", Entry { names: [0xf004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DG_ANSI }),
+    ("dg211", Entry { names: [0xf004_0200_05aa_121a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_9000_4000], off: &["bce"], colours: None, strings: STRINGS_DG211 }),
+    ("dg450", Entry { names: [0xf104_0200_01a8_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DG200 }),
+    ("dg460-ansi", Entry { names: [0xf154_0280_69aa_024a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_DG460_ANSI }),
+    ("dg6053", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("dg605x", Entry { names: [0xf104_0200_21aa_025a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_6053 }),
+    ("dg6134", Entry { names: [0xf104_0200_01a8_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DG200 }),
+    ("dgkeys+11", Entry { names: [0xf000_0000_0000_000a, 0x83ff_ffff_fff0_0000, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DGKEYS_11 }),
+    ("dgkeys+15", Entry { names: [0x0000_0000_0000_000a, 0xffff_ffff_fff0_0000, 0x0080_0004_000f_8fff, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DGKEYS_15 }),
+    ("dgkeys+7b", Entry { names: [0xf000_0000_0000_000a, 0xffff_ffff_fff0_0000, 0x0000_0000_0207_8fff, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DGKEYS_7B }),
+    ("dgmode+color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("dgmode+color8", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("dgunix+ccc", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0080], off: &["am"], colours: Some(52), strings: STRINGS_9TERM }),
+    ("dgunix+fixed", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("dialogue", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_A80 }),
+    ("dialogue80", Entry { names: [0x0150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_A80 }),
+    ("digilog", Entry { names: [0x0104_0200_012a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("djgpp", Entry { names: [0xf7fc_03c0_dffe_33db, 0xafff_ffff_fff9_0448, 0x0411_2221_2247_8400, 0x0000_0402_8203_1a82], off: &[], colours: Some(8), strings: STRINGS_DJGPP }),
+    ("djgpp203", Entry { names: [0x3100_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("djgpp204", Entry { names: [0xf7f4_02c0_dffe_33de, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_1a00], off: &["bce"], colours: Some(8), strings: STRINGS_DJGPP204 }),
+    ("dku7003", Entry { names: [0xf104_0280_21aa_02ca, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_DKU7003 }),
+    ("dku7003-dumb", Entry { names: [0xf104_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DKU7003_DUMB }),
+    ("dku7102", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102 }),
+    ("dku7102-old", Entry { names: [0xfd05_0280_3b7e_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102_OLD }),
+    ("dku7102-sna", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102_SNA }),
+    ("dku7103-sna", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102_SNA }),
+    ("dku7202", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7202 }),
+    ("dm1520", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APL }),
+    ("dm1521", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APL }),
+    ("dm2500", Entry { names: [0x0154_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DATAMEDIA2500 }),
+    ("dm3025", Entry { names: [0x0144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DM3025 }),
+    ("dm3045", Entry { names: [0xc104_0280_09aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DM3045 }),
+    ("dm80", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80 }),
+    ("dm80w", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80W }),
+    ("dmchat", Entry { names: [0x0154_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DATAMEDIA2500 }),
+    ("dmd", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("dmd-24", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("dmd-34", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("dmd1", Entry { names: [0xf3f4_0280_d9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_1800], off: &["bce"], colours: None, strings: STRINGS_ATT5620_1 }),
+    ("dmdt80", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80 }),
+    ("dmdt80w", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80W }),
+    ("dmterm", Entry { names: [0xf154_0280_49aa_131a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_DMTERM }),
+    ("domterm", Entry { names: [0xfbec_03e0_dffe_b38f, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_fa8f], off: &[], colours: Some(256), strings: STRINGS_DOMTERM }),
+    ("dp3360", Entry { names: [0x0104_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DATAPOINT }),
+    ("dp8242", Entry { names: [0xf144_0280_408a_131a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_DP8242 }),
+    ("ds40", Entry { names: [0x1154_0080_492a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_DATASPEED40 }),
+    ("ds40-2", Entry { names: [0x1154_0080_492a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_DATASPEED40 }),
+    ("dt-100", Entry { names: [0xf154_0280_49aa_931b, 0x8010_0200_4010_0000, 0x0001_0200_0207_8400, 0x0000_0002_8a00_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DT_100 }),
+    ("dt-100w", Entry { names: [0xf154_0280_49aa_931b, 0x8010_0200_4010_0000, 0x0001_0200_0207_8400, 0x0000_0002_8a00_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DT_100 }),
+    ("dt100", Entry { names: [0xf154_0280_49aa_931b, 0x8010_0200_4010_0000, 0x0001_0200_0207_8400, 0x0000_0002_8a00_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DT_100 }),
+    ("dt100w", Entry { names: [0xf154_0280_49aa_931b, 0x8010_0200_4010_0000, 0x0001_0200_0207_8400, 0x0000_0002_8a00_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DT_100 }),
+    ("dt110", Entry { names: [0xf154_0680_49aa_931b, 0x8010_0200_4018_0000, 0x0001_0201_0207_8400, 0x0000_0002_8a00_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DT110 }),
+    ("dt80", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80 }),
+    ("dt80-sas", Entry { names: [0xf144_0280_41aa_821b, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DT80_SAS }),
+    ("dt80w", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DM80W }),
+    ("dtc382", Entry { names: [0x0144_0280_4da2_121a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_1000_4000], off: &["bce"], colours: None, strings: STRINGS_DTC382 }),
+    ("dtterm", Entry { names: [0xf5e4_07c0_fbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0002_8a03_3280], off: &["bce"], colours: Some(8), strings: STRINGS_DTTERM }),
+    ("dumb", Entry { names: [0x0100_0000_0008_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("dvtm", Entry { names: [0xf9fc_0780_c3fe_b3df, 0x8010_0203_fff8_2041, 0x2083_0707_060f_8400, 0x0000_0402_9e03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_DVTM }),
+    ("dvtm-256color", Entry { names: [0xf9fc_0780_c3fe_b3df, 0x8010_0203_fff8_2041, 0x2083_0707_060f_8400, 0x0000_0402_9e03_7280], off: &["bce"], colours: Some(256), strings: STRINGS_DVTM }),
+    ("dwk", Entry { names: [0xf114_0280_09aa_021b, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0000_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DWK }),
+    ("dwk-vt", Entry { names: [0xf114_0280_09aa_021b, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0000_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DWK }),
+    ("ecma+color", Entry { names: [0x0000_0000_0000_200e, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("ecma+index", Entry { names: [0x0200_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0800], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ecma+italics", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0400_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ecma+sgr", Entry { names: [0x0400_0000_0000_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("ecma+standout", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("ecma+strikeout", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0004_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("ecma+underline", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("elks", Entry { names: [0x3104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("elks-ansi", Entry { names: [0x3104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_DM80W }),
+    ("elks-glasstty", Entry { names: [0x3100_0000_0000_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("elks-vt52", Entry { names: [0x3104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("emots", Entry { names: [0xf9f4_0280_dbfe_22db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8a00_3280], off: &[], colours: Some(8), strings: STRINGS_EMOTS }),
+    ("emu", Entry { names: [0xf1c4_03c0_dbfe_b3db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0002_8203_1280], off: &[], colours: Some(15), strings: STRINGS_EMU }),
+    ("emu-220", Entry { names: [0xf1c4_0780_dbfe_93db, 0x803e_47e0_47f0_0040, 0x0001_0201_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_EMU_220 }),
+    ("env230", Entry { names: [0xf104_0380_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ENV230 }),
+    ("envision230", Entry { names: [0xf104_0380_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ENV230 }),
+    ("ep40", Entry { names: [0x0100_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("ep4000", Entry { names: [0x0100_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("ep4080", Entry { names: [0x0100_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("ep48", Entry { names: [0x0100_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("ergo4000", Entry { names: [0xf140_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_a200_9000], off: &["am", "bce"], colours: None, strings: STRINGS_ERGO4000 }),
+    ("esprit", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_a000_8000], off: &["bce"], colours: None, strings: STRINGS_ESPRIT }),
+    ("esprit-am", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_a000_8000], off: &["bce"], colours: None, strings: STRINGS_ESPRIT }),
+    ("eterm", Entry { names: [0x01e4_0380_dbfe_829a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_ETERM_ }),
+    ("eterm-color", Entry { names: [0xf5e4_0380_dbfe_a2da, 0x0000_0000_0008_0040, 0x0001_0201_0200_0000, 0x0000_0002_9203_5280], off: &["bce"], colours: Some(8), strings: STRINGS_ETERM_COLOR }),
+    ("ex155", Entry { names: [0xf804_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_EX155 }),
+    ("excel62", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62 }),
+    ("excel62-rv", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62 }),
+    ("excel62-w", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62_W }),
+    ("excel64", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62 }),
+    ("excel64-rv", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62 }),
+    ("excel64-w", Entry { names: [0xf104_0780_0bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_EXCEL62_W }),
+    ("exec80", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("f100", Entry { names: [0xfd4d_0280_49aa_021b, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F100 }),
+    ("f100-rv", Entry { names: [0xfd4d_0280_49aa_021b, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F100 }),
+    ("f110", Entry { names: [0xfd4d_0280_69aa_13db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F110 }),
+    ("f110-14", Entry { names: [0xfd4d_0280_61aa_13db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F110 }),
+    ("f110-14w", Entry { names: [0xfd4d_0280_61aa_13db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F110 }),
+    ("f110-w", Entry { names: [0xfd4d_0280_69aa_13db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F110 }),
+    ("f1720", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_F1720 }),
+    ("f1720a", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_F1720 }),
+    ("f200", Entry { names: [0xf54d_0280_69aa_93db, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F200 }),
+    ("f200-w", Entry { names: [0xf54d_0280_69aa_93db, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F200 }),
+    ("f200vi", Entry { names: [0xf54d_0280_69aa_93db, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F200 }),
+    ("f200vi-w", Entry { names: [0xf54d_0280_69aa_93db, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F200 }),
+    ("falco", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_FALCO }),
+    ("falco-p", Entry { names: [0xf140_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_FALCO_P }),
+    ("fbterm", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(256), strings: STRINGS_FBTERM }),
+    ("fenix", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("fenixw", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("fixterm", Entry { names: [0xf1e0_0280_d9aa_021a, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CBBLIT }),
+    ("foot", Entry { names: [0xfffd_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be87_fa9f], off: &[], colours: Some(256), strings: STRINGS_FOOT }),
+    ("foot+base", Entry { names: [0xfffd_03e0_ffff_d3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be84_fa9f], off: &[], colours: None, strings: STRINGS_FOOT }),
+    ("foot-direct", Entry { names: [0xfffd_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be87_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_FOOT }),
+    ("fortune", Entry { names: [0xf154_0280_4d8a_135b, 0x8010_0200_4008_0000, 0x0001_0200_0203_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_FORTUNE }),
+    ("fos", Entry { names: [0xf154_0280_4d8a_135b, 0x8010_0200_4008_0000, 0x0001_0200_0203_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_FORTUNE }),
+    ("fox", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("freedom", Entry { names: [0xfd4d_0280_49aa_021b, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F100 }),
+    ("freedom-rv", Entry { names: [0xfd4d_0280_49aa_021b, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F100 }),
+    ("freedom100", Entry { names: [0xfd4d_0280_49aa_021b, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F100 }),
+    ("freedom110", Entry { names: [0xfd4d_0280_69aa_13db, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F110 }),
+    ("freedom200", Entry { names: [0xf54d_0280_69aa_93db, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_F200 }),
+    ("gator", Entry { names: [0x30fc_0280_d9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_GATOR }),
+    ("gator-52", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("gator-52t", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("gator-t", Entry { names: [0x30fc_0280_d9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_GATOR }),
+    ("ghostty", Entry { names: [0xfffd_83f0_fffe_bfdf, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0dd7_febb_fa9f], off: &[], colours: Some(256), strings: STRINGS_GHOSTTY }),
+    ("gigi", Entry { names: [0xf100_0280_03fe_021a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_a200_9000], off: &["bce"], colours: None, strings: STRINGS_GIGI }),
+    ("glasstty", Entry { names: [0x3000_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("gnome", Entry { names: [0xfdcc_06c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("gnome+pcfkeys", Entry { names: [0xf000_0000_0000_000a, 0xffff_ffff_ffff_ffff, 0xffff_feff_ffff_ffff, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_GNOME_PCFKEYS }),
+    ("gnome-2007", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("gnome-2008", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("gnome-2012", Entry { names: [0xfdcc_06c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("gnome-256color", Entry { names: [0xfdcc_06c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_f28f], off: &[], colours: Some(256), strings: STRINGS_GNOME }),
+    ("gnome-fc5", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("gnome-rh62", Entry { names: [0xf1c4_0680_dbfe_a29b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_GNOME_RH62 }),
+    ("gnome-rh72", Entry { names: [0xf1c4_0680_dbfe_b39b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_GNOME_RH72 }),
+    ("gnome-rh80", Entry { names: [0xf9c4_06c0_dbfe_b39b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_GNOME_RH80 }),
+    ("gnome-rh90", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("go-225", Entry { names: [0xf144_0280_49aa_82ca, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_d200], off: &["bce"], colours: None, strings: STRINGS_GO_225 }),
+    ("go140", Entry { names: [0xf040_0280_49aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_a200_9000], off: &["am", "bce"], colours: None, strings: STRINGS_GO140 }),
+    ("go140w", Entry { names: [0xf040_0280_49aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_a200_9000], off: &["bce"], colours: None, strings: STRINGS_GO140 }),
+    ("go225", Entry { names: [0xf144_0280_49aa_82ca, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_d200], off: &["bce"], colours: None, strings: STRINGS_GO_225 }),
+    ("graphos", Entry { names: [0xf1c4_0280_cffe_120a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_GRAPHOS }),
+    ("graphos-30", Entry { names: [0xf1c4_0280_cffe_120a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_GRAPHOS_30 }),
+    ("gs5430", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("gs5430-22", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("gs5430-24", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("gs6300", Entry { names: [0xf9f4_0280_dbfe_22db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8a00_3280], off: &[], colours: Some(8), strings: STRINGS_EMOTS }),
+    ("gt100", Entry { names: [0x0144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_GT100 }),
+    ("gt100a", Entry { names: [0x0144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_GT100 }),
+    ("gt40", Entry { names: [0x0000_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("gt42", Entry { names: [0x0000_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("guru", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU }),
+    ("guru+rv", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("guru+s", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_GURU_S }),
+    ("guru+unk", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU }),
+    ("guru-24", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_24 }),
+    ("guru-33", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU }),
+    ("guru-33-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU }),
+    ("guru-33-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_33_S }),
+    ("guru-44", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_44 }),
+    ("guru-44-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_44_S }),
+    ("guru-76", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76 }),
+    ("guru-76-lp", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76 }),
+    ("guru-76-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76_S }),
+    ("guru-76-w", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76 }),
+    ("guru-76-w-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76_S }),
+    ("guru-76-wm", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76 }),
+    ("guru-lp", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_76 }),
+    ("guru-nctxt", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_NCTXT }),
+    ("guru-rv", Entry { names: [0xfdfc_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0402_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU }),
+    ("guru-s", Entry { names: [0xfdfd_0280_dbfe_02da, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0502_b200_c200], off: &["bce"], colours: None, strings: STRINGS_GURU_33_S }),
+    ("h-100", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100 }),
+    ("h-100bw", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100BW }),
+    ("h100", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100 }),
+    ("h100bw", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100BW }),
+    ("h19", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("h19-a", Entry { names: [0xf144_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0000_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_A }),
+    ("h19-b", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("h19-bs", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_a800_b000], off: &["bce"], colours: None, strings: STRINGS_H19_BS }),
+    ("h19-g", Entry { names: [0xf105_0280_09aa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_G }),
+    ("h19-smul", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_a800_b000], off: &["bce"], colours: None, strings: STRINGS_H19_SMUL }),
+    ("h19-u", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_U }),
+    ("h19-us", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_a800_b000], off: &["bce"], colours: None, strings: STRINGS_H19_SMUL }),
+    ("h19a", Entry { names: [0xf144_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0000_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_A }),
+    ("h19g", Entry { names: [0xf105_0280_09aa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_G }),
+    ("h19k", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H19_U }),
+    ("h19kermit", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H19_U }),
+    ("h19us", Entry { names: [0xf105_0280_09aa_021b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_a800_b000], off: &["bce"], colours: None, strings: STRINGS_H19_SMUL }),
+    ("h29a-kc-bc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("h29a-kc-uc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("h29a-nkc-bc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("h29a-nkc-uc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("h80", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("ha8675", Entry { names: [0xf844_0280_49aa_020a, 0x8010_0200_47f0_0040, 0x0000_0001_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HA8675 }),
+    ("ha8686", Entry { names: [0xf844_0280_49aa_020a, 0x8010_0200_47f0_0040, 0x0000_0001_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HA8686 }),
+    ("hazel", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("hds200", Entry { names: [0xfded_0380_dbfe_93db, 0xffff_fa07_fff0_0041, 0x2081_0206_020f_840f, 0x0000_0502_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_HDS200 }),
+    ("he80", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("heath", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("heath-19", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("heath-ansi", Entry { names: [0xf144_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0000_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_A }),
+    ("heathkit", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("heathkit-a", Entry { names: [0xf144_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0000_8800_3000], off: &["bce"], colours: None, strings: STRINGS_H19_A }),
+    ("hft", Entry { names: [0xffcc_02c0_cbfe_221b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("hft-c", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("hft-c-old", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("hft-old", Entry { names: [0xf554_0280_49aa_22da, 0x8010_0200_4000_0000, 0x0001_0200_0207_8400, 0x0000_0002_8200_0280], off: &["bce"], colours: Some(8), strings: STRINGS_HFT_OLD }),
+    ("hirez100", Entry { names: [0xf0c4_0280_dbfe_02db, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_a200], off: &["am", "bce"], colours: None, strings: STRINGS_HIREZ100 }),
+    ("hirez100-w", Entry { names: [0xf0c4_0280_dbfe_02db, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_a200], off: &["am", "bce"], colours: None, strings: STRINGS_HIREZ100 }),
+    ("hmod1", Entry { names: [0xf144_0000_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HMOD1 }),
+    ("hp", Entry { names: [0x0948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP }),
+    ("hp+arrows", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0000_0000, 0x2000_0002_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_HP_ARROWS }),
+    ("hp+color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0080], off: &["am", "bce"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("hp+labels", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("hp+pfk+arrows", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0000_0000, 0x2000_0002_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_HP_PFK_ARROWS }),
+    ("hp+pfk+cr", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_HP_PFK_CR }),
+    ("hp+pfk-cr", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_HP_PFK_CR_ }),
+    ("hp+printer", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("hp110", Entry { names: [0x0948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP }),
+    ("hp150", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2", Entry { names: [0xf148_0280_49aa_021a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2 }),
+    ("hp236", Entry { names: [0x0050_0200_4d82_120a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP236 }),
+    ("hp2382", Entry { names: [0xfd4c_0280_6bfe_02da, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_9200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2382a", Entry { names: [0xfd4c_0280_6bfe_02da, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_9200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2392", Entry { names: [0xf148_0280_49aa_021a, 0x8010_0200_4000_0000, 0x2001_0202_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2392 }),
+    ("hp2397", Entry { names: [0xfd4c_0280_6bfe_22db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b280], off: &["bce"], colours: Some(16), strings: STRINGS_HP2397 }),
+    ("hp2397a", Entry { names: [0xfd4c_0280_6bfe_22db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b280], off: &["bce"], colours: Some(16), strings: STRINGS_HP2397 }),
+    ("hp2621", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621-48", Entry { names: [0x094c_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621-a", Entry { names: [0xf948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x2000_0002_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_A }),
+    ("hp2621-ba", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x2000_0002_0203_8400, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP2621_BA }),
+    ("hp2621-fl", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_FL }),
+    ("hp2621-k45", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_K45 }),
+    ("hp2621-nl", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP2621_NL }),
+    ("hp2621-nt", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621-wl", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621A", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621a", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621a-a", Entry { names: [0xf948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x2000_0002_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_A }),
+    ("hp2621b", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x2000_0002_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621B }),
+    ("hp2621b-kx", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621B_KX }),
+    ("hp2621b-kx-p", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621B_KX }),
+    ("hp2621b-p", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x2000_0002_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621B }),
+    ("hp2621k45", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_K45 }),
+    ("hp2621p", Entry { names: [0x0948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_2621 }),
+    ("hp2621p-a", Entry { names: [0xf948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x2000_0002_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621P_A }),
+    ("hp2622", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2622a", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2623", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2623a", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624-10p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624a", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624a-10p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b-10p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b-10p-p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b-4p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b-4p-p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2624b-p", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626-12", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626-12-s", Entry { names: [0xff4d_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0502_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP2626_12_S }),
+    ("hp2626-12x40", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626-ns", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626-s", Entry { names: [0xff4d_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0502_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP2626_12_S }),
+    ("hp2626-x40", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626a", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2626p", Entry { names: [0xff4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("hp2627a", Entry { names: [0x3948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP2627A }),
+    ("hp2627a-rev", Entry { names: [0x3948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP2621_NL }),
+    ("hp2627c", Entry { names: [0x3948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP2627A }),
+    ("hp262x", Entry { names: [0xf500_0080_0800_004a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0002_a200_8200], off: &["am", "bce"], colours: None, strings: STRINGS_HP262X }),
+    ("hp2640a", Entry { names: [0xf948_0280_692a_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_HP2640A }),
+    ("hp2640b", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_HP2640A }),
+    ("hp2641a", Entry { names: [0x3148_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HP2641A }),
+    ("hp2644a", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_HP2640A }),
+    ("hp2645", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_HP2645 }),
+    ("hp2645a", Entry { names: [0x3148_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HP2641A }),
+    ("hp2647a", Entry { names: [0x3148_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HP2641A }),
+    ("hp2648", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_HP2645 }),
+    ("hp2648a", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_HP2645 }),
+    ("hp300h", Entry { names: [0xf148_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP300H }),
+    ("hp45", Entry { names: [0xf948_0280_69aa_025a, 0x0000_0000_0000_0040, 0x2001_0203_0200_0000, 0x0000_0402_a200_8200], off: &["bce"], colours: None, strings: STRINGS_HP2645 }),
+    ("hp700", Entry { names: [0xf954_0280_49aa_131b, 0x8010_0200_4018_0000, 0x0001_0200_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP700 }),
+    ("hp700-wy", Entry { names: [0xf844_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0001_0200_0000, 0x0000_0402_8200_1000], off: &["bce"], colours: None, strings: STRINGS_HP700_WY }),
+    ("hp70092", Entry { names: [0xf048_0200_69aa_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP70092 }),
+    ("hp70092A", Entry { names: [0xf048_0200_69aa_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP70092 }),
+    ("hp70092a", Entry { names: [0xf048_0200_69aa_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP70092 }),
+    ("hp9837", Entry { names: [0xf148_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0001_0201_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP9837 }),
+    ("hp9845", Entry { names: [0x0040_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HP9845 }),
+    ("hp98550", Entry { names: [0xf548_0280_69aa_13db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_HP98550 }),
+    ("hp98550-color", Entry { names: [0xf14c_0280_49aa_229b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_ba00_f280], off: &["bce"], colours: Some(8), strings: STRINGS_X_HPTERM_COLOR2 }),
+    ("hp98550a", Entry { names: [0xf548_0280_69aa_13db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_HP98550 }),
+    ("hp98550a-color", Entry { names: [0xf14c_0280_49aa_229b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_ba00_f280], off: &["bce"], colours: Some(8), strings: STRINGS_X_HPTERM_COLOR2 }),
+    ("hp98720", Entry { names: [0xf148_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0001_0201_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP9837 }),
+    ("hp98721", Entry { names: [0xf148_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0001_0201_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP9837 }),
+    ("hpansi", Entry { names: [0xf954_0280_49aa_131b, 0x8010_0200_4018_0000, 0x0001_0200_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP700 }),
+    ("hpex", Entry { names: [0xf148_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_BOBCAT }),
+    ("hpex2", Entry { names: [0xf148_0280_49aa_021a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2 }),
+    ("hpgeneric", Entry { names: [0x0948_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HP }),
+    ("hpsub", Entry { names: [0xf148_0280_492a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_a200_8000], off: &["bce"], colours: None, strings: STRINGS_BOBCAT }),
+    ("hpterm", Entry { names: [0xf148_0280_69aa_029b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_X_HPTERM }),
+    ("hpterm-color", Entry { names: [0xf14c_0280_69aa_229b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b280], off: &["bce"], colours: Some(64), strings: STRINGS_X_HPTERM }),
+    ("hpterm-color2", Entry { names: [0xf14c_0280_69aa_229b, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_ba00_f280], off: &["bce"], colours: Some(8), strings: STRINGS_X_HPTERM_COLOR2 }),
+    ("hterm", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0e16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("hterm-256color", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0e16_be83_fa9f], off: &[], colours: Some(256), strings: STRINGS_HTERM }),
+    ("htx11", Entry { names: [0xf045_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0102_8000_1000], off: &["bce"], colours: None, strings: STRINGS_HTX11 }),
+    ("hurd", Entry { names: [0xffec_03c0_fffe_b3db, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0402_8e03_3a80], off: &[], colours: Some(8), strings: STRINGS_HURD }),
+    ("hz1000", Entry { names: [0x0104_0000_002a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("hz1420", Entry { names: [0x0140_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HZ1420 }),
+    ("hz1500", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HMOD1 }),
+    ("hz1510", Entry { names: [0x0140_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_HZ1510 }),
+    ("hz1520", Entry { names: [0xf144_0280_41aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_HZ1520 }),
+    ("hz1520-noesc", Entry { names: [0x0144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_HZ1520_NOESC }),
+    ("hz1552", Entry { names: [0xf144_0280_41aa_021b, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_2800_b000], off: &["am", "bce"], colours: None, strings: STRINGS_HZ1552 }),
+    ("hz1552-rv", Entry { names: [0xf144_0280_41aa_021b, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_a800_b000], off: &["am", "bce"], colours: None, strings: STRINGS_HZ1552_RV }),
+    ("hz2000", Entry { names: [0x0144_0000_408a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_HZ2000 }),
+    ("i100", Entry { names: [0x0144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_GT100 }),
+    ("i3101", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BANTAM }),
+    ("i3164", Entry { names: [0xfd54_0280_49aa_22db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9203_4280], off: &["bce"], colours: Some(8), strings: STRINGS_I3164 }),
+    ("i400", Entry { names: [0x0140_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_I400 }),
+    ("iTerm.app", Entry { names: [0xf9fd_0780_dbfe_b3db, 0x8010_0200_4079_0040, 0x0081_0304_0247_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_ITERM_APP }),
+    ("iTerm2.app", Entry { names: [0xfbfd_0780_fbfe_b3db, 0x8010_020f_ffff_ef40, 0xaf85_0b7e_03ff_8400, 0x0000_0507_be07_fa87], off: &[], colours: Some(256), strings: STRINGS_ITERM2_APP }),
+    ("ibcs2", Entry { names: [0x02b8_0040_13fe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_0000_0800], off: &["am", "bce"], colours: None, strings: STRINGS_IBCS2 }),
+    ("ibm+16color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0000], off: &["am", "bce"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("ibm+color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0080], off: &["am", "bce"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("ibm-apl", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APL }),
+    ("ibm-pc", Entry { names: [0x2104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_5051 }),
+    ("ibm-system1", Entry { names: [0x0104_0000_01a2_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("ibm3101", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BANTAM }),
+    ("ibm3151", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_IBM3151 }),
+    ("ibm3161", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3161 }),
+    ("ibm3161-C", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3161_C }),
+    ("ibm3162", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3151 }),
+    ("ibm3163", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3161 }),
+    ("ibm3164", Entry { names: [0xfd54_0280_49aa_22db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9203_4280], off: &["bce"], colours: Some(8), strings: STRINGS_I3164 }),
+    ("ibm5051", Entry { names: [0x2104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_5051 }),
+    ("ibm5081", Entry { names: [0xffcc_02c0_cbfe_221b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibm5151", Entry { names: [0xffcc_02c0_cbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("ibm5154", Entry { names: [0xffcc_02c0_cbfe_225b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibm6153", Entry { names: [0xffcc_02c0_cbfe_029b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("ibm6153-40", Entry { names: [0xffcc_02c0_cbfe_021b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("ibm6153-90", Entry { names: [0xffcc_02c0_cbfe_021b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("ibm6154", Entry { names: [0xffcc_02c0_cbfe_229b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibm6155", Entry { names: [0xffcc_02c0_cbfe_021b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("ibm8503", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibm8507", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibm8512", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_9a03_7a80], off: &["bce"], colours: Some(8), strings: STRINGS_IBM8512 }),
+    ("ibm8513", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_9a03_7a80], off: &["bce"], colours: Some(8), strings: STRINGS_IBM8512 }),
+    ("ibm8514", Entry { names: [0xffcd_02c0_cbfe_221b, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_IBM8514 }),
+    ("ibm8604", Entry { names: [0xffcc_02c0_cbfe_22db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8203_1a80], off: &["bce"], colours: Some(8), strings: STRINGS_HFT }),
+    ("ibmaed", Entry { names: [0xf054_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_IBMAED }),
+    ("ibmpc3", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("ibmpc3r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("ibmpc3r-mono", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("ibmpcx", Entry { names: [0xf454_0280_49aa_02cb, 0x8010_0200_4008_0000, 0x0001_0200_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_IBMPCX }),
+    ("ibmx", Entry { names: [0xf454_0280_49aa_02cb, 0x8010_0200_4008_0000, 0x0001_0200_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_IBMPCX }),
+    ("icl6402", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("icl6404", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("icl6404-w", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("ifmr", Entry { names: [0x0014_0280_09aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IFMR }),
+    ("illumos", Entry { names: [0xf3fc_0280_fbfe_33da, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8203_0a80], off: &["bce"], colours: Some(8), strings: STRINGS_ILLUMOS }),
+    ("ims-ansi", Entry { names: [0xf000_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IMS_ANSI }),
+    ("ims950", Entry { names: [0x0955_0280_49aa_021b, 0x0000_0000_0030_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_IMS950 }),
+    ("ims950-b", Entry { names: [0x0955_0280_49aa_021b, 0x0000_0000_0030_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_IMS950 }),
+    ("ims950-rv", Entry { names: [0x0955_0280_49aa_021b, 0x0000_0000_0030_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_IMS950 }),
+    ("infoton", Entry { names: [0x0100_0080_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("infoton2", Entry { names: [0x0104_0080_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("interix", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("interix-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("intertec", Entry { names: [0x0104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_INTERTEC }),
+    ("intertube", Entry { names: [0x0104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_INTERTEC }),
+    ("intertube2", Entry { names: [0x010c_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0400_8000_0000], off: &["bce"], colours: None, strings: STRINGS_INTERTEC }),
+    ("intext2", Entry { names: [0xf158_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_INTEXT2 }),
+    ("intextii", Entry { names: [0xf158_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_INTEXT2 }),
+    ("iq120", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_SOROC }),
+    ("iq140", Entry { names: [0xc144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_IQ140 }),
+    ("iris-ansi", Entry { names: [0xf9c4_0380_c7fe_129a, 0x8010_0200_4078_2041, 0x0081_0205_020f_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_IRIS_ANSI }),
+    ("iris-ansi-ap", Entry { names: [0xf9c4_0380_c7fe_129a, 0x8010_0200_4078_2041, 0x0081_0205_020f_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_IRIS_ANSI }),
+    ("iris-ansi-net", Entry { names: [0xf9c4_0380_c7fe_129a, 0x8010_0200_4078_2041, 0x0081_0205_020f_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_IRIS_ANSI }),
+    ("iris-color", Entry { names: [0xf9e4_03c0_f7fe_b29a, 0x8010_0200_4078_2041, 0x0081_0205_020f_8400, 0x0000_0002_8603_1280], off: &["bce"], colours: Some(8), strings: STRINGS_IRIS_ANSI }),
+    ("iris40", Entry { names: [0xf144_0280_65aa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IRIS40 }),
+    ("iterm", Entry { names: [0xf9fd_0780_dbfe_b3db, 0x8010_0200_4079_0040, 0x0081_0304_0247_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_ITERM_APP }),
+    ("iterm2", Entry { names: [0xfbfd_0780_fbfe_b3db, 0x8010_020f_ffff_ef40, 0xaf85_0b7e_03ff_8400, 0x0000_0502_be03_fa87], off: &[], colours: Some(256), strings: STRINGS_ITERM2 }),
+    ("iterm2-direct", Entry { names: [0xfbfd_0780_fbfe_b3db, 0x8010_020f_ffff_ef40, 0xaf85_0b7e_03ff_8400, 0x0000_0507_be07_fe87], off: &[], colours: Some(16_777_216), strings: STRINGS_ITERM2_APP }),
+    ("jaixterm", Entry { names: [0xffcd_02c0_cbfe_229a, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8203_0a80], off: &["bce"], colours: Some(8), strings: STRINGS_AIXTERM }),
+    ("jaixterm-m", Entry { names: [0xffcd_02c0_cbfe_029a, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0102_8200_0a00], off: &["bce"], colours: None, strings: STRINGS_AIXTERM }),
+    ("jerq", Entry { names: [0xf1f0_0200_d9aa_021a, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_BLIT }),
+    ("jfbterm", Entry { names: [0xf5fd_0380_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_JFBTERM }),
+    ("k45", Entry { names: [0xf948_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_HP2621_K45 }),
+    ("kaypro", Entry { names: [0xe144_0280_41a8_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("kaypro2", Entry { names: [0xe144_0280_41a8_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("kds6402", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("kds7372", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("kds7372-w", Entry { names: [0x0444_0000_4daa_935a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ICL6402 }),
+    ("kermit", Entry { names: [0xf004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_KERMIT }),
+    ("kermit-am", Entry { names: [0xf004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_KERMIT }),
+    ("kitty", Entry { names: [0xfbed_03c0_ffff_f39b, 0x8011_ffff_ffff_ffff, 0xffff_ffff_ffff_8400, 0x0000_0516_be83_fa9f], off: &["bce"], colours: Some(256), strings: STRINGS_KITTY }),
+    ("kitty+common", Entry { names: [0xfbed_03c0_ffff_d39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0517_be80_fa9f], off: &["bce"], colours: None, strings: STRINGS_KITTY_COMMON }),
+    ("kitty+setal", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0004_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("kitty-direct", Entry { names: [0xfbed_03c0_ffff_f39b, 0x8011_ffff_ffff_ffff, 0xffff_ffff_ffff_8400, 0x0000_0516_be83_fe9f], off: &["bce"], colours: Some(16_777_216), strings: STRINGS_KITTY }),
+    ("klone+acs", Entry { names: [0x0000_0000_0000_000b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("klone+color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("klone+koi8acs", Entry { names: [0x0000_0000_0000_000b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("klone+sgr", Entry { names: [0x0000_0000_0000_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("klone+sgr-dumb", Entry { names: [0x0400_0000_0000_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("klone+sgr8", Entry { names: [0x0400_0000_0000_00cb, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("kon", Entry { names: [0xf5fd_0380_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_JFBTERM }),
+    ("kon2", Entry { names: [0xf5fd_0380_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_JFBTERM }),
+    ("konsole", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("konsole+pcfkeys", Entry { names: [0x0800_0000_0000_000a, 0xffff_ffff_ffff_ffff, 0xffff_feff_ffff_ffff, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_KONSOLE_PCFKEYS }),
+    ("konsole-16color", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(16), strings: STRINGS_GNOME }),
+    ("konsole-256color", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_GNOME }),
+    ("konsole-base", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x0000_0000_0008_0040, 0x0001_0301_0200_0000, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_BASE }),
+    ("konsole-direct", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_GNOME }),
+    ("konsole-linux", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_LINUX }),
+    ("konsole-solaris", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_SOLARIS }),
+    ("konsole-vt100", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_VT100 }),
+    ("konsole-vt420pc", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_VT420PC }),
+    ("konsole-xf3x", Entry { names: [0xf7cc_06c0_fbfe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0c06_be03_fa80], off: &[], colours: Some(8), strings: STRINGS_KONSOLE_SOLARIS }),
+    ("konsole-xf4x", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("kt7", Entry { names: [0xf855_0280_49aa_020a, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_KT7 }),
+    ("kt7ix", Entry { names: [0xf955_0280_69aa_135b, 0x8010_0200_4008_0000, 0x0000_0201_0207_8400, 0x0000_0102_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_KT7IX }),
+    ("kterm", Entry { names: [0xf1c5_0680_dbfe_a29f, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0902_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_KTERM }),
+    ("kterm-co", Entry { names: [0xf1c5_0680_dbfe_a29f, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0902_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_KTERM }),
+    ("kterm-color", Entry { names: [0xf1c5_0680_dbfe_a29f, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0902_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_KTERM }),
+    ("ktm", Entry { names: [0x0000_0280_01a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("kvt", Entry { names: [0xf1c4_0680_dbfe_a29b, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0002_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_KVT }),
+    ("layer", Entry { names: [0xf140_0200_418a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ATT5620_S }),
+    ("lft", Entry { names: [0xffec_02c0_dbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_LFT_PC850 }),
+    ("lft-pc850", Entry { names: [0xffec_02c0_dbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_LFT_PC850 }),
+    ("linux", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX }),
+    ("linux+decid", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("linux+kbs", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("linux+lockeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_LINUX_LOCKEYS }),
+    ("linux+sfkeys", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_bf80_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("linux-16color", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(16), strings: STRINGS_LINUX }),
+    ("linux-basic", Entry { names: [0xf9fc_03c0_fbfe_a2df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX_BASIC }),
+    ("linux-c", Entry { names: [0xf9fc_03c0_fbfe_a2df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX_BASIC }),
+    ("linux-c-nc", Entry { names: [0xf9fc_03c0_fbfe_a2df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX_BASIC }),
+    ("linux-koi8", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("linux-koi8r", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("linux-lat", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("linux-m", Entry { names: [0xf9fc_07e0_fffe_93df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a00_3280], off: &[], colours: None, strings: STRINGS_FBTERM }),
+    ("linux-m1", Entry { names: [0xf9cc_07e0_f9aa_b3db, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0400_8a03_3280], off: &["bce"], colours: Some(8), strings: STRINGS_LINUX_M1 }),
+    ("linux-m1b", Entry { names: [0xf9cc_03e0_f9aa_93da, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0400_8203_1200], off: &["bce"], colours: None, strings: STRINGS_LINUX_M1 }),
+    ("linux-m2", Entry { names: [0xf9cc_07e0_fdaa_93db, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0400_8a03_3200], off: &["bce"], colours: None, strings: STRINGS_LINUX_M2 }),
+    ("linux-nic", Entry { names: [0xf9cc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("linux-s", Entry { names: [0xf9fd_0760_fffe_33df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0702_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX_S }),
+    ("linux-vt", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("linux2.2", Entry { names: [0xf9fc_03c0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX2_2 }),
+    ("linux2.6", Entry { names: [0xf9fc_07c0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_LINUX2_2 }),
+    ("linux2.6.26", Entry { names: [0xf9fc_07c0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &["bce"], colours: Some(8), strings: STRINGS_LINUX2_2 }),
+    ("linux3.0", Entry { names: [0xf9fc_07e0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_FBTERM }),
+    ("lisa", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISA }),
+    ("lisaterm", Entry { names: [0xf104_0280_03fe_82da, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_LISATERM }),
+    ("lisaterm-w", Entry { names: [0xf104_0280_03fe_82da, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_LISATERM }),
+    ("liswb", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISWB }),
+    ("luna", Entry { names: [0x0104_0280_0088_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("luna68k", Entry { names: [0x0104_0280_0088_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("m2-nam", Entry { names: [0xf1c5_0280_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_M2_NAM }),
+    ("mac", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISA }),
+    ("mac-w", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISA }),
+    ("mach", Entry { names: [0xf1c4_0280_c3fe_02da, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MACH }),
+    ("mach-bold", Entry { names: [0xf1c4_0280_c3fe_02da, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MACH }),
+    ("mach-color", Entry { names: [0xf5c4_0280_e3fe_22da, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_0280], off: &["bce"], colours: Some(8), strings: STRINGS_MACH }),
+    ("mach-gnu", Entry { names: [0xf7fc_03c0_fbfe_02db, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8200_0a00], off: &["bce"], colours: None, strings: STRINGS_MACH }),
+    ("mach-gnu-color", Entry { names: [0xf7fc_03c0_fbfe_22db, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_0a80], off: &["bce"], colours: Some(8), strings: STRINGS_MACH }),
+    ("macintosh", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISA }),
+    ("macterminal-w", Entry { names: [0xf054_0280_49aa_130b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_LISA }),
+    ("mai", Entry { names: [0xf144_0280_4daa_92da, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_BASIC4 }),
+    ("masscomp", Entry { names: [0xf040_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_MASSCOMP }),
+    ("masscomp1", Entry { names: [0xf040_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_MASSCOMP }),
+    ("masscomp2", Entry { names: [0xf040_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_MASSCOMP }),
+    ("mdl110", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_CYB110 }),
+    ("megatek", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_9TERM }),
+    ("memhp", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP2397 }),
+    ("mgr", Entry { names: [0xf1f0_0280_ddaa_939a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MGR }),
+    ("mgr-linux", Entry { names: [0xf1f0_0280_ddaa_939a, 0x8010_0200_4078_0040, 0x0001_0200_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MGR_LINUX }),
+    ("mgr-sun", Entry { names: [0xf1f0_0280_ddaa_939a, 0x8010_0200_4078_0000, 0x0001_0200_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MGR_SUN }),
+    ("mgt", Entry { names: [0xf7ec_07c0_dbfe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c02_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_MGT }),
+    ("mgterm", Entry { names: [0xfbfc_03c0_fbfe_a2da, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0400_8200_1a80], off: &[], colours: Some(8), strings: STRINGS_MGTERM }),
+    ("microb", Entry { names: [0xf100_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_MICROB }),
+    ("microbee", Entry { names: [0xf100_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_MICROB }),
+    ("microterm", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("microterm5", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("mime", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME }),
+    ("mime-3ax", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("mime-fb", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME_FB }),
+    ("mime-hb", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME_HB }),
+    ("mime1", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME }),
+    ("mime2", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME }),
+    ("mime2a", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_MIME2A }),
+    ("mime2a-s", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME2A_S }),
+    ("mime2a-v", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_MIME2A }),
+    ("mime314", Entry { names: [0xf044_0280_49a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("mime340", Entry { names: [0xb140_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("mime3a", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("mime3ax", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("mimei", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME }),
+    ("mimeii", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MIME }),
+    ("minitel", Entry { names: [0xf1c5_0280_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_M2_NAM }),
+    ("minitel-2", Entry { names: [0xf1c5_0280_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_M2_NAM }),
+    ("minitel-2-nam", Entry { names: [0xf1c5_0280_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_M2_NAM }),
+    ("minitel1", Entry { names: [0x0105_0200_01aa_335b, 0x0000_0000_0008_0000, 0x0001_0200_0000_0000, 0x0000_0100_8203_1280], off: &["bce"], colours: Some(8), strings: STRINGS_MINITEL1 }),
+    ("minitel1-nb", Entry { names: [0x0105_0200_21aa_13db, 0x0000_0000_0008_0000, 0x0001_0200_0000_0000, 0x0000_0100_8200_1200], off: &["bce"], colours: None, strings: STRINGS_MINITEL1_NB }),
+    ("minitel12-80", Entry { names: [0xf1c5_0380_dbfe_13da, 0x8010_0203_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_MINITEL12_80 }),
+    ("minitel1b", Entry { names: [0xf1c5_0380_dbfe_335b, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0100_8203_1280], off: &["bce"], colours: Some(8), strings: STRINGS_MINITEL1B }),
+    ("minitel1b-80", Entry { names: [0xf1c5_0380_dbfe_13da, 0x8010_0203_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_MINITEL1B_80 }),
+    ("minitel1b-nb", Entry { names: [0xf1c5_0380_fbfe_13db, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_MINITEL1B_NB }),
+    ("minitel2-80", Entry { names: [0xf1c5_0780_dbfe_13db, 0x8010_0203_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_MINITEL12_80 }),
+    ("minix", Entry { names: [0xf1f4_0380_dbfe_22df, 0x803f_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_1280], off: &["bce"], colours: Some(8), strings: STRINGS_MINIX }),
+    ("minix-1.5", Entry { names: [0xf1f4_0280_dbfe_02da, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_MINIX_1_5 }),
+    ("minix-1.7", Entry { names: [0xf1f4_0380_dbfe_02da, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_MINIX_1_5 }),
+    ("minix-3.0", Entry { names: [0xf1f4_0380_dbfe_22de, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8203_1280], off: &["bce"], colours: Some(8), strings: STRINGS_MINIX_1_5 }),
+    ("minix-old", Entry { names: [0xf1f4_0280_dbfe_02da, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_MINIX_1_5 }),
+    ("minix-old-am", Entry { names: [0xf1f4_0280_dbfe_02da, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_MINIX_1_5 }),
+    ("mintty", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c17_fe87_fa9f], off: &[], colours: Some(256), strings: STRINGS_MINTTY }),
+    ("mintty+common", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c17_fe83_fa9f], off: &[], colours: Some(8), strings: STRINGS_MINTTY_COMMON }),
+    ("mintty+keypad", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("mintty-direct", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c17_fe87_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_MINTTY_COMMON }),
+    ("mlterm", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_MLTERM }),
+    ("mlterm+pcfkeys", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_1f80, 0xdfb2_64fc_6000_0000, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("mlterm-256color", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_MLTERM }),
+    ("mlterm-direct", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_MLTERM }),
+    ("mlterm2", Entry { names: [0xfbec_07c0_dbfe_b39b, 0xffff_ffff_fff8_1fc0, 0xffb3_67ff_6207_ffff, 0x0000_0c02_ba03_fa8f], off: &["bce"], colours: Some(8), strings: STRINGS_MLTERM2 }),
+    ("mlterm3", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_MLTERM }),
+    ("mm314", Entry { names: [0xf044_0280_49a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("mm340", Entry { names: [0xb140_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("mod", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("mod24", Entry { names: [0xf104_0780_07fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_MOD24 }),
+    ("modgraph", Entry { names: [0xf104_0780_07fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_MOD24 }),
+    ("modgraph2", Entry { names: [0x0000_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_MODGRAPH2 }),
+    ("modgraph48", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("mosh", Entry { names: [0xffec_03c0_dffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0e02_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_MOSH }),
+    ("mosh-256color", Entry { names: [0xffec_03c0_dffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0e02_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_MOSH }),
+    ("mostlike", Entry { names: [0xf1c5_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_MOSTLIKE }),
+    ("mouse-sun", Entry { names: [0x0144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_MOUSE_SUN }),
+    ("mrxvt", Entry { names: [0xf9ec_0780_c3fe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("mrxvt-256color", Entry { names: [0xf9ec_0780_c3fe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(256), strings: STRINGS_MRXVT }),
+    ("ms+terminal", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_MS_TERMINAL }),
+    ("ms-terminal", Entry { names: [0xf7ec_03e0_fffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_MS_TERMINAL_ }),
+    ("ms-terminal-direct", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_MS_TERMINAL }),
+    ("ms-vt-utf8", Entry { names: [0xf124_0780_13fe_a2df, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_MS_VT_UTF8 }),
+    ("ms-vt100", Entry { names: [0xf104_0780_03fe_82db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DARWIN }),
+    ("ms-vt100+", Entry { names: [0xf124_0780_13fe_a2df, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_MS_VT_UTF8 }),
+    ("ms-vt100-16color", Entry { names: [0xf124_0780_13fe_b3df, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(16), strings: STRINGS_MS_VT100_16COLOR }),
+    ("ms-vt100-color", Entry { names: [0xf124_0780_13fe_a2df, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("msk227", Entry { names: [0xf044_0280_4daa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_MSK227 }),
+    ("msk22714", Entry { names: [0xf044_0280_4daa_028a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MSK22714 }),
+    ("msk227am", Entry { names: [0xf044_0280_4daa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_MSK227AM }),
+    ("mskermit227", Entry { names: [0xf044_0280_4daa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_MSK227 }),
+    ("mskermit22714", Entry { names: [0xf044_0280_4daa_028a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_MSK22714 }),
+    ("mskermit227am", Entry { names: [0xf044_0280_4daa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_MSK227AM }),
+    ("mt-70", Entry { names: [0xf954_0280_69aa_131b, 0x8010_0200_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_MT_70 }),
+    ("mt4520-rv", Entry { names: [0xf1f5_0280_dffe_921a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0102_8200_1000], off: &["bce"], colours: None, strings: STRINGS_MT4520_RV }),
+    ("mt70", Entry { names: [0xf954_0280_69aa_131b, 0x8010_0200_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_MT_70 }),
+    ("mterm", Entry { names: [0x0144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_MOUSE_SUN }),
+    ("mterm-ansi", Entry { names: [0x07dc_02c0_fbfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0402_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_MTERM_ANSI }),
+    ("mvterm", Entry { names: [0xf1f5_0780_dbfe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_MVTERM }),
+    ("n7900", Entry { names: [0xf100_0280_21aa_025a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_N7900 }),
+    ("ncr160vppp", Entry { names: [0xf545_0280_69aa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160VPPP }),
+    ("ncr160vpwpp", Entry { names: [0xf545_0280_69aa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160VPPP }),
+    ("ncr160vt100an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0000_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100AN }),
+    ("ncr160vt100pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4008_0040, 0x0001_0201_0200_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100PP }),
+    ("ncr160vt100wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0000_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100AN }),
+    ("ncr160vt100wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4008_0040, 0x0001_0201_0200_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100PP }),
+    ("ncr160vt200an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr160vt200pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr160vt200wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr160vt200wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr160vt300an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr160vt300pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr160vt300wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr160vt300wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr160wy50+pp", Entry { names: [0xfd45_0280_6daa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY50_PP }),
+    ("ncr160wy50+wpp", Entry { names: [0xfd45_0280_6daa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY50_PP }),
+    ("ncr160wy60pp", Entry { names: [0xfd45_0280_4daa_135b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY60PP }),
+    ("ncr160wy60wpp", Entry { names: [0xfd45_0280_4daa_135b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY60PP }),
+    ("ncr260intan", Entry { names: [0xf7ed_03c0_dbfe_b3db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NCR160VT200AN }),
+    ("ncr260intpp", Entry { names: [0xf7ed_03c0_dbfe_b3db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260intwan", Entry { names: [0xf7ed_03c0_dbfe_b3db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NCR160VT200AN }),
+    ("ncr260intwpp", Entry { names: [0xf7ed_03c0_dbfe_b3db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260vp+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NCR260VP_SL }),
+    ("ncr260vppp", Entry { names: [0xf545_0280_69aa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160VPPP }),
+    ("ncr260vpwpp", Entry { names: [0xf545_0280_69aa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160VPPP }),
+    ("ncr260vt+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NCR260VT_SL }),
+    ("ncr260vt100an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0000_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100AN }),
+    ("ncr260vt100pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4008_0040, 0x0001_0201_0200_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100PP }),
+    ("ncr260vt100wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0000_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100AN }),
+    ("ncr260vt100wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_0200_4008_0040, 0x0001_0201_0200_0000, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT100PP }),
+    ("ncr260vt200an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr260vt200pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260vt200wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr260vt200wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260vt300an", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr260vt300pp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260vt300wan", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR160VT200AN }),
+    ("ncr260vt300wpp", Entry { names: [0xf7ed_03c0_dbfe_93db, 0x8010_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NCR260VT300WPP }),
+    ("ncr260wy325pp", Entry { names: [0xfd45_0280_4daa_335b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: Some(16), strings: STRINGS_NCR160WY60PP }),
+    ("ncr260wy325wpp", Entry { names: [0xfd45_0280_4daa_335b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: Some(16), strings: STRINGS_NCR160WY60PP }),
+    ("ncr260wy350pp", Entry { names: [0xfd45_0280_6daa_335b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: Some(16), strings: STRINGS_NCR160WY50_PP }),
+    ("ncr260wy350wpp", Entry { names: [0xfd45_0280_6daa_335b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: Some(16), strings: STRINGS_NCR160WY50_PP }),
+    ("ncr260wy50+pp", Entry { names: [0xfd45_0280_6daa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY50_PP }),
+    ("ncr260wy50+wpp", Entry { names: [0xfd45_0280_6daa_135b, 0x8010_1fff_fff8_2041, 0x0081_0201_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY50_PP }),
+    ("ncr260wy60pp", Entry { names: [0xfd45_0280_4daa_135b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY60PP }),
+    ("ncr260wy60wpp", Entry { names: [0xfd45_0280_4daa_135b, 0x8010_1fff_fff8_2041, 0x0083_0601_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCR160WY60PP }),
+    ("ncr7900", Entry { names: [0xf100_0280_21aa_025a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_N7900 }),
+    ("ncr7900i", Entry { names: [0xf100_0280_21aa_025a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_N7900 }),
+    ("ncr7900iv", Entry { names: [0xf145_0000_408a_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_0000_0000], off: &["bce"], colours: None, strings: STRINGS_NCR7900IV }),
+    ("ncr7901", Entry { names: [0xf108_0280_21aa_135a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_NCR7901 }),
+    ("ncrvt100an", Entry { names: [0xf1c5_0780_dbfe_82db, 0x8010_0200_4000_0000, 0x0080_0004_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCRVT100WPP }),
+    ("ncrvt100pp", Entry { names: [0xf1c5_0780_dbfe_82db, 0x8010_0200_4000_0000, 0x0080_0004_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCRVT100WPP }),
+    ("ncrvt100wan", Entry { names: [0xf1c5_0780_dbfe_82db, 0x8010_0200_4000_0000, 0x0080_0004_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCRVT100WPP }),
+    ("ncrvt100wpp", Entry { names: [0xf1c5_0780_dbfe_82db, 0x8010_0200_4000_0000, 0x0080_0004_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NCRVT100WPP }),
+    ("ncsa", Entry { names: [0xf1e5_0780_dbfe_b3db, 0x8010_0200_43f8_0040, 0x0001_0200_0207_8400, 0x0000_0102_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_NCSA }),
+    ("ncsa-m", Entry { names: [0xf1e5_0780_dbfe_93db, 0x8010_0200_43f8_0040, 0x0001_0200_0207_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_NCSA }),
+    ("ncsa-m-ns", Entry { names: [0xf1e4_0780_dbfe_93db, 0x8010_0200_43f8_0040, 0x0001_0200_0207_8400, 0x0000_0002_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_NCSA_M_NS }),
+    ("ncsa-ns", Entry { names: [0xf1e4_0780_dbfe_b3db, 0x8010_0200_43f8_0040, 0x0001_0200_0207_8400, 0x0000_0002_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_NCSA_M_NS }),
+    ("ncsa-vt220", Entry { names: [0xf1e5_0780_dbfe_b3db, 0x8010_0200_fff8_0040, 0x0001_0200_0207_8400, 0x0000_0102_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_NCSA_VT220 }),
+    ("ncsa-vt220-8", Entry { names: [0xf1e5_0780_dbfe_93db, 0x8010_0200_43f8_0040, 0x0001_0200_0207_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_NCSA }),
+    ("nd9500", Entry { names: [0xf955_0280_69aa_131b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_ND9500 }),
+    ("ndr9500", Entry { names: [0xf955_0280_69aa_131b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_ND9500 }),
+    ("ndr9500-25", Entry { names: [0xf955_0280_69aa_131b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_ND9500 }),
+    ("ndr9500-25-mc", Entry { names: [0xfd55_0280_69aa_135b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_MC }),
+    ("ndr9500-25-mc-nl", Entry { names: [0xfd54_0280_69aa_135b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_MC_NL }),
+    ("ndr9500-25-nl", Entry { names: [0xf954_0280_69aa_131b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0000_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_NL }),
+    ("ndr9500-mc", Entry { names: [0xfd55_0280_69aa_135b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_MC }),
+    ("ndr9500-mc-nl", Entry { names: [0xfd54_0280_69aa_135b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_MC_NL }),
+    ("ndr9500-nl", Entry { names: [0xf954_0280_69aa_131b, 0x8010_0203_fff0_0041, 0x0000_0001_0607_8400, 0x0000_0000_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_NDR9500_25_NL }),
+    ("netbsd6", Entry { names: [0xf1e4_07c0_dbfe_b3db, 0x8010_0200_f9f8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_NETBSD6 }),
+    ("newhp", Entry { names: [0xfd40_0280_692a_00db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NEWHP }),
+    ("newhpkeyboard", Entry { names: [0xf800_0000_0000_000a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0000_2000_8000], off: &["am", "bce"], colours: None, strings: STRINGS_NEWHPKEYBOARD }),
+    ("news", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news-29", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-29-euc", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-29-sjis", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-33", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-33-euc", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-33-sjis", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-42", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-42-euc", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-42-sjis", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news-old-unk", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news-unk", Entry { names: [0xf0c4_0280_c1aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NEWS_29 }),
+    ("news28", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news28-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news29", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news31", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news31-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news31-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news33", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news40", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news40-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news40-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("news42", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("newscbm", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("newscbm-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("newscbm-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("newscbm33", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("next", Entry { names: [0x3104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_NEXT }),
+    ("nextshell", Entry { names: [0x3000_0000_000a_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_9TERM }),
+    ("no+brackets", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("northstar", Entry { names: [0x0004_0280_0080_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NORTHSTAR }),
+    ("nsterm", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f280], off: &[], colours: Some(256), strings: STRINGS_APPLE_TERMINAL }),
+    ("nsterm+7", Entry { names: [0xf5c4_0380_e3fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm+acs", Entry { names: [0xf5c4_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm+c", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(16), strings: STRINGS_9TERM }),
+    ("nsterm+c41", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("nsterm+mac", Entry { names: [0xf5c4_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm+s", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NSTERM_S }),
+    ("nsterm-16color", Entry { names: [0xf5fd_0780_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0401_0220_0207_8400, 0x0000_0502_ba03_f280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_16COLOR }),
+    ("nsterm-256color", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f280], off: &[], colours: Some(256), strings: STRINGS_APPLE_TERMINAL }),
+    ("nsterm-7", Entry { names: [0xf5c4_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-7-c", Entry { names: [0xf5c4_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-7-c-s", Entry { names: [0xf5c5_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a203_9280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-7-m", Entry { names: [0xf5c4_0380_e3fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm-7-m-s", Entry { names: [0xf5c5_0380_e3fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-7-s", Entry { names: [0xf5c5_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a203_9280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-acs", Entry { names: [0xf5c4_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-acs-c", Entry { names: [0xf5c4_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-acs-c-s", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-acs-m", Entry { names: [0xf5c4_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm-acs-m-s", Entry { names: [0xf5c5_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-acs-s", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-bce", Entry { names: [0xf5fd_0780_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0401_0220_0207_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(16), strings: STRINGS_NSTERM_16COLOR }),
+    ("nsterm-build309", Entry { names: [0xf5fd_0780_fbfe_b3db, 0x8010_0200_fff8_0040, 0x0401_0220_0207_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_NSTERM_16COLOR }),
+    ("nsterm-build326", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_022c_0207_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_NSTERM_BUILD326 }),
+    ("nsterm-build343", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_022c_0207_8400, 0x0000_0502_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_ITERM_APP }),
+    ("nsterm-build361", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_ba03_f280], off: &[], colours: Some(256), strings: STRINGS_ITERM_APP }),
+    ("nsterm-build400", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f280], off: &[], colours: Some(256), strings: STRINGS_ITERM_APP }),
+    ("nsterm-build440", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f280], off: &[], colours: Some(256), strings: STRINGS_APPLE_TERMINAL }),
+    ("nsterm-c", Entry { names: [0xf5c4_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-c-7", Entry { names: [0xf5c4_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-c-acs", Entry { names: [0xf5c4_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-c-s", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-c-s-7", Entry { names: [0xf5c5_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a203_9280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-c-s-acs", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(16), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-direct", Entry { names: [0xfdfd_0780_fbfe_b3db, 0x8010_0200_fff8_0049, 0x0581_032c_0207_8400, 0x0000_0d02_be03_f680], off: &[], colours: Some(16_777_216), strings: STRINGS_APPLE_TERMINAL }),
+    ("nsterm-m", Entry { names: [0xf5c4_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm-m-7", Entry { names: [0xf5c4_0380_e3fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm-m-acs", Entry { names: [0xf5c4_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7 }),
+    ("nsterm-m-s", Entry { names: [0xf5c5_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-m-s-7", Entry { names: [0xf5c5_0380_e3fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a200_9200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-m-s-acs", Entry { names: [0xf5c5_0780_e3fe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-old", Entry { names: [0xf5c4_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7 }),
+    ("nsterm-s", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-s-7", Entry { names: [0xf5c5_0380_e3fe_a2da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_a203_9280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7_C_S }),
+    ("nsterm-s-acs", Entry { names: [0xf5c5_0780_e3fe_a2db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0102_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_NSTERM_7_C_S }),
+    ("ntconsole", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-100", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-100-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("ntconsole-25", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-25-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("ntconsole-25-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-25-w-vt", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-35", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-35-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("ntconsole-35-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-50", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-50-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("ntconsole-50-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-60", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-60-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("ntconsole-60-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("ntconsole-w-vt", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("nwe501", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwe501-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwe501-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp-511", Entry { names: [0xf040_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0200_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_NWP_511 }),
+    ("nwp-517", Entry { names: [0xf1e5_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NWP_517 }),
+    ("nwp-517-w", Entry { names: [0xf1e5_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NWP_517 }),
+    ("nwp251-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp251-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp511", Entry { names: [0xf040_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0200_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_NWP_511 }),
+    ("nwp512", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp512-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp512-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp513", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp513-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp513-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp514", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp514-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp514-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp517", Entry { names: [0xf1e5_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NWP_517 }),
+    ("nwp517-w", Entry { names: [0xf1e5_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_NWP_517 }),
+    ("nwp518", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp518-a", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nwp518-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("nxterm", Entry { names: [0xf1c4_0680_dbfe_a29b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_NXTERM }),
+    ("o31", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADM31_OLD }),
+    ("o4112-nd", Entry { names: [0x0100_0000_010a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_O4112_ND }),
+    ("o85h", Entry { names: [0xf040_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ABM85 }),
+    ("oabm85h", Entry { names: [0xf040_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ABM85 }),
+    ("oblit", Entry { names: [0x01c0_0280_c9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("oc100", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("oconcept", Entry { names: [0xfd40_0280_69aa_025a, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0002_b200_c200], off: &["bce"], colours: None, strings: STRINGS_C100 }),
+    ("ojerq", Entry { names: [0x01c0_0280_c9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("old-st", Entry { names: [0xf3ec_0280_cbfa_b39b, 0x8010_0200_4078_0040, 0x0001_0200_0207_8400, 0x0000_0002_8a03_2a80], off: &["bce"], colours: Some(8), strings: STRINGS_OLD_ST }),
+    ("oldibmpc3", Entry { names: [0xf140_0000_6008_009a, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0000_0200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_OLDIBMPC3 }),
+    ("oldpc3", Entry { names: [0xf140_0000_6008_009a, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0000_0200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_OLDIBMPC3 }),
+    ("oldsun", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_OLDSUN }),
+    ("oldxterm+sm+1006", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("omron", Entry { names: [0x0144_0280_4d2a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_OMRON }),
+    ("opennt", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-100", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-100-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-25", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-25-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-25-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-25-w-vt", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-35", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-35-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-35-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-50", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-50-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-50-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-60", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-60-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-60-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-nti", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX_NTI }),
+    ("opennt-w", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opennt-w-vt", Entry { names: [0xfbc4_0280_c3fe_229b, 0xffff_ffff_fff8_0040, 0x2081_0207_0207_8fff, 0x0000_0002_9203_5a80], off: &[], colours: Some(8), strings: STRINGS_INTERIX }),
+    ("opus3n1+", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f8_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_OPUS3N1_ }),
+    ("origibmpc3", Entry { names: [0xf104_0280_01aa_028b, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_ORIGIBMPC3 }),
+    ("origpc3", Entry { names: [0xf104_0280_01aa_028b, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_ORIGIBMPC3 }),
+    ("os9LII", Entry { names: [0xf044_0280_41aa_13da, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_COCO3 }),
+    ("osborne", Entry { names: [0xf040_0200_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_OSBORNE }),
+    ("osborne-w", Entry { names: [0xf150_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_OSBORNE_W }),
+    ("osborne1", Entry { names: [0xf040_0200_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_OSBORNE }),
+    ("osborne1-w", Entry { names: [0xf150_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_OSBORNE_W }),
+    ("osexec", Entry { names: [0xf054_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_OSEXEC }),
+    ("otek4112", Entry { names: [0x0100_0000_010a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_O4112_ND }),
+    ("otek4113", Entry { names: [0x0100_0000_010a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_O4112_ND }),
+    ("otek4114", Entry { names: [0x0100_0000_010a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_O4112_ND }),
+    ("otek4115", Entry { names: [0x0044_0280_4daa_120a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_b200_d000], off: &["bce"], colours: None, strings: STRINGS_OTEK4115 }),
+    ("owl", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_OWL }),
+    ("p12", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("p12-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("p14", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("p14-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("p19", Entry { names: [0xf145_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("p8gl", Entry { names: [0xf504_0280_69aa_025a, 0x8010_0200_4fd0_0040, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_P8GL }),
+    ("p9", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("p9-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("pangoterm", Entry { names: [0xfbec_03c0_dffe_b39f, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_PANGOTERM }),
+    ("pangoterm-256color", Entry { names: [0xfbec_03c0_dffe_b39f, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_PANGOTERM }),
+    ("pangoterm-direct", Entry { names: [0xfbec_03c0_dffe_b39f, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_PANGOTERM }),
+    ("pc-coherent", Entry { names: [0xf104_0280_09aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_COHERENT }),
+    ("pc-minix", Entry { names: [0xf1f4_0380_dbfe_22df, 0x8010_0200_4000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8a03_3280], off: &["bce"], colours: Some(8), strings: STRINGS_MINIX_1_5 }),
+    ("pc-venix", Entry { names: [0xf140_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_PC_VENIX }),
+    ("pc3", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("pc3-bold", Entry { names: [0xf5c4_0280_c3fe_22db, 0x0000_0000_0000_0000, 0x0001_0201_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_PC }),
+    ("pc3r", Entry { names: [0xfbfc_02c0_fffe_32db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_ANSI80X25 }),
+    ("pc3r-m", Entry { names: [0xfbfc_02c0_fffe_12db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8200_1a00], off: &[], colours: None, strings: STRINGS_ANSI80X25 }),
+    ("pc6300plus", Entry { names: [0xf554_0280_69aa_13da, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_PC6300PLUS }),
+    ("pc7300", Entry { names: [0xfdd4_0280_ebfe_13da, 0x8010_0200_4008_2041, 0x2083_0607_060b_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_3B1 }),
+    ("pcansi", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-25", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-25-m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-33", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-33-m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-43", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-43-m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi-mono", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi25", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi25m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi33", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi33m", Entry { names: [0xf544_0280_49aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("pcansi43", Entry { names: [0xf544_0280_49aa_22db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_ANSI_GENERIC }),
+    ("pccon", Entry { names: [0xf1f4_07c0_dbfe_b39b, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_PCCON }),
+    ("pccon+base", Entry { names: [0x01f4_03c0_dbfe_821a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_0000_1000], off: &["bce"], colours: None, strings: STRINGS_PCCON_BASE }),
+    ("pccon+colors", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("pccon+keys", Entry { names: [0xf000_0000_0000_000a, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PCCON_KEYS }),
+    ("pccon+sgr+acs", Entry { names: [0x0000_0400_0000_008b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8a00_2200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("pccon+sgr+acs0", Entry { names: [0x0000_0000_0000_008b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_ANSI_SGRBOLD }),
+    ("pccon-m", Entry { names: [0xf1f4_07c0_dbfe_939b, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_PCCON }),
+    ("pccon0", Entry { names: [0xf1f4_03c0_dbfe_a29b, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_1280], off: &[], colours: Some(8), strings: STRINGS_PCCON0 }),
+    ("pccon0-m", Entry { names: [0xf1f4_03c0_dbfe_829b, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_PCCON0 }),
+    ("pccons", Entry { names: [0xf054_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_IMS_ANSI }),
+    ("pcconsole", Entry { names: [0xf054_0200_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_IMS_ANSI }),
+    ("pcix", Entry { names: [0x0004_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_PCIX }),
+    ("pckermit", Entry { names: [0xf004_0000_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PCKERMIT }),
+    ("pckermit12", Entry { names: [0xf004_0000_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PCKERMIT }),
+    ("pckermit120", Entry { names: [0xf044_0280_4daa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PCKERMIT120 }),
+    ("pcmw", Entry { names: [0xf104_0280_01aa_02da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_PCMW }),
+    ("pcplot", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("pcvt25", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt25-color", Entry { names: [0xf3e4_0380_dbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_ba80], off: &["bce"], colours: Some(8), strings: STRINGS_PCVT25_COLOR }),
+    ("pcvt25w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt28", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt28w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt35", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt35w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt40", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt40w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt43", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt43w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt50", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvt50w", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcvtXX", Entry { names: [0xf3e4_0380_dbfe_93db, 0x8010_0200_4000_0040, 0x0001_0201_0203_8400, 0x0000_0002_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_PCVT25 }),
+    ("pcz19", Entry { names: [0xf104_0280_09aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_1000], off: &["bce"], colours: None, strings: STRINGS_COHERENT }),
+    ("pe1100", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("pe1200", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_OWL }),
+    ("pe1251", Entry { names: [0x0104_0280_01aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PE1251 }),
+    ("pe550", Entry { names: [0x0104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_BANTAM }),
+    ("pe6100", Entry { names: [0x0104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_BANTAM }),
+    ("pe6300", Entry { names: [0x0104_0280_01aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PE1251 }),
+    ("pe6312", Entry { names: [0x0104_0280_01aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PE1251 }),
+    ("pe7000c", Entry { names: [0xf104_0280_01aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_PE7000C }),
+    ("pe7000m", Entry { names: [0xf104_0280_01aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_PE7000M }),
+    ("pilot", Entry { names: [0x3104_0000_008a_021a, 0x0000_0000_0000_0000, 0x0001_0200_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_PILOT }),
+    ("pmcons", Entry { names: [0xf100_0000_010a_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PMCONS }),
+    ("pmconsole", Entry { names: [0xf100_0000_010a_021a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PMCONS }),
+    ("prism12", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("prism12-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("prism14", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("prism14-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("prism2", Entry { names: [0x010c_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0400_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PRISM2 }),
+    ("prism8gl", Entry { names: [0xf504_0280_69aa_025a, 0x8010_0200_4fd0_0040, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_P8GL }),
+    ("prism9", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("prism9-w", Entry { names: [0xf1cd_02c0_dbfe_93da, 0x8010_0200_5ff0_0000, 0x0000_0000_0207_8400, 0x0000_0502_8200_1200], off: &["bce"], colours: None, strings: STRINGS_P12 }),
+    ("pro350", Entry { names: [0xf004_0280_01aa_020b, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0002_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_DECPRO }),
+    ("ps300", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0a00_3200], off: &["bce"], colours: None, strings: STRINGS_ANSI_MINI }),
+    ("psterm", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM }),
+    ("psterm-80x24", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM }),
+    ("psterm-90x28", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM }),
+    ("psterm-96x48", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM }),
+    ("psterm-basic", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM }),
+    ("psterm-fast", Entry { names: [0xf145_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_PSTERM_FAST }),
+    ("psx_ansi", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_ANSI_NT }),
+    ("pt100", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("pt100w", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("pt200", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("pt200w", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("pt250", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_3200_c000], off: &["bce"], colours: None, strings: STRINGS_PT250 }),
+    ("pt250w", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_3200_c000], off: &["bce"], colours: None, strings: STRINGS_PT250 }),
+    ("pt505", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("pt505-22", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("pt505-24", Entry { names: [0xf1c4_0380_dffe_12db, 0x8010_022f_f000_0000, 0x0000_0000_0000_8400, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_ATT505 }),
+    ("pty", Entry { names: [0xf150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_PTY }),
+    ("putty", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0040, 0x2001_0303_0207_8400, 0x0000_0f02_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_PUTTY }),
+    ("putty+cursor", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0400, 0x0400_0020_0000_0000, 0x0000_0000_0000_0002], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("putty+fnkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("putty+fnkeys+esc", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("putty+fnkeys+linux", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_LINUX }),
+    ("putty+fnkeys+sco", Entry { names: [0xf000_0000_0000_000a, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_SCO }),
+    ("putty+fnkeys+vt100", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_VT100 }),
+    ("putty+fnkeys+vt400", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("putty+fnkeys+xterm", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_XTERM }),
+    ("putty+keypad", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("putty+screen", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("putty-256color", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0040, 0x2001_0303_0207_8400, 0x0000_0f02_ba03_fa80], off: &[], colours: Some(256), strings: STRINGS_PUTTY }),
+    ("putty-m1", Entry { names: [0xfbcd_07e0_d9aa_b3db, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0502_9a03_7a80], off: &["bce"], colours: Some(8), strings: STRINGS_PUTTY_M1 }),
+    ("putty-m1b", Entry { names: [0xfbcd_03e0_d9aa_93da, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0502_9203_5a00], off: &["bce"], colours: None, strings: STRINGS_PUTTY_M1 }),
+    ("putty-m2", Entry { names: [0xfbcd_07e0_ddaa_93db, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0502_9a03_7a00], off: &["bce"], colours: None, strings: STRINGS_PUTTY_M2 }),
+    ("putty-noapp", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0440, 0x2481_0327_0207_8400, 0x0000_0f06_ba03_fa82], off: &[], colours: Some(8), strings: STRINGS_PUTTY_NOAPP }),
+    ("putty-sco", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0xbfff_ffff_fff8_0440, 0x2401_0323_0207_8400, 0x0000_0f06_ba03_fa82], off: &[], colours: Some(8), strings: STRINGS_PUTTY_SCO }),
+    ("putty-screen", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0440, 0x2401_0323_0207_8400, 0x0000_0f06_ba03_fa82], off: &[], colours: Some(8), strings: STRINGS_PUTTY_SCREEN }),
+    ("putty-vt100", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0440, 0x2401_0323_0207_8400, 0x0000_0f06_ba03_fa82], off: &[], colours: Some(8), strings: STRINGS_PUTTY_VT100 }),
+    ("qansi", Entry { names: [0xfffd_03c0_fffe_b3db, 0xbfff_ffff_fff8_0040, 0x2083_0607_020f_8400, 0x0000_0102_8a00_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_QANSI }),
+    ("qansi-g", Entry { names: [0xfffd_03c0_fffe_b3db, 0xbfff_ffff_fff8_0040, 0x2083_0607_020f_8400, 0x0000_0102_8a00_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_QANSI }),
+    ("qansi-m", Entry { names: [0xfffd_03c0_fffe_b3db, 0xbfff_ffff_fff8_0040, 0x2083_0607_020f_8400, 0x0000_0102_8a00_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_QANSI }),
+    ("qansi-t", Entry { names: [0xfffd_03c0_fffe_b3db, 0xbfff_ffff_fff8_0040, 0x2083_0607_020f_8400, 0x0000_0102_8a00_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_QANSI }),
+    ("qansi-w", Entry { names: [0xfffd_03c0_fffe_b3db, 0xbfff_ffff_fff8_0040, 0x2083_0607_020f_8400, 0x0000_0102_8a00_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_QANSI }),
+    ("qdcons", Entry { names: [0x0000_0000_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("qdss", Entry { names: [0x0000_0000_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("qvt101", Entry { names: [0xf955_0280_49aa_121a, 0x8010_0200_4010_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_QVT101 }),
+    ("qvt101+", Entry { names: [0xf955_0280_49aa_121a, 0x8010_0200_4010_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_QVT101 }),
+    ("qvt101p", Entry { names: [0xf955_0280_49aa_121a, 0x8010_0200_4010_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_QVT101 }),
+    ("qvt102", Entry { names: [0xf955_0280_49aa_121a, 0x8010_0200_4010_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_QVT102 }),
+    ("qvt103", Entry { names: [0xf104_0280_03fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT103 }),
+    ("qvt103-w", Entry { names: [0xf104_0280_03fe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT103 }),
+    ("qvt108", Entry { names: [0xf955_0280_49aa_121a, 0x8010_0200_4010_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_0200], off: &["bce"], colours: None, strings: STRINGS_QVT101 }),
+    ("qvt119", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119+", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119+-25", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119+-25-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119+-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119-25-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119p", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119p-25", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119p-25-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt119p-w", Entry { names: [0xf545_0280_4daa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_QVT119 }),
+    ("qvt203", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("qvt203+", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("qvt203-25", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("qvt203-25-w", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("qvt203-w", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("qvt203-w-am", Entry { names: [0xf144_0280_4bfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT203 }),
+    ("rbcomm", Entry { names: [0xf5c0_02c0_c9aa_93da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_d200], off: &["bce"], colours: None, strings: STRINGS_RBCOMM }),
+    ("rbcomm-nam", Entry { names: [0xf5c0_02c0_c9aa_93da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_d200], off: &["am", "bce"], colours: None, strings: STRINGS_RBCOMM_NAM }),
+    ("rbcomm-w", Entry { names: [0xf5c0_02c0_c9aa_93da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_d200], off: &["bce"], colours: None, strings: STRINGS_RBCOMM_NAM }),
+    ("rca", Entry { names: [0x0004_0000_01a0_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_RCA }),
+    ("rcons", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("rcons-color", Entry { names: [0xf1f0_0280_d9aa_221a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8203_0280], off: &[], colours: Some(8), strings: STRINGS_BSDOS_SPARC }),
+    ("rebus3180", Entry { names: [0xf104_0280_01aa_82ca, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_DDR }),
+    ("regent", Entry { names: [0x0104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("regent100", Entry { names: [0x0104_0000_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_REGENT100 }),
+    ("regent20", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("regent200", Entry { names: [0xf944_0280_49aa_021b, 0x8010_0200_4000_0040, 0x0000_0001_0203_8400, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_ADDS200 }),
+    ("regent25", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_PRISM2 }),
+    ("regent40", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVP60 }),
+    ("regent40+", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVP60 }),
+    ("regent60", Entry { names: [0xf944_0280_49aa_021b, 0x8010_0200_4000_0040, 0x0000_0001_0203_8400, 0x0000_0002_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_ADDS200 }),
+    ("report+da2", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("report+version", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("rio", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be83_fa9f], off: &[], colours: Some(256), strings: STRINGS_ALACRITTY }),
+    ("rio-direct", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d17_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_ALACRITTY }),
+    ("rlogin-color", Entry { names: [0xffec_03c0_fbfe_b3db, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0406_be03_fa80], off: &[], colours: Some(256), strings: STRINGS_RLOGIN_COLOR }),
+    ("rt6221", Entry { names: [0xf104_0280_07fe_93db, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_RT6221 }),
+    ("rt6221-w", Entry { names: [0xf104_0280_07fe_93db, 0x0010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_RT6221 }),
+    ("rxvt", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("rxvt+pcfkeys", Entry { names: [0xf000_0000_0000_000a, 0x83ff_ffff_fffb_24d9, 0x64b3_6627_66cf_8400, 0x0000_0000_0000_0002], off: &["am", "bce"], colours: None, strings: STRINGS_PCCON_KEYS }),
+    ("rxvt-16color", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(16), strings: STRINGS_MRXVT }),
+    ("rxvt-256color", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(256), strings: STRINGS_MRXVT }),
+    ("rxvt-88color", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(88), strings: STRINGS_MRXVT }),
+    ("rxvt-basic", Entry { names: [0xf9e4_0780_c3fe_93db, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0802_ba00_f202], off: &[], colours: None, strings: STRINGS_MRXVT }),
+    ("rxvt-color", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("rxvt-cygwin", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("rxvt-cygwin-native", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("rxvt-unicode", Entry { names: [0xfbfd_07c0_dffe_b3db, 0x8010_0200_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0502_be03_fa80], off: &[], colours: Some(88), strings: STRINGS_RXVT_UNICODE }),
+    ("rxvt-unicode-256color", Entry { names: [0xfbfd_07c0_dffe_b3db, 0x8010_0200_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0502_be03_fa80], off: &[], colours: Some(256), strings: STRINGS_RXVT_UNICODE }),
+    ("rxvt-xpm", Entry { names: [0xf9ec_0780_c3fe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_MRXVT }),
+    ("s4", Entry { names: [0xfdd4_0280_ebfe_13da, 0x8010_0200_4008_2041, 0x2083_0607_060b_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_3B1 }),
+    ("sb1", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0001_0207_8400, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SB1 }),
+    ("sb2", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0001_0207_8400, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SB1 }),
+    ("sb3", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0001_0207_8400, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SB1 }),
+    ("sbi", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0001_0207_8400, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SB1 }),
+    ("sbobcat", Entry { names: [0xf148_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_a200_8000], off: &["bce"], colours: None, strings: STRINGS_BOBCAT }),
+    ("sc410", Entry { names: [0xf104_0280_01aa_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("sc415", Entry { names: [0xf104_0280_01aa_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("scanset", Entry { names: [0xf104_0280_01aa_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("sclp", Entry { names: [0xf128_07c0_dbfe_225b, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a03_3280], off: &["am", "bce"], colours: Some(8), strings: STRINGS_SCLP }),
+    ("scoansi", Entry { names: [0xfff4_0380_dffe_33db, 0xbfff_ffff_fef8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3a80], off: &[], colours: Some(8), strings: STRINGS_SCOANSI }),
+    ("scoansi-new", Entry { names: [0xfff4_0380_dffe_b3db, 0xbfff_ffff_fef8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3a80], off: &[], colours: Some(8), strings: STRINGS_SCOANSI_NEW }),
+    ("scoansi-old", Entry { names: [0xfff4_0380_dffe_33db, 0xbfff_ffff_fef8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3a80], off: &[], colours: Some(8), strings: STRINGS_SCOANSI }),
+    ("screen", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen+fkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_SCREEN_FKEYS }),
+    ("screen+italics", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("screen-16color", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(16), strings: STRINGS_SCREEN }),
+    ("screen-16color-bce", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &[], colours: Some(16), strings: STRINGS_SCREEN }),
+    ("screen-16color-bce-s", Entry { names: [0xfbed_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0702_ba03_fa80], off: &[], colours: Some(16), strings: STRINGS_SCREEN_16COLOR_BCE_S }),
+    ("screen-16color-s", Entry { names: [0xfbed_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0702_ba03_fa80], off: &["bce"], colours: Some(16), strings: STRINGS_SCREEN_16COLOR_BCE_S }),
+    ("screen-256color", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN }),
+    ("screen-256color-bce", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &[], colours: Some(256), strings: STRINGS_SCREEN }),
+    ("screen-256color-bce-s", Entry { names: [0xfbed_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0702_ba03_fa80], off: &[], colours: Some(256), strings: STRINGS_SCREEN_16COLOR_BCE_S }),
+    ("screen-256color-s", Entry { names: [0xfbed_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0702_ba03_fa80], off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN_16COLOR_BCE_S }),
+    ("screen-base", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen-bce", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen-bce.Eterm", Entry { names: [0xf1ec_0780_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_ETERM }),
+    ("screen-bce.gnome", Entry { names: [0xfdcc_0680_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_GNOME }),
+    ("screen-bce.konsole", Entry { names: [0xffcc_0680_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_ba03_fa8f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_GNOME }),
+    ("screen-bce.linux", Entry { names: [0xf3ec_0780_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_LINUX }),
+    ("screen-bce.mrxvt", Entry { names: [0xf9ec_0780_c3fe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_MRXVT }),
+    ("screen-bce.rxvt", Entry { names: [0xfbec_0780_fbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0e02_ba03_fa82], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_RXVT }),
+    ("screen-bce.xterm-new", Entry { names: [0xfbec_0380_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xfffd_fbff_fbff_ffff, 0x0000_0c16_ba83_fa9f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_XTERM_NEW }),
+    ("screen-s", Entry { names: [0xfbed_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0702_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_16COLOR_BCE_S }),
+    ("screen-w", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.Eterm", Entry { names: [0xf1ec_07c0_dbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b1_6327_66cf_8400, 0x0000_0c02_ba03_f282], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_ETERM }),
+    ("screen.gnome", Entry { names: [0xfdcc_06c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_GNOME }),
+    ("screen.konsole", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_ba03_fa8f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_GNOME }),
+    ("screen.konsole-256color", Entry { names: [0xffcc_06c0_fbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_ba03_fa8f], off: &[], colours: Some(256), strings: STRINGS_SCREEN_BCE_GNOME }),
+    ("screen.linux", Entry { names: [0xf3ec_0780_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_BCE_LINUX }),
+    ("screen.linux-m1", Entry { names: [0xfbec_07a0_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0600_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_LINUX_M1 }),
+    ("screen.linux-m1b", Entry { names: [0xfbec_07a0_fffe_93df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0600_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN_LINUX_M1 }),
+    ("screen.linux-m2", Entry { names: [0xfbec_07a0_fffe_93df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0600_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN_LINUX_M1 }),
+    ("screen.linux-s", Entry { names: [0xf3ec_0780_fffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_BCE_LINUX }),
+    ("screen.minitel1", Entry { names: [0xfbec_0780_fffe_335f, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0600_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.minitel1-nb", Entry { names: [0xfbec_0780_fffe_13df, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0600_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.minitel12-80", Entry { names: [0xfbec_0780_fffe_13df, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0602_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.minitel1b", Entry { names: [0xfbec_0780_fffe_335f, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0600_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.minitel1b-80", Entry { names: [0xfbec_0780_fffe_13df, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0602_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.minitel1b-nb", Entry { names: [0xfbec_0780_fffe_13df, 0x8010_020f_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0600_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.minitel2-80", Entry { names: [0xfbec_0780_fffe_13df, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0602_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.mlterm", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_MLTERM }),
+    ("screen.mlterm-256color", Entry { names: [0xffec_07c0_dbfe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_SCREEN_MLTERM }),
+    ("screen.mrxvt", Entry { names: [0xf9ec_0780_c3fe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_BCE_MRXVT }),
+    ("screen.putty", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0040, 0x2001_0303_0207_8400, 0x0000_0f02_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_SCREEN_PUTTY }),
+    ("screen.putty-256color", Entry { names: [0xfbcd_07e0_dbfe_b3db, 0x8010_0200_fff8_0040, 0x2001_0303_0207_8400, 0x0000_0f02_ba03_fa80], off: &[], colours: Some(256), strings: STRINGS_SCREEN_PUTTY }),
+    ("screen.putty-m1", Entry { names: [0xfbec_0780_dffe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.putty-m1b", Entry { names: [0xfbec_0780_dffe_93df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.putty-m2", Entry { names: [0xfbec_0780_dffe_93df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba00_fa00], off: &["bce"], colours: None, strings: STRINGS_SCREEN }),
+    ("screen.rxvt", Entry { names: [0xfbec_0780_fbfe_b3df, 0x83ff_ffff_fffb_24d9, 0x64b3_6727_66cf_8400, 0x0000_0e02_ba03_fa82], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_BCE_RXVT }),
+    ("screen.teraterm", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.vte", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c07_fa03_fa8f], off: &[], colours: Some(8), strings: STRINGS_SCREEN_VTE }),
+    ("screen.vte-256color", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c07_fa03_fa8f], off: &[], colours: Some(256), strings: STRINGS_SCREEN_VTE }),
+    ("screen.xterm-256color", Entry { names: [0xfbec_03c0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xfffd_fbff_fbff_ffff, 0x0000_0c16_ba83_fa9f], off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN_BCE_XTERM_NEW }),
+    ("screen.xterm-new", Entry { names: [0xfbec_03c0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xfffd_fbff_fbff_ffff, 0x0000_0c16_ba83_fa9f], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_BCE_XTERM_NEW }),
+    ("screen.xterm-r6", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_SCREEN_XTERM_R6 }),
+    ("screen.xterm-xfree86", Entry { names: [0xfbec_03c0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xfffd_fbff_fbff_ffff, 0x0000_0c16_ba83_fa9f], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_BCE_XTERM_NEW }),
+    ("screen2", Entry { names: [0xf1f0_0280_dbfe_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_1000], off: &["am", "bce"], colours: None, strings: STRINGS_SCREEN2 }),
+    ("screen3", Entry { names: [0xf1e4_0280_dbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["am", "bce"], colours: None, strings: STRINGS_SCREEN3 }),
+    ("screen4", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_ba03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen5", Entry { names: [0xfbec_0780_fffe_b3df, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0602_be03_fa80], off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN5 }),
+    ("screwpoint", Entry { names: [0xf100_0280_41aa_121a, 0x8010_0200_0000_0000, 0x0000_0000_0200_0400, 0x0000_0000_0200_0000], off: &["bce"], colours: None, strings: STRINGS_SCREWPOINT }),
+    ("scrhp", Entry { names: [0xfd4c_0280_6bfe_02db, 0x8010_0200_4000_0040, 0x2001_0203_0203_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_HP150 }),
+    ("scrt", Entry { names: [0xffec_03e0_fbfe_b3cf, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_fa8f], off: &["bce"], colours: Some(256), strings: STRINGS_SCRT }),
+    ("securecrt", Entry { names: [0xffec_03e0_fbfe_b3cf, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_fa8f], off: &["bce"], colours: Some(256), strings: STRINGS_SCRT }),
+    ("sibo", Entry { names: [0x3104_0200_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ELKS }),
+    ("simpleterm", Entry { names: [0xf3ec_0280_cbfa_b39b, 0x8010_0200_4078_0040, 0x0001_0200_0207_8400, 0x0000_0002_8a03_2a80], off: &["bce"], colours: Some(8), strings: STRINGS_OLD_ST }),
+    ("simterm", Entry { names: [0x0144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SIMTERM }),
+    ("soroc", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_SOROC }),
+    ("soroc120", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_SOROC }),
+    ("soroc140", Entry { names: [0xc144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_IQ140 }),
+    ("st", Entry { names: [0xf7ed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(8), strings: STRINGS_ST }),
+    ("st-0.6", Entry { names: [0xffed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2041, 0x2083_0707_060f_ffff, 0x0000_0d16_be83_fa80], off: &[], colours: Some(8), strings: STRINGS_ST_0_6 }),
+    ("st-0.7", Entry { names: [0xf7ed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(8), strings: STRINGS_ST }),
+    ("st-0.8", Entry { names: [0xf7ed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(8), strings: STRINGS_ST }),
+    ("st-0.8.5", Entry { names: [0xf7ed_07c0_fbff_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(8), strings: STRINGS_ST_0_8_5 }),
+    ("st-16color", Entry { names: [0xf7ed_07c0_fbff_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(16), strings: STRINGS_ST_0_8_5 }),
+    ("st-256color", Entry { names: [0xf7ed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(256), strings: STRINGS_ST }),
+    ("st-direct", Entry { names: [0xf7ed_07c0_fbfe_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fe92], off: &[], colours: Some(16_777_216), strings: STRINGS_ST }),
+    ("st52", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("st52-color", Entry { names: [0xf144_0380_41aa_331a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8203_1200], off: &[], colours: Some(16), strings: STRINGS_AT }),
+    ("st52-m", Entry { names: [0xf144_0380_41aa_131a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8200_1200], off: &["bce"], colours: None, strings: STRINGS_AT }),
+    ("st52-old", Entry { names: [0xf144_0280_41aa_131a, 0x8010_0200_4000_0000, 0x2000_0002_0207_8400, 0x0000_0000_9200_5000], off: &["bce"], colours: None, strings: STRINGS_ST52_OLD }),
+    ("stterm", Entry { names: [0xf7ed_07c0_fbff_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(8), strings: STRINGS_ST_0_8_5 }),
+    ("stterm-16color", Entry { names: [0xf7ed_07c0_fbff_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(16), strings: STRINGS_ST_0_8_5 }),
+    ("stterm-256color", Entry { names: [0xf7ed_07c0_fbff_b3db, 0xffff_ffff_fff8_2541, 0xa597_2f2f_060f_ffff, 0x0000_0d16_be83_fa92], off: &[], colours: Some(256), strings: STRINGS_ST_0_8_5 }),
+    ("stv52", Entry { names: [0xf144_0280_65aa_13da, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0002_9200_5280], off: &["bce"], colours: None, strings: STRINGS_STV52 }),
+    ("stv52pc", Entry { names: [0xf144_0280_65aa_13db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0002_9200_5200], off: &["bce"], colours: None, strings: STRINGS_STV52 }),
+    ("sun", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_SUN_SL }),
+    ("sun-1", Entry { names: [0xf1f1_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0100_8200_0200], off: &["bce"], colours: None, strings: STRINGS_SUN_1 }),
+    ("sun-12", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-16color", Entry { names: [0xf3fc_0280_fbfe_33da, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8203_0a80], off: &["bce"], colours: Some(16), strings: STRINGS_ILLUMOS }),
+    ("sun-17", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-24", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-256color", Entry { names: [0xf3fc_0280_fbfe_33da, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8203_0a80], off: &["bce"], colours: Some(256), strings: STRINGS_ILLUMOS }),
+    ("sun-34", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-48", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-c", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_9200_4200], off: &["bce"], colours: None, strings: STRINGS_SUN_C }),
+    ("sun-cgsix", Entry { names: [0xf130_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-cmd", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_9200_4200], off: &["bce"], colours: None, strings: STRINGS_SUN_C }),
+    ("sun-color", Entry { names: [0xf3fc_0280_dbfe_229a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_0a80], off: &["bce"], colours: Some(8), strings: STRINGS_BSDOS_SPARC }),
+    ("sun-direct", Entry { names: [0xf3fc_0280_fbfe_33da, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0402_8203_0e80], off: &["bce"], colours: Some(16_777_216), strings: STRINGS_ILLUMOS }),
+    ("sun-e", Entry { names: [0xf1e0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-e-s", Entry { names: [0xf1e1_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0100_8200_0200], off: &["bce"], colours: None, strings: STRINGS_SUN_E_S }),
+    ("sun-il", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-nic", Entry { names: [0xf1e0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-s", Entry { names: [0xf1f1_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0100_8200_0200], off: &["bce"], colours: None, strings: STRINGS_SUN_E_S }),
+    ("sun-s-e", Entry { names: [0xf1e1_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0100_8200_0200], off: &["bce"], colours: None, strings: STRINGS_SUN_E_S }),
+    ("sun-ss5", Entry { names: [0xf130_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun-type4", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun1", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sun2", Entry { names: [0xf1f0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("sune", Entry { names: [0xf1e0_0280_d9aa_021a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_BSDOS_SPARC }),
+    ("superbee", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0001_0207_8400, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_SB1 }),
+    ("superbrain", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_SUPERBRAIN }),
+    ("sv80", Entry { names: [0xf9e4_0380_dbfe_021a, 0x8010_0200_47f0_0040, 0x0000_0001_0207_8400, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ATT2300 }),
+    ("swtp", Entry { names: [0x0154_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_CT82 }),
+    ("synertek", Entry { names: [0x0000_0280_01a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("synertek380", Entry { names: [0x0000_0280_01a2_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_CAD68_3 }),
+    ("system1", Entry { names: [0x0104_0000_01a2_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("t10", Entry { names: [0x0154_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_T10 }),
+    ("t1061", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_T1061 }),
+    ("t1061f", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_T1061 }),
+    ("t16", Entry { names: [0x0144_0280_49aa_021a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_9200_5000], off: &["bce"], colours: None, strings: STRINGS_T16 }),
+    ("t3700", Entry { names: [0x0100_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("t3800", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("t653x", Entry { names: [0x0105_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_8200_1000], off: &["bce"], colours: None, strings: STRINGS_T653X }),
+    ("tab", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tab132", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tab132-15", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tab132-rv", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tab132-w", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tab132-w-rv", Entry { names: [0xf144_0780_4bfe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("tandem6510", Entry { names: [0xf104_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("tandem653", Entry { names: [0x0105_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_8200_1000], off: &["bce"], colours: None, strings: STRINGS_T653X }),
+    ("tek", Entry { names: [0x0000_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4012", Entry { names: [0x0000_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4013", Entry { names: [0x0000_0000_000a_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4014", Entry { names: [0x0000_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4014-sm", Entry { names: [0x0000_0000_000a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4015", Entry { names: [0x0000_0000_000a_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4015-sm", Entry { names: [0x0000_0000_000a_021b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK }),
+    ("tek4023", Entry { names: [0x0000_0000_00aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK4023 }),
+    ("tek4024", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_TEK4024 }),
+    ("tek4025", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_TEK4024 }),
+    ("tek4025-17", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_TEK4024 }),
+    ("tek4025-17-ws", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_b000_c000], off: &["bce"], colours: None, strings: STRINGS_TEK4025_17_WS }),
+    ("tek4025-cr", Entry { names: [0x0100_0000_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TEK4025_CR }),
+    ("tek4025-ex", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_3000_c000], off: &["bce"], colours: None, strings: STRINGS_4025EX }),
+    ("tek4025a", Entry { names: [0x0348_0200_db7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK4025A }),
+    ("tek4025ex", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_3000_c000], off: &["bce"], colours: None, strings: STRINGS_4025EX }),
+    ("tek4027", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_2000_8000], off: &["bce"], colours: None, strings: STRINGS_TEK4024 }),
+    ("tek4027-ex", Entry { names: [0x01d0_0080_cb7e_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_3000_c000], off: &["bce"], colours: None, strings: STRINGS_4025EX }),
+    ("tek4105", Entry { names: [0xf544_0280_69aa_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_TEK4105 }),
+    ("tek4105-30", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_TEK4105_30 }),
+    ("tek4105a", Entry { names: [0xf3c4_02c0_dffe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_ba00_fa00], off: &["am", "bce"], colours: None, strings: STRINGS_TEK4105A }),
+    ("tek4106brl", Entry { names: [0xf3c4_02c0_dffe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_ba00_fa00], off: &["am", "bce"], colours: None, strings: STRINGS_TEK4106BRL }),
+    ("tek4107", Entry { names: [0xf100_0280_25aa_12da, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TEK4107 }),
+    ("tek4107brl", Entry { names: [0xf3c4_02c0_dffe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_ba00_fa00], off: &["am", "bce"], colours: None, strings: STRINGS_TEK4106BRL }),
+    ("tek4109", Entry { names: [0xf100_0280_25aa_12da, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TEK4107 }),
+    ("tek4109brl", Entry { names: [0xf3c4_02c0_dffe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_ba00_fa00], off: &["am", "bce"], colours: None, strings: STRINGS_TEK4106BRL }),
+    ("tek4112", Entry { names: [0x0150_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_TEK4112 }),
+    ("tek4112-5", Entry { names: [0x0150_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_TEK4112 }),
+    ("tek4112-nd", Entry { names: [0x0150_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_TEK4112 }),
+    ("tek4113", Entry { names: [0x0000_0000_002a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK4113 }),
+    ("tek4113-34", Entry { names: [0x0000_0000_002a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK4113 }),
+    ("tek4113-nd", Entry { names: [0x0004_0000_052a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK4113_ND }),
+    ("tek4114", Entry { names: [0x0150_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_TEK4112 }),
+    ("tek4115", Entry { names: [0xf5fc_0280_cbfe_02da, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_ANSI_GENERIC }),
+    ("tek4125", Entry { names: [0xf144_0780_43fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa00_3200], off: &["bce"], colours: None, strings: STRINGS_TEK4125 }),
+    ("tek4205", Entry { names: [0xf5e4_07c0_ebfe_22db, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0002_9a00_7280], off: &["am", "bce"], colours: Some(8), strings: STRINGS_TEK4205 }),
+    ("tek4207", Entry { names: [0xf554_0280_49aa_02ca, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_9200_5200], off: &["bce"], colours: None, strings: STRINGS_TEK4207 }),
+    ("tek4207-s", Entry { names: [0xf101_0280_25aa_12da, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TEK4207_S }),
+    ("tek4404", Entry { names: [0xf044_0280_49aa_82ca, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_b200_c000], off: &["am", "bce"], colours: None, strings: STRINGS_TEK4404 }),
+    ("teken", Entry { names: [0xf3fc_02c0_fbfe_b38a, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0600_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_TEKEN }),
+    ("teken-16color", Entry { names: [0xf3fc_02c0_fbfe_b38a, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0600_8203_1a80], off: &[], colours: Some(16), strings: STRINGS_TEKEN }),
+    ("teken-2018", Entry { names: [0xfbfc_02c0_fbfe_33db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0400_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_TEKEN_2018 }),
+    ("teken-2022", Entry { names: [0xf3fc_02c0_fbfe_b38a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0600_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_TEKEN_2022 }),
+    ("teken-sc", Entry { names: [0xf3fc_02c0_fbfe_b38a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0600_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_TEKEN_SC }),
+    ("teken-sc+fkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_SCO }),
+    ("teken-vt", Entry { names: [0xf3fc_02c0_fbfe_b38a, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0600_8203_1a80], off: &[], colours: Some(8), strings: STRINGS_TEKEN }),
+    ("teken-vt+fkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4078_0040, 0x0001_0201_0207_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TEKEN_VT_FKEYS }),
+    ("teleray", Entry { names: [0x0154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0003_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_T1061 }),
+    ("teletec", Entry { names: [0x0104_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("teraterm", Entry { names: [0xf1cd_07c0_dbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0d02_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_TERATERM }),
+    ("teraterm-256color", Entry { names: [0xf1cd_07c0_dbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0d02_aa03_b280], off: &[], colours: Some(256), strings: STRINGS_TERATERM }),
+    ("teraterm2.3", Entry { names: [0xf1cc_07c0_dbfe_b3db, 0x8010_0200_fff0_0040, 0x0001_0201_0007_8400, 0x0000_0402_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_TERATERM2_3 }),
+    ("teraterm4.59", Entry { names: [0xf1cc_07c0_dbfe_b3db, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0402_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_TERATERM2_3 }),
+    ("teraterm4.97", Entry { names: [0xf1cc_07c0_dbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0c02_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_TERATERM2_3 }),
+    ("teraterm5.0", Entry { names: [0xf1cd_07c0_dbfe_b3df, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0d02_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_TERATERM }),
+    ("terminator", Entry { names: [0xf3cd_0780_fbfe_b38b, 0x8010_0200_47f8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9e03_7a80], off: &["am"], colours: Some(256), strings: STRINGS_TERMINATOR }),
+    ("terminology", Entry { names: [0xffec_03e0_fbff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa8f], off: &[], colours: Some(256), strings: STRINGS_TERMINOLOGY }),
+    ("terminology-0.6.1", Entry { names: [0xf504_0400_03fe_a29b, 0xffff_ffff_fff1_1fbe, 0x7f80_00fe_0047_ffff, 0x0000_0402_aa03_b280], off: &["bce"], colours: Some(256), strings: STRINGS_TERMINOLOGY_0_6_1 }),
+    ("terminology-1.0.0", Entry { names: [0xf504_0400_23fe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0402_ae03_b28f], off: &["bce"], colours: Some(256), strings: STRINGS_TERMINOLOGY_1_0_0 }),
+    ("terminology-1.8.1", Entry { names: [0xffec_03e0_fbff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa8f], off: &[], colours: Some(256), strings: STRINGS_TERMINOLOGY }),
+    ("termite", Entry { names: [0xfffd_03c0_dbfe_b39f, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0502_be03_fa8f], off: &["bce"], colours: Some(256), strings: STRINGS_TERMITE }),
+    ("tgtelnet", Entry { names: [0x3104_0000_008a_021a, 0x0000_0000_0000_0000, 0x0001_0200_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_PILOT }),
+    ("ti916", Entry { names: [0xf1ec_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TI916 }),
+    ("ti916-132", Entry { names: [0xf1ec_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TI916 }),
+    ("ti916-220-7", Entry { names: [0xf1ec_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0207_8400, 0x0000_0402_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TI916 }),
+    ("ti924", Entry { names: [0xf144_0280_45aa_93da, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TI924 }),
+    ("ti924w", Entry { names: [0xf144_0280_45aa_93da, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TI924 }),
+    ("ti926", Entry { names: [0xf144_0280_45aa_13da, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TI926 }),
+    ("ti928", Entry { names: [0xf154_0280_49aa_a2da, 0x8010_0200_42f8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8203_1080], off: &[], colours: Some(8), strings: STRINGS_TI928 }),
+    ("ti931", Entry { names: [0xf554_0280_49aa_125a, 0x8010_0200_4000_0040, 0x0000_0001_0007_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TI931 }),
+    ("ti_ansi", Entry { names: [0xf154_0280_49aa_a2da, 0x8010_0200_4008_0000, 0x0001_0200_0207_8400, 0x0000_0002_8203_1080], off: &[], colours: Some(8), strings: STRINGS_TI_ANSI }),
+    ("tkterm", Entry { names: [0x0100_0000_01aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_a000_8000], off: &["am", "bce"], colours: None, strings: STRINGS_TKTERM }),
+    ("tmux", Entry { names: [0xffed_07a0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0717_be83_f29f], off: &["bce"], colours: Some(8), strings: STRINGS_TMUX }),
+    ("tmux-256color", Entry { names: [0xffed_07a0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0717_be83_f29f], off: &["bce"], colours: Some(256), strings: STRINGS_TMUX }),
+    ("tmux-direct", Entry { names: [0xffed_07a0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0717_be87_f69f], off: &["bce"], colours: Some(16_777_216), strings: STRINGS_TMUX }),
+    ("trs16", Entry { names: [0xf154_0280_49aa_131b, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0000_8a00_2000], off: &["bce"], colours: None, strings: STRINGS_TRS16 }),
+    ("trs2", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TRS2 }),
+    ("trs80II", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TRS2 }),
+    ("trsII", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TRS2 }),
+    ("ts-1", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_FALCO }),
+    ("ts-1p", Entry { names: [0xf140_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_FALCO_P }),
+    ("ts1", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_FALCO }),
+    ("ts100", Entry { names: [0xf154_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_TEK4105_30 }),
+    ("ts100-ctxt", Entry { names: [0xf154_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_TS100_CTXT }),
+    ("ts100-sp", Entry { names: [0xf154_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_TEK4105_30 }),
+    ("ts1p", Entry { names: [0xf140_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_9200_4000], off: &["bce"], colours: None, strings: STRINGS_FALCO_P }),
+    ("tt", Entry { names: [0x0100_0000_01aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_a000_8000], off: &["am", "bce"], colours: None, strings: STRINGS_TKTERM }),
+    ("tt52", Entry { names: [0xf144_0380_41aa_331a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0000_8203_1200], off: &[], colours: Some(16), strings: STRINGS_AT }),
+    ("tty40", Entry { names: [0x1154_0080_492a_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_DATASPEED40 }),
+    ("tty4420", Entry { names: [0xf944_0280_49aa_021a, 0x0010_0000_0000_0040, 0x2000_0003_0200_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ATT4420 }),
+    ("tty4424", Entry { names: [0xf1f4_0280_fbfe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ATT4424 }),
+    ("tty4424-1", Entry { names: [0xf1f4_0280_fbfe_82db, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ATT4424_1 }),
+    ("tty4424m", Entry { names: [0xf150_0200_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_ATT4424M }),
+    ("tty4426", Entry { names: [0xfbfc_0280_dbfe_029b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0402_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_ATT4426 }),
+    ("tty5410", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("tty5410-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("tty5410v1", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("tty5410v1-w", Entry { names: [0xf555_0280_69aa_82db, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_4410_W }),
+    ("tty5420+nl", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("tty5620", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("tty5620-1", Entry { names: [0xf3f4_0280_d9aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_1800], off: &["bce"], colours: None, strings: STRINGS_ATT5620_1 }),
+    ("tty5620-24", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("tty5620-34", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("tty5620-s", Entry { names: [0xf140_0200_418a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ATT5620_S }),
+    ("ttydmd", Entry { names: [0xf3f4_0280_f9aa_029a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_5620 }),
+    ("tvi803", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TVI803 }),
+    ("tvi9065", Entry { names: [0xffe5_02c0_fffe_93db, 0x8010_0200_4070_0040, 0x0000_0000_020f_8400, 0x0000_0102_9a00_7a00], off: &["bce"], colours: None, strings: STRINGS_TVI9065 }),
+    ("tvi910", Entry { names: [0xf10c_0280_01aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI910 }),
+    ("tvi910+", Entry { names: [0xf15c_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0402_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI910_ }),
+    ("tvi912", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912 }),
+    ("tvi912b", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B }),
+    ("tvi912b+2p", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_TVI912B_2P }),
+    ("tvi912b+dim", Entry { names: [0x0000_0000_2000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TVI912B_DIM }),
+    ("tvi912b+mc", Entry { names: [0x0400_0000_2000_004a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_TVI912B_MC }),
+    ("tvi912b+printer", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("tvi912b+vb", Entry { names: [0x0000_0000_0000_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_TVI912B_2P }),
+    ("tvi912b-2p", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_ }),
+    ("tvi912b-2p-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912b-2p-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-2p-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_MC_ }),
+    ("tvi912b-mc-2p", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912b-mc-vb", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912b-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_P }),
+    ("tvi912b-p-2p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-p-vb", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_P }),
+    ("tvi912b-unk-2p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-unk-vb", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-vb", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_ }),
+    ("tvi912b-vb-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912b-vb-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912b-vb-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B }),
+    ("tvi912c-2p", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_ }),
+    ("tvi912c-2p-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912c-2p-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-2p-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_MC_ }),
+    ("tvi912c-mc-2p", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912c-mc-vb", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912c-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_P }),
+    ("tvi912c-p-2p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-p-vb", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_P }),
+    ("tvi912c-unk-2p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-unk-vb", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-vb", Entry { names: [0xf154_0280_69aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_ }),
+    ("tvi912c-vb-mc", Entry { names: [0xf554_0280_69aa_025a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_MC }),
+    ("tvi912c-vb-p", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912c-vb-unk", Entry { names: [0xf154_0280_49aa_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI912B_2P_P }),
+    ("tvi912cc", Entry { names: [0xf154_0280_692a_021a, 0x0000_0000_0000_0040, 0x0000_0000_0200_0000, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912B }),
+    ("tvi914", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912 }),
+    ("tvi920", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI912 }),
+    ("tvi920b", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B }),
+    ("tvi920b+fn", Entry { names: [0x0000_0000_0000_000a, 0x8010_0203_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_TVI920B_FN }),
+    ("tvi920b-2p", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P }),
+    ("tvi920b-2p-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920b-2p-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-2p-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_MC }),
+    ("tvi920b-mc-2p", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920b-mc-vb", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920b-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_P }),
+    ("tvi920b-p-2p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-p-vb", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_P }),
+    ("tvi920b-unk-2p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-unk-vb", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-vb", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P }),
+    ("tvi920b-vb-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920b-vb-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920b-vb-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_8200_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B }),
+    ("tvi920c-2p", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P }),
+    ("tvi920c-2p-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920c-2p-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-2p-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_MC }),
+    ("tvi920c-mc-2p", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920c-mc-vb", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920c-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_P }),
+    ("tvi920c-p-2p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-p-vb", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_P }),
+    ("tvi920c-unk-2p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-unk-vb", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-vb", Entry { names: [0xf154_0280_69aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_9200_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P }),
+    ("tvi920c-vb-mc", Entry { names: [0xf554_0280_69aa_025a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_MC }),
+    ("tvi920c-vb-p", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi920c-vb-unk", Entry { names: [0xf154_0280_49aa_021a, 0x8010_0203_fff0_0040, 0x0000_0000_0207_8400, 0x0000_0000_1000_4000], off: &["bce"], colours: None, strings: STRINGS_TVI920B_2P_P }),
+    ("tvi921", Entry { names: [0xf155_0280_4daa_120b, 0x0000_0000_0000_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_TVI921 }),
+    ("tvi924", Entry { names: [0xf155_0280_4daa_935a, 0x8010_0200_43f0_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TVI924 }),
+    ("tvi925", Entry { names: [0xf155_0280_4daa_121a, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TVI925 }),
+    ("tvi925-hi", Entry { names: [0xf155_0280_4daa_121a, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0102_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TVI925_HI }),
+    ("tvi92B", Entry { names: [0xf155_0280_4daa_120b, 0x0000_0000_0000_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_TVI921 }),
+    ("tvi92D", Entry { names: [0xf155_0280_4daa_120b, 0x0000_0000_0000_0040, 0x0000_0001_0000_0000, 0x0000_0102_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_TVI921 }),
+    ("tvi950", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TVI803 }),
+    ("tvi950-2p", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_TVI950_2P }),
+    ("tvi950-4p", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_TVI950_4P }),
+    ("tvi950-rv", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_TVI803 }),
+    ("tvi950-rv-2p", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_TVI950_2P }),
+    ("tvi950-rv-4p", Entry { names: [0xf955_0280_49aa_021b, 0x8010_0200_4030_0040, 0x0000_0001_0207_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_TVI950_4P }),
+    ("tvi955", Entry { names: [0xfc55_0280_6daa_135b, 0x8010_0200_4030_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_955_HB }),
+    ("tvi955-hb", Entry { names: [0xfc55_0280_4daa_13db, 0x8010_0200_4030_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_955_HB }),
+    ("tvi955-w", Entry { names: [0xfc55_0280_6daa_135b, 0x8010_0200_4030_0040, 0x0001_0201_0207_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_955_HB }),
+    ("tvi970", Entry { names: [0xf04c_0280_4daa_820b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0402_9a00_7000], off: &["bce"], colours: None, strings: STRINGS_TVI970 }),
+    ("tvi970-2p", Entry { names: [0xf04c_0280_4daa_820b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0402_9a00_7000], off: &["bce"], colours: None, strings: STRINGS_TVI970_2P }),
+    ("tvi970-vb", Entry { names: [0xf04c_0280_4daa_820b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0402_9a00_7000], off: &["bce"], colours: None, strings: STRINGS_TVI970 }),
+    ("tvipt", Entry { names: [0xf044_0280_41a2_020a, 0x0000_0000_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["bce"], colours: None, strings: STRINGS_TVIPT }),
+    ("tw100", Entry { names: [0xf164_0380_ebfe_b3db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0002_ba00_f280], off: &["am", "bce"], colours: Some(8), strings: STRINGS_TW100 }),
+    ("tw52", Entry { names: [0xf144_0380_69aa_339a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0002_8203_1280], off: &[], colours: Some(16), strings: STRINGS_TW52 }),
+    ("tw52-color", Entry { names: [0xf144_0380_69aa_339a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0002_8203_1280], off: &[], colours: Some(16), strings: STRINGS_TW52 }),
+    ("tw52-m", Entry { names: [0xf144_0380_69aa_139a, 0x8010_0200_fff0_0040, 0x0081_0205_0207_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_TW52 }),
+    ("tws-generic", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102 }),
+    ("tws2102-sna", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102_SNA }),
+    ("tws2103", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102 }),
+    ("tws2103-sna", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102_SNA }),
+    ("ultima2", Entry { names: [0xf000_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IMS_ANSI }),
+    ("ultimaII", Entry { names: [0xf000_0280_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IMS_ANSI }),
+    ("uniterm", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_CRT }),
+    ("uniterm49", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_CRT }),
+    ("unixpc", Entry { names: [0xfdd4_0280_ebfe_13da, 0x8010_0200_4008_2041, 0x2083_0607_060b_8400, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_3B1 }),
+    ("uts30", Entry { names: [0xf3f5_0280_dbfe_93db, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0102_8a00_3a00], off: &["bce"], colours: None, strings: STRINGS_UTS30 }),
+    ("uwin", Entry { names: [0xf034_03c0_39aa_33db, 0x8010_0200_4078_0040, 0x0000_0001_0207_8400, 0x0000_0002_8a03_2280], off: &["bce"], colours: Some(8), strings: STRINGS_UWIN }),
+    ("v200-nam", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("v320n", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_CRT }),
+    ("v3220", Entry { names: [0xf040_0280_49aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_a200_9000], off: &["bce"], colours: None, strings: STRINGS_V3220 }),
+    ("v5410", Entry { names: [0xf154_0780_49aa_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_TEK4105_30 }),
+    ("vanilla", Entry { names: [0x0100_0000_0008_001a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_DIGILOG }),
+    ("vapple", Entry { names: [0xf004_0200_01aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_APPLE_VIDEX3 }),
+    ("vc103", Entry { names: [0xf004_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("vc203", Entry { names: [0xf004_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("vc303", Entry { names: [0xf004_0000_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AEPRO }),
+    ("vc303a", Entry { names: [0xf004_0200_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_VC303A }),
+    ("vc403a", Entry { names: [0xf004_0200_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_VC303A }),
+    ("vc404", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_VC404 }),
+    ("vc404-s", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_VC404_S }),
+    ("vc414", Entry { names: [0xf054_0280_49a8_020a, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_VC414 }),
+    ("vc414h", Entry { names: [0xf054_0280_49a8_020a, 0x8010_0200_4000_0000, 0x0000_0000_0201_8400, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_VC414 }),
+    ("vc415", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("venix", Entry { names: [0xf140_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_PC_VENIX }),
+    ("versaterm", Entry { names: [0xf054_0280_49aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_VERSATERM }),
+    ("vi200", Entry { names: [0xf544_0280_6daa_121b, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0000_aa00_b000], off: &["bce"], colours: None, strings: STRINGS_VI200 }),
+    ("vi200-f", Entry { names: [0xf544_0280_6daa_121b, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0000_2a00_b000], off: &["bce"], colours: None, strings: STRINGS_VI200_F }),
+    ("vi200-rv", Entry { names: [0xf544_0280_69aa_021b, 0x8010_0200_4000_0040, 0x0000_0001_0207_8400, 0x0000_0000_aa00_a000], off: &["bce"], colours: None, strings: STRINGS_VI200_RV }),
+    ("vi300", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_VI300 }),
+    ("vi300-old", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_VI300 }),
+    ("vi50", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8000_1000], off: &["bce"], colours: None, strings: STRINGS_VI50 }),
+    ("vi500", Entry { names: [0xf144_0280_49aa_820b, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8800_2000], off: &["bce"], colours: None, strings: STRINGS_VI500 }),
+    ("vi50adm", Entry { names: [0xf144_0280_41aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_VI50ADM }),
+    ("vi55", Entry { names: [0xf044_0280_49aa_820a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_1000], off: &["bce"], colours: None, strings: STRINGS_VI55 }),
+    ("vi550", Entry { names: [0xf144_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_VI550 }),
+    ("vi603", Entry { names: [0xf145_0780_4bfe_82db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_VI603 }),
+    ("viewdata", Entry { names: [0x0004_0000_01aa_131a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_VIEWDATA }),
+    ("viewdata-o", Entry { names: [0x0004_0000_01aa_131a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_VIEWDATA }),
+    ("viewdata-rv", Entry { names: [0x0004_0000_01aa_131a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8000_0000], off: &["bce"], colours: None, strings: STRINGS_VIEWDATA_RV }),
+    ("viewpoint", Entry { names: [0xf100_0280_45aa_121a, 0x8010_0200_0000_0000, 0x0000_0000_0200_0400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVIEWPOINT }),
+    ("viewpoint3a+", Entry { names: [0xf504_0280_21aa_134a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_VIEWPOINT3A_ }),
+    ("viewpoint60", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVP60 }),
+    ("viewpoint90", Entry { names: [0xf114_0280_49aa_020a, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VIEWPOINT90 }),
+    ("vip", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip-H", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip-Hw", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip-w", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip7800-H", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip7800-Hw", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("vip7800-w", Entry { names: [0xfd15_0280_69aa_025b, 0x8010_1fff_4070_0040, 0x2080_0007_020f_8400, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_Q310_VIP_H }),
+    ("visa50", Entry { names: [0xf5fc_0280_fbfe_82db, 0x8010_0200_4010_0040, 0x0000_0000_0207_8400, 0x0000_0402_aa00_a200], off: &["am", "bce"], colours: None, strings: STRINGS_VISA50 }),
+    ("visual603", Entry { names: [0xf145_0780_4bfe_82db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0102_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_VI603 }),
+    ("vitty", Entry { names: [0xf140_0200_418a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ATT5620_S }),
+    ("vk100", Entry { names: [0xf100_0280_03fe_021a, 0x8010_0200_4000_0000, 0x0000_0000_0200_0000, 0x0000_0002_a200_9000], off: &["bce"], colours: None, strings: STRINGS_GIGI }),
+    ("vp3a+", Entry { names: [0xf504_0280_21aa_134a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_VIEWPOINT3A_ }),
+    ("vp60", Entry { names: [0xf144_0280_41aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_ADDSVP60 }),
+    ("vp90", Entry { names: [0xf114_0280_49aa_020a, 0x8010_0200_4010_0000, 0x0000_0000_0207_8400, 0x0000_0002_8200_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VIEWPOINT90 }),
+    ("vremote", Entry { names: [0xf150_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_CBUNIX }),
+    ("vs100", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("vs100-x10", Entry { names: [0xf1c4_0280_d9aa_828a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT103 }),
+    ("vsc", Entry { names: [0x3104_0200_01aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_0200], off: &["bce"], colours: None, strings: STRINGS_VSC }),
+    ("vscode", Entry { names: [0xffec_03e0_fffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_DOMTERM }),
+    ("vscode-direct", Entry { names: [0xffec_03e0_fffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_DOMTERM }),
+    ("vt-61", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("vt-utf8", Entry { names: [0xf124_0780_13fe_a2df, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_MS_VT_UTF8 }),
+    ("vt100", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100+", Entry { names: [0xf124_0780_13fe_a2df, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_MS_VT_UTF8 }),
+    ("vt100+4bsd", Entry { names: [0xf104_0780_03fe_02db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ADM36 }),
+    ("vt100+enq", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt100+fnkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_FNKEYS }),
+    ("vt100+keypad", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt100+noapp", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_NOAPP }),
+    ("vt100+noapp+pc", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_NOAPP }),
+    ("vt100+pf1-pf4", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_PF1_PF4 }),
+    ("vt100+pfkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_PF1_PF4 }),
+    ("vt100-am", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-bm", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("vt100-bm-o", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("vt100-bot-s", Entry { names: [0xf105_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT100_BOT_S }),
+    ("vt100-nam", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-nam-w", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-nav", Entry { names: [0xf104_0780_03fe_821b, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_a800_b000], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-nav-w", Entry { names: [0xf104_0780_03fe_821b, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_a800_b000], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-putty", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-s", Entry { names: [0xf105_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT100_S }),
+    ("vt100-s-bot", Entry { names: [0xf105_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT100_BOT_S }),
+    ("vt100-s-top", Entry { names: [0xf105_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT100_S }),
+    ("vt100-top-s", Entry { names: [0xf105_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT100_S }),
+    ("vt100-vb", Entry { names: [0xf104_0780_03fe_82cb, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-w", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-w-am", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-w-nam", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100-w-nav", Entry { names: [0xf104_0780_03fe_821b, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_a800_b000], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt100nam", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt102", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt102+enq", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt102-nsgr", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt102-w", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt125", Entry { names: [0xf104_0780_03fe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT125 }),
+    ("vt131", Entry { names: [0xf004_0280_01aa_82da, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_EXEC80 }),
+    ("vt132", Entry { names: [0xf144_0780_4bfe_82db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_APOLLO_VT132 }),
+    ("vt200", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("vt200-js", Entry { names: [0xf144_0280_49aa_931a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a000_9000], off: &["bce"], colours: None, strings: STRINGS_VT200_JS }),
+    ("vt200-old", Entry { names: [0xf144_0280_49aa_93db, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_VT200_OLD }),
+    ("vt200-w", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("vt220", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("vt220+cvis", Entry { names: [0x0000_0000_0000_110a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_CVIS }),
+    ("vt220+keypad", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_PF1_PF4 }),
+    ("vt220+pcedit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0008_0040, 0x0001_0201_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_PCEDIT }),
+    ("vt220+sfkeys", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_bf80_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt220+ufkeys", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0070_0000, 0x0000_0000_0007_8000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_UFKEYS }),
+    ("vt220+vtedit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0040, 0x0001_0201_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_VTEDIT }),
+    ("vt220-base", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_CRT }),
+    ("vt220-js", Entry { names: [0xf144_0280_49aa_931a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a000_9000], off: &["bce"], colours: None, strings: STRINGS_VT200_JS }),
+    ("vt220-nam", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("vt220-old", Entry { names: [0xf144_0280_49aa_93db, 0x8010_0200_4018_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_VT200_OLD }),
+    ("vt220-w", Entry { names: [0xf1e4_07c0_dbfe_93db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT220 }),
+    ("vt220d", Entry { names: [0xf144_0280_49aa_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_VT220D }),
+    ("vt300", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt300-nam", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt300-w", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt300-w-nam", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt320", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt320-k3", Entry { names: [0xf1ed_02c0_dbfe_93db, 0x8010_0200_4000_0000, 0x0001_0201_0007_8000, 0x0000_0502_aa00_ba00], off: &["bce"], colours: None, strings: STRINGS_VT320_K3 }),
+    ("vt320-k311", Entry { names: [0xf1e5_0280_dbfe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT320_K311 }),
+    ("vt320-nam", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt320-w", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt320-w-nam", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_VT300 }),
+    ("vt320nam", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["am", "bce"], colours: None, strings: STRINGS_CRT }),
+    ("vt330", Entry { names: [0xf1e5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("vt340", Entry { names: [0xf1e5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("vt400", Entry { names: [0xf1f5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("vt400-24", Entry { names: [0xf1f5_0280_dbfe_93cb, 0x8010_0200_4000_0000, 0x0000_0000_0007_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_DEC_VT330 }),
+    ("vt420", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420 }),
+    ("vt420+lrmm", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt420f", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420F }),
+    ("vt420pc", Entry { names: [0xf1e5_07c0_dbfe_93db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420PC }),
+    ("vt420pcdos", Entry { names: [0xf1e5_07c0_dbfe_93db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420PC }),
+    ("vt50", Entry { names: [0x0100_0280_012a_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("vt50h", Entry { names: [0xf100_0280_01aa_021a, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT50H }),
+    ("vt510", Entry { names: [0xf1e5_07c0_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420 }),
+    ("vt510pc", Entry { names: [0xf1e5_07c0_dbfe_93db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420PC }),
+    ("vt510pcdos", Entry { names: [0xf1e5_07c0_dbfe_93db, 0xbfff_ffff_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420PC }),
+    ("vt52", Entry { names: [0xf104_0280_01aa_021b, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_2800_b000], off: &["am", "bce"], colours: None, strings: STRINGS_HZ1552 }),
+    ("vt52+arrows", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("vt52+keypad", Entry { names: [0x0000_0000_0000_000a, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT52_KEYPAD }),
+    ("vt52-basic", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("vt520", Entry { names: [0xf1ed_07c0_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420 }),
+    ("vt520-w", Entry { names: [0xf1ed_07c0_dbfe_93db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420 }),
+    ("vt520ansi", Entry { names: [0xf1ed_07c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8400, 0x0000_0502_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT420F }),
+    ("vt525", Entry { names: [0xf1ed_07c0_dbfe_b3db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_VT420 }),
+    ("vt525-w", Entry { names: [0xf1ed_07c0_dbfe_b3db, 0x8010_0200_4010_0040, 0x0001_0201_0007_8400, 0x0000_0502_aa03_b280], off: &["bce"], colours: Some(8), strings: STRINGS_VT420 }),
+    ("vt61", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("vt61.5", Entry { names: [0xf100_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["am", "bce"], colours: None, strings: STRINGS_ELKS }),
+    ("vte", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c07_fe03_fa8f], off: &[], colours: Some(8), strings: STRINGS_VTE }),
+    ("vte+pcfkeys", Entry { names: [0xf000_0000_0000_000a, 0xffff_ffff_ffff_ffff, 0xffff_feff_ffff_ffff, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_GNOME_PCFKEYS }),
+    ("vte-2007", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("vte-2008", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("vte-2012", Entry { names: [0xfdcc_06c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("vte-2014", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("vte-2017", Entry { names: [0xffec_07e0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c06_be03_fa8f], off: &[], colours: Some(8), strings: STRINGS_VTE_2017 }),
+    ("vte-2018", Entry { names: [0xffec_07e0_fbff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c17_fe87_fa9f], off: &[], colours: Some(8), strings: STRINGS_VTE_2018 }),
+    ("vte-2022", Entry { names: [0xffec_07e0_fbff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c17_fe87_fa9f], off: &[], colours: Some(8), strings: STRINGS_VTE_2018 }),
+    ("vte-256color", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c07_fe03_fa8f], off: &[], colours: Some(256), strings: STRINGS_VTE }),
+    ("vte-direct", Entry { names: [0xffec_07c0_fbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c07_fe03_fe8f], off: &[], colours: Some(16_777_216), strings: STRINGS_VTE }),
+    ("vtnt", Entry { names: [0xf124_0780_13fe_a2df, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_aa03_b280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("vv100", Entry { names: [0xf1f5_0780_dbfe_a2db, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0102_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_MVTERM }),
+    ("vwmterm", Entry { names: [0xf544_0280_27fe_33db, 0x8010_0200_4078_0040, 0x0001_0200_0207_8400, 0x0000_0002_9a03_6200], off: &[], colours: Some(8), strings: STRINGS_VWMTERM }),
+    ("wezterm", Entry { names: [0xfffd_03c0_fbff_f3db, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0517_fe83_fa9f], off: &[], colours: Some(256), strings: STRINGS_WEZTERM }),
+    ("winconsole", Entry { names: [0xf3e4_03c0_dbfe_b39f, 0xffff_ffff_fff8_0040, 0x0001_0201_0207_8fff, 0x0000_0202_8a03_3a80], off: &["bce"], colours: Some(8), strings: STRINGS_WINCONSOLE }),
+    ("wren", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("wrenw", Entry { names: [0xf144_0280_7bfe_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_b200_c000], off: &["bce"], colours: None, strings: STRINGS_FENIX }),
+    ("wsiris", Entry { names: [0xf144_0280_65aa_121a, 0x8010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0002_8200_1000], off: &["bce"], colours: None, strings: STRINGS_IRIS40 }),
+    ("wsvt25", Entry { names: [0xf1e4_07c0_dbfe_b3db, 0x8010_0200_f9f8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_NETBSD6 }),
+    ("wsvt25m", Entry { names: [0xf1e4_07c0_dbfe_b3db, 0x8010_0200_f9f8_0040, 0x0001_0201_0207_8400, 0x0000_0002_8a03_3280], off: &[], colours: Some(8), strings: STRINGS_NETBSD6 }),
+    ("wy-75ap", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY_75AP }),
+    ("wy-99fgt", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy-99fgta", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy100", Entry { names: [0xf141_0280_49aa_021a, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0102_8200_0200], off: &["am", "bce"], colours: None, strings: STRINGS_WY100 }),
+    ("wy100q", Entry { names: [0xf044_0280_49aa_020a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_8200_1200], off: &["am", "bce"], colours: None, strings: STRINGS_WY100Q }),
+    ("wy120", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy120-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy150-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy160", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-42-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-43-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-tek", Entry { names: [0x0004_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK }),
+    ("wy160-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy160-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy185", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wy185-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185_24 }),
+    ("wy185-vb", Entry { names: [0xfded_07c0_fffe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wy185-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wy185-wvb", Entry { names: [0xfded_07c0_fffe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wy30", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_WY30 }),
+    ("wy30-mc", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY30_MC }),
+    ("wy30-vb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_WY30 }),
+    ("wy325", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-25w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-42w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-42w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-42wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-43w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-43w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-43wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-80", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy325w-24", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wy350", Entry { names: [0xfd45_0280_69aa_335b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wy350-vb", Entry { names: [0xfd45_0280_69aa_334b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wy350-w", Entry { names: [0xfd45_0280_69aa_335b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wy350-wvb", Entry { names: [0xfd45_0280_69aa_334b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wy370", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy370-101k", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy370-105k", Entry { names: [0xf5ed_07c0_fffe_b3db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370_105K }),
+    ("wy370-EPC", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_4078_0000, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370_EPC }),
+    ("wy370-nk", Entry { names: [0x05ed_07c0_fffe_b3db, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370_NK }),
+    ("wy370-rv", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy370-tek", Entry { names: [0xf004_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK }),
+    ("wy370-vb", Entry { names: [0xfded_07c0_fffe_b3cb, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy370-w", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy370-wvb", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wy50", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wy50-mc", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY50_MC }),
+    ("wy50-vb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wy50-w", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wy50-wvb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wy520", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wy520-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wy520-36", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wy520-36pc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wy520-36w", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wy520-36wpc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wy520-48", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wy520-48pc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wy520-48w", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wy520-48wpc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wy520-epc", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wy520-epc-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wy520-epc-vb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wy520-epc-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wy520-epc-wvb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wy520-vb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wy520-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wy520-wvb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wy60", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-316X", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3161 }),
+    ("wy60-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-42-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-43-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-AT", Entry { names: [0xffcc_02c0_cbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("wy60-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy60-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wy75", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wy75-mc", Entry { names: [0xf5ed_07c0_fbfe_935b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75_MC }),
+    ("wy75-vb", Entry { names: [0xf1ed_07c0_fbfe_930b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wy75-w", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wy75-wvb", Entry { names: [0xf1ed_07c0_fbfe_930b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wy75ap", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY_75AP }),
+    ("wy85", Entry { names: [0xf5e5_07c0_fbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wy85-vb", Entry { names: [0xf5e5_07c0_fbfe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wy85-w", Entry { names: [0xf5e5_07c0_fbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wy85-wvb", Entry { names: [0xf5e5_07c0_fbfe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wy99-ansi", Entry { names: [0xfdec_07c0_e7fe_93db, 0x8010_020f_f870_0000, 0x0000_0000_0007_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY99_ANSI }),
+    ("wy99a-ansi", Entry { names: [0xfdec_07c0_e7fe_93db, 0x8010_020f_f870_0000, 0x0000_0000_0007_8400, 0x0000_0402_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY99_ANSI }),
+    ("wy99f", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy99fa", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy99fgt", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy99fgta", Entry { names: [0xfd45_0680_6daa_135b, 0x8010_020f_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0100_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY_99FGT }),
+    ("wy99gt", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-tek", Entry { names: [0x0004_0000_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_TEK }),
+    ("wy99gt-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wy99gt-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse+cvis", Entry { names: [0x0000_0000_0000_110a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_WYSE_CVIS }),
+    ("wyse+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NCR260VP_SL }),
+    ("wyse-325", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse-75ap", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY_75AP }),
+    ("wyse-vp", Entry { names: [0xf144_0280_49aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_0000], off: &["bce"], colours: None, strings: STRINGS_WYSE_VP }),
+    ("wyse120", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse120-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse120-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse120-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse120-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse120-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse150-w-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse160", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-42-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-43-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse160-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse185", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wyse185-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185_24 }),
+    ("wyse185-vb", Entry { names: [0xfded_07c0_fffe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wyse185-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wyse185-wvb", Entry { names: [0xfded_07c0_fffe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_WY185 }),
+    ("wyse30", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_WY30 }),
+    ("wyse30-mc", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY30_MC }),
+    ("wyse30-vb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_4000_0040, 0x0001_0201_020b_8400, 0x0000_0100_8a00_3000], off: &["bce"], colours: None, strings: STRINGS_WY30 }),
+    ("wyse325", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-25w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-42w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-43w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse325-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY325 }),
+    ("wyse350", Entry { names: [0xfd45_0280_69aa_335b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wyse350-vb", Entry { names: [0xfd45_0280_69aa_334b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wyse350-w", Entry { names: [0xfd45_0280_69aa_335b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wyse350-wvb", Entry { names: [0xfd45_0280_69aa_334b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_8a00_3280], off: &["bce"], colours: Some(8), strings: STRINGS_WY350 }),
+    ("wyse370", Entry { names: [0xfded_07c0_fffe_b3db, 0x8010_0200_47f0_0040, 0x0001_0201_0207_8400, 0x0000_0502_ba00_f280], off: &["bce"], colours: Some(64), strings: STRINGS_WY370 }),
+    ("wyse50", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wyse50-mc", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY50_MC }),
+    ("wyse50-vb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wyse50-w", Entry { names: [0xf945_0280_69aa_131b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wyse50-wvb", Entry { names: [0xf945_0280_69aa_130b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0100_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_ALT4 }),
+    ("wyse520", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wyse520-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wyse520-36", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wyse520-36pc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wyse520-36w", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wyse520-36wpc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wyse520-48", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wyse520-48pc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wyse520-48w", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_24 }),
+    ("wyse520-48wpc", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wyse520-epc", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wyse520-epc-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wyse520-p-wvb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wyse520-pc-24", Entry { names: [0xfdec_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0402_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_36PC }),
+    ("wyse520-pc-vb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff8_0040, 0x0001_0201_0207_8400, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520_EPC }),
+    ("wyse520-vb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wyse520-w", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wyse520-wvb", Entry { names: [0xfded_07c0_fffe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0502_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY520 }),
+    ("wyse60", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-316X", Entry { names: [0xfd54_0280_49aa_02db, 0x8010_020f_fff0_0040, 0x0000_0001_0207_8400, 0x0000_0002_9200_4200], off: &["bce"], colours: None, strings: STRINGS_IBM3161 }),
+    ("wyse60-42", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-42-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-43", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-43-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-AT", Entry { names: [0xffcc_02c0_cbfe_02db, 0x8011_ffff_fff8_0040, 0x2001_0203_0207_8400, 0x0000_0002_8200_1a00], off: &["bce"], colours: None, strings: STRINGS_HFT }),
+    ("wyse60-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse60-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY120 }),
+    ("wyse75", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wyse75-mc", Entry { names: [0xf5ed_07c0_fbfe_935b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75_MC }),
+    ("wyse75-vb", Entry { names: [0xf1ed_07c0_fbfe_930b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wyse75-w", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wyse75-wvb", Entry { names: [0xf1ed_07c0_fbfe_930b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY75 }),
+    ("wyse75ap", Entry { names: [0xf1ed_07c0_fbfe_931b, 0x8010_0201_fff0_0000, 0x0001_0201_0207_8400, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY_75AP }),
+    ("wyse85", Entry { names: [0xf5e5_07c0_fbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wyse85-vb", Entry { names: [0xf5e5_07c0_fbfe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wyse85-w", Entry { names: [0xf5e5_07c0_fbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wyse85-wvb", Entry { names: [0xf5e5_07c0_fbfe_93cb, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_WY85 }),
+    ("wyse99gt", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse99gt-25", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse99gt-25-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse99gt-vb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse99gt-w", Entry { names: [0xfd45_0280_69aa_135b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("wyse99gt-wvb", Entry { names: [0xfd45_0280_69aa_134b, 0x8010_0200_47f0_0040, 0x0001_0201_020f_8400, 0x0000_0102_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_WY160 }),
+    ("x10term", Entry { names: [0xf1c4_0280_d9aa_828a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_QVT103 }),
+    ("x10term+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_X10TERM_SL }),
+    ("x68k", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_CRT }),
+    ("x68k-ite", Entry { names: [0xf1e4_07c0_dbfe_82db, 0x8010_0200_f9f0_0040, 0x0001_0201_0007_8000, 0x0000_0002_8a00_3200], off: &["bce"], colours: None, strings: STRINGS_CRT }),
+    ("x820", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("xdku", Entry { names: [0xfdc5_0280_fbfe_135b, 0x8010_0200_4000_0040, 0x0000_0000_0203_8400, 0x0000_0102_9a00_6200], off: &["bce"], colours: None, strings: STRINGS_DKU7102 }),
+    ("xenix", Entry { names: [0xf454_0280_49aa_02cb, 0x8010_0200_4008_0000, 0x0001_0200_0200_0000, 0x0000_0002_8a00_2200], off: &["bce"], colours: None, strings: STRINGS_IBMPCX }),
+    ("xerox820", Entry { names: [0x0104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["bce"], colours: None, strings: STRINGS_ADM3 }),
+    ("xfce", Entry { names: [0xf9cc_06c0_dbfe_b39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_ba03_f28f], off: &[], colours: Some(8), strings: STRINGS_GNOME }),
+    ("xgterm", Entry { names: [0xf1f4_0680_dbfe_829b, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0002_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_XGTERM }),
+    ("xiterm", Entry { names: [0xf1c4_0680_dbfe_a29b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_NXTERM }),
+    ("xl83", Entry { names: [0xf104_0280_01aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_1000], off: &["bce"], colours: None, strings: STRINGS_AAS1901 }),
+    ("xnuppc", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc+100x37", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+112x37", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+128x40", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+128x48", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+144x48", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+160x64", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+200x64", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+200x75", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+256x96", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+80x25", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+80x30", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+90x30", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xnuppc+b", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc+basic", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc+c", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(8), strings: STRINGS_9TERM }),
+    ("xnuppc+f", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F }),
+    ("xnuppc+f2", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F2 }),
+    ("xnuppc-100x37", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-100x37-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-112x37", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-112x37-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-128x40", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-128x40-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-128x48", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-128x48-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-144x48", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-144x48-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-160x64", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-160x64-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-200x64", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-200x64-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-200x75", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-200x75-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-256x96", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-256x96-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-80x25", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-80x25-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-80x30", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-80x30-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-90x30", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-90x30-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-b", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN }),
+    ("xnuppc-f", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN_F }),
+    ("xnuppc-f2", Entry { names: [0xf104_0380_03fe_a28a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a203_9280], off: &[], colours: Some(8), strings: STRINGS_DARWIN_F2 }),
+    ("xnuppc-m", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-m-b", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN }),
+    ("xnuppc-m-f", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F }),
+    ("xnuppc-m-f2", Entry { names: [0xf104_0380_03fe_828a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0002_a200_9200], off: &[], colours: None, strings: STRINGS_DARWIN_F2 }),
+    ("xtalk", Entry { names: [0xf144_0780_43fe_021b, 0x8010_0200_4010_0000, 0x0000_0000_0007_8400, 0x0000_0000_aa00_b000], off: &["bce"], colours: None, strings: STRINGS_XTALK }),
+    ("xterm", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm+256color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0000], off: &["am", "bce"], colours: Some(256), strings: STRINGS_9TERM }),
+    ("xterm+256color2", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0000], off: &["am", "bce"], colours: Some(256), strings: STRINGS_9TERM }),
+    ("xterm+256setaf", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(256), strings: STRINGS_9TERM }),
+    ("xterm+256setaf2", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0080], off: &["am", "bce"], colours: Some(256), strings: STRINGS_9TERM }),
+    ("xterm+88color", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0000], off: &["am", "bce"], colours: Some(88), strings: STRINGS_9TERM }),
+    ("xterm+88color2", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0000], off: &["am", "bce"], colours: Some(88), strings: STRINGS_9TERM }),
+    ("xterm+acs", Entry { names: [0x0000_0000_0000_000b, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0800_2000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+alt+title", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_ALT_TITLE }),
+    ("xterm+alt1049", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_ALT1049 }),
+    ("xterm+alt47", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_ALT47 }),
+    ("xterm+app", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_APP }),
+    ("xterm+app+pc", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_APP }),
+    ("xterm+decedit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0040, 0x0001_0201_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_VTEDIT }),
+    ("xterm+direct", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0480], off: &["am", "bce"], colours: Some(16_777_216), strings: STRINGS_9TERM }),
+    ("xterm+direct16", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0480], off: &["am", "bce"], colours: Some(16_777_216), strings: STRINGS_9TERM }),
+    ("xterm+direct2", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0480], off: &["am", "bce"], colours: Some(16_777_216), strings: STRINGS_9TERM }),
+    ("xterm+direct256", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0480], off: &["am", "bce"], colours: Some(16_777_216), strings: STRINGS_9TERM }),
+    ("xterm+edit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0008_0040, 0x0001_0201_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_PCEDIT }),
+    ("xterm+focus", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+indirect", Entry { names: [0x0000_0000_0000_200a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0003_0480], off: &["am", "bce"], colours: Some(16_777_216), strings: STRINGS_9TERM }),
+    ("xterm+kbs", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+keypad", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_PF1_PF4 }),
+    ("xterm+meta", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+noalt", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+noapp", Entry { names: [0xf000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT100_NOAPP }),
+    ("xterm+nofkeys", Entry { names: [0x0fec_03e0_ffff_f3df, 0x8010_0200_4000_0000, 0x0000_0100_0000_0000, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_NOFKEYS }),
+    ("xterm+nopcfkeys", Entry { names: [0x0000_0000_0000_000a, 0x80ff_ffff_fff0_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("xterm+osc104", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+pc+edit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0008_0000, 0x0000_0000_0200_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_PC_EDIT }),
+    ("xterm+pcc0", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_1f80, 0xff80_00fe_0000_0000, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+pcc1", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_1f80, 0xff80_00fe_0000_0000, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+pcc2", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_1f80, 0xff80_00fe_0000_0000, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+pcc3", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_1f80, 0xff80_00fe_0000_0000, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+pce2", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_000f_e07f, 0x007f_fe01_fff8_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_VT220_PCEDIT }),
+    ("xterm+pcf0", Entry { names: [0x0000_0000_0000_000a, 0xffff_ffff_fff0_0000, 0x0000_0000_0007_ffff, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_XTERM }),
+    ("xterm+pcf2", Entry { names: [0x0000_0000_0000_000a, 0xffff_ffff_fff0_0000, 0x0000_0000_0007_ffff, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS_XTERM }),
+    ("xterm+pcfkeys", Entry { names: [0xf000_0000_0000_000a, 0xffff_ffff_ffff_ffff, 0xffff_feff_ffff_ffff, 0x0000_0000_0000_000f], off: &["am", "bce"], colours: None, strings: STRINGS_GNOME_PCFKEYS }),
+    ("xterm+r5+fkeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4070_0000, 0x0000_0000_0007_8400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("xterm+r5+lockeys", Entry { names: [0x0000_0000_0000_000a, 0x8010_0200_4000_0000, 0x0000_0000_0000_0400, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_R5_LOCKEYS }),
+    ("xterm+r6f2", Entry { names: [0x0000_0000_0000_000a, 0xffff_ffff_fff0_0000, 0x0000_0000_0007_ffff, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_PUTTY_FNKEYS }),
+    ("xterm+sl", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_SL }),
+    ("xterm+sl-alt", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_SL_ALT }),
+    ("xterm+sl-twm", Entry { names: [0x0001_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_NSTERM_S }),
+    ("xterm+sm+1002", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+sm+1003", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+sm+1005", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+sm+1006", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+titlestack", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_1000_4000], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_TITLESTACK }),
+    ("xterm+tmux", Entry { names: [0x0000_0000_0001_400a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0010_0080_0010], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_TMUX }),
+    ("xterm+tmux2", Entry { names: [0x0000_0000_0001_400a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0010_0080_0010], off: &["am", "bce"], colours: None, strings: STRINGS_XTERM_TMUX2 }),
+    ("xterm+vt+edit", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+x10mouse", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+x11hilite", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm+x11mouse", Entry { names: [0x0000_0000_0000_000a, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0000_0000_0000], off: &["am", "bce"], colours: None, strings: STRINGS_9TERM }),
+    ("xterm-1002", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-1003", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-1005", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-1006", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-16color", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(16), strings: STRINGS_HTERM }),
+    ("xterm-24", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterm-256color", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(256), strings: STRINGS_HTERM }),
+    ("xterm-88color", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(88), strings: STRINGS_HTERM }),
+    ("xterm-basic", Entry { names: [0x05ec_03e0_fffe_b3df, 0x0000_0000_0000_0000, 0x0000_0100_0000_0000, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_XTERM_BASIC }),
+    ("xterm-bold", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterm-color", Entry { names: [0xf1c4_0680_dbfe_a29b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba03_f280], off: &["bce"], colours: Some(8), strings: STRINGS_NXTERM }),
+    ("xterm-direct", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_HTERM }),
+    ("xterm-direct16", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_HTERM }),
+    ("xterm-direct2", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_XTERM_DIRECT2 }),
+    ("xterm-direct256", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fe9f], off: &[], colours: Some(16_777_216), strings: STRINGS_HTERM }),
+    ("xterm-ghostty", Entry { names: [0xfffd_83f0_fffe_bfdf, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0dd7_febb_fa9f], off: &[], colours: Some(256), strings: STRINGS_GHOSTTY }),
+    ("xterm-hp", Entry { names: [0xffec_03e0_ffff_f3df, 0x80ff_ffff_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_HP }),
+    ("xterm-kitty", Entry { names: [0xfbed_03c0_ffff_f39b, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_05d7_bebb_fa9f], off: &["bce"], colours: Some(256), strings: STRINGS_XTERM_KITTY }),
+    ("xterm-mono", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterm-new", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-nic", Entry { names: [0xffcc_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-noapp", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_ae83_ba9f], off: &[], colours: Some(8), strings: STRINGS_XTERM_NOAPP }),
+    ("xterm-old", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterm-p370", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-p371", Entry { names: [0xffed_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0d16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_XTERM_P371 }),
+    ("xterm-pcolor", Entry { names: [0xf1c5_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0102_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_XTERM_PCOLOR }),
+    ("xterm-r5", Entry { names: [0xf1f4_0280_dbfe_829a, 0x8010_0200_4078_0040, 0x0001_0301_0207_8400, 0x0000_0002_a200_9200], off: &["bce"], colours: None, strings: STRINGS_XGTERM }),
+    ("xterm-r6", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterm-sco", Entry { names: [0xffec_03e0_ffff_f3df, 0xbfff_ffff_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_SCO }),
+    ("xterm-sun", Entry { names: [0xffec_03e0_ffff_f3df, 0x9eff_ffff_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_SUN }),
+    ("xterm-utf8", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0e16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-vt220", Entry { names: [0xffec_03e0_ffff_f3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_VT220 }),
+    ("xterm-vt52", Entry { names: [0xf104_0280_01aa_021b, 0x0010_0200_4000_0000, 0x0000_0000_0007_8400, 0x0000_0000_0800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_VT50H }),
+    ("xterm-x10mouse", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-x11hilite", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-x11mouse", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_be83_fa9f], off: &[], colours: Some(8), strings: STRINGS_HTERM }),
+    ("xterm-xf86-v32", Entry { names: [0xf1fc_07c0_dbfe_b39f, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_XTERM_XF86_V32 }),
+    ("xterm-xf86-v33", Entry { names: [0xf1fc_07c0_dbfe_b39f, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_XTERM_XF86_V33 }),
+    ("xterm-xf86-v333", Entry { names: [0xf5ec_07c0_dbfe_b3df, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_MGT }),
+    ("xterm-xf86-v40", Entry { names: [0xfdec_07c0_dbfe_b3df, 0xbfff_ffff_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_RLOGIN_COLOR }),
+    ("xterm-xf86-v43", Entry { names: [0xfdec_07c0_dbfe_b3df, 0xbfff_ffff_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_RLOGIN_COLOR }),
+    ("xterm-xf86-v44", Entry { names: [0xffec_07c0_dffe_b3df, 0xbfff_ffff_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0c02_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_MOSH }),
+    ("xterm-xfree86", Entry { names: [0xffec_07c0_dffe_b3df, 0xbfff_ffff_fff8_2041, 0x0083_0705_060f_8400, 0x0000_0c02_ba03_fa80], off: &[], colours: Some(8), strings: STRINGS_MOSH }),
+    ("xterm-xi", Entry { names: [0xf1fc_07c0_dbfe_b39f, 0x8010_0200_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c02_ba03_f280], off: &[], colours: Some(8), strings: STRINGS_XTERM_XF86_V33 }),
+    ("xterm.js", Entry { names: [0xffec_03e0_fffe_b3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c02_be03_fa8f], off: &[], colours: Some(256), strings: STRINGS_DOMTERM }),
+    ("xterm1", Entry { names: [0xffec_03e0_ffff_f3df, 0xffff_ffff_ffff_ffff, 0xffff_ffff_ffff_ffff, 0x0000_0c16_ae83_ba9f], off: &[], colours: Some(8), strings: STRINGS_XTERM1 }),
+    ("xtermc", Entry { names: [0xf1f4_0780_dbfe_a29b, 0x8010_0200_4078_0000, 0x0001_0300_0207_8400, 0x0000_0000_9a03_7280], off: &["bce"], colours: Some(8), strings: STRINGS_XTERMC }),
+    ("xtermm", Entry { names: [0xf1f4_0780_dbfe_829b, 0x8010_0200_4078_0000, 0x0001_0300_0207_8400, 0x0000_0000_9a00_7200], off: &["bce"], colours: None, strings: STRINGS_XTERMC }),
+    ("xterms", Entry { names: [0xf1c4_0680_dbfe_829b, 0x8010_0200_fff0_0040, 0x0001_0301_0007_8400, 0x0000_0002_ba00_f200], off: &["bce"], colours: None, strings: STRINGS_NXTERM }),
+    ("xterms-sun", Entry { names: [0xffec_03e0_ffff_f3df, 0x9eff_ffff_fff8_0040, 0x0001_0301_0207_8400, 0x0000_0c16_be83_fa90], off: &[], colours: Some(8), strings: STRINGS_XTERM_SUN }),
+    ("xwsh", Entry { names: [0xf9e4_03c0_f7fe_b29a, 0x8010_0200_4078_2041, 0x0081_0205_020f_8400, 0x0000_0002_8603_1280], off: &["bce"], colours: Some(8), strings: STRINGS_IRIS_ANSI }),
+    ("z-100", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100 }),
+    ("z-100bw", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100BW }),
+    ("z100", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100 }),
+    ("z100bw", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100BW }),
+    ("z110", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100 }),
+    ("z110bw", Entry { names: [0xf044_0280_4daa_120b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0000_8800_3000], off: &["am", "bce"], colours: None, strings: STRINGS_H_100BW }),
+    ("z19", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("z29", Entry { names: [0xf155_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8800_3000], off: &["bce"], colours: None, strings: STRINGS_Z29 }),
+    ("z29a", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("z29a-kc-bc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("z29a-kc-uc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("z29a-nkc-bc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("z29a-nkc-uc", Entry { names: [0xf1c5_0280_fbfe_82da, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_9200_5200], off: &["bce"], colours: None, strings: STRINGS_H29A_KC_BC }),
+    ("z29b", Entry { names: [0xf155_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8800_3000], off: &["bce"], colours: None, strings: STRINGS_Z29 }),
+    ("z30", Entry { names: [0x0544_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_Z30 }),
+    ("z340", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["bce"], colours: None, strings: STRINGS_VT300 }),
+    ("z340-nam", Entry { names: [0xf1e5_03c0_dbfe_93db, 0x8010_0200_fff0_0040, 0x0001_0201_0207_8000, 0x0000_0102_aa00_b200], off: &["am", "bce"], colours: None, strings: STRINGS_VT300 }),
+    ("z39-a", Entry { names: [0xf1c5_0380_fbfe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_Z39_A }),
+    ("z39a", Entry { names: [0xf1c5_0380_fbfe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_Z39_A }),
+    ("z50", Entry { names: [0xf050_0280_4982_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_Z50 }),
+    ("z8001", Entry { names: [0xf404_0280_25aa_924a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_CCI }),
+    ("zen30", Entry { names: [0x0544_0280_69aa_021a, 0x0000_0000_0000_0000, 0x0000_0000_0000_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_Z30 }),
+    ("zen50", Entry { names: [0xf050_0280_4982_020a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0000_8200_0200], off: &["bce"], colours: None, strings: STRINGS_Z50 }),
+    ("zen8001", Entry { names: [0xf404_0280_25aa_924a, 0x0000_0000_0000_0000, 0x0000_0000_0200_0000, 0x0000_0002_8200_1200], off: &["bce"], colours: None, strings: STRINGS_CCI }),
+    ("zenith", Entry { names: [0xf105_0280_0daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0203_8400, 0x0000_0100_8800_3000], off: &["bce"], colours: None, strings: STRINGS_ALTO_H19 }),
+    ("zenith29", Entry { names: [0xf155_0280_4daa_121b, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_8800_3000], off: &["bce"], colours: None, strings: STRINGS_Z29 }),
+    ("zenith39-a", Entry { names: [0xf1c5_0380_fbfe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_Z39_A }),
+    ("zenith39-ansi", Entry { names: [0xf1c5_0380_fbfe_93db, 0x8010_0200_4000_0000, 0x0000_0000_0207_8400, 0x0000_0102_aa00_a200], off: &["bce"], colours: None, strings: STRINGS_Z39_A }),
+    ("zt-1", Entry { names: [0xf045_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0102_8000_1000], off: &["bce"], colours: None, strings: STRINGS_HTX11 }),
+    ("ztx", Entry { names: [0xf045_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0102_8000_1000], off: &["bce"], colours: None, strings: STRINGS_HTX11 }),
+    ("ztx-1-a", Entry { names: [0xf045_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0102_8000_1000], off: &["bce"], colours: None, strings: STRINGS_HTX11 }),
+    ("ztx11", Entry { names: [0xf045_0280_41aa_020a, 0x8010_0200_4000_0000, 0x0000_0000_0001_8400, 0x0000_0102_8000_1000], off: &["bce"], colours: None, strings: STRINGS_HTX11 }),
+];
+
+/// The terminals ncurses' `setupterm` refuses as hardcopy (`hc`): tmux's
+/// client says `can't use hardcopy terminal` (`tty_term_read_list`). The
+/// generic ones (`gn`: `unknown`, `ibm327x`) are left out of the table, so they
+/// are `missing or unsuitable terminal` like any name without an entry.
+pub(super) const HARDCOPY: &[&str] = &[
+    "1730-lm",
+    "630-lm",
+    "8510",
+    "aj",
+    "aj830",
+    "aj832",
+    "ci8510",
+    "citoh",
+    "citoh-6lpi",
+    "citoh-8lpi",
+    "citoh-comp",
+    "citoh-elite",
+    "citoh-pica",
+    "citoh-prop",
+    "citoh-ps",
+    "decwriter",
+    "diablo",
+    "diablo-lm",
+    "diablo1620",
+    "diablo1620-m8",
+    "diablo1640",
+    "diablo1640-lm",
+    "diablo1640-m8",
+    "diablo1720",
+    "diablo1730",
+    "diablo1740",
+    "diablo1740-lm",
+    "diablo450",
+    "diablo630",
+    "dtc300s",
+    "dumb-emacs-ansi",
+    "dw",
+    "dw1",
+    "dw2",
+    "dw3",
+    "dw4",
+    "gsi",
+    "ips",
+    "ipsi",
+    "la120",
+    "ln03",
+    "ln03-w",
+    "lpr",
+    "nec",
+    "nec5520",
+    "printer",
+    "pt210",
+    "qume",
+    "qume5",
+    "spinwriter",
+    "terminet",
+    "terminet1200",
+    "terminet300",
+    "ti700",
+    "ti703",
+    "ti703-w",
+    "ti707",
+    "ti707-w",
+    "ti733",
+    "ti735",
+    "ti745",
+    "ti800",
+    "tn1200",
+    "tn300",
+    "tty33",
+    "tty35",
+    "tty37",
+    "tty43",
+    "x1700",
+    "x1700-lm",
+    "x1720",
+    "x1750",
+    "xerox",
+    "xerox-lm",
+    "xerox1720",
+];
+
+#[rustfmt::skip]
+const STRINGS_1178: &[u16] = &[0, 1, 2, 3];
+
+#[rustfmt::skip]
+const STRINGS_2621: &[u16] = &[4, 5, 6, 1, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_386AT: &[u16] = &[17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40];
+
+#[rustfmt::skip]
+const STRINGS_3B1: &[u16] = &[17, 41, 42, 1, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 35, 53, 37, 38, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_4025EX: &[u16] = &[55, 56, 57, 58, 59, 60];
+
+#[rustfmt::skip]
+const STRINGS_4410_W: &[u16] = &[61, 1, 62, 63, 21, 22, 23, 24, 25, 26, 27, 28, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_5051: &[u16] = &[64, 1];
+
+#[rustfmt::skip]
+const STRINGS_5620: &[u16] = &[61, 20, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_5630_24: &[u16] = &[61, 65, 66, 67, 68, 69, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_6053: &[u16] = &[70, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84];
+
+#[rustfmt::skip]
+const STRINGS_730MTG_24: &[u16] = &[61, 85, 86, 65, 87, 63, 43, 44, 45, 46, 47, 48, 49, 50, 66, 67, 68, 69, 33, 35, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_955_HB: &[u16] = &[89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 3];
+
+#[rustfmt::skip]
+const STRINGS_9TERM: &[u16] = &[];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_TERMINAL: &[u16] = &[61, 112, 113, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ETERM: &[u16] = &[132, 133, 134, 135, 136, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_LFT_PC850: &[u16] = &[61, 65, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 34, 35, 157, 158, 159, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_NCR260VT300WPP: &[u16] = &[160, 161, 162, 116, 86, 65, 163, 164, 21, 22, 23, 24, 165, 120, 121, 122, 123, 124, 125, 126, 141, 166, 35, 167, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_NCRVT100WPP: &[u16] = &[160, 65, 168, 169, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_P12: &[u16] = &[70, 170, 171, 1, 172, 173, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_Q310_VIP_H: &[u16] = &[174, 1, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 34, 190, 54, 191];
+
+#[rustfmt::skip]
+const STRINGS_X_HPTERM: &[u16] = &[192, 193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 207];
+
+#[rustfmt::skip]
+const STRINGS_X_HPTERM_COLOR2: &[u16] = &[4, 208, 209, 193, 194, 210, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 211];
+
+#[rustfmt::skip]
+const STRINGS_A210: &[u16] = &[89, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_A80: &[u16] = &[89, 1, 223];
+
+#[rustfmt::skip]
+const STRINGS_A980: &[u16] = &[224, 1, 225, 178, 226, 227, 228, 229, 230, 231, 232, 233];
+
+#[rustfmt::skip]
+const STRINGS_AA4080: &[u16] = &[70, 1, 234];
+
+#[rustfmt::skip]
+const STRINGS_AAA: &[u16] = &[61, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_RV: &[u16] = &[252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_UNK: &[u16] = &[61, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_18: &[u16] = &[61, 253, 254, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_18_RV: &[u16] = &[61, 253, 254, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_20: &[u16] = &[61, 255, 256, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_22: &[u16] = &[61, 257, 258, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_24: &[u16] = &[61, 259, 260, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_24_RV: &[u16] = &[61, 259, 260, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_26: &[u16] = &[61, 261, 262, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_28: &[u16] = &[61, 263, 264, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_CTXT: &[u16] = &[61, 265, 266, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_RV: &[u16] = &[61, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_RV_CTXT: &[u16] = &[61, 265, 266, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_S: &[u16] = &[61, 267, 268, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_S_CTXT: &[u16] = &[61, 271, 272, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_S_RV: &[u16] = &[61, 267, 268, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_30_S_RV_CT: &[u16] = &[61, 271, 272, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_36: &[u16] = &[61, 273, 274, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_36_RV: &[u16] = &[61, 273, 274, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_40: &[u16] = &[61, 275, 276, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_40_RV: &[u16] = &[61, 275, 276, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_48: &[u16] = &[61, 277, 278, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAA_48_RV: &[u16] = &[61, 277, 278, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_60_DEC_RV: &[u16] = &[61, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_60_RV: &[u16] = &[61, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 252];
+
+#[rustfmt::skip]
+const STRINGS_AAA_60_S: &[u16] = &[61, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AAS1901: &[u16] = &[70, 1];
+
+#[rustfmt::skip]
+const STRINGS_ABM80: &[u16] = &[279];
+
+#[rustfmt::skip]
+const STRINGS_ABM85: &[u16] = &[89, 107, 223];
+
+#[rustfmt::skip]
+const STRINGS_ABM85H: &[u16] = &[89, 280, 92, 93, 107, 281, 3];
+
+#[rustfmt::skip]
+const STRINGS_ABSOLUTE: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_ADDS200: &[u16] = &[70, 1, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299];
+
+#[rustfmt::skip]
+const STRINGS_ADDSVIEWPOINT: &[u16] = &[70, 300, 1, 301, 302, 303, 304, 297, 305, 306];
+
+#[rustfmt::skip]
+const STRINGS_ADDSVP60: &[u16] = &[70, 1, 287, 288, 289, 290, 291, 292, 293, 294, 297, 307];
+
+#[rustfmt::skip]
+const STRINGS_ADM_SGR: &[u16] = &[3];
+
+#[rustfmt::skip]
+const STRINGS_ADM1: &[u16] = &[308, 1];
+
+#[rustfmt::skip]
+const STRINGS_ADM11: &[u16] = &[89, 309, 310, 94, 95, 96, 97, 98, 99, 100, 101, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM12: &[u16] = &[311, 214, 215, 216, 217, 218, 219, 220, 221, 222, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM2: &[u16] = &[308, 1, 107];
+
+#[rustfmt::skip]
+const STRINGS_ADM20: &[u16] = &[311, 312, 313, 314, 315, 316, 317, 318, 319];
+
+#[rustfmt::skip]
+const STRINGS_ADM21: &[u16] = &[311, 1, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM22: &[u16] = &[0, 94, 95, 96, 97, 98, 99, 100, 107, 319];
+
+#[rustfmt::skip]
+const STRINGS_ADM3: &[u16] = &[311, 1];
+
+#[rustfmt::skip]
+const STRINGS_ADM31: &[u16] = &[89, 1, 214, 215, 216, 217, 218, 219, 220, 221, 222, 320];
+
+#[rustfmt::skip]
+const STRINGS_ADM31_OLD: &[u16] = &[89, 1, 214, 215, 216, 217, 218, 219, 220, 221, 222, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM36: &[u16] = &[61, 1, 321];
+
+#[rustfmt::skip]
+const STRINGS_ADM42: &[u16] = &[308, 1, 107, 2, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM42_NS: &[u16] = &[322, 1, 107, 2, 3];
+
+#[rustfmt::skip]
+const STRINGS_ADM5: &[u16] = &[311, 1, 107, 323];
+
+#[rustfmt::skip]
+const STRINGS_AEPRO: &[u16] = &[70];
+
+#[rustfmt::skip]
+const STRINGS_AIXTERM: &[u16] = &[61, 20, 324, 325, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 34, 35, 157, 158, 159, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_AIXTERM_SL: &[u16] = &[324, 325];
+
+#[rustfmt::skip]
+const STRINGS_AJ510: &[u16] = &[70, 326, 327, 328];
+
+#[rustfmt::skip]
+const STRINGS_ALACRITTY: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 117, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 331, 332, 333, 334];
+
+#[rustfmt::skip]
+const STRINGS_ALT2: &[u16] = &[132, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 335, 336, 337, 40];
+
+#[rustfmt::skip]
+const STRINGS_ALT4: &[u16] = &[0, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 108, 109, 110, 342];
+
+#[rustfmt::skip]
+const STRINGS_ALT7: &[u16] = &[343, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 335, 107, 108, 109, 337, 3];
+
+#[rustfmt::skip]
+const STRINGS_ALT7PC: &[u16] = &[343, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 335, 107, 344, 108, 109, 337, 3];
+
+#[rustfmt::skip]
+const STRINGS_ALTO_H19: &[u16] = &[345, 346, 1, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190, 357, 358];
+
+#[rustfmt::skip]
+const STRINGS_AMIGA: &[u16] = &[61, 359, 360, 20, 361, 362, 363, 364, 365, 366, 367, 368, 369, 40];
+
+#[rustfmt::skip]
+const STRINGS_AMP219: &[u16] = &[132, 161, 162, 370, 1, 371, 372, 373, 374, 375, 120, 121, 122, 123, 35, 376, 40];
+
+#[rustfmt::skip]
+const STRINGS_AMPEX_232: &[u16] = &[0, 280, 91, 377, 378, 379, 380, 381, 382, 383, 384, 385, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_AMPEX175: &[u16] = &[0, 386, 387, 1, 105, 106, 107, 223];
+
+#[rustfmt::skip]
+const STRINGS_ANSI: &[u16] = &[61, 1, 388, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_APPARROWS: &[u16] = &[128];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_ARROWS: &[u16] = &[35];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_ERASE: &[u16] = &[61];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_SGRBOLD: &[u16] = &[40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_GENERIC: &[u16] = &[61, 1, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_MINI: &[u16] = &[61, 1];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_NT: &[u16] = &[389, 20, 40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI_SYS_OLD: &[u16] = &[389, 107, 40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI77: &[u16] = &[390, 65, 21, 391, 24, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_ANSI80X25: &[u16] = &[61, 41, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 408, 40];
+
+#[rustfmt::skip]
+const STRINGS_APL: &[u16] = &[70, 1, 409];
+
+#[rustfmt::skip]
+const STRINGS_APOLLO: &[u16] = &[70, 410, 411, 412, 413];
+
+#[rustfmt::skip]
+const STRINGS_APOLLO_VT132: &[u16] = &[61, 114, 115, 1, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 40];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_AE: &[u16] = &[70, 420, 421];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_SOROC: &[u16] = &[89, 1];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_UTERM: &[u16] = &[70, 421];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_VIDEX: &[u16] = &[70, 409, 422];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_VIDEX2: &[u16] = &[70, 1, 409, 422];
+
+#[rustfmt::skip]
+const STRINGS_APPLE_VIDEX3: &[u16] = &[423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 190];
+
+#[rustfmt::skip]
+const STRINGS_APPLE80P: &[u16] = &[433];
+
+#[rustfmt::skip]
+const STRINGS_APPLEII: &[u16] = &[70, 434, 435, 421];
+
+#[rustfmt::skip]
+const STRINGS_APPLEIIC: &[u16] = &[70, 420, 404, 421];
+
+#[rustfmt::skip]
+const STRINGS_ARM100: &[u16] = &[61, 114, 115, 1, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 40];
+
+#[rustfmt::skip]
+const STRINGS_AT: &[u16] = &[345, 446, 447, 1, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 404, 461, 462, 463, 358];
+
+#[rustfmt::skip]
+const STRINGS_ATARI_OLD: &[u16] = &[4, 358];
+
+#[rustfmt::skip]
+const STRINGS_ATERM: &[u16] = &[132, 133, 134, 161, 162, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT2300: &[u16] = &[61, 1, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT4418: &[u16] = &[132, 1, 476, 477, 478, 479, 480, 481, 444, 482, 483, 484, 485, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT4420: &[u16] = &[4, 486, 487, 488, 203, 190, 298, 489];
+
+#[rustfmt::skip]
+const STRINGS_ATT4424: &[u16] = &[132, 1, 21, 22, 23, 24, 35, 489];
+
+#[rustfmt::skip]
+const STRINGS_ATT4424_1: &[u16] = &[132, 1, 21, 22, 23, 24, 489];
+
+#[rustfmt::skip]
+const STRINGS_ATT4424M: &[u16] = &[490, 1, 21, 22, 23, 24, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT4426: &[u16] = &[491, 1, 21, 22, 23, 24, 25, 26, 27, 28, 35, 298, 492];
+
+#[rustfmt::skip]
+const STRINGS_ATT505: &[u16] = &[17, 493, 1, 494, 495, 496, 497, 498, 499, 500, 501];
+
+#[rustfmt::skip]
+const STRINGS_ATT510A: &[u16] = &[61, 502, 503, 504, 505, 1, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 54, 518, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT510D: &[u16] = &[61, 502, 503, 504, 1, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 54, 518, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT5420_2: &[u16] = &[4, 519, 520, 521, 1, 522, 63, 43, 44, 45, 46, 47, 48, 49, 50, 523, 34, 35, 524, 37, 38, 54, 525, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT5620_1: &[u16] = &[61, 1, 35];
+
+#[rustfmt::skip]
+const STRINGS_ATT5620_S: &[u16] = &[70, 1, 35];
+
+#[rustfmt::skip]
+const STRINGS_ATT605: &[u16] = &[61, 1, 526, 63, 43, 44, 45, 46, 47, 48, 49, 50, 66, 67, 68, 69, 33, 34, 35, 527, 37, 38, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT605_PC: &[u16] = &[61, 1, 526, 63, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 68, 69, 33, 34, 35, 405, 406, 407, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT610: &[u16] = &[61, 85, 86, 65, 526, 63, 43, 44, 45, 46, 47, 48, 49, 50, 66, 67, 68, 69, 35, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT610_CVIS: &[u16] = &[85, 86, 88];
+
+#[rustfmt::skip]
+const STRINGS_ATT610_CVIS0: &[u16] = &[85, 86];
+
+#[rustfmt::skip]
+const STRINGS_ATT610_103K: &[u16] = &[61, 85, 86, 65, 526, 63, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 35, 53, 37, 38, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_ATT700: &[u16] = &[61, 85, 86, 65, 528, 63, 43, 44, 45, 46, 47, 48, 49, 50, 66, 67, 68, 69, 33, 34, 35, 527, 37, 38, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_AVATAR: &[u16] = &[529, 530, 1, 531, 532];
+
+#[rustfmt::skip]
+const STRINGS_AVATAR0: &[u16] = &[1, 532];
+
+#[rustfmt::skip]
+const STRINGS_AVT: &[u16] = &[61, 533, 534, 535, 536, 537, 1, 538, 539, 21, 22, 23, 24, 540, 541, 35, 542, 40];
+
+#[rustfmt::skip]
+const STRINGS_AVT_S: &[u16] = &[533, 534, 538, 539];
+
+#[rustfmt::skip]
+const STRINGS_AVT_NS: &[u16] = &[61, 543, 544, 535, 536, 537, 1, 21, 22, 23, 24, 540, 541, 35, 542, 40];
+
+#[rustfmt::skip]
+const STRINGS_AVT_W: &[u16] = &[61, 545, 534, 535, 536, 537, 1, 538, 539, 21, 22, 23, 24, 540, 541, 35, 542, 40];
+
+#[rustfmt::skip]
+const STRINGS_AVT_W_NS: &[u16] = &[61, 545, 544, 535, 536, 537, 1, 21, 22, 23, 24, 540, 541, 35, 542, 40];
+
+#[rustfmt::skip]
+const STRINGS_AWS: &[u16] = &[70, 546, 547];
+
+#[rustfmt::skip]
+const STRINGS_AWSC: &[u16] = &[70, 548];
+
+#[rustfmt::skip]
+const STRINGS_B_128: &[u16] = &[549, 550];
+
+#[rustfmt::skip]
+const STRINGS_BANTAM: &[u16] = &[551, 1];
+
+#[rustfmt::skip]
+const STRINGS_BASIC4: &[u16] = &[552, 553, 65, 21, 22, 23, 24, 25, 26, 27, 28, 554, 40];
+
+#[rustfmt::skip]
+const STRINGS_BASIS: &[u16] = &[89, 1, 555];
+
+#[rustfmt::skip]
+const STRINGS_BEACON: &[u16] = &[556, 557, 558, 1, 559];
+
+#[rustfmt::skip]
+const STRINGS_BEE: &[u16] = &[345, 105, 203, 190, 560, 561];
+
+#[rustfmt::skip]
+const STRINGS_BEEHIVE3: &[u16] = &[562, 1, 563];
+
+#[rustfmt::skip]
+const STRINGS_BEEHIVE4: &[u16] = &[345, 1];
+
+#[rustfmt::skip]
+const STRINGS_BETERM: &[u16] = &[61, 564, 565, 1, 137, 138, 139, 140, 119, 566, 567, 568, 569, 570, 571, 572, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_BG1_25: &[u16] = &[61, 161, 162, 1, 448, 449, 450, 451, 40];
+
+#[rustfmt::skip]
+const STRINGS_BG2_0: &[u16] = &[61, 161, 162, 1, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_BLIT: &[u16] = &[70, 1, 573, 574, 575];
+
+#[rustfmt::skip]
+const STRINGS_BOBCAT: &[u16] = &[4, 193, 194, 1, 204, 211];
+
+#[rustfmt::skip]
+const STRINGS_BQ300: &[u16] = &[61, 576, 577, 115, 116, 86, 65, 578, 164, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_BQ300_PC: &[u16] = &[61, 576, 577, 115, 116, 86, 65, 578, 164, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_BSDOS_PC: &[u16] = &[591, 1, 388, 35, 406, 407, 40];
+
+#[rustfmt::skip]
+const STRINGS_BSDOS_SPARC: &[u16] = &[70, 1, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 404, 605, 606, 607, 608, 40];
+
+#[rustfmt::skip]
+const STRINGS_BTERM: &[u16] = &[132, 116, 86, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_C100: &[u16] = &[614, 615, 616, 617, 618, 1, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632];
+
+#[rustfmt::skip]
+const STRINGS_C100_RV: &[u16] = &[614, 615, 616, 617, 618, 1, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 633];
+
+#[rustfmt::skip]
+const STRINGS_C108: &[u16] = &[614, 615, 634, 617, 618, 635, 1, 636, 637, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 638, 632];
+
+#[rustfmt::skip]
+const STRINGS_C108_4P: &[u16] = &[614, 615, 639, 617, 618, 635, 1, 636, 637, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 638, 632];
+
+#[rustfmt::skip]
+const STRINGS_C108_RV: &[u16] = &[614, 640, 641, 617, 618, 635, 1, 636, 637, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 638, 633];
+
+#[rustfmt::skip]
+const STRINGS_C108_RV_4P: &[u16] = &[614, 615, 639, 617, 618, 635, 1, 636, 637, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 638, 633];
+
+#[rustfmt::skip]
+const STRINGS_C108_W: &[u16] = &[614, 642, 643, 617, 618, 635, 1, 636, 637, 619, 620, 621, 180, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 638, 632];
+
+#[rustfmt::skip]
+const STRINGS_C300: &[u16] = &[551, 1, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653];
+
+#[rustfmt::skip]
+const STRINGS_CA22851: &[u16] = &[70, 1, 107];
+
+#[rustfmt::skip]
+const STRINGS_CAD68_2: &[u16] = &[311, 619, 620, 621, 180, 654];
+
+#[rustfmt::skip]
+const STRINGS_CAD68_3: &[u16] = &[311];
+
+#[rustfmt::skip]
+const STRINGS_CBBLIT: &[u16] = &[70, 1, 573, 574, 575, 655];
+
+#[rustfmt::skip]
+const STRINGS_CBUNIX: &[u16] = &[656, 1, 461, 657];
+
+#[rustfmt::skip]
+const STRINGS_CCI: &[u16] = &[4, 658, 190, 659, 660];
+
+#[rustfmt::skip]
+const STRINGS_CDC456: &[u16] = &[661, 1];
+
+#[rustfmt::skip]
+const STRINGS_CDC721: &[u16] = &[70, 409];
+
+#[rustfmt::skip]
+const STRINGS_CDC721_ESC: &[u16] = &[70, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 409, 674];
+
+#[rustfmt::skip]
+const STRINGS_CDC752: &[u16] = &[675, 1];
+
+#[rustfmt::skip]
+const STRINGS_CDC756: &[u16] = &[661, 1, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 409];
+
+#[rustfmt::skip]
+const STRINGS_CG7900: &[u16] = &[70, 687, 688, 1, 689];
+
+#[rustfmt::skip]
+const STRINGS_CIT_80: &[u16] = &[690, 114, 115, 1];
+
+#[rustfmt::skip]
+const STRINGS_CIT101: &[u16] = &[132, 114, 115, 691, 692, 40];
+
+#[rustfmt::skip]
+const STRINGS_CIT101E: &[u16] = &[61, 161, 162, 693, 21, 22, 23, 24, 694, 695, 696, 697, 698, 40];
+
+#[rustfmt::skip]
+const STRINGS_CIT101E_N: &[u16] = &[61, 161, 162, 693, 21, 22, 23, 24, 694, 695, 696, 697, 699, 40];
+
+#[rustfmt::skip]
+const STRINGS_CIT101E_RV: &[u16] = &[61, 700, 558, 701, 702, 1, 21, 22, 23, 24, 703, 40];
+
+#[rustfmt::skip]
+const STRINGS_CIT500: &[u16] = &[61, 114, 115, 1, 704, 391, 705, 706, 707, 708, 709, 710, 711, 523, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_COCO3: &[u16] = &[70, 712, 713, 714];
+
+#[rustfmt::skip]
+const STRINGS_COHERENT: &[u16] = &[345, 1, 190, 358];
+
+#[rustfmt::skip]
+const STRINGS_COLOR_XTERM: &[u16] = &[132, 715, 716, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 142, 143, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_COLORSCAN: &[u16] = &[61, 1, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_CONS25_DEBIAN: &[u16] = &[61, 41, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 127, 35, 405, 406, 407, 54, 408, 40];
+
+#[rustfmt::skip]
+const STRINGS_CONTOUR: &[u16] = &[132, 112, 113, 717, 718, 116, 86, 284, 1, 719, 164, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40, 330, 720, 721, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_COPS: &[u16] = &[723, 1, 409];
+
+#[rustfmt::skip]
+const STRINGS_CRT: &[u16] = &[61, 65, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_CT82: &[u16] = &[70, 724, 725];
+
+#[rustfmt::skip]
+const STRINGS_CT8500: &[u16] = &[726, 1, 727];
+
+#[rustfmt::skip]
+const STRINGS_CTRM: &[u16] = &[4, 5, 6, 1, 7, 8, 9, 10, 11, 12, 13, 14, 728, 16];
+
+#[rustfmt::skip]
+const STRINGS_CYB110: &[u16] = &[723, 1, 729];
+
+#[rustfmt::skip]
+const STRINGS_CYGWIN: &[u16] = &[61, 133, 134, 1, 730, 118, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_CYGWINDBG: &[u16] = &[61, 116, 86, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_D132: &[u16] = &[70, 731, 1, 732];
+
+#[rustfmt::skip]
+const STRINGS_D200: &[u16] = &[70, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733, 83, 734];
+
+#[rustfmt::skip]
+const STRINGS_D210: &[u16] = &[389, 1, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 35, 747];
+
+#[rustfmt::skip]
+const STRINGS_D216_: &[u16] = &[748, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733, 749, 734];
+
+#[rustfmt::skip]
+const STRINGS_D220_7B: &[u16] = &[389, 750, 751, 1, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 35, 747];
+
+#[rustfmt::skip]
+const STRINGS_D220_DG: &[u16] = &[70, 752, 753, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733, 83, 734];
+
+#[rustfmt::skip]
+const STRINGS_D230: &[u16] = &[389, 754, 755, 750, 751, 1, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 35, 756];
+
+#[rustfmt::skip]
+const STRINGS_D412_: &[u16] = &[757, 758, 753, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733, 749, 734];
+
+#[rustfmt::skip]
+const STRINGS_D412_S: &[u16] = &[759, 758, 753, 1, 760, 761, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733, 749, 734];
+
+#[rustfmt::skip]
+const STRINGS_D800: &[u16] = &[762, 763, 65, 21, 22, 23, 24, 25, 26, 27, 28, 764, 40];
+
+#[rustfmt::skip]
+const STRINGS_DARWIN: &[u16] = &[61, 114, 115, 1, 40];
+
+#[rustfmt::skip]
+const STRINGS_DARWIN_F: &[u16] = &[61, 114, 115, 1, 765];
+
+#[rustfmt::skip]
+const STRINGS_DARWIN_F2: &[u16] = &[61, 114, 115, 1, 766];
+
+#[rustfmt::skip]
+const STRINGS_DATAMEDIA2500: &[u16] = &[767, 1, 306];
+
+#[rustfmt::skip]
+const STRINGS_DATAPOINT: &[u16] = &[552, 1];
+
+#[rustfmt::skip]
+const STRINGS_DATASPEED40: &[u16] = &[4, 210, 768];
+
+#[rustfmt::skip]
+const STRINGS_DD5000: &[u16] = &[769, 1];
+
+#[rustfmt::skip]
+const STRINGS_DDR: &[u16] = &[132, 114, 115, 65, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_DEC_SL: &[u16] = &[719, 164];
+
+#[rustfmt::skip]
+const STRINGS_DEC_VT220: &[u16] = &[61, 116, 86, 65, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_DEC_VT330: &[u16] = &[61, 114, 115, 116, 86, 65, 770, 771, 21, 22, 23, 24, 120, 121, 122, 123, 40];
+
+#[rustfmt::skip]
+const STRINGS_DECANSI: &[u16] = &[61, 114, 115, 116, 86, 20, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_DECPRO: &[u16] = &[4, 772, 773, 774, 775, 776, 777, 778, 190, 779];
+
+#[rustfmt::skip]
+const STRINGS_DG_ANSI: &[u16] = &[389, 35, 780];
+
+#[rustfmt::skip]
+const STRINGS_DG200: &[u16] = &[70, 1, 71, 72, 73, 74, 75, 76, 77, 78, 79, 83, 674];
+
+#[rustfmt::skip]
+const STRINGS_DG211: &[u16] = &[70, 781, 782, 783, 83, 784, 674];
+
+#[rustfmt::skip]
+const STRINGS_DG460_ANSI: &[u16] = &[389, 20, 785, 786, 787, 788, 789, 790, 791, 792, 793, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_DGKEYS_11: &[u16] = &[71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83];
+
+#[rustfmt::skip]
+const STRINGS_DGKEYS_15: &[u16] = &[71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 733];
+
+#[rustfmt::skip]
+const STRINGS_DGKEYS_7B: &[u16] = &[735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 35];
+
+#[rustfmt::skip]
+const STRINGS_DIGILOG: &[u16] = &[1];
+
+#[rustfmt::skip]
+const STRINGS_DJGPP: &[u16] = &[61, 794, 702, 20, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 795, 40];
+
+#[rustfmt::skip]
+const STRINGS_DJGPP204: &[u16] = &[132, 794, 702, 20, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 141, 127, 285, 286, 130, 131, 795, 40];
+
+#[rustfmt::skip]
+const STRINGS_DKU7003: &[u16] = &[552, 1, 796, 40];
+
+#[rustfmt::skip]
+const STRINGS_DKU7003_DUMB: &[u16] = &[552, 1, 796];
+
+#[rustfmt::skip]
+const STRINGS_DKU7102: &[u16] = &[389, 797, 798, 799, 800, 1, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 34, 35, 54, 811];
+
+#[rustfmt::skip]
+const STRINGS_DKU7102_OLD: &[u16] = &[17, 797, 798, 799, 800, 1, 812, 802, 803, 804, 805, 806, 807, 808, 809, 810, 34, 35, 54, 811];
+
+#[rustfmt::skip]
+const STRINGS_DKU7102_SNA: &[u16] = &[389, 797, 798, 799, 800, 1, 813, 802, 803, 804, 805, 806, 807, 808, 809, 810, 34, 35, 54, 811];
+
+#[rustfmt::skip]
+const STRINGS_DKU7202: &[u16] = &[389, 797, 798, 799, 800, 1, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 34, 35, 54, 814];
+
+#[rustfmt::skip]
+const STRINGS_DM3025: &[u16] = &[815, 1, 816];
+
+#[rustfmt::skip]
+const STRINGS_DM3045: &[u16] = &[815, 1, 7, 8, 9, 10, 11, 12, 13, 14, 817, 190];
+
+#[rustfmt::skip]
+const STRINGS_DM80: &[u16] = &[17, 1, 40];
+
+#[rustfmt::skip]
+const STRINGS_DM80W: &[u16] = &[132, 1, 40];
+
+#[rustfmt::skip]
+const STRINGS_DMTERM: &[u16] = &[818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 190, 3];
+
+#[rustfmt::skip]
+const STRINGS_DOMTERM: &[u16] = &[132, 282, 283, 717, 718, 85, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_DP8242: &[u16] = &[831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845];
+
+#[rustfmt::skip]
+const STRINGS_DT_100: &[u16] = &[132, 116, 86, 1, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 35, 856, 857, 40];
+
+#[rustfmt::skip]
+const STRINGS_DT110: &[u16] = &[132, 116, 86, 1, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 33, 868, 869, 870, 871, 40];
+
+#[rustfmt::skip]
+const STRINGS_DT80_SAS: &[u16] = &[70, 872, 409, 873];
+
+#[rustfmt::skip]
+const STRINGS_DTC382: &[u16] = &[874, 875, 558, 876, 1, 877];
+
+#[rustfmt::skip]
+const STRINGS_DTTERM: &[u16] = &[61, 116, 86, 65, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 747];
+
+#[rustfmt::skip]
+const STRINGS_DVTM: &[u16] = &[132, 133, 134, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_DWK: &[u16] = &[4, 1, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892];
+
+#[rustfmt::skip]
+const STRINGS_ELKS: &[u16] = &[4, 1];
+
+#[rustfmt::skip]
+const STRINGS_EMOTS: &[u16] = &[61, 1, 893, 894, 895, 896, 897, 898, 899, 900, 35, 901, 501];
+
+#[rustfmt::skip]
+const STRINGS_EMU: &[u16] = &[902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 404, 919, 920, 892];
+
+#[rustfmt::skip]
+const STRINGS_EMU_220: &[u16] = &[17, 921, 922, 161, 162, 116, 86, 65, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 141, 127, 130, 131, 811];
+
+#[rustfmt::skip]
+const STRINGS_ENV230: &[u16] = &[61, 1, 40];
+
+#[rustfmt::skip]
+const STRINGS_ERGO4000: &[u16] = &[132, 161, 935, 65, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_ESPRIT: &[u16] = &[279, 936, 162, 1, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947];
+
+#[rustfmt::skip]
+const STRINGS_ETERM_: &[u16] = &[61, 133, 134, 1, 40];
+
+#[rustfmt::skip]
+const STRINGS_ETERM_COLOR: &[u16] = &[61, 133, 134, 1, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_EX155: &[u16] = &[948, 949, 950, 951];
+
+#[rustfmt::skip]
+const STRINGS_EXCEL62: &[u16] = &[17, 1, 927, 928, 929, 930, 931, 40];
+
+#[rustfmt::skip]
+const STRINGS_EXCEL62_W: &[u16] = &[132, 1, 927, 928, 929, 930, 931, 40];
+
+#[rustfmt::skip]
+const STRINGS_EXEC80: &[u16] = &[390, 114, 115, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_F100: &[u16] = &[311, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_F110: &[u16] = &[311, 90, 952, 1, 953, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 106, 107, 110, 954];
+
+#[rustfmt::skip]
+const STRINGS_F1720: &[u16] = &[132, 65, 40];
+
+#[rustfmt::skip]
+const STRINGS_F200: &[u16] = &[311, 955, 91, 1, 953, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 106, 954];
+
+#[rustfmt::skip]
+const STRINGS_FALCO: &[u16] = &[89, 1, 956];
+
+#[rustfmt::skip]
+const STRINGS_FALCO_P: &[u16] = &[89, 957, 958, 1, 35, 959];
+
+#[rustfmt::skip]
+const STRINGS_FBTERM: &[u16] = &[61, 960, 961, 284, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 963, 40];
+
+#[rustfmt::skip]
+const STRINGS_FENIX: &[u16] = &[964, 965, 558, 966, 967, 1, 968, 747];
+
+#[rustfmt::skip]
+const STRINGS_FOOT: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 117, 969, 970, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 720, 721, 971, 334];
+
+#[rustfmt::skip]
+const STRINGS_FORTUNE: &[u16] = &[70, 972, 973, 1, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987];
+
+#[rustfmt::skip]
+const STRINGS_GATOR: &[u16] = &[61, 40];
+
+#[rustfmt::skip]
+const STRINGS_GHOSTTY: &[u16] = &[132, 112, 113, 114, 115, 85, 86, 284, 1, 117, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 331, 334, 988, 722];
+
+#[rustfmt::skip]
+const STRINGS_GIGI: &[u16] = &[132, 114, 115, 1, 21, 22, 23, 24, 35, 989];
+
+#[rustfmt::skip]
+const STRINGS_GNOME: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GNOME_PCFKEYS: &[u16] = &[21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_GNOME_RH62: &[u16] = &[132, 133, 134, 114, 115, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_GNOME_RH72: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_GNOME_RH80: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 962, 40];
+
+#[rustfmt::skip]
+const STRINGS_GO_225: &[u16] = &[61, 990, 991, 161, 162, 65, 21, 22, 23, 24, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_GO140: &[u16] = &[132, 114, 115, 21, 22, 23, 24, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_GRAPHOS: &[u16] = &[132, 992, 65, 21, 22, 23, 24, 35, 993, 40];
+
+#[rustfmt::skip]
+const STRINGS_GRAPHOS_30: &[u16] = &[132, 992, 65, 21, 22, 23, 24, 35, 994, 40];
+
+#[rustfmt::skip]
+const STRINGS_GT100: &[u16] = &[70, 1, 995];
+
+#[rustfmt::skip]
+const STRINGS_GURU: &[u16] = &[61, 996, 997, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_S: &[u16] = &[998, 999, 269, 270];
+
+#[rustfmt::skip]
+const STRINGS_GURU_24: &[u16] = &[61, 1000, 997, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_33_S: &[u16] = &[61, 1001, 999, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_44: &[u16] = &[61, 1002, 997, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_44_S: &[u16] = &[61, 1003, 999, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_76: &[u16] = &[61, 1004, 997, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_76_S: &[u16] = &[61, 1005, 999, 237, 238, 239, 269, 270, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_GURU_NCTXT: &[u16] = &[61, 1006, 997, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 33, 34, 35, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_H_100: &[u16] = &[345, 1007, 349, 350, 351, 352, 353, 354, 355, 356, 248, 190, 1008, 358];
+
+#[rustfmt::skip]
+const STRINGS_H_100BW: &[u16] = &[345, 346, 349, 350, 351, 352, 353, 354, 355, 356, 248, 190, 357, 358];
+
+#[rustfmt::skip]
+const STRINGS_H19_A: &[u16] = &[389, 1009, 1, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 35, 1018, 40];
+
+#[rustfmt::skip]
+const STRINGS_H19_BS: &[u16] = &[345, 1019, 1020, 346, 1, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190, 357, 358];
+
+#[rustfmt::skip]
+const STRINGS_H19_G: &[u16] = &[345, 1021, 1, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190, 358];
+
+#[rustfmt::skip]
+const STRINGS_H19_SMUL: &[u16] = &[345, 1019, 1020, 1, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190, 358];
+
+#[rustfmt::skip]
+const STRINGS_H19_U: &[u16] = &[345, 1, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190, 358];
+
+#[rustfmt::skip]
+const STRINGS_H29A_KC_BC: &[u16] = &[389, 1022, 577, 65, 1023, 1024, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 29, 35, 1025];
+
+#[rustfmt::skip]
+const STRINGS_HA8675: &[u16] = &[345, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 105, 203, 190, 560, 561];
+
+#[rustfmt::skip]
+const STRINGS_HA8686: &[u16] = &[345, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1046, 1047, 1048, 1049, 105, 203, 190, 560, 561];
+
+#[rustfmt::skip]
+const STRINGS_HDS200: &[u16] = &[61, 1050, 1051, 65, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1060, 1061, 1062, 1063, 1064, 1065, 404, 35, 37, 38, 1066, 1067];
+
+#[rustfmt::skip]
+const STRINGS_HFT: &[u16] = &[61, 20, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 34, 35, 157, 158, 159, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_HFT_OLD: &[u16] = &[61, 1, 144, 145, 146, 147, 148, 149, 150, 151, 152, 35, 1068, 1069, 40];
+
+#[rustfmt::skip]
+const STRINGS_HIREZ100: &[u16] = &[61, 114, 115, 704, 391, 705, 40];
+
+#[rustfmt::skip]
+const STRINGS_HMOD1: &[u16] = &[1070, 1, 1071, 1072];
+
+#[rustfmt::skip]
+const STRINGS_HP: &[u16] = &[4, 1, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP_ARROWS: &[u16] = &[204];
+
+#[rustfmt::skip]
+const STRINGS_HP_PFK_ARROWS: &[u16] = &[728];
+
+#[rustfmt::skip]
+const STRINGS_HP_PFK_CR: &[u16] = &[7, 8, 9, 10, 11, 12, 13, 14];
+
+#[rustfmt::skip]
+const STRINGS_HP_PFK_CR_: &[u16] = &[195, 196, 197, 198, 199, 200, 201, 202];
+
+#[rustfmt::skip]
+const STRINGS_HP150: &[u16] = &[1073, 193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP2: &[u16] = &[192, 193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP236: &[u16] = &[1074, 1075, 1076, 1077];
+
+#[rustfmt::skip]
+const STRINGS_HP2392: &[u16] = &[4, 193, 194, 1, 7, 8, 9, 10, 11, 12, 13, 14, 204, 1078, 1079, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP2397: &[u16] = &[4, 193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP2621_A: &[u16] = &[4, 5, 1080, 1, 728, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621_BA: &[u16] = &[4, 1, 7, 8, 9, 10, 11, 12, 13, 14, 204, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621_FL: &[u16] = &[4, 5, 1080, 1, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621_K45: &[u16] = &[4, 193, 194, 1, 7, 8, 9, 10, 11, 12, 13, 14, 204, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621_NL: &[u16] = &[4, 1, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621B: &[u16] = &[4, 5, 6, 1, 7, 8, 9, 10, 11, 12, 13, 14, 204, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621B_KX: &[u16] = &[4, 193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2621P_A: &[u16] = &[4, 5, 6, 1, 728, 15, 16];
+
+#[rustfmt::skip]
+const STRINGS_HP2626_12_S: &[u16] = &[1073, 193, 194, 1, 1081, 1082, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP2627A: &[u16] = &[4, 1, 7, 8, 9, 10, 11, 12, 13, 14, 15, 1083];
+
+#[rustfmt::skip]
+const STRINGS_HP262X: &[u16] = &[193, 194, 210, 105, 203, 204, 205, 206, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP2640A: &[u16] = &[4, 1, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP2641A: &[u16] = &[4, 1, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP2645: &[u16] = &[4, 193, 194, 1, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP300H: &[u16] = &[192, 193, 194, 1, 204, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP700: &[u16] = &[17, 116, 86, 1, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_HP700_WY: &[u16] = &[311, 1084, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_HP70092: &[u16] = &[192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 207];
+
+#[rustfmt::skip]
+const STRINGS_HP9837: &[u16] = &[192, 193, 194, 1, 105, 203, 204, 205, 206, 1085];
+
+#[rustfmt::skip]
+const STRINGS_HP9845: &[u16] = &[4, 211];
+
+#[rustfmt::skip]
+const STRINGS_HP98550: &[u16] = &[4, 193, 194, 1086, 1087, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 207];
+
+#[rustfmt::skip]
+const STRINGS_HTERM: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_HTX11: &[u16] = &[345, 1089, 348, 676, 1090, 1091, 1092, 1093, 1094, 1044, 1095];
+
+#[rustfmt::skip]
+const STRINGS_HURD: &[u16] = &[591, 116, 86, 20, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 40];
+
+#[rustfmt::skip]
+const STRINGS_HZ1420: &[u16] = &[279, 1, 947];
+
+#[rustfmt::skip]
+const STRINGS_HZ1510: &[u16] = &[279, 1];
+
+#[rustfmt::skip]
+const STRINGS_HZ1520: &[u16] = &[279, 1, 946, 947];
+
+#[rustfmt::skip]
+const STRINGS_HZ1520_NOESC: &[u16] = &[1070, 1, 1072];
+
+#[rustfmt::skip]
+const STRINGS_HZ1552: &[u16] = &[4, 161, 162, 1, 448, 449, 450, 1097, 1098, 1099, 1100, 1101];
+
+#[rustfmt::skip]
+const STRINGS_HZ1552_RV: &[u16] = &[4, 161, 162, 1, 448, 449, 450, 1097, 1098, 1099, 1100, 1101, 413];
+
+#[rustfmt::skip]
+const STRINGS_HZ2000: &[u16] = &[1070, 1];
+
+#[rustfmt::skip]
+const STRINGS_I3164: &[u16] = &[4, 1102, 1103, 1, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 190, 1118, 1119];
+
+#[rustfmt::skip]
+const STRINGS_I400: &[u16] = &[389, 1];
+
+#[rustfmt::skip]
+const STRINGS_ITERM_APP: &[u16] = &[61, 133, 134, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_ITERM2_APP: &[u16] = &[61, 282, 283, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 54, 40, 334];
+
+#[rustfmt::skip]
+const STRINGS_IBCS2: &[u16] = &[591];
+
+#[rustfmt::skip]
+const STRINGS_IBM3151: &[u16] = &[4, 1120, 1121, 1, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 190, 1118, 1122];
+
+#[rustfmt::skip]
+const STRINGS_IBM3161: &[u16] = &[4, 1123, 1124, 1, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 190, 1118, 1119];
+
+#[rustfmt::skip]
+const STRINGS_IBM3161_C: &[u16] = &[4, 1120, 1121, 1, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 190, 1118, 1119];
+
+#[rustfmt::skip]
+const STRINGS_IBM8512: &[u16] = &[61, 1125, 1126, 20, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 34, 35, 157, 158, 159, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_IBM8514: &[u16] = &[61, 20, 1127, 1128, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 34, 35, 157, 158, 159, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_IBMAED: &[u16] = &[1129, 1130];
+
+#[rustfmt::skip]
+const STRINGS_IBMPCX: &[u16] = &[70, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138, 40];
+
+#[rustfmt::skip]
+const STRINGS_ICL6402: &[u16] = &[89, 1139, 91, 111, 1140];
+
+#[rustfmt::skip]
+const STRINGS_IFMR: &[u16] = &[556, 1141];
+
+#[rustfmt::skip]
+const STRINGS_ILLUMOS: &[u16] = &[70, 116, 86, 1, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 404, 605, 606, 607, 608, 40];
+
+#[rustfmt::skip]
+const STRINGS_IMS_ANSI: &[u16] = &[132, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_IMS950: &[u16] = &[89, 1, 92, 93, 103, 104, 105, 106, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_INTERIX: &[u16] = &[389, 1142, 1143, 20, 1144, 1145, 1146, 1147, 1148, 1149, 1150, 1151, 1152, 1153, 1154, 1155, 388, 404, 35, 1156, 1157, 1158, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_INTERIX_NTI: &[u16] = &[389, 20, 1144, 1145, 1146, 1147, 1148, 1149, 1150, 1151, 1152, 1153, 1154, 1155, 388, 404, 35, 1156, 1157, 1158, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_INTERTEC: &[u16] = &[70, 1, 307];
+
+#[rustfmt::skip]
+const STRINGS_INTEXT2: &[u16] = &[132, 20, 1159, 1160, 1161, 1162, 1163, 1164, 1165, 1166, 1167, 1168, 1169];
+
+#[rustfmt::skip]
+const STRINGS_IQ140: &[u16] = &[0, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 107, 1170];
+
+#[rustfmt::skip]
+const STRINGS_IRIS_ANSI: &[u16] = &[132, 1171, 65, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 404, 35, 157, 158, 159, 54, 1172, 321];
+
+#[rustfmt::skip]
+const STRINGS_IRIS40: &[u16] = &[423, 1173, 1, 225, 178, 226, 227, 228, 229, 230, 231, 232, 1174, 1175];
+
+#[rustfmt::skip]
+const STRINGS_ITERM2: &[u16] = &[61, 282, 283, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 54];
+
+#[rustfmt::skip]
+const STRINGS_JFBTERM: &[u16] = &[61, 116, 86, 1, 1176, 325, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KERMIT: &[u16] = &[345, 107];
+
+#[rustfmt::skip]
+const STRINGS_KITTY: &[u16] = &[132, 112, 113, 717, 718, 85, 86, 1, 117, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_KITTY_COMMON: &[u16] = &[132, 112, 113, 717, 718, 85, 86, 1, 117, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333, 334];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_PCFKEYS: &[u16] = &[21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_BASE: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_LINUX: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_SOLARIS: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_VT100: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 35, 405, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KONSOLE_VT420PC: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 405, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KT7: &[u16] = &[311, 953, 1177, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_KT7IX: &[u16] = &[89, 1139, 91, 1, 953, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 107, 1178, 1179, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_KTERM: &[u16] = &[132, 133, 134, 114, 115, 1, 1180, 325, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_KVT: &[u16] = &[132, 133, 134, 114, 115, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 405, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX: &[u16] = &[61, 960, 961, 284, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 963, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX_LOCKEYS: &[u16] = &[609, 610, 611, 612, 613];
+
+#[rustfmt::skip]
+const STRINGS_LINUX_BASIC: &[u16] = &[61, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX_M1: &[u16] = &[61, 116, 86, 1181, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX_M2: &[u16] = &[61, 1182, 86, 1181, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 1183, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX_S: &[u16] = &[1184, 960, 961, 284, 1, 1185, 63, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 963, 40];
+
+#[rustfmt::skip]
+const STRINGS_LINUX2_2: &[u16] = &[61, 960, 961, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 963, 40];
+
+#[rustfmt::skip]
+const STRINGS_LISA: &[u16] = &[70, 1186, 1187, 40];
+
+#[rustfmt::skip]
+const STRINGS_LISATERM: &[u16] = &[132, 114, 115, 1, 704, 391, 705, 40];
+
+#[rustfmt::skip]
+const STRINGS_LISWB: &[u16] = &[70, 1186, 1187, 252];
+
+#[rustfmt::skip]
+const STRINGS_M2_NAM: &[u16] = &[61, 1188, 1189, 1, 1190, 1191, 923, 924, 925, 926, 927, 928, 929, 930, 931, 1192, 523, 34, 35, 1193, 1194, 40];
+
+#[rustfmt::skip]
+const STRINGS_MACH: &[u16] = &[591, 1, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 33, 1195, 35, 36, 37, 38, 40];
+
+#[rustfmt::skip]
+const STRINGS_MASSCOMP: &[u16] = &[389, 40];
+
+#[rustfmt::skip]
+const STRINGS_MGR: &[u16] = &[70, 1196, 1197, 1, 1198, 1199];
+
+#[rustfmt::skip]
+const STRINGS_MGR_LINUX: &[u16] = &[70, 1196, 1197, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126, 127, 285, 286, 130, 131, 1198, 1199];
+
+#[rustfmt::skip]
+const STRINGS_MGR_SUN: &[u16] = &[70, 1196, 1197, 1, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 605, 606, 607, 608, 1198, 1199];
+
+#[rustfmt::skip]
+const STRINGS_MGT: &[u16] = &[132, 1200, 1201, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_MGTERM: &[u16] = &[61, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_MICROB: &[u16] = &[345, 1, 195, 196, 197, 198, 199, 200, 201, 202, 1202, 190, 1203];
+
+#[rustfmt::skip]
+const STRINGS_MIME: &[u16] = &[1204, 1];
+
+#[rustfmt::skip]
+const STRINGS_MIME_FB: &[u16] = &[1204, 1, 1205];
+
+#[rustfmt::skip]
+const STRINGS_MIME_HB: &[u16] = &[1204, 1, 1206];
+
+#[rustfmt::skip]
+const STRINGS_MIME2A: &[u16] = &[656, 1, 1207];
+
+#[rustfmt::skip]
+const STRINGS_MIME2A_S: &[u16] = &[656, 1, 1208];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL1: &[u16] = &[70, 1209, 1210, 1, 1211, 1191, 1212, 1213, 1214, 1215];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL1_NB: &[u16] = &[1216, 1209, 1210, 1, 1217, 1191, 1212, 1213, 1214, 1215];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL12_80: &[u16] = &[61, 1188, 1189, 65, 1218, 1191, 923, 924, 925, 926, 927, 928, 929, 930, 931, 1192, 1219, 1220, 523, 34, 35, 1221, 1193, 1194, 40];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL1B: &[u16] = &[70, 1209, 1210, 1, 1211, 1191, 1222, 1223, 1224, 1225, 1226, 1227, 1228, 1229, 1230, 1231, 1232, 1233, 523, 34, 35, 1212, 1213, 1214, 1215];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL1B_80: &[u16] = &[61, 1234, 1235, 65, 1218, 1191, 923, 924, 925, 926, 927, 928, 929, 930, 931, 1192, 1219, 1220, 523, 34, 35, 1221, 1193, 1194, 40];
+
+#[rustfmt::skip]
+const STRINGS_MINITEL1B_NB: &[u16] = &[1216, 1209, 1210, 1, 1217, 1191, 1236, 1237, 1238, 1239, 1240, 1241, 1228, 1229, 1230, 1231, 1232, 1233, 523, 34, 35, 1221, 1242, 1243, 1215];
+
+#[rustfmt::skip]
+const STRINGS_MINIX: &[u16] = &[1244, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 1245, 1246, 33, 404, 35, 36, 37, 38, 40];
+
+#[rustfmt::skip]
+const STRINGS_MINIX_1_5: &[u16] = &[1244, 1, 1247, 1248, 1249, 439, 1250, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_MINTTY: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54];
+
+#[rustfmt::skip]
+const STRINGS_MINTTY_COMMON: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_MLTERM: &[u16] = &[132, 282, 283, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_MLTERM2: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_MOD24: &[u16] = &[61, 1, 1251, 321];
+
+#[rustfmt::skip]
+const STRINGS_MODGRAPH2: &[u16] = &[4];
+
+#[rustfmt::skip]
+const STRINGS_MOSH: &[u16] = &[132, 112, 113, 114, 115, 85, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_MOSTLIKE: &[u16] = &[132, 133, 134, 114, 115, 1, 1252, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 1253];
+
+#[rustfmt::skip]
+const STRINGS_MOUSE_SUN: &[u16] = &[70, 1254, 1255];
+
+#[rustfmt::skip]
+const STRINGS_MRXVT: &[u16] = &[132, 133, 134, 161, 162, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_MS_TERMINAL: &[u16] = &[132, 282, 283, 717, 718, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_MS_TERMINAL_: &[u16] = &[132, 282, 283, 717, 718, 85, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_MS_VT_UTF8: &[u16] = &[61, 114, 115, 1, 225, 178, 226, 227, 228, 229, 230, 231, 232, 1256, 1257, 1258, 1259, 1260, 204, 1261, 1262, 1263, 40];
+
+#[rustfmt::skip]
+const STRINGS_MS_VT100_16COLOR: &[u16] = &[61, 114, 115, 1264, 1265, 1, 225, 178, 226, 227, 228, 229, 230, 231, 232, 1256, 1257, 1258, 1259, 1260, 204, 1261, 1262, 1263, 40];
+
+#[rustfmt::skip]
+const STRINGS_MSK227: &[u16] = &[345, 107, 1266, 358];
+
+#[rustfmt::skip]
+const STRINGS_MSK22714: &[u16] = &[345, 225, 178, 226, 227, 228, 229, 230, 231, 232, 107, 1267, 501];
+
+#[rustfmt::skip]
+const STRINGS_MSK227AM: &[u16] = &[345, 107, 1268, 358];
+
+#[rustfmt::skip]
+const STRINGS_MT_70: &[u16] = &[311, 1269, 558, 1270, 1271, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 1272, 1273, 404, 1274, 1275, 3];
+
+#[rustfmt::skip]
+const STRINGS_MT4520_RV: &[u16] = &[61, 1276, 65, 1277, 1278, 21, 22, 23, 24, 35, 1279, 40];
+
+#[rustfmt::skip]
+const STRINGS_MTERM_ANSI: &[u16] = &[61, 20, 40];
+
+#[rustfmt::skip]
+const STRINGS_MVTERM: &[u16] = &[132, 133, 134, 114, 115, 1, 1180, 325, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 40];
+
+#[rustfmt::skip]
+const STRINGS_N7900: &[u16] = &[70, 1, 297, 1280];
+
+#[rustfmt::skip]
+const STRINGS_NCR160VPPP: &[u16] = &[70, 1281, 339, 1, 340, 93, 287, 288, 289, 290, 291, 292, 293, 294, 1282, 1283, 1284, 1285, 1084, 106, 297, 1286, 1179, 109, 3];
+
+#[rustfmt::skip]
+const STRINGS_NCR160VT100AN: &[u16] = &[160, 114, 115, 116, 86, 65, 163, 164, 21, 22, 23, 24, 141, 127, 130, 131, 321];
+
+#[rustfmt::skip]
+const STRINGS_NCR160VT100PP: &[u16] = &[160, 161, 162, 116, 86, 65, 163, 164, 21, 22, 23, 24, 1287, 166, 1288, 1289, 130, 1290, 321];
+
+#[rustfmt::skip]
+const STRINGS_NCR160VT200AN: &[u16] = &[160, 114, 115, 116, 86, 65, 163, 164, 21, 22, 23, 24, 165, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_NCR160WY50_PP: &[u16] = &[0, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 1084, 106, 107, 344, 108, 109, 110, 1291, 1292];
+
+#[rustfmt::skip]
+const STRINGS_NCR160WY60PP: &[u16] = &[89, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 1084, 106, 107, 344, 108, 109, 110, 1291, 1292];
+
+#[rustfmt::skip]
+const STRINGS_NCR260VP_SL: &[u16] = &[340, 93];
+
+#[rustfmt::skip]
+const STRINGS_NCR260VT_SL: &[u16] = &[163, 164];
+
+#[rustfmt::skip]
+const STRINGS_NCR7900IV: &[u16] = &[70, 1, 1293, 348, 349, 350, 351, 352, 353, 354, 355, 356, 190];
+
+#[rustfmt::skip]
+const STRINGS_NCR7901: &[u16] = &[70, 832, 1294, 1, 83, 1295];
+
+#[rustfmt::skip]
+const STRINGS_NCSA: &[u16] = &[132, 1296, 1297, 116, 86, 1, 1252, 118, 579, 1298, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 166, 1288, 1289, 130, 1290, 40];
+
+#[rustfmt::skip]
+const STRINGS_NCSA_M_NS: &[u16] = &[132, 1296, 1297, 116, 86, 1, 579, 1298, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 166, 1288, 1289, 130, 1290, 40];
+
+#[rustfmt::skip]
+const STRINGS_NCSA_VT220: &[u16] = &[132, 1296, 1297, 116, 86, 1, 1252, 118, 21, 22, 23, 24, 583, 120, 121, 122, 123, 124, 125, 126, 166, 1288, 1289, 130, 1290, 40];
+
+#[rustfmt::skip]
+const STRINGS_ND9500: &[u16] = &[308, 955, 91, 1, 1299, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 105, 106, 107, 110, 319];
+
+#[rustfmt::skip]
+const STRINGS_NDR9500_25_MC: &[u16] = &[308, 955, 91, 1, 1299, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_NDR9500_25_MC_NL: &[u16] = &[308, 955, 91, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_NDR9500_25_NL: &[u16] = &[308, 955, 91, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 105, 106, 107, 110, 319];
+
+#[rustfmt::skip]
+const STRINGS_NETBSD6: &[u16] = &[61, 116, 86, 65, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_NEWHP: &[u16] = &[193, 194, 1, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15, 207];
+
+#[rustfmt::skip]
+const STRINGS_NEWHPKEYBOARD: &[u16] = &[193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 105, 203, 204, 205, 206, 15];
+
+#[rustfmt::skip]
+const STRINGS_NEWS_29: &[u16] = &[132, 114, 115, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40];
+
+#[rustfmt::skip]
+const STRINGS_NEXT: &[u16] = &[70, 1, 1301];
+
+#[rustfmt::skip]
+const STRINGS_NORTHSTAR: &[u16] = &[1302];
+
+#[rustfmt::skip]
+const STRINGS_NSTERM_7: &[u16] = &[61, 114, 115, 1, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_NSTERM_S: &[u16] = &[117, 118];
+
+#[rustfmt::skip]
+const STRINGS_NSTERM_16COLOR: &[u16] = &[61, 133, 134, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 35, 405, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_NSTERM_7_C_S: &[u16] = &[61, 114, 115, 1, 117, 118, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_NSTERM_BUILD326: &[u16] = &[61, 133, 134, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 35, 405, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_NWP_511: &[u16] = &[390, 21, 22, 23, 24, 25, 1303, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_NWP_517: &[u16] = &[61, 65, 1304, 164, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_NXTERM: &[u16] = &[132, 133, 134, 114, 115, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_O4112_ND: &[u16] = &[1305, 1306, 1307, 1];
+
+#[rustfmt::skip]
+const STRINGS_OLD_ST: &[u16] = &[132, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_OLDIBMPC3: &[u16] = &[1, 388, 35, 406, 407];
+
+#[rustfmt::skip]
+const STRINGS_OLDSUN: &[u16] = &[70, 1, 21, 22, 23, 24, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_OMRON: &[u16] = &[1308, 210, 1309, 1310];
+
+#[rustfmt::skip]
+const STRINGS_OPUS3N1_: &[u16] = &[89, 1311, 558, 338, 339, 1, 1312, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 405, 108, 109, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_ORIGIBMPC3: &[u16] = &[591, 20, 1135, 1313];
+
+#[rustfmt::skip]
+const STRINGS_OSBORNE: &[u16] = &[311, 555];
+
+#[rustfmt::skip]
+const STRINGS_OSBORNE_W: &[u16] = &[311, 1, 319];
+
+#[rustfmt::skip]
+const STRINGS_OSEXEC: &[u16] = &[311, 377, 378, 379, 380, 381, 382, 383, 384, 385, 223];
+
+#[rustfmt::skip]
+const STRINGS_OTEK4115: &[u16] = &[132, 1314, 1315, 161, 162, 1316, 1317, 40];
+
+#[rustfmt::skip]
+const STRINGS_OWL: &[u16] = &[4, 1, 644, 645, 646, 647, 648, 649, 650, 651, 652, 1318];
+
+#[rustfmt::skip]
+const STRINGS_P8GL: &[u16] = &[70, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 1319, 1320, 297, 1321];
+
+#[rustfmt::skip]
+const STRINGS_PANGOTERM: &[u16] = &[132, 282, 283, 717, 718, 85, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_PC_VENIX: &[u16] = &[4, 1, 1322];
+
+#[rustfmt::skip]
+const STRINGS_PC6300PLUS: &[u16] = &[17, 18, 19, 1, 43, 44, 45, 46, 47, 48, 49, 50, 1323, 1324, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCCON: &[u16] = &[61, 116, 86, 65, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCCON_BASE: &[u16] = &[61, 65, 21, 22, 23, 24];
+
+#[rustfmt::skip]
+const STRINGS_PCCON_KEYS: &[u16] = &[137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_PCCON0: &[u16] = &[61, 65, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCIX: &[u16] = &[591, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCKERMIT: &[u16] = &[4, 107];
+
+#[rustfmt::skip]
+const STRINGS_PCKERMIT120: &[u16] = &[345, 107, 1325, 358];
+
+#[rustfmt::skip]
+const STRINGS_PCMW: &[u16] = &[390, 65, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCVT25: &[u16] = &[61, 114, 115, 116, 86, 65, 579, 580, 581, 582, 583, 584, 585, 586, 141, 127, 285, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_PCVT25_COLOR: &[u16] = &[61, 114, 115, 116, 86, 65, 21, 22, 23, 24, 850, 851, 852, 853, 854, 1326, 125, 126, 141, 127, 285, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_PE1251: &[u16] = &[551, 1, 1327, 1328, 1329, 1330, 1331, 1332, 1333, 1334, 1335, 1336];
+
+#[rustfmt::skip]
+const STRINGS_PE7000C: &[u16] = &[551, 1, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1348];
+
+#[rustfmt::skip]
+const STRINGS_PE7000M: &[u16] = &[551, 1, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347];
+
+#[rustfmt::skip]
+const STRINGS_PILOT: &[u16] = &[591, 1, 1349, 1350, 995];
+
+#[rustfmt::skip]
+const STRINGS_PMCONS: &[u16] = &[70, 1, 21, 22, 23, 24];
+
+#[rustfmt::skip]
+const STRINGS_PRISM2: &[u16] = &[70, 1, 297];
+
+#[rustfmt::skip]
+const STRINGS_PSTERM: &[u16] = &[70, 1351, 1352, 1353, 1354, 1355, 1356];
+
+#[rustfmt::skip]
+const STRINGS_PSTERM_FAST: &[u16] = &[70, 1357, 1358, 420, 1359, 1360, 1361];
+
+#[rustfmt::skip]
+const STRINGS_PT250: &[u16] = &[964, 965, 558, 966, 967, 1, 968];
+
+#[rustfmt::skip]
+const STRINGS_PTY: &[u16] = &[656, 1, 461, 1362];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY: &[u16] = &[61, 1363, 1364, 114, 115, 116, 86, 284, 1, 1252, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_FNKEYS: &[u16] = &[137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_FNKEYS_LINUX: &[u16] = &[609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 125, 126];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_FNKEYS_SCO: &[u16] = &[392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_FNKEYS_VT100: &[u16] = &[21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 1365];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_FNKEYS_XTERM: &[u16] = &[21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_M1: &[u16] = &[61, 133, 134, 116, 86, 1181, 1, 117, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_M2: &[u16] = &[61, 133, 134, 1182, 86, 1181, 1, 117, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 962, 1183, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_NOAPP: &[u16] = &[61, 112, 113, 161, 162, 116, 86, 284, 1, 1252, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_SCO: &[u16] = &[61, 112, 113, 114, 115, 116, 86, 284, 1, 1252, 118, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_SCREEN: &[u16] = &[61, 112, 113, 114, 115, 116, 86, 284, 1, 1252, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_PUTTY_VT100: &[u16] = &[61, 112, 113, 114, 115, 116, 86, 284, 1, 1252, 118, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 1365, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_QANSI: &[u16] = &[17, 85, 86, 20, 1366, 1367, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_QVT101: &[u16] = &[311, 280, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 105, 106, 107, 110, 1368];
+
+#[rustfmt::skip]
+const STRINGS_QVT102: &[u16] = &[311, 1369, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 105, 106, 107, 110, 1368];
+
+#[rustfmt::skip]
+const STRINGS_QVT103: &[u16] = &[132, 114, 115, 1, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_QVT119: &[u16] = &[1370, 280, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 107, 281, 3];
+
+#[rustfmt::skip]
+const STRINGS_QVT203: &[u16] = &[132, 114, 115, 1, 579, 580, 581, 582, 583, 584, 585, 586, 1371, 40];
+
+#[rustfmt::skip]
+const STRINGS_RBCOMM: &[u16] = &[70, 998, 558, 161, 162, 116, 86, 65, 297, 1372];
+
+#[rustfmt::skip]
+const STRINGS_RBCOMM_NAM: &[u16] = &[70, 998, 558, 161, 162, 116, 86, 1, 297, 1372];
+
+#[rustfmt::skip]
+const STRINGS_RCA: &[u16] = &[70, 1373];
+
+#[rustfmt::skip]
+const STRINGS_REGENT100: &[u16] = &[70, 1, 1374, 1375, 1376, 1377, 1378, 1379, 1380, 307];
+
+#[rustfmt::skip]
+const STRINGS_RLOGIN_COLOR: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_RT6221: &[u16] = &[1381, 161, 162, 1382, 1383, 1, 704, 391, 705, 1384, 40];
+
+#[rustfmt::skip]
+const STRINGS_RXVT_UNICODE: &[u16] = &[132, 112, 1385, 161, 162, 85, 86, 1, 117, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 142, 143, 130, 131, 54, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_SB1: &[u16] = &[4, 1386, 558, 1, 195, 196, 197, 198, 199, 200, 201, 202, 1387, 1388, 190, 1389];
+
+#[rustfmt::skip]
+const STRINGS_SCLP: &[u16] = &[61, 65, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCOANSI: &[u16] = &[132, 1390, 1391, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 1392, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCOANSI_NEW: &[u16] = &[132, 1393, 1394, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 1395, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_FKEYS: &[u16] = &[21, 22, 23, 24, 285, 286];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_16COLOR_BCE_S: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1, 1398, 969, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_ETERM: &[u16] = &[132, 133, 134, 135, 136, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_GNOME: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_LINUX: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 1096, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_MRXVT: &[u16] = &[132, 133, 134, 161, 162, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_RXVT: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_BCE_XTERM_NEW: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_LINUX_M1: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1181, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_MLTERM: &[u16] = &[132, 282, 283, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_PUTTY: &[u16] = &[61, 1363, 1364, 114, 115, 116, 86, 284, 1, 1252, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_VTE: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN_XTERM_R6: &[u16] = &[132, 133, 134, 114, 115, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN2: &[u16] = &[17, 1, 349, 350, 351, 352, 353, 354, 355, 356, 1399, 190, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN3: &[u16] = &[61, 161, 162, 1, 21, 22, 23, 24, 1397];
+
+#[rustfmt::skip]
+const STRINGS_SCREEN5: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 40];
+
+#[rustfmt::skip]
+const STRINGS_SCREWPOINT: &[u16] = &[70, 300, 1, 301, 302, 303, 304, 297];
+
+#[rustfmt::skip]
+const STRINGS_SCRT: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_SIMTERM: &[u16] = &[4, 1400, 1401, 1, 211];
+
+#[rustfmt::skip]
+const STRINGS_ST: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 1252, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40, 330, 1088];
+
+#[rustfmt::skip]
+const STRINGS_ST_0_6: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 1252, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 40, 330, 1088];
+
+#[rustfmt::skip]
+const STRINGS_ST_0_8_5: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 1252, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40, 330, 1088, 332];
+
+#[rustfmt::skip]
+const STRINGS_ST52_OLD: &[u16] = &[4, 1402, 558, 446, 447, 1, 1403, 1404, 1405, 1406, 1407, 1408, 1409, 1410, 1411, 1412, 358];
+
+#[rustfmt::skip]
+const STRINGS_STV52: &[u16] = &[345, 1413, 1414, 1415, 447, 1, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 404, 461, 462, 463, 1416, 358];
+
+#[rustfmt::skip]
+const STRINGS_SUN_SL: &[u16] = &[1417, 969];
+
+#[rustfmt::skip]
+const STRINGS_SUN_1: &[u16] = &[70, 1, 1418, 1419, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 404, 605, 606, 607, 608, 40];
+
+#[rustfmt::skip]
+const STRINGS_SUN_C: &[u16] = &[70, 1420, 1421, 1, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 404, 605, 606, 607, 608, 40];
+
+#[rustfmt::skip]
+const STRINGS_SUN_E_S: &[u16] = &[70, 1, 1417, 969, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 404, 605, 606, 607, 608, 40];
+
+#[rustfmt::skip]
+const STRINGS_SUPERBRAIN: &[u16] = &[70, 1422, 782, 1];
+
+#[rustfmt::skip]
+const STRINGS_T10: &[u16] = &[818, 1423, 1424];
+
+#[rustfmt::skip]
+const STRINGS_T1061: &[u16] = &[70, 1, 1425, 1426, 1427, 1428, 1429, 1430, 1431, 1432, 1433];
+
+#[rustfmt::skip]
+const STRINGS_T16: &[u16] = &[132, 1434, 1435, 1, 1425, 1426, 1427, 1428, 1429, 1430, 1431, 1432, 1436, 1437, 40];
+
+#[rustfmt::skip]
+const STRINGS_T653X: &[u16] = &[1438, 210, 1439, 93, 1440];
+
+#[rustfmt::skip]
+const STRINGS_TEK: &[u16] = &[1305];
+
+#[rustfmt::skip]
+const STRINGS_TEK4023: &[u16] = &[1305, 1441];
+
+#[rustfmt::skip]
+const STRINGS_TEK4024: &[u16] = &[55, 58, 59, 60];
+
+#[rustfmt::skip]
+const STRINGS_TEK4025_17_WS: &[u16] = &[55, 1442, 1443, 58, 59, 60, 1444];
+
+#[rustfmt::skip]
+const STRINGS_TEK4025_CR: &[u16] = &[1445, 1446, 1447, 60];
+
+#[rustfmt::skip]
+const STRINGS_TEK4025A: &[u16] = &[1448, 1];
+
+#[rustfmt::skip]
+const STRINGS_TEK4105: &[u16] = &[17, 1449, 558, 20, 1450];
+
+#[rustfmt::skip]
+const STRINGS_TEK4105_30: &[u16] = &[61, 114, 115, 1, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 321];
+
+#[rustfmt::skip]
+const STRINGS_TEK4105A: &[u16] = &[61, 1451, 1452, 114, 115, 1453, 1454, 1, 1455, 1456, 1457, 1458, 1459, 1460, 1461, 1462, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEK4106BRL: &[u16] = &[61, 1451, 1452, 114, 115, 1453, 1454, 1, 1455, 1456, 1457, 1458, 1459, 1460, 1461, 1462, 1463];
+
+#[rustfmt::skip]
+const STRINGS_TEK4107: &[u16] = &[1464, 1465, 1, 1466, 1467];
+
+#[rustfmt::skip]
+const STRINGS_TEK4112: &[u16] = &[1468, 1469, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEK4113: &[u16] = &[1464];
+
+#[rustfmt::skip]
+const STRINGS_TEK4113_ND: &[u16] = &[1305, 1470, 1471];
+
+#[rustfmt::skip]
+const STRINGS_TEK4125: &[u16] = &[61, 161, 1, 321];
+
+#[rustfmt::skip]
+const STRINGS_TEK4205: &[u16] = &[17, 1472, 558, 65, 1455, 1456, 1457, 1473, 1474, 1475, 1476, 1450];
+
+#[rustfmt::skip]
+const STRINGS_TEK4207: &[u16] = &[61, 1477, 1478, 20, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEK4207_S: &[u16] = &[1464, 1465, 1, 1479, 1367, 1466, 1467];
+
+#[rustfmt::skip]
+const STRINGS_TEK4404: &[u16] = &[132, 1480, 1481, 1482, 1483, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEKEN: &[u16] = &[61, 116, 86, 20, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 35, 405, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEKEN_2018: &[u16] = &[61, 116, 86, 20, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 35, 405, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEKEN_2022: &[u16] = &[61, 116, 86, 20, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEKEN_SC: &[u16] = &[61, 116, 86, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 40];
+
+#[rustfmt::skip]
+const STRINGS_TEKEN_VT_FKEYS: &[u16] = &[21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 35, 405, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_TERATERM: &[u16] = &[61, 114, 115, 116, 86, 1, 719, 164, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_TERATERM2_3: &[u16] = &[61, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_TERMINATOR: &[u16] = &[132, 112, 113, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_TERMINOLOGY: &[u16] = &[132, 282, 283, 114, 115, 116, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_TERMINOLOGY_0_6_1: &[u16] = &[61, 114, 115, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 40];
+
+#[rustfmt::skip]
+const STRINGS_TERMINOLOGY_1_0_0: &[u16] = &[61, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1484, 1485, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_TERMITE: &[u16] = &[132, 112, 113, 114, 115, 116, 86, 1, 117, 118, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_TI916: &[u16] = &[132, 116, 86, 65, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 33, 34, 35, 1486, 1487, 40];
+
+#[rustfmt::skip]
+const STRINGS_TI924: &[u16] = &[17, 116, 86, 65, 21, 22, 23, 24, 1488, 120, 121, 122, 123, 33, 34, 1489, 40];
+
+#[rustfmt::skip]
+const STRINGS_TI926: &[u16] = &[17, 116, 86, 1490, 21, 22, 23, 24, 1488, 120, 121, 122, 123, 33, 34, 1489, 40];
+
+#[rustfmt::skip]
+const STRINGS_TI928: &[u16] = &[17, 20, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 33, 34, 35, 1491, 1486, 1487, 40];
+
+#[rustfmt::skip]
+const STRINGS_TI931: &[u16] = &[656, 1492, 1493, 1494, 1495, 1496, 1497, 1498, 1499, 1500, 1501, 1502, 1503, 1117, 1119];
+
+#[rustfmt::skip]
+const STRINGS_TI_ANSI: &[u16] = &[17, 20, 392, 393, 394, 395, 396, 397, 398, 399, 400, 35, 405, 406, 407, 40];
+
+#[rustfmt::skip]
+const STRINGS_TKTERM: &[u16] = &[61, 1504, 115, 1, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40];
+
+#[rustfmt::skip]
+const STRINGS_TMUX: &[u16] = &[61, 112, 113, 114, 115, 1396, 86, 284, 1, 1252, 118, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 1096, 40, 330, 1088, 332, 333, 334];
+
+#[rustfmt::skip]
+const STRINGS_TRS16: &[u16] = &[70, 1505, 1506, 1, 1507, 1508, 1509, 1510, 1511, 1512, 1513, 1514, 1424];
+
+#[rustfmt::skip]
+const STRINGS_TRS2: &[u16] = &[70, 1, 306];
+
+#[rustfmt::skip]
+const STRINGS_TS100_CTXT: &[u16] = &[61, 1515, 1516, 114, 115, 1, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 321];
+
+#[rustfmt::skip]
+const STRINGS_TVI803: &[u16] = &[89, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI9065: &[u16] = &[311, 1517, 1518, 1139, 91, 1, 1519, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 106, 107, 110, 281, 1292];
+
+#[rustfmt::skip]
+const STRINGS_TVI910: &[u16] = &[311, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI910_: &[u16] = &[311, 1, 377, 378, 379, 380, 381, 382, 383, 384, 385, 107, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI912: &[u16] = &[311, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 107, 223];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B: &[u16] = &[311, 1, 404, 107, 319];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_2P: &[u16] = &[1520, 1521];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_DIM: &[u16] = &[319];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_MC: &[u16] = &[1522];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_2P_: &[u16] = &[311, 1520, 1521, 1, 404, 107, 319];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_2P_MC: &[u16] = &[311, 1520, 1521, 1, 404, 107, 1522];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_2P_P: &[u16] = &[311, 1520, 1521, 1, 404, 107];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_MC_: &[u16] = &[311, 1, 404, 107, 1522];
+
+#[rustfmt::skip]
+const STRINGS_TVI912B_P: &[u16] = &[311, 1, 404, 107];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B: &[u16] = &[311, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107, 319];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_FN: &[u16] = &[94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_2P: &[u16] = &[311, 1520, 1521, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107, 319];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_2P_MC: &[u16] = &[311, 1520, 1521, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107, 1522];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_2P_P: &[u16] = &[311, 1520, 1521, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_MC: &[u16] = &[311, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107, 1522];
+
+#[rustfmt::skip]
+const STRINGS_TVI920B_P: &[u16] = &[311, 1, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 1300, 404, 107];
+
+#[rustfmt::skip]
+const STRINGS_TVI921: &[u16] = &[311, 1139, 1, 1523, 1177, 105, 106, 281, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI924: &[u16] = &[1524, 1139, 91, 1, 953, 1525, 377, 378, 379, 380, 381, 382, 383, 384, 385, 1526, 1527, 1528, 105, 106, 107, 111, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI925: &[u16] = &[311, 280, 1, 1529, 1530, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 106, 107, 281, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI925_HI: &[u16] = &[311, 280, 1, 1529, 1530, 94, 95, 96, 97, 98, 99, 100, 101, 102, 105, 106, 107, 281, 319];
+
+#[rustfmt::skip]
+const STRINGS_TVI950_2P: &[u16] = &[89, 1531, 1532, 1533, 1534, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI950_4P: &[u16] = &[89, 1531, 1535, 1533, 1534, 1, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_TVI970: &[u16] = &[132, 1536, 558, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 1544, 1545, 35, 1546, 40];
+
+#[rustfmt::skip]
+const STRINGS_TVI970_2P: &[u16] = &[132, 1547, 1548, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 1544, 1545, 35, 1546, 40];
+
+#[rustfmt::skip]
+const STRINGS_TVIPT: &[u16] = &[311, 1507, 107, 1549];
+
+#[rustfmt::skip]
+const STRINGS_TW100: &[u16] = &[17, 1022, 577, 114, 115, 446, 447, 1, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 458, 459, 460, 404, 1550, 462, 1551, 40];
+
+#[rustfmt::skip]
+const STRINGS_TW52: &[u16] = &[345, 446, 447, 1, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 404, 461, 462, 463, 1552];
+
+#[rustfmt::skip]
+const STRINGS_UTS30: &[u16] = &[70, 1553, 1554, 1, 1555, 93, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_UWIN: &[u16] = &[61, 116, 86, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 404, 35, 36, 40];
+
+#[rustfmt::skip]
+const STRINGS_V3220: &[u16] = &[61, 161, 162, 1556, 1557, 1558, 1559, 1560, 1561, 1562, 1563, 1564, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_VC303A: &[u16] = &[723];
+
+#[rustfmt::skip]
+const STRINGS_VC404: &[u16] = &[723, 1];
+
+#[rustfmt::skip]
+const STRINGS_VC404_S: &[u16] = &[723, 1, 306];
+
+#[rustfmt::skip]
+const STRINGS_VC414: &[u16] = &[279, 676, 677, 678, 679, 680, 681, 682, 946, 1565];
+
+#[rustfmt::skip]
+const STRINGS_VERSATERM: &[u16] = &[390, 1566, 1567, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_VI200: &[u16] = &[423, 161, 162, 1568, 1, 1569, 1570, 1571, 1572, 1573, 1574, 1575, 1576, 1577, 1578, 1579, 190, 1580, 1581];
+
+#[rustfmt::skip]
+const STRINGS_VI200_F: &[u16] = &[423, 161, 162, 1568, 1, 1569, 1570, 1571, 1572, 1573, 1574, 1575, 1576, 1577, 1578, 1579, 190, 1580];
+
+#[rustfmt::skip]
+const STRINGS_VI200_RV: &[u16] = &[423, 161, 162, 1, 1569, 1570, 1571, 1572, 1573, 1574, 1575, 1576, 1577, 1578, 1579, 190, 1581];
+
+#[rustfmt::skip]
+const STRINGS_VI300: &[u16] = &[132, 1, 1582, 1583, 1584, 1585, 1586, 1587, 1588, 1589, 1590, 35, 501];
+
+#[rustfmt::skip]
+const STRINGS_VI50: &[u16] = &[4, 1, 448, 449, 450, 352, 1591, 1592, 1593, 1594, 1595, 190, 1596];
+
+#[rustfmt::skip]
+const STRINGS_VI500: &[u16] = &[423, 1, 190, 779];
+
+#[rustfmt::skip]
+const STRINGS_VI50ADM: &[u16] = &[311, 1, 190, 1596];
+
+#[rustfmt::skip]
+const STRINGS_VI55: &[u16] = &[423, 1596];
+
+#[rustfmt::skip]
+const STRINGS_VI550: &[u16] = &[1597, 1, 1582, 1583, 1584, 1585, 1586, 1587, 1588, 1589, 1590, 35, 501];
+
+#[rustfmt::skip]
+const STRINGS_VI603: &[u16] = &[61, 65, 1598, 969, 40];
+
+#[rustfmt::skip]
+const STRINGS_VIEWDATA: &[u16] = &[70, 1209, 1210];
+
+#[rustfmt::skip]
+const STRINGS_VIEWDATA_RV: &[u16] = &[70, 1209, 1210, 1599];
+
+#[rustfmt::skip]
+const STRINGS_VIEWPOINT3A_: &[u16] = &[89, 832, 1294, 1, 107, 1600];
+
+#[rustfmt::skip]
+const STRINGS_VIEWPOINT90: &[u16] = &[1601, 1, 1374, 1375, 1376, 1377, 1378, 1379, 1380, 1602, 1603, 1604, 297, 1605];
+
+#[rustfmt::skip]
+const STRINGS_VISA50: &[u16] = &[132, 161, 162, 1, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 404, 336, 747];
+
+#[rustfmt::skip]
+const STRINGS_VSC: &[u16] = &[390, 1, 714];
+
+#[rustfmt::skip]
+const STRINGS_VT100_FNKEYS: &[u16] = &[21, 22, 23, 24, 414, 415, 416, 417, 418, 419];
+
+#[rustfmt::skip]
+const STRINGS_VT100_NOAPP: &[u16] = &[35, 405];
+
+#[rustfmt::skip]
+const STRINGS_VT100_PF1_PF4: &[u16] = &[21, 22, 23, 24];
+
+#[rustfmt::skip]
+const STRINGS_VT100_BOT_S: &[u16] = &[61, 114, 115, 1, 1616, 63, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT100_S: &[u16] = &[1617, 114, 115, 1, 1618, 63, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT125: &[u16] = &[1619, 114, 115, 1, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT200_JS: &[u16] = &[61, 114, 115, 116, 86, 65, 21, 22, 23, 24, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT200_OLD: &[u16] = &[132, 116, 86, 65, 21, 22, 23, 24, 850, 851, 852, 853, 854, 1326, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT220_CVIS: &[u16] = &[116, 86];
+
+#[rustfmt::skip]
+const STRINGS_VT220_PCEDIT: &[u16] = &[141, 127, 285, 286, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_VT220_UFKEYS: &[u16] = &[120, 121, 122, 123, 124, 125, 126];
+
+#[rustfmt::skip]
+const STRINGS_VT220_VTEDIT: &[u16] = &[141, 127, 130, 131];
+
+#[rustfmt::skip]
+const STRINGS_VT220D: &[u16] = &[132, 116, 86, 65, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT300: &[u16] = &[132, 114, 115, 116, 86, 65, 719, 164, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT320_K3: &[u16] = &[61, 114, 115, 116, 86, 1, 1620, 164, 21, 22, 23, 24, 120, 121, 122, 123, 141, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT320_K311: &[u16] = &[390, 114, 115, 116, 86, 65, 770, 771, 21, 22, 23, 24, 120, 121, 122, 123, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT420: &[u16] = &[132, 161, 162, 116, 86, 65, 719, 164, 21, 22, 23, 24, 850, 851, 852, 853, 854, 1326, 141, 127, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT420F: &[u16] = &[132, 161, 162, 116, 86, 65, 719, 164, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT420PC: &[u16] = &[132, 161, 162, 116, 86, 65, 719, 164, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_VT50H: &[u16] = &[4, 1, 448, 449, 450, 1097, 1098, 1099, 1100, 1101];
+
+#[rustfmt::skip]
+const STRINGS_VT52_KEYPAD: &[u16] = &[448, 449, 450, 1097, 1098, 1099, 1100, 1101];
+
+#[rustfmt::skip]
+const STRINGS_VTE: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_VTE_2017: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 284, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40];
+
+#[rustfmt::skip]
+const STRINGS_VTE_2018: &[u16] = &[132, 282, 283, 114, 115, 116, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40, 330, 1621, 332, 333, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_VWMTERM: &[u16] = &[61, 112, 113, 116, 86, 1, 609, 610, 611, 612, 613, 120, 121, 122, 123, 124, 1622, 1623, 127, 285, 286, 130, 131, 1624, 1397];
+
+#[rustfmt::skip]
+const STRINGS_WEZTERM: &[u16] = &[61, 282, 283, 114, 115, 116, 86, 1, 117, 969, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 40, 330, 1088, 332, 333, 334, 722];
+
+#[rustfmt::skip]
+const STRINGS_WINCONSOLE: &[u16] = &[61, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY_75AP: &[u16] = &[61, 114, 115, 116, 86, 1, 1625, 1626, 1627, 1628, 1629, 1630, 165, 120, 121, 122, 123, 124, 125, 126, 33, 128, 130, 131, 1631];
+
+#[rustfmt::skip]
+const STRINGS_WY_99FGT: &[u16] = &[1632, 1633, 1634, 1635, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 110, 1636, 3];
+
+#[rustfmt::skip]
+const STRINGS_WY100: &[u16] = &[308, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 1637, 3];
+
+#[rustfmt::skip]
+const STRINGS_WY100Q: &[u16] = &[311, 3];
+
+#[rustfmt::skip]
+const STRINGS_WY120: &[u16] = &[0, 1638, 1639, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 108, 109, 110, 1292];
+
+#[rustfmt::skip]
+const STRINGS_WY160: &[u16] = &[0, 1640, 1641, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 108, 109, 110, 1292];
+
+#[rustfmt::skip]
+const STRINGS_WY185: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 1645, 1646, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY185_24: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY30: &[u16] = &[0, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 105, 106, 107, 108, 109, 110, 1649];
+
+#[rustfmt::skip]
+const STRINGS_WY30_MC: &[u16] = &[0, 998, 1650, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 105, 106, 107, 108, 109, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_WY325: &[u16] = &[0, 1640, 1641, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 1084, 106, 107, 108, 109, 110, 1292];
+
+#[rustfmt::skip]
+const STRINGS_WY350: &[u16] = &[0, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 108, 109, 110, 3];
+
+#[rustfmt::skip]
+const STRINGS_WY370: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 1651, 1646, 1652, 1628, 1629, 1630, 165, 120, 121, 122, 123, 124, 125, 126, 1653, 1654, 35, 37, 38, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY370_105K: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 1651, 1646, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY370_EPC: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 1651, 1646, 21, 22, 23, 24, 165, 120, 121, 122, 123, 124, 125, 126, 141, 35, 167, 37, 38, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY370_NK: &[u16] = &[61, 1642, 1643, 1644, 162, 1396, 86, 1, 1651, 1646, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY50_MC: &[u16] = &[0, 998, 1650, 338, 339, 1, 340, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 341, 105, 106, 107, 108, 109, 110, 1292];
+
+#[rustfmt::skip]
+const STRINGS_WY520: &[u16] = &[61, 1655, 1643, 1396, 86, 1, 719, 164, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY520_24: &[u16] = &[61, 1655, 1643, 1396, 86, 1, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY520_36PC: &[u16] = &[61, 1655, 1643, 1396, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 286, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY520_EPC: &[u16] = &[61, 1655, 1643, 1396, 86, 1, 719, 164, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 35, 286, 130, 131, 54, 1648, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY75: &[u16] = &[61, 1656, 162, 116, 86, 1, 1625, 1626, 1627, 1628, 1629, 1630, 165, 120, 121, 122, 123, 124, 125, 126, 33, 35, 130, 131, 1631];
+
+#[rustfmt::skip]
+const STRINGS_WY75_MC: &[u16] = &[61, 1656, 162, 116, 86, 1, 1625, 1626, 1627, 1628, 1629, 1630, 165, 120, 121, 122, 123, 124, 125, 126, 33, 35, 130, 131, 1657];
+
+#[rustfmt::skip]
+const STRINGS_WY85: &[u16] = &[61, 1644, 162, 116, 86, 1, 1658, 1646, 21, 22, 23, 24, 120, 121, 122, 123, 124, 125, 126, 141, 127, 1647, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_WY99_ANSI: &[u16] = &[61, 717, 718, 1396, 86, 1, 21, 22, 23, 24, 165, 120, 121, 122, 123, 124, 125, 126, 1659, 1660, 40];
+
+#[rustfmt::skip]
+const STRINGS_WYSE_CVIS: &[u16] = &[1396, 86];
+
+#[rustfmt::skip]
+const STRINGS_WYSE_VP: &[u16] = &[70, 1, 297, 306];
+
+#[rustfmt::skip]
+const STRINGS_X10TERM_SL: &[u16] = &[1180, 325];
+
+#[rustfmt::skip]
+const STRINGS_XGTERM: &[u16] = &[132, 114, 115, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_XTALK: &[u16] = &[61, 114, 115, 1, 21, 22, 23, 24, 414, 415, 416, 417, 418, 419, 1661];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_ALT_TITLE: &[u16] = &[282, 283];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_ALT1049: &[u16] = &[112, 113];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_ALT47: &[u16] = &[133, 134];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_APP: &[u16] = &[128, 129];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_NOFKEYS: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_PC_EDIT: &[u16] = &[285, 286];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_R5_LOCKEYS: &[u16] = &[137, 138, 139, 140, 119];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_SL: &[u16] = &[1252, 118];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_SL_ALT: &[u16] = &[117, 969];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_TITLESTACK: &[u16] = &[1662, 1663];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_TMUX: &[u16] = &[329, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_TMUX2: &[u16] = &[970, 330, 720, 721, 971];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_BASIC: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 88, 40];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_DIRECT2: &[u16] = &[132, 1662, 1663, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_HP: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 195, 196, 197, 198, 199, 200, 201, 202, 123, 124, 125, 126, 105, 203, 204, 1664, 1665, 1666, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_KITTY: &[u16] = &[132, 112, 113, 717, 718, 1667, 86, 1, 117, 118, 970, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_NOAPP: &[u16] = &[132, 161, 162, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 35, 405, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_P371: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 719, 164, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_PCOLOR: &[u16] = &[132, 133, 134, 114, 115, 1, 1252, 118, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 130, 131, 989];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_SCO: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 388, 404, 35, 405, 406, 407, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_SUN: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 1668, 1669, 1670, 1671, 605, 606, 607, 608, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_VT220: &[u16] = &[132, 282, 283, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 285, 286, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_XF86_V32: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 137, 138, 139, 140, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 128, 129, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_XTERM_XF86_V33: &[u16] = &[132, 133, 134, 114, 115, 116, 86, 1, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 404, 128, 129, 130, 131, 40];
+
+#[rustfmt::skip]
+const STRINGS_XTERM1: &[u16] = &[132, 114, 115, 85, 86, 284, 1, 329, 21, 22, 23, 24, 119, 120, 121, 122, 123, 124, 125, 126, 141, 127, 128, 129, 130, 131, 54, 88, 40, 330, 1088, 332, 333];
+
+#[rustfmt::skip]
+const STRINGS_XTERMC: &[u16] = &[132, 1672, 1673, 1, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 35, 36, 37, 38, 40];
+
+#[rustfmt::skip]
+const STRINGS_Z29: &[u16] = &[345, 346, 1, 1089, 348, 349, 350, 351, 352, 353, 354, 355, 356, 1399, 190, 357, 358];
+
+#[rustfmt::skip]
+const STRINGS_Z30: &[u16] = &[89, 1, 1674];
+
+#[rustfmt::skip]
+const STRINGS_Z39_A: &[u16] = &[17, 1675, 1676, 1677, 1678, 1, 1679, 1680, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 29, 35, 40];
+
+#[rustfmt::skip]
+const STRINGS_Z50: &[u16] = &[0, 107, 3];
+
+#[rustfmt::skip]
+pub(super) const POOL: &[(Cap, &str)] = &[("clear", "\x1b+"), ("ind", "\x0a"), ("cvvis", "\x1bC\x1b3 \x1b3("), ("smso", "\x1bG4"), ("clear", "\x1bH\x1bJ"), ("smkx", "\x1b&jB"), ("rmkx", "\x1b&jA"), ("kf1", "\x1bp\x0d"), ("kf2", "\x1bq\x0d"), ("kf3", "\x1br\x0d"), ("kf4", "\x1bs\x0d"), ("kf5", "\x1bt\x0d"), ("kf6", "\x1bu\x0d"), ("kf7", "\x1bv\x0d"), ("kf8", "\x1bw\x0d"), ("kcbt", "\x1bi"), ("smso", "\x1b&dD"), ("clear", "\x1b[2J\x1b[H"), ("cnorm", "\x1b[=1C"), ("civis", "\x1b[=C"), ("ind", "\x1b[S"), ("kf1", "\x1bOP"), ("kf2", "\x1bOQ"), ("kf3", "\x1bOR"), ("kf4", "\x1bOS"), ("kf5", "\x1bOT"), ("kf6", "\x1bOU"), ("kf7", "\x1bOV"), ("kf8", "\x1bOW"), ("kf9", "\x1bOX"), ("kf10", "\x1bOY"), ("kf11", "\x1bOZ"), ("kf12", "\x1bOA"), ("kich1", "\x1b[@"), ("kdch1", "\x1b[P"), ("khome", "\x1b[H"), ("kend", "\x1b[Y"), ("knp", "\x1b[U"), ("kpp", "\x1b[V"), ("kcbt", "\x1d"), ("smso", "\x1b[7m"), ("cnorm", "\x1b[=0C"), ("civis", "\x1b[=1C"), ("kf1", "\x1bOc"), ("kf2", "\x1bOd"), ("kf3", "\x1bOe"), ("kf4", "\x1bOf"), ("kf5", "\x1bOg"), ("kf6", "\x1bOh"), ("kf7", "\x1bOi"), ("kf8", "\x1bOj"), ("kich1", "\x1bNj"), ("kdch1", "\x1bNf"), ("kend", "\x1b0"), ("kcbt", "\x1b[Z"), ("clear", "\x1fera\x0d\x0a\x0a"), ("smcup", "!com 31\x0d"), ("rmcup", "\x1fcom 33\x0d"), ("smkx", "\x1flea p4 /h/\x0d\x1flea p8 /k/\x0d\x1flea p6 / /\x0d\x1flea p2 /j/\x0d\x1flea f5 /H/\x0d"), ("rmkx", "\x1flea p2\x0d\x1flea p4\x0d\x1flea p6\x0d\x1flea p8\x0d\x1flea f5\x0d"), ("ind", "\x06\x0a"), ("clear", "\x1b[H\x1b[J"), ("tsl", "\x1b7\x1b[25;%p1%{1}%+%dH"), ("fsl", "\x1b8"), ("clear", "\x0c\x0b"), ("ind", "\x1bD"), ("kf9", "\x1bNo"), ("kf10", "\x1bNp"), ("kf11", "\x1bNq"), ("kf12", "\x1bNr"), ("clear", "\x0c"), ("kf1", "\x1eq"), ("kf2", "\x1er"), ("kf3", "\x1es"), ("kf4", "\x1et"), ("kf5", "\x1eu"), ("kf6", "\x1ev"), ("kf7", "\x1ew"), ("kf8", "\x1ex"), ("kf9", "\x1ey"), ("kf10", "\x1ez"), ("kf11", "\x1e{"), ("kf12", "\x1ea"), ("khome", "\x08"), ("smso", "\x1c"), ("cnorm", "\x1b[?12l\x1b[?25h"), ("civis", "\x1b[?25l"), ("tsl", "\x1b7\x1b[;%i%p1%dx"), ("cvvis", "\x1b[?12;25h"), ("clear", "\x1b*"), ("cnorm", "\x1b.2"), ("civis", "\x1b.0"), ("tsl", "\x1bg\x1bf"), ("fsl", "\x0d"), ("kf1", "\x01@\x0d"), ("kf2", "\x01A\x0d"), ("kf3", "\x01B\x0d"), ("kf4", "\x01C\x0d"), ("kf5", "\x01D\x0d"), ("kf6", "\x01E\x0d"), ("kf7", "\x01F\x0d"), ("kf8", "\x01G\x0d"), ("kf9", "\x01H\x0d"), ("kf10", "\x01I\x0d"), ("kf11", "\x01J\x0d"), ("kich1", "\x1bQ"), ("kdch1", "\x1bW"), ("khome", "\x1e"), ("knp", "\x1bK"), ("kpp", "\x1bJ"), ("kcbt", "\x1bI"), ("cvvis", "\x1b.1"), ("smcup", "\x1b[?1049h"), ("rmcup", "\x1b[?1049l"), ("smkx", "\x1b[?1h\x1b="), ("rmkx", "\x1b[?1l\x1b>"), ("cnorm", "\x1b[?25h"), ("tsl", "\x1b]2;"), ("fsl", "\x07"), ("kf5", "\x1b[15~"), ("kf6", "\x1b[17~"), ("kf7", "\x1b[18~"), ("kf8", "\x1b[19~"), ("kf9", "\x1b[20~"), ("kf10", "\x1b[21~"), ("kf11", "\x1b[23~"), ("kf12", "\x1b[24~"), ("kdch1", "\x1b[3~"), ("khome", "\x1bOH"), ("kend", "\x1bOF"), ("knp", "\x1b[6~"), ("kpp", "\x1b[5~"), ("clear", "\x1b[H\x1b[2J"), ("smcup", "\x1b7\x1b[?47h"), ("rmcup", "\x1b[2J\x1b[?47l\x1b8"), ("smkx", ""), ("rmkx", ""), ("kf1", "\x1b[11~"), ("kf2", "\x1b[12~"), ("kf3", "\x1b[13~"), ("kf4", "\x1b[14~"), ("kich1", "\x1b[2~"), ("khome", "\x1b[7~"), ("kend", "\x1b[8~"), ("kf1", "\x1b[001q"), ("kf2", "\x1b[002q"), ("kf3", "\x1b[003q"), ("kf4", "\x1b[004q"), ("kf5", "\x1b[005q"), ("kf6", "\x1b[006q"), ("kf7", "\x1b[007q"), ("kf8", "\x1b[008q"), ("kf9", "\x1b[009q"), ("kf10", "\x1b[010q"), ("kf11", "\x1b[011q"), ("kf12", "\x1b[012q"), ("kich1", "\x1b[139q"), ("kend", "\x1b[146q"), ("knp", "\x1b[154q"), ("kpp", "\x1b[150q"), ("clear", "\x1b[2J\x1b[1;1H"), ("smkx", "\x1b="), ("rmkx", "\x1b>"), ("tsl", "\x1b[2$~\x1b[1$}"), ("fsl", "\x1b[0$}"), ("kf5", "\x1b[M"), ("kdch1", "\x1b[4~"), ("kend", "\x1b[1~"), ("tsl", "\x1b[>+1"), ("fsl", "1"), ("cnorm", "\x1b[<4h"), ("civis", "\x1b[<4l"), ("tsl", "\x1b[%i%p1%d%%}"), ("fsl", "\x14"), ("clear", "\x1b`"), ("tsl", "\x1bw"), ("fsl", "\x1bO"), ("kf1", "\x1b0"), ("kf2", "\x1b2"), ("kf3", "\x1b6"), ("kf4", "\x1b8"), ("kf5", "\x1b:"), ("kf6", "\x1b<"), ("kf7", "\x1b>"), ("kf8", "\x1bP"), ("kf9", "\x1bR"), ("kf10", "\x1bT"), ("kf11", "\x1b\\"), ("kf12", "\x1b^"), ("kich1", "\x1b[I"), ("khome", "\x1bH"), ("smso", "\x1bsI"), ("clear", "\x1b&a0y0C\x1bJ"), ("smkx", "\x1b&s1A"), ("rmkx", "\x1b&s0A"), ("kf1", "\x1bp"), ("kf2", "\x1bq"), ("kf3", "\x1br"), ("kf4", "\x1bs"), ("kf5", "\x1bt"), ("kf6", "\x1bu"), ("kf7", "\x1bv"), ("kf8", "\x1bw"), ("kdch1", "\x1bP"), ("khome", "\x1bh"), ("knp", "\x1bU"), ("kpp", "\x1bV"), ("smso", "\x1b&dJ"), ("smcup", "\x1b&s1A"), ("rmcup", "\x1b&s0A"), ("ind", "\x1bS"), ("smso", "\x1b&dB"), ("tsl", "\x1b.0\x1bg\x1b}\x1bf"), ("fsl", "\x1b.2"), ("kf1", "\x011\x0d"), ("kf2", "\x012\x0d"), ("kf3", "\x013\x0d"), ("kf4", "\x014\x0d"), ("kf5", "\x015\x0d"), ("kf6", "\x016\x0d"), ("kf7", "\x017\x0d"), ("kf8", "\x018\x0d"), ("kf9", "\x019\x0d"), ("smso", "\x1bj"), ("clear", "\x0c\x0b@"), ("kf1", "\x1b1"), ("kf3", "\x1b3"), ("kf4", "\x1b4"), ("kf5", "\x1b5"), ("kf6", "\x1b6"), ("kf7", "\x1b7"), ("kf8", "\x1b8"), ("kf9", "\x1b9"), ("smso", "\x19\x1e\x0e"), ("khome", "\x0b"), ("smcup", "\x1b[H\x1b[J\x1b[30;0;0;30p"), ("rmcup", "\x1b[60;0;0;30p\x1b[30;1H\x1b[K"), ("smkx", "\x1bP`>z~[[J`8xz~[[A`4xz~[[D`6xz~[[C`2xz~[[B\x1b\\"), ("rmkx", "\x1bP`>y~[[J`8xy~[[A`4xy~[[D`6xy~[[C`2xy~[[B\x1b\\"), ("ind", "\x0b"), ("kf1", "\x1bOA"), ("kf2", "\x1bOB"), ("kf3", "\x1bOC"), ("kf4", "\x1bOD"), ("kf5", "\x1bOE"), ("kf6", "\x1bOF"), ("kf7", "\x1bOG"), ("kf8", "\x1bOH"), ("kf9", "\x1bOI"), ("kf10", "\x1bOJ"), ("kf11", "\x1bOK"), ("kf12", "\x1bOL"), ("smso", "\x1b[m"), ("smcup", "\x1b[18;0;0;18p"), ("rmcup", "\x1b[60;0;0;18p\x1b[60;1H\x1b[K"), ("smcup", "\x1b[20;0;0;20p"), ("rmcup", "\x1b[60;0;0;20p\x1b[60;1H\x1b[K"), ("smcup", "\x1b[22;0;0;22p"), ("rmcup", "\x1b[60;0;0;22p\x1b[60;1H\x1b[K"), ("smcup", "\x1b[24;0;0;24p"), ("rmcup", "\x1b[60;0;0;24p\x1b[60;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[26;0;0;26p"), ("rmcup", "\x1b[60;0;0;26p\x1b[26;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[28;0;0;28p"), ("rmcup", "\x1b[60;0;0;28p\x1b[28;1H\x1b[K"), ("smcup", "\x1b[30;0;0;30p"), ("rmcup", "\x1b[60;0;0;30p\x1b[60;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[30;1;0;30p\x1b[30;1H\x1b[K"), ("rmcup", "\x1b[60;1;0;30p\x1b[29;1H\x1b[K"), ("tsl", "\x1b[>51h\x1b[1;%p1%dH\x1b[2K"), ("fsl", "\x1b[>51l"), ("smcup", "\x1b[30;1H\x1b[K\x1b[30;1;0;30p"), ("rmcup", "\x1b[60;1;0;30p\x1b[59;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[36;0;0;36p"), ("rmcup", "\x1b[60;0;0;36p\x1b[36;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[40;0;0;40p"), ("rmcup", "\x1b[60;0;0;40p\x1b[40;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[48;0;0;48p"), ("rmcup", "\x1b[60;0;0;48p\x1b[48;1H\x1b[K"), ("clear", "\x1b\x1c"), ("cnorm", "\x1b.4"), ("cvvis", "\x1b.2"), ("smcup", "\x1b[?1049h\x1b[22;0;0t"), ("rmcup", "\x1b[?1049l\x1b[23;0;0t"), ("E3", "\x1b[3J"), ("khome", "\x1b[1~"), ("kend", "\x1b[4~"), ("kf1", "\x021\x0d"), ("kf2", "\x022\x0d"), ("kf3", "\x023\x0d"), ("kf4", "\x024\x0d"), ("kf5", "\x025\x0d"), ("kf6", "\x026\x0d"), ("kf7", "\x027\x0d"), ("kf8", "\x028\x0d"), ("kich1", "\x1bF"), ("kdch1", "\x1bE"), ("khome", "\x01"), ("kcbt", "\x1bO"), ("smso", "\x1bR\x1b0P\x1bV"), ("cnorm", "\x0f\x1b0`"), ("kf2", "\x022"), ("kf3", "\x02!"), ("kf4", "\x02\""), ("kf5", "\x02#"), ("cvvis", "\x0f\x1b0P"), ("smso", "\x0e"), ("smso", "\x1b0P"), ("clear", "\x1b;"), ("tsl", "\x1bF\x1b)"), ("fsl", "\x1b(\x0d"), ("clear", "\x1a"), ("kf1", "\x01"), ("kf2", "\x02"), ("kf3", "\x17"), ("kf4", "\x04"), ("kf5", "\x05"), ("kf6", "\x18"), ("kf7", "\x1a"), ("smso", "\x1b)"), ("smso", "\x1bG1"), ("smso", "\x1b[1;7m"), ("clear", "\x1b;\x1bF \x09"), ("smso", "\x1bG"), ("tsl", "\x1b[?%p1%dT"), ("fsl", "\x1b[?F"), ("smcup", "\x1b\"N"), ("rmcup", "\x1b\"N"), ("smso", "\x1b\"I"), ("Ms", "\x1b]52;%p1%s;%p2%s\x07"), ("Ss", "\x1b[%p1%d q"), ("Se", "\x1b[0 q"), ("Cs", "\x1b]12;%p1%s\x07"), ("Cr", "\x1b]112\x07"), ("Smulx", "\x1b[4:%p1%dm"), ("kdch1", "\x01M\x0d"), ("khome", "\x1b[f"), ("kcbt", "\x01K\x0d"), ("cnorm", "\x1b`1"), ("civis", "\x1b`0"), ("tsl", "\x1bF"), ("kf12", "\x01K\x0d"), ("smso", "\x1b`6\x1b)"), ("clear", "\x1b+\x1e"), ("kend", "\x1bT"), ("clear", "\x1bE"), ("cnorm", "\x1by4"), ("tsl", "\x1bj\x1bx5\x1bY8%p1%' '%+%c\x1bo\x1bo"), ("fsl", "\x1bk\x1by5"), ("kf1", "\x1bS"), ("kf2", "\x1bT"), ("kf3", "\x1bU"), ("kf4", "\x1bV"), ("kf5", "\x1bW"), ("kf6", "\x1bP"), ("kf7", "\x1bQ"), ("kf8", "\x1bR"), ("cvvis", "\x1bx4"), ("smso", "\x1bp"), ("cnorm", "\x1b[ p"), ("civis", "\x1b[0 p"), ("kf1", "\x1b[0~"), ("kf2", "\x1b[1~"), ("kf3", "\x1b[2~"), ("kf4", "\x1b[3~"), ("kf5", "\x1b[4~"), ("kf6", "\x1b[5~"), ("kf7", "\x1b[6~"), ("kf8", "\x1b[7~"), ("kf9", "\x1b[8~"), ("cnorm", "\x1b[?3l"), ("kf1", "\x1b[7~"), ("kf2", "\x1b[8~"), ("kf3", "\x1b[9~"), ("kf4", "\x1b[10~"), ("kf5", "\x1b[11~"), ("cvvis", "\x1b[?3h"), ("kf1", "\x01A\x0d"), ("kf2", "\x01B\x0d"), ("kf3", "\x01C\x0d"), ("kf4", "\x01D\x0d"), ("kf5", "\x01E\x0d"), ("kf6", "\x01F\x0d"), ("kf7", "\x01G\x0d"), ("kf8", "\x01H\x0d"), ("kf9", "\x01I\x0d"), ("smcup", "\x1bN"), ("rmcup", "\x1bF"), ("kich1", "\x1b[L"), ("clear", "\x1b[2J"), ("clear", "\x1b[;H\x1b[2J"), ("kf2", "\x1bOR"), ("kf1", "\x1b[M"), ("kf2", "\x1b[N"), ("kf3", "\x1b[O"), ("kf4", "\x1b[P"), ("kf5", "\x1b[Q"), ("kf6", "\x1b[R"), ("kf7", "\x1b[S"), ("kf8", "\x1b[T"), ("kf9", "\x1b[U"), ("kf10", "\x1b[V"), ("kf11", "\x1b[W"), ("kf12", "\x1b[X"), ("kdch1", "\x7f"), ("kend", "\x1b[F"), ("knp", "\x1b[G"), ("kpp", "\x1b[I"), ("cvvis", "\x1b[=1C"), ("khome", "\x19"), ("smcup", "\x1bW"), ("rmcup", "\x1bX"), ("ind", "\x1bE"), ("smso", "\x1bS"), ("kf5", "\x1bOt"), ("kf6", "\x1bOu"), ("kf7", "\x1bOv"), ("kf8", "\x1bOl"), ("kf9", "\x1bOw"), ("kf10", "\x1bOx"), ("ind", "\x17"), ("smso", "\x0f"), ("smso", "\x1a3"), ("clear", "\x1bv"), ("kf1", "\x1bQ"), ("kf2", "\x1bR"), ("kf3", "\x1b "), ("kf4", "\x1b!"), ("kf5", "\x1b\""), ("kf6", "\x1b#"), ("kf7", "\x1b$"), ("kf8", "\x1b%%"), ("kf9", "\x1b&"), ("clear", "\x19\x0c"), ("cnorm", "\x14C2"), ("cvvis", "\x14C6"), ("kf1", "\x1b[P"), ("kf2", "\x1b[Q"), ("kf3", "\x1b[R"), ("kf4", "\x1b[S"), ("kf5", "\x1b[t"), ("kf6", "\x1b[u"), ("kf7", "\x1b[v"), ("kf8", "\x1b[l"), ("kf9", "\x1b[w"), ("kf10", "\x1b[x"), ("cnorm", "\x1be"), ("civis", "\x1bf"), ("kf1", "\x1bP"), ("kf2", "\x1bQ"), ("kf3", "\x1bR"), ("kf4", "\x1bS"), ("kf5", "\x1bT"), ("kf6", "\x1bU"), ("kf7", "\x1bV"), ("kf8", "\x1bW"), ("kf9", "\x1bX"), ("kf10", "\x1bY"), ("kf11", "\x1bp"), ("kf12", "\x1bq"), ("kich1", "\x1bI"), ("khome", "\x1bE"), ("knp", "\x1bb"), ("kpp", "\x1ba"), ("kf1", "\x1b[1r"), ("kf2", "\x1b[2r"), ("kf3", "\x1b[3r"), ("kf4", "\x1b[4r"), ("kf5", "\x1b[5r"), ("kf6", "\x1b[6r"), ("kf7", "\x1b[7r"), ("kf8", "\x1b[8r"), ("kf9", "\x1b[9r"), ("kf10", "\x1b[10r"), ("kf11", "\x1b[11r"), ("kf12", "\x1b[12r"), ("kf1", "\x1b[h"), ("kf2", "\x1b[i"), ("kf3", "\x1b[j"), ("kf6", "\x1b[k"), ("kf7", "\x1b[l"), ("kf8", "\x1b[f"), ("kf10", "\x1b[m"), ("kf11", "\x1b[n"), ("kf12", "\x1b[o"), ("khome", "\x1bc"), ("ind", "\x1bH\x1bM\x1bY7 "), ("kf3", "\x1b@"), ("kich1", "\x1b^"), ("smso", "\x1b}"), ("clear", "\x1b[2;H\x1b[J"), ("clear", "\x1b[H\x1b[2J\x1b[1U\x1b[H\x1b[2J\x1b[1V"), ("smso", "\x1b[5m"), ("cnorm", "\x1b[>l"), ("kf1", "\x1b[01s"), ("kf2", "\x1b[02s"), ("kf3", "\x1b[03s"), ("kf4", "\x1b[04s"), ("kf5", "\x1b[05s"), ("kf6", "\x1b[06s"), ("cvvis", "\x1b[>h"), ("smso", "\x1b[1m"), ("smkx", "\x1b[19;1|"), ("rmkx", "\x1b[19;0|"), ("cnorm", "\x1b[11;3|"), ("civis", "\x1b[11;0|"), ("kf1", "\x1bOm"), ("kf2", "\x1bOV"), ("kf3", "\x1bOu"), ("kf4", "\x1bNj"), ("kf5", "\x1bNe"), ("kf6", "\x1bNf"), ("kf7", "\x1bNh"), ("kf8", "\x1b[H"), ("kf9", "\x1bOc"), ("kf10", "\x1bOd"), ("kf11", "\x1bOe"), ("kf12", "\x1bOf"), ("cvvis", "\x1b[11;2|"), ("smkx", "\x1b[19;1j"), ("rmkx", "\x1b[19;0j"), ("cnorm", "\x1b[11;0j"), ("tsl", "\x1b7\x1b[25;%p1%{8}%+%dH"), ("kich1", "\x1b[4h"), ("kend", "\x1bz"), ("cvvis", "\x1b[11;1j"), ("tsl", "\x1b7\x1b[25;%i%p1%dx"), ("kend", "\x1b[24;1H"), ("tsl", "\x1b7\x1b[99;%i%p1%dx"), ("cnorm", "\x16'\x01"), ("civis", "\x16'\x02"), ("cvvis", "\x16\x03"), ("smso", "\x16\x01p"), ("smcup", "\x1b[2;25w\x1b2\x0d"), ("rmcup", "\x1b[2w\x1b2\x0d\x0a"), ("smkx", "\x1b[1!z\x1b[0;3u"), ("rmkx", "\x1b[!z\x1b[0;2u"), ("cnorm", "\x1b[=119l"), ("tsl", "\x1b[2;1!w\x1b[;%p1%dH\x1b[2K"), ("fsl", "\x1b[1;1!w"), ("kich1", "\x1b\x01\x0d"), ("kdch1", "\x1b\x02\x0d"), ("cvvis", "\x1b[=119h"), ("smcup", "\x1b[=4l\x1b[1;24w\x1b2\x0d"), ("rmcup", "\x1b[w\x1b2\x0d\x0a"), ("smcup", "\x1b[H\x1b[1;24;1;132w"), ("ind", "\x1bSU"), ("smso", "\x1bARN"), ("smso", "\x1bAE"), ("clear", "\x1b\x06"), ("khome", "\x1b\x05"), ("clear", "\x1bK"), ("clear", "\x1d\x1f"), ("cnorm", "\x1b[?7h"), ("cvvis", "\x1b[?7l"), ("smso", "\x1b("), ("clear", "\x1bZ"), ("smcup", "\x1bSTART\x0d\x1b2,0\x0d\x1b12\x0d\x1bEND\x0d"), ("rmcup", ""), ("smso", "\x1bSTART\x0d\x1b70,6\x0d\x1bEND\x0d"), ("kcbt", "\x1b>"), ("smso", "\x1bdP"), ("clear", "\x05\x12"), ("smso", "\x1d "), ("smkx", "\x1b[?4h"), ("rmkx", "\x1b[?4l"), ("kf6", "\x1b[16~"), ("kf7", "\x1b[17~"), ("kf8", "\x1b[18~"), ("kf9", "\x1b[19~"), ("kf10", "\x1b[20~"), ("kf11", "\x1b[21~"), ("kf12", "\x1b[22~"), ("kf1", "\x1bx"), ("kf2", "\x1by"), ("kf3", "\x1bz"), ("smcup", "\x1b[?7l\x1b[?1l\x1b(B"), ("rmcup", "\x1b[?7h"), ("tsl", "\x1b[1$}\x1b[2$~"), ("kf1", "\x1b[17~"), ("kf2", "\x1b[18~"), ("kf3", "\x1b[19~"), ("kf4", "\x1b[20~"), ("kf5", "\x1b[21~"), ("kf6", "\x1b[23~"), ("kf7", "\x1b[24~"), ("kf8", "\x1b[25~"), ("kf9", "\x1b[26~"), ("kf10", "\x1b[28~"), ("kf11", "\x1b[29~"), ("kf12", "\x1b[31~"), ("clear", "\x1bc"), ("kf1", "\x1b[224z"), ("kf2", "\x1b[225z"), ("kf3", "\x1b[226z"), ("kf4", "\x1b[227z"), ("kf5", "\x1b[228z"), ("kf6", "\x1b[229z"), ("kf7", "\x1b[230z"), ("kf8", "\x1b[231z"), ("kf9", "\x1b[232z"), ("kf10", "\x1b[233z"), ("kf11", "\x1b[234z"), ("kf12", "\x1b[235z"), ("kich1", "\x1b[247z"), ("khome", "\x1b[214z"), ("kend", "\x1b[220z"), ("knp", "\x1b[222z"), ("kpp", "\x1b[216z"), ("kf1", "\x1b[[A"), ("kf2", "\x1b[[B"), ("kf3", "\x1b[[C"), ("kf4", "\x1b[[D"), ("kf5", "\x1b[[E"), ("clear", "\x1b?\x1b\x05"), ("smcup", "\x1bU\x1bv  8p\x1bp\x0d\x1b\x15"), ("rmcup", "\x1bv    \x1bp\x0d\x0a"), ("smkx", "\x1bX"), ("rmkx", "\x1bx"), ("kf1", "\x1b5"), ("kf2", "\x1b6"), ("kf3", "\x1b7"), ("kf5", "\x1b9"), ("kf6", "\x1b:a"), ("kf7", "\x1b:b"), ("kf8", "\x1b:c"), ("kich1", "\x1b\x10"), ("kdch1", "\x1b\x11"), ("khome", "\x1b?"), ("knp", "\x1b-"), ("kpp", "\x1b."), ("kcbt", "\x1b'"), ("smso", "\x1bD"), ("smso", "\x1bE"), ("rmcup", "\x1bv  \x01\x7fp\x1bp\x0d\x0a"), ("cnorm", "\x1bw"), ("tsl", "\x1b z\"\x1b?\x1b\x05\x1bE\x1ba %+ "), ("fsl", "\x1be\x1b z "), ("cvvis", "\x1bW"), ("rmcup", "\x1bv  \x01 p\x1bp\x0d\x0a"), ("smcup", "\x1bU\x1bv  8p\x1bp\x0d"), ("rmcup", "\x1bv  \x02 p\x1bp\x0d\x0a"), ("smcup", "\x1bU\x1bv  8\x01D\x1bp\x0d"), ("rmcup", "\x1bv  \x010\x01D\x1bp\x0d\x0a"), ("kf1", "\x1bRA"), ("kf2", "\x1bRB"), ("kf3", "\x1bRC"), ("kf4", "\x1bRD"), ("kf5", "\x1bRE"), ("kf6", "\x1bRF"), ("kf7", "\x1bRG"), ("kf8", "\x1bRH"), ("kf9", "\x1bRI"), ("smso", "\x1b!\x0d"), ("smso", "\x1bm\x0c"), ("smso", "\x1bU!"), ("clear", "\x1bL"), ("smso", "\x1ba\x04"), ("cnorm", "\x1bP"), ("cvvis", "\x1bF\x1bQ\x1bM \x1bR 7"), ("smso", "\x1bM$"), ("clear", "\x19\x18"), ("smkx", "\x1e\x12k"), ("rmkx", "\x1e\x12l"), ("ind", "\x1eW =\x1eU"), ("kf1", "\x1er"), ("kf2", "\x1es"), ("kf3", "\x1et"), ("kf4", "\x1eu"), ("kf5", "\x1ev"), ("kf6", "\x1ew"), ("kf7", "\x1ex"), ("kf8", "\x1ey"), ("kf9", "\x1ez"), ("smso", "\x1eD"), ("clear", "\x18\x1b1  "), ("kf1", "\x1bB"), ("kf2", "\x1bC"), ("kf3", "\x1bD"), ("kf4", "\x1bE"), ("kf5", "\x1bF"), ("kf6", "\x1bG"), ("kf7", "\x1bH"), ("kf8", "\x1ba"), ("kf9", "\x1bb"), ("kich1", "\x1bK"), ("kdch1", "\x1bI"), ("smcup", "\x01P0\x01O1\x01R1\x01C4,\x01c0,\x0c\x01M0,42,WARNING DOUBLE ENTER ESCAPE and \x15\x01C1,\x01c2,\x01W0,0,79,39,"), ("rmcup", "\x01W0,40,85,48,\x0c\x01W0,0,85,48,\x01M0,40,"), ("smso", "\x01C4,\x01c7,"), ("clear", "\x1b[H\x1bJ"), ("cnorm", "\x1b[V\x1b8"), ("cvvis", "\x1b7\x1b[U"), ("cnorm", ""), ("kf5", "\x1bOm"), ("kf6", "\x1bOl"), ("kf7", "\x1bOM"), ("kf8", "\x1bOn"), ("cvvis", "\x1b[?1l\x1b[?4l\x1b[?7h"), ("cvvis", "\x1b[?1l\x1b[?4l\x1b[?7l"), ("smcup", "\x1b[>5g\x1b[?7h\x1b[?5h"), ("cnorm", "\x1b[0;3;4v"), ("civis", "\x1b[1v"), ("cvvis", "\x1b[3;5v"), ("kf1", "\x1bOQ"), ("kf3", "\x1bOS"), ("kf4", "\x1bOU"), ("kf5", "\x1bOV"), ("kf6", "\x1bOW"), ("kf7", "\x1bOX"), ("kf8", "\x1bOY"), ("kf9", "\x1bOZ"), ("cnorm", "\x05!"), ("civis", "\x05 "), ("smso", "\x1f "), ("smcup", "\x1b[?1;41s\x1b[?1;41h\x1b="), ("rmcup", "\x1b>\x1b[?41;1r"), ("smkx", "\x1b[?1h"), ("rmkx", "\x1b[?1l"), ("tsl", "\x1b[2$~\x1b[1$}\x1b[%i%p1%d`"), ("Se", "\x1b[ q"), ("Cs", "\x1b]12;%p1%s\x1b\\"), ("Smol", "\x1b[53m"), ("clear", "\x18"), ("ind", "\x0e"), ("smso", "\x1e\x16"), ("clear", "\x1b\x05"), ("smso", "\x1b$"), ("khome", "\x1bp\x0d"), ("smso", "\x0eF"), ("tsl", "\x1b];"), ("cnorm", "\x1bm\x1bn"), ("cvvis", "\x1bx"), ("kf12", "\x1e|"), ("smso", "\x1eD\x1c"), ("kf1", "\x1b[001z"), ("kf2", "\x1b[002z"), ("kf3", "\x1b[003z"), ("kf4", "\x1b[004z"), ("kf5", "\x1b[005z"), ("kf6", "\x1b[006z"), ("kf7", "\x1b[007z"), ("kf8", "\x1b[008z"), ("kf9", "\x1b[009z"), ("kf10", "\x1b[010z"), ("kf11", "\x1b[011z"), ("kf12", "\x1b[012z"), ("smso", "\x1b[2;7m"), ("clear", "\x1ePH"), ("khome", "\x1ePF"), ("cnorm", "\x1b[3;2v"), ("civis", "\x1b[3;0v"), ("cnorm", "\x1eFQ2"), ("civis", "\x1eFQ0"), ("smkx", "\x1b[2;0v"), ("rmkx", "\x1b[2;1v"), ("smso", "\x1b[2;7;50m"), ("clear", "\x1eFE"), ("cnorm", "\x1eFQ5"), ("clear", "\x1eFG\x1ePH"), ("tsl", "\x1eF}00\x1eFP%p1%2.2X18\x1ePG"), ("fsl", "\x1eF}01\x12"), ("clear", "\x1b[1;1H\x1b[2J"), ("cnorm", "\x1b[>12h"), ("cvvis", "\x1b[>12l"), ("smso", "\x1b[33;44m"), ("smso", "\x1b[31;47m"), ("clear", "\x1e\x1e\x7f"), ("smso", "\x1b3"), ("clear", "\x0eR"), ("tsl", "\x1b[2$~\x1b[1$}\x1b[1;%dH"), ("fsl", "\x1b[$}"), ("kf1", "\x1bF"), ("kf2", "\x1bG"), ("kf3", "\x1bH"), ("kf4", "\x1bI"), ("kf5", "\x1bJ"), ("kf6", "\x1bi"), ("kf7", "\x1bj"), ("smso", "\x1b\x08"), ("smso", "\x1b[7;m"), ("smcup", "\x0c\x12"), ("rmcup", "\x0c"), ("cnorm", "\x0c"), ("cvvis", "\x0c\x12"), ("kf1", "\x1b[002z"), ("kf2", "\x1b[003z"), ("kf3", "\x1b[004z"), ("kf4", "\x1b[005z"), ("kf5", "\x1b[006z"), ("kf6", "\x1b[007z"), ("kf7", "\x1b[008z"), ("kf8", "\x1b[009z"), ("kf9", "\x1b[00:z"), ("cnorm", "\x1b[v"), ("cvvis", "\x1b[2v"), ("khome", "\x1d"), ("smcup", "\x1b[?>h\x1bPY99:98\x1b\\"), ("rmcup", "\x1b[0;98v\x1b[2J\x1b[v"), ("cnorm", "\x1b[r"), ("civis", "\x1b[1r"), ("tsl", "\x1bPY99:98\x1b\\\x1b[0;98v\x1b[2;7m"), ("fsl", "\x1b[v"), ("kf1", "\x1b[1u\x17"), ("kf2", "\x1b[2u\x17"), ("kf3", "\x1b[3u\x17"), ("kf4", "\x1b[4u\x17"), ("kf5", "\x1b[5u\x17"), ("kf6", "\x1b[6u\x17"), ("kf7", "\x1b[7u\x17"), ("kf8", "\x1b[8u\x17"), ("smso", "\x1b[0;7m"), ("tsl", "\x1bPY99:98\x1b\\\x1b[0;98v\x1b[H\x1b[2;7m"), ("tsl", "\x1b[0;98v"), ("smso", "\x1b[0;4;5;7m"), ("clear", "\x1bM"), ("smso", "\x1bO1"), ("kf9", "\x1bx\x0d"), ("clear", "\x1bj"), ("cnorm", "\x1bG6"), ("civis", "\x1bG5"), ("ind", "\x1bX"), ("kf1", "\x1b2"), ("kf2", "\x1b3"), ("kf3", "\x1b4"), ("kf4", "\x1b5"), ("kf5", "\x1b6"), ("kf6", "\x1b7"), ("kf7", "\x1b8"), ("kf8", "\x1b9"), ("kf9", "\x1b0"), ("clear", "\x15\x1b\x04\x17\x18"), ("cnorm", "\x18"), ("civis", "\x19"), ("ind", "\x03"), ("kf1", "\x07\x1be"), ("kf2", "\x09\x1bd"), ("kf3", "\x0a\x1bc"), ("kf4", "\x0a\x1bb"), ("kf5", "\x13\x1ba"), ("kf6", "\x1bO\x1be"), ("kf7", "\x1bN\x1bd"), ("kf8", "\x1bM\x1bc"), ("kf9", "\x1bL\x1bb"), ("kf10", "\x1bK\x1ba"), ("smso", "\x1b\x05"), ("kf1", "\x1b[?3i"), ("kf2", "\x1b[2i"), ("kf3", "\x1b[@"), ("kf4", "\x1b[M"), ("kf5", "\x1b[17~"), ("kf6", "\x1b[18~"), ("kf7", "\x1b[19~"), ("kf8", "\x1b[20~"), ("kf9", "\x1b[21~"), ("kf10", "\x1b[?5i"), ("knp", "\x1b[29~"), ("kpp", "\x1b[28~"), ("kf1", "\x1b[1~"), ("kf2", "\x1b[2~"), ("kf3", "\x1b[3~"), ("kf4", "\x1b[4~"), ("kf5", "\x1b[5~"), ("kf6", "\x1b[6~"), ("kf7", "\x1b[7~"), ("kf8", "\x1b[8~"), ("kf9", "\x1b[9~"), ("kf10", "\x1b[10~"), ("khome", "\x1b[G"), ("kend", "\x1b[K"), ("knp", "\x1b[26~"), ("kpp", "\x1b[25~"), ("ind", "\x1bB"), ("smso", "\x1b$2\x04"), ("clear", "\x10\x1d"), ("smcup", "\x10\x1d"), ("cnorm", "\x10b"), ("cvvis", "\x10B"), ("kf1", "\x1bf1"), ("kf2", "\x1bf2"), ("kf3", "\x1bf3"), ("kf4", "\x1bf4"), ("kf5", "\x1bf5"), ("kf6", "\x1bf6"), ("kf7", "\x1bf7"), ("kf8", "\x1bf8"), ("kf9", "\x1bf9"), ("kf10", "\x1bf0"), ("kich1", "\x1bd"), ("kdch1", "\x1be"), ("knp", "\x1bh"), ("kpp", "\x1bg"), ("smso", "\x1bT"), ("kf1", "\x1b[0s"), ("kf2", "\x1b[24s"), ("kf3", "\x1b[1s"), ("kf4", "\x1b[23s"), ("kf5", "\x1b[2s"), ("kf6", "\x1b[22s"), ("kf7", "\x1b[3s"), ("kf8", "\x1b[21s"), ("kcbt", "\x12\x09"), ("clear", "\x1bP\x1bE0;0;"), ("cnorm", "\x1ba"), ("civis", "\x1bZ"), ("ind", "\x1bG"), ("kf1", "\x1bF01"), ("kf2", "\x1bF02"), ("kf3", "\x1bF03"), ("kf4", "\x1bF04"), ("kf5", "\x1bF05"), ("kf6", "\x1bF06"), ("kf7", "\x1bF07"), ("kf8", "\x1bF08"), ("kf9", "\x1bF09"), ("kf10", "\x1bF10"), ("kf11", "\x1bF11"), ("kf12", "\x1bF12"), ("kich1", "\x1bins"), ("knp", "\x1bnext"), ("kpp", "\x1bprior"), ("smcup", "\x1b[?1l\x1b="), ("rmcup", "\x1b>"), ("kf1", "\x1bOq"), ("kf2", "\x1bOr"), ("kf3", "\x1bOs"), ("kf4", "\x1bOt"), ("kf5", "\x1bOu"), ("kf6", "\x1bOv"), ("kf7", "\x1bOw"), ("kf8", "\x1bOx"), ("kf9", "\x1bOy"), ("kf10", "\x1bOl"), ("kf11", "\x1bOm"), ("kf12", "\x1bOn"), ("rmkx", "\x1b="), ("smkx", "\x1b<"), ("kf1", "\x021\x0a"), ("kf2", "\x022\x0a"), ("kf3", "\x023\x0a"), ("kf4", "\x024\x0a"), ("kf5", "\x025\x0a"), ("kf6", "\x026\x0a"), ("kf7", "\x027\x0a"), ("kf8", "\x028\x0a"), ("kf9", "\x029\x0a"), ("khome", "\x1b\x12"), ("smso", "\x1b\x1f"), ("clear", "\x1bX"), ("khome", "\x1b@"), ("kcbt", "\x1b["), ("smso", "\x1bb\x1bD"), ("civis", "\x1b.1"), ("tsl", "\x1bf"), ("smso", "\x1bG<"), ("cnorm", "\x1b.1"), ("smso", "\x1bg1"), ("smcup", "\x1b_d"), ("rmcup", "\x1b_b"), ("smso", "\x1bg4"), ("cnorm", "\x1b[?25h\x1b[?0c"), ("civis", "\x1b[?25l\x1b[?1c"), ("kcbt", "\x1b\x09"), ("cvvis", "\x1b[?25h\x1b[?8c"), ("clear", "\x1b?"), ("smcup", "\x1b[>1l\x1b[>2l\x1b[>16l\x1b[4l\x1b[>9l\x1b[20l\x1b[>3l\x1b[>7h\x1b[>12l\x1b[1Q"), ("smkx", "\x1b[>13h"), ("rmkx", "\x1b[>13l"), ("khome", "\x1b$A"), ("fsl", "\x1b\\"), ("Ms", "\x1b]52;%p1%s;%p2%s\x1b\\"), ("Cr", "\x1b]112\x1b\\"), ("cnorm", "\x1b\\"), ("civis", "\x1b]"), ("kf1", "\x01a\x0d"), ("kf2", "\x01b\x0d"), ("kf3", "\x01c\x0d"), ("kf4", "\x01d\x0d"), ("kf5", "\x01e\x0d"), ("kf6", "\x01f\x0d"), ("kf7", "\x01g\x0d"), ("kf8", "\x01h\x0d"), ("khome", "\x01?\x0d"), ("kend", "\x01k\x0d"), ("knp", "\x01o\x0d"), ("kpp", "\x01n\x0d"), ("cvvis", "\x1b:"), ("smso", "\x1cH`"), ("Setulc", "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"), ("smso", "\x1b[7;31m"), ("smcup", "\x1b[2;0#w\x1b[1;25r"), ("rmcup", "\x1b[!p\x1b[?7h\x1b[2;1;1#w"), ("cnorm", "\x1bz56;2;0;0z\x1bz73z\x1bz4;1;1z"), ("cvvis", "\x1bz4;2;1z\x1bz56;2;80;24z"), ("cvvis", "\x1bz4;2;1z\x1bz56;2;80;30z"), ("smso", "\x1bb"), ("smcup", "\x1b[33p"), ("rmcup", "\x1b[255p\x1b[255;1H\x1b[K"), ("smcup", ""), ("rmcup", "\x1b[255;1p\x1b[255;1H\x1b[K"), ("smcup", "\x1b[24p"), ("smcup", "\x1b[33;1p\x1b[255;1H\x1b[K"), ("smcup", "\x1b[44p"), ("smcup", "\x1b[44;1p\x1b[255;1H\x1b[K"), ("smcup", "\x1b[76p"), ("smcup", "\x1b[76;1p\x1b[255;1H\x1b[K"), ("smcup", "\x1b[H\x1b[J\x1b[33p\x1b[255;1H\x1b[K"), ("cnorm", "\x1by4\x1bm70"), ("cvvis", "\x1bx4\x1bm71"), ("cnorm", "\x1b[>4l"), ("kf1", "\x1bOS"), ("kf2", "\x1bOT"), ("kf3", "\x1bOU"), ("kf4", "\x1bOV"), ("kf5", "\x1bOW"), ("kf6", "\x1bOP"), ("kf7", "\x1bOQ"), ("kf8", "\x1bOR"), ("cvvis", "\x1b[>4h"), ("smkx", "\x1bt"), ("rmkx", "\x1bu"), ("cnorm", "\x1bx4"), ("smcup", "\x1b[?7l"), ("tsl", "\x1b[s\x1b[>5;1h\x1b[25;%i%dH\x1b[1K"), ("fsl", "\x1b[u\x1b[>5l"), ("smso", "\x1b[7;2m"), ("kf1", "\x06"), ("kf2", "\x10"), ("kf3", "\x0e"), ("kf4", "\x16"), ("kf5", "\x0a"), ("kf6", "\x14"), ("kf7", "\x08"), ("kf8", "\x7f"), ("kf9", "\x1be"), ("kf10", "\x1bd"), ("kf11", "\x17"), ("kf12", "\x1bR"), ("kf1", "\x02\x1bp\x03"), ("kf2", "\x02\x1bq\x03"), ("kf3", "\x02\x1br\x03"), ("kf4", "\x02\x1bs\x03"), ("kf5", "\x1b3"), ("kf6", "\x1bI"), ("kf7", "\x1bR"), ("kf8", "\x1bJ"), ("kf9", "\x1b("), ("kf10", "\x1bj"), ("kf11", "\x1bW"), ("kf12", "\x02\x1b{\x03"), ("cnorm", "\x1b[+{"), ("civis", "\x1b[6+{"), ("tsl", "\x1b[2!w\x1b[%i%p1%dG"), ("fsl", "\x1b[!w"), ("kf1", "\x1c001\x0d"), ("kf2", "\x1c002\x0d"), ("kf3", "\x1c003\x0d"), ("kf4", "\x1c004\x0d"), ("kf5", "\x1c005\x0d"), ("kf6", "\x1c006\x0d"), ("kf7", "\x1c007\x0d"), ("kf8", "\x1c008\x0d"), ("kf9", "\x1c009\x0d"), ("kf10", "\x1c010\x0d"), ("kf11", "\x1c011\x0d"), ("kf12", "\x1c012\x0d"), ("kcbt", "\x1b$I"), ("smso", "\x1b[0;1;7m"), ("knp", "\x1b[153q"), ("kpp", "\x1b[159q"), ("clear", "~\x1c"), ("khome", "~\x12"), ("smso", "~\x1f"), ("clear", "\x1b&a0c0Y\x1bJ"), ("clear", "\x1bF"), ("cnorm", "\x1bDE"), ("cvvis", "\x1bDB"), ("smso", "\x1bBI"), ("knp", "\x1bu"), ("kpp", "\x1bv"), ("rmkx", "\x1b&j@"), ("tsl", "\x1b&w7f2p2I\x1b&w4f2I\x0d\x1bK\x1b&a%p1%dC"), ("fsl", "\x1b&d@\x1b&w7f2p1I\x1b&w4f1I"), ("smso", "\x1b&v2S"), ("kich1", "\x1bq"), ("smso", "\x1b&v5S"), ("cnorm", "\x1b*dQ"), ("civis", "\x1b*dR"), ("Se", "\x1b[2 q"), ("tsl", "\x1bj\x1bx5\x1bx1\x1bY8%+ \x1bo"), ("kf2", "\x1bU"), ("kf3", "\x1bV"), ("kf4", "\x1bW"), ("kf5", "\x1bP"), ("kf6", "\x1bQ"), ("smso", "\x1bs5"), ("cvvis", "\x1b[34l"), ("kf5", "\x1b?t"), ("kf6", "\x1b?u"), ("kf7", "\x1b?v"), ("kf8", "\x1b?w"), ("kf9", "\x1b?x"), ("smcup", "\x1b!9/N\x1b>B"), ("rmcup", "\x1b!9(N\x1b>B"), ("kf1", "\x1ba\x0d"), ("kf2", "\x1bb\x0d"), ("kf3", "\x1bc\x0d"), ("kf4", "\x1bd\x0d"), ("kf5", "\x1be\x0d"), ("kf6", "\x1bf\x0d"), ("kf7", "\x1bg\x0d"), ("kf8", "\x1bh\x0d"), ("kf9", "\x1bi\x0d"), ("kf10", "\x1bj\x0d"), ("kf11", "\x1bk\x0d"), ("kf12", "\x1bl\x0d"), ("kich1", "\x1bP \x08"), ("kdch1", "\x1bQ"), ("kcbt", "\x1b2"), ("smso", "\x1b4A"), ("smcup", "\x1b>B"), ("rmcup", "\x1b>B"), ("smso", "\x1b4!a"), ("smcup", "\x1b>A"), ("rmcup", "\x1b>A"), ("smcup", "\x1b[20;4l\x1b[?7h\x1bb"), ("rmcup", "\x1b[20h"), ("tsl", "\x1bj\x1bYI%+ \x1bo"), ("fsl", "\x1bk"), ("clear", "\x1bH\x1bK"), ("smso", "\x1b0"), ("kf1", "\x1b[K"), ("kf2", "\x1b[L"), ("kf3", "\x1b[M"), ("kf4", "\x1b[N"), ("khome", "\x1b[Y"), ("kend", "\x1b[d"), ("knp", "\x1b[e"), ("kpp", "\x1b[Z"), ("cnorm", "\x1b.3"), ("smso", "\x1b[8ZZ"), ("smso", "\x1bJ"), ("smcup", "\x1b[s\x1b[1b"), ("rmcup", "\x1b[2b\x1b[u\x0d\x1b[K"), ("kf1", "\x1bF1"), ("kf2", "\x1bF2"), ("kf3", "\x1bF3"), ("kf4", "\x1bF4"), ("kf5", "\x1bF5"), ("kf6", "\x1bF6"), ("kf7", "\x1bF7"), ("kf8", "\x1bF8"), ("kf9", "\x1bF9"), ("kf10", "\x1bFA"), ("kf11", "\x1bFB"), ("kf12", "\x1bFC"), ("kend", "\x1b[U"), ("knp", "\x1b[T"), ("kpp", "\x1b[S"), ("kf1", "\x1bP\x0d"), ("kf2", "\x1bQ\x0d"), ("kf3", "\x1bS\x0d"), ("kf4", "\x1bT\x0d"), ("kf5", "\x1bU\x0d"), ("kf6", "\x1bV\x0d"), ("kf7", "\x1bW\x0d"), ("kf8", "\x1bX\x0d"), ("kf9", "\x1bY\x0d"), ("khome", "\x1bR\x0d"), ("smso", "\x1b[6 D"), ("smso", "\x1b\x7f"), ("cnorm", "\x1b[9/y\x1b[12/y\x1b[=6l"), ("cvvis", "\x1b[10/y\x1b[=1h\x1b[=2l\x1b[=6h"), ("cnorm", "\x1b>"), ("cvvis", "\x1b;"), ("smso", "\x1b9P"), ("tsl", "\x1b[?T"), ("fsl", "\x1bg"), ("kend", "\x1bY"), ("knp", "\x1bJ"), ("tsl", "\x1b[?E\x1b[?%i%p1%dT"), ("E3", "\x1b[99H\x1b[2J\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a\x0a"), ("cnorm", "\x1b[?2c\x1b[?25h"), ("cvvis", "\x1b[?8c\x1b[?25h"), ("clear", "\x1b[255;255H\x1b[A\x1b[1J\x1b[H"), ("tsl", "\x1b7\x1b[255;%p1%dH"), ("cnorm", "\x1b[5l"), ("civis", "\x1b[5h"), ("cnorm", "\x1b[<1l"), ("civis", "\x1b[<1h"), ("tsl", "\x1f@A"), ("fsl", "\x0a"), ("kf10", "\x1bOp"), ("knp", "\x1bOn"), ("kpp", "\x1bOR"), ("kdch1", "\x1b[9"), ("cnorm", "\x1bh"), ("civis", "\x1b9h"), ("cvvis", "\x1b0h"), ("smso", "\x1b1n"), ("smcup", "\x1b[?1048h\x1b[?1047h"), ("rmcup", "\x1b[?1047l\x1b[?1048l"), ("kf9", "\x1bx"), ("smso", " \x1bdP"), ("clear", "\x1d\x03"), ("smso", "\x19"), ("smso", "\x13"), ("smso", "\x1b8"), ("smso", "\x1b:"), ("cnorm", "\x11"), ("civis", "\x14"), ("tsl", "\x1f@%p1%'A'%+%c"), ("kend", "\x13I"), ("knp", "\x13H"), ("kpp", "\x13B"), ("smso", "\x1b]"), ("clear", "\x0c\x1bB"), ("tsl", "\x1f@%p1%'A'%+%c\x1bB"), ("tsl", "\x1f@%?%p1%'?'%<%t%p1%'A'%+%c%e\x7f%p1%'>'%-%Pa%?%ga%{1}%&%t\x09%;%?%ga%{2}%&%t\x09\x09%;%?%ga%{4}%&%t\x09\x09\x09\x09%;%?%ga%{07}%>%t\x09\x09\x09\x09\x09\x09\x09\x09%;%?%ga%{15}%>%t\x09\x09\x09\x09\x09\x09\x09\x09%;%;"), ("kf11", "\x1bOP1"), ("kf12", "\x1bOP2"), ("kend", "\x1b)4\x0d"), ("kf1", "\x13D"), ("kf2", "\x13C"), ("kf3", "\x13F"), ("kf4", "\x13A"), ("kf5", "\x13G"), ("kf6", "\x13E"), ("kf7", "\x198"), ("kf8", "\x19,"), ("kf9", "\x19."), ("kf10", "\x190"), ("kf11", "\x191"), ("kf12", "\x19/"), ("cnorm", "\x1f@A\x11\x0a"), ("civis", "\x1f@A\x14\x0a"), ("kf1", "\x1b$4\x0d"), ("kf2", "\x1b#4\x0d"), ("kf3", "\x1b&4\x0d"), ("kf4", "\x1b!4\x0d"), ("kf5", "\x1b'4\x0d"), ("kf6", "\x1b/4\x0d"), ("knp", "\x1b(4\x0d"), ("kpp", "\x1b\"4\x0d"), ("clear", "\x1b[H\x1b[0J"), ("kf11", "\x1b[11;2~"), ("kf12", "\x1b[12;2~"), ("kf1", "\x1b[V"), ("kf2", "\x1b[U"), ("kf3", "\x1b[T"), ("kf5", "\x1b[G"), ("cvvis", "\x1b^9;0s\x1b^7;1s"), ("tsl", "\x1b]0;"), ("smso", "\x1b[1;30m\x1b[47m"), ("ind", "\x15"), ("smso", "\x16"), ("kf10", "\x1b0"), ("kf11", "\x1b!"), ("kf12", "\x1b@"), ("kich1", "\x1b+"), ("kdch1", "\x1b-"), ("kend", "\x1bk"), ("knp", "\x1b/"), ("kpp", "\x1b?"), ("cnorm", "\x1b[?l"), ("civis", "\x1b[?h"), ("cvvis", "\x1bO\x1bq\x1bG\x1bwK4"), ("cvvis", "\x1bO\x1bq\x1bG\x1bvK6"), ("cvvis", "\x1bO\x1bq\x1bG\x1bvK5"), ("smcup", "\x1b\"2\x1bG0\x1b]"), ("cnorm", "\x1b\"2"), ("civis", "\x1b\"0"), ("kf11", "\x01`\x0d"), ("kf12", "\x01a\x0d"), ("khome", "\x01N\x0d"), ("kcbt", "\x01\x1a\x0d"), ("cnorm", "\x1b[0V\x1b8"), ("tsl", "\x1b[25;1H"), ("fsl", "\x1b[?5l\x1b[?5h"), ("cvvis", "\x1b7\x1b[0U"), ("smso", "\x1b0Q"), ("cnorm", "\x1b`5"), ("kf9", "\x029\x0d"), ("kf10", "\x02:\x0d"), ("kf11", "\x02;\x0d"), ("kf12", "\x02<\x0d"), ("kend", "\x1bK"), ("kich1", "\x1b[1~"), ("khome", "\x1b[2~"), ("kend", "\x1b[5~"), ("kpp", "\x1b[3~"), ("cvvis", "\x1b`5"), ("smso", "\x1bGt"), ("tsl", "\x1bj\x1bx5\x1bx1\x1bY8%p1%' '%+%c\x1bo"), ("civis", "\x17"), ("smso", "\x1b0Q\x0e"), ("smcup", "\x1b7"), ("rmcup", "\x1b[2J\x1b8"), ("kf2", "\x1b[18"), ("tsl", "\x1bg\x1bf\x09%p1%' '%+%c"), ("kf12", "\x01`\x0d"), ("smso", "\x1b[4;2m"), ("clear", "\x04"), ("kf6", "\x1b#W"), ("tsl", "\x1b[1$}\x1b[;%df"), ("clear", "\x1b\x0c"), ("smcup", "\x1bKA0\x1bLV0\x1bMG0"), ("rmcup", "\x1bKA1\x1bLV1"), ("clear", "\x1bJ"), ("cvvis", "\x1bN"), ("smso", "\x1bf"), ("smcup", "\x1bzz&\x1b[A\x7f\x1bzz'\x1b[B\x7f\x1bzz(\x1b[D\x7f\x1bzz)\x1b[C\x7f\x1bzz<\x1b[Q\x7f"), ("tsl", "\x1bz("), ("smso", "\x1b[1;7x\x1b[2;0x"), ("smcup", "\x1b%!0\x1bLBB2\x1b%!1"), ("rmcup", "\x1b%!0\x1bLBG8\x1b%!1\x1b[34;1H\x1b[J"), ("cnorm", "\x1b%!0\x1bLBG8\x1b%!1\x1b[34;1H"), ("cvvis", "\x1b%!0\x1bLBB2\x1b%!1"), ("smso", "\x1b!\x08"), ("kf12", "\x01J\x0d"), ("kdch1", " \x08"), ("smso", "\x03E"), ("khome", "\x1bG"), ("kf9", "\x1bOk"), ("kf10", "\x1bOu"), ("cvvis", "\x1bO\x1bq\x1bEK3"), ("kf10", "\x1b[29~"), ("kf1", "\x1bRB"), ("kf2", "\x1bRC"), ("kf3", "\x1bRD"), ("kf4", "\x1bRE"), ("kf5", "\x1bRF"), ("kf6", "\x1bRG"), ("kf7", "\x1bRH"), ("kf8", "\x1bRI"), ("kf9", "\x1bRJ"), ("kf10", "\x1bRK"), ("kf1", "\x1b!\x01"), ("kf2", "\x1b!\x02"), ("kf3", "\x1b!\x03"), ("kf4", "\x1b!\x04"), ("kf5", "\x1b!\x05"), ("kf6", "\x1b!\x06"), ("kf7", "\x1b!\x07"), ("kf8", "\x1b!\x08"), ("kf9", "\x1b!\x09"), ("kf10", "\x1b!\x0a"), ("khome", "\x1b!S"), ("smso", "\x1bb2"), ("knp", "\x0c"), ("kpp", "\x0b"), ("smcup", "\x1bOt"), ("rmcup", "\x1bNt"), ("ind", "\x1bW"), ("tsl", "\x1bOl"), ("fsl", "\x1bNl"), ("smso", "\x1bOo"), ("smcup", "\x0ft"), ("rmcup", "\x0et"), ("tsl", "\x0fl"), ("fsl", "\x0el"), ("smso", "\x0fo"), ("smso", "\x1ba$"), ("smcup", "\x1b[?47h"), ("rmcup", "\x1b[2J\x1b[?47l"), ("kf12", "\x1bO["), ("tsl", "\x1b7\x1b1;24r\x1b[?6l\x1b[25;%i%p1%dH"), ("fsl", "\x1b[?6h\x1b8"), ("smso", "\x1b0P\x1b)"), ("cnorm", "\x1b."), ("clear", "\x1b*1"), ("kf9", "\x1b[28~"), ("smso", "\x12"), ("smso", "\x1b\x1bS1"), ("kf1", "\x022\x0d"), ("kf2", "\x023\x0d"), ("kf3", "\x024\x0d"), ("kf4", "\x025\x0d"), ("kf5", "\x026\x0d"), ("kf6", "\x027\x0d"), ("kf7", "\x028\x0d"), ("clear", "\x1b[1;1H\x1b[J"), ("cnorm", "\x1b[>5h\x1b[>9h"), ("civis", "\x1b[>5l"), ("cvvis", "\x1b[>7h\x1b[>9l"), ("rmcup", "\x1b[r\x1b[?1049l"), ("smcup", "\x1bO"), ("kf9", "\x1b1"), ("kich1", "\x1bQ\x1bO"), ("smso", "\x1b_1"), ("cnorm", "\x1b[=10;12C"), ("civis", "\x1b[=14;12C"), ("cvvis", "\x1b[=0;12C"), ("cnorm", "\x1b[=1c"), ("civis", "\x1b[=0c"), ("cvvis", "\x1b[=2c"), ("cnorm", "\x1b[34h\x1b[?25h"), ("smso", "\x1b[3m"), ("tsl", "\x1b_"), ("kf9", "\x1b0I"), ("smcup", "\x1bVS"), ("rmcup", "\x1bVE"), ("smcup", "\x1be"), ("kf1", "\x1b#;"), ("kf2", "\x1b#<"), ("kf3", "\x1b#="), ("kf4", "\x1b#>"), ("kf5", "\x1b#?"), ("kf6", "\x1b#@"), ("kf7", "\x1b#A"), ("kf8", "\x1b#B"), ("kf9", "\x1b#C"), ("khome", "\x1b#G"), ("smcup", "\x1bv\x1be\x1bz_"), ("rmcup", "\x1bv\x1b. \x1be\x1bz_"), ("cnorm", "\x1b. \x1be"), ("cvvis", "\x1b.\""), ("tsl", "\x1b]l"), ("tsl", "\x0d"), ("fsl", "\x1b[K"), ("smcup", "\x1b[>4l"), ("rmcup", "\x1b[>4h"), ("smcup", "\x0c"), ("ind", "\x1bq"), ("smso", "\x1bRD"), ("kf1", "\x1a1"), ("kf2", "\x1a2"), ("kf3", "\x1a3"), ("kf4", "\x1a4"), ("kf5", "\x1a5"), ("kf6", "\x1a6"), ("kf7", "\x1a7"), ("kf8", "\x1a8"), ("smso", " \x1bRD"), ("smcup", "\x1b[U\x1b[?38l"), ("rmcup", "\x1b[V\x1b[24;1f\x1b[?38h"), ("kf9", "\x1a9"), ("kf10", "\x1a0"), ("clear", "\x1bI"), ("tsl", "\x1bo"), ("smso", "\x1b6$"), ("smso", "\x1fP"), ("smcup", "\x1fwor h\x0d"), ("rmcup", "\x1fmon h\x0d"), ("smso", "\x1fatt e\x0d"), ("clear", "\x1fera;"), ("smcup", "\x1fwor 33h"), ("rmcup", "\x1fwor 0"), ("clear", "\x1dera;\x0a\x1drup;"), ("smcup", "\x1b%!1\x1b[?6l\x1b[2J"), ("smso", "\x1b[=2;<3m"), ("smcup", "\x1b[?6l"), ("rmcup", "\x1b%!0\x1bLBH=\x1b%!1"), ("cnorm", "\x1b%!0\x1bTD10\x1b%!1"), ("civis", "\x1b%!0\x1bTD00\x1b%!1"), ("kf1", "\x1bOB"), ("kf2", "\x1bOC"), ("kf3", "\x1bOD"), ("kf4", "\x1bOP"), ("kf5", "\x1bOQ"), ("kf6", "\x1bOR"), ("kf7", "\x1bOS"), ("cvvis", "\x1b%!0\x1bTD70\x1b%!1"), ("smso", "\x1b[7;42m"), ("clear", "\x1bLZ"), ("cnorm", "\x1b%!0"), ("cvvis", "\x1b%!3"), ("smso", "\x1b%!1\x1b[7;5m\x1b%!0"), ("clear", "\x1b[2J\x1b[0;0H"), ("ind", "\x1b7\x1b[0;0H\x1b[M\x1b8"), ("cvvis", "\x1bLZ\x1bKA0"), ("smso", "\x1bMT2"), ("smcup", "\x1b%%!1\x1b[?6l\x1b[2J"), ("kf4", "\x1bP"), ("kf5", "\x1bQ"), ("kf6", "\x1bR"), ("kf7", "\x1bS"), ("smcup", "\x1b[?6l\x1b[H\x1b[J"), ("rmcup", "\x1b[?6h\x1b%!0\x1bLBP0\x1b%!1\x1b[32;1f"), ("tsl", "\x1b7\x1b[?6l\x1b[2K\x1b[;%i%df"), ("smcup", "\x1b%\x1b!1\x1b[1;32r\x1b[?6l\x1b>"), ("rmcup", "\x1b[1;1H\x1b[0J\x1b[?6h\x1b[?1l"), ("smkx", "\x1b[?1l"), ("rmkx", "\x1b[?1h"), ("khome", "\x1b[OH"), ("kend", "\x1b[OF"), ("knp", "\x1b[S"), ("kpp", "\x1b[T"), ("kf5", "\x1b[16~"), ("cvvis", "\x1b[?31h"), ("ind", "\x1b[1S"), ("kend", "\x1b_1\x1b\\"), ("cnorm", "\x1b4@"), ("ind", "\x1ba"), ("kf1", "\x1bi1"), ("kf2", "\x1bi2"), ("kf3", "\x1bi3"), ("kf4", "\x1bi4"), ("kf5", "\x1bi5"), ("kf6", "\x1bi6"), ("kf7", "\x1bi7"), ("kf8", "\x1bi8"), ("kf9", "\x1bi9"), ("kich1", "\x1bP"), ("smkx", "\x1b[?1h\x1b"), ("cnorm", "\x1bRC"), ("civis", "\x1bRc"), ("kf1", "\x02"), ("kf2", "\x04"), ("kf3", "\x0c"), ("kf4", "\x15"), ("kf5", "\x10"), ("kf6", "\x0e"), ("kf7", "\x13"), ("khome", "\x17"), ("smcup", "\x1b~_d\x1b[2J"), ("rmcup", "\x1b~_b"), ("smcup", "\x1b.2"), ("rmcup", "\x1b.3\x1br\x1b[1;25r\x1b[25;0H"), ("tsl", "\x1b[4;1v\x1b_30"), ("smcup", "\x1bK\x1a\x1b(\x1bk\x08\x1bm\x08\x1bq\x1a"), ("rmcup", "\x1a\x1bK\x1b=7 "), ("smso", "\x1b)\x1bj"), ("tsl", "\x1bf\x1bG0"), ("clear", "\x1b*0"), ("fsl", "\x19\x1bs1"), ("kf10", "\x01J\x0d"), ("kf11", "\x01K\x0d"), ("kf12", "\x01L\x0d"), ("tsl", "\x1bh\x1bf"), ("fsl", "\x0d\x1bg"), ("smcup", "\x1b\\1\x1b-07 "), ("rmcup", "\x1b\\2\x1b-07 "), ("smkx", "\x1bl"), ("rmkx", "\x1bk"), ("rmcup", "\x1b\\3\x1b-07 "), ("smcup", "\x1b[?20l\x1b[?7h\x1b[1Q"), ("kf1", "\x1b?a"), ("kf2", "\x1b?b"), ("kf3", "\x1b?c"), ("kf4", "\x1b?d"), ("kf5", "\x1b?e"), ("kf6", "\x1b?f"), ("kf7", "\x1b?g"), ("kf8", "\x1b?h"), ("kf9", "\x1b?i"), ("cvvis", "\x1b[1Q"), ("smcup", "\x1b[U\x1b[?20l\x1b[?7h\x1b[1Q"), ("rmcup", "\x1b[H\x1b[J\x1b[V"), ("smso", "\x1bG1@A\x1bH"), ("khome", "\x1b\x1bE"), ("kpp", "\x1b\x1ba"), ("smso", "\x1byQ"), ("cnorm", "\x1bS"), ("civis", "\x1bR"), ("tsl", "\x1b]"), ("kf1", "\x1b[2~"), ("kf2", "\x1b[3~"), ("kf3", "\x1b[4~"), ("kf4", "\x1b[5~"), ("kf5", "\x1b[6~"), ("kf6", "\x1b[OP"), ("kf7", "\x1b[OQ"), ("kf8", "\x1b[OR"), ("kf9", "\x1b[OS"), ("smso", "\x1b\x19"), ("smkx", "\x1b=\x1b[?1h"), ("rmkx", "\x1b>\x1b[?1l"), ("cnorm", "\x1bc"), ("kf1", "\x1b?q"), ("kf2", "\x1b?r"), ("kf3", "\x1b?s"), ("kf4", "\x1b?t"), ("kf5", "\x1b?u"), ("kf6", "\x1b?v"), ("kf7", "\x1b?w"), ("kf8", "\x1b?x"), ("kf9", "\x1b?y"), ("kich1", "\x1bi"), ("kdch1", "\x1bO"), ("cvvis", "\x1bd"), ("smso", "\x1b4"), ("kf1", "\x1b_A\x1b\\"), ("kf2", "\x1b_B\x1b\\"), ("kf3", "\x1b_C\x1b\\"), ("kf4", "\x1b_D\x1b\\"), ("kf5", "\x1b_E\x1b\\"), ("kf6", "\x1b_F\x1b\\"), ("kf7", "\x1b_G\x1b\\"), ("kf8", "\x1b_H\x1b\\"), ("kf9", "\x1b_I\x1b\\"), ("kf5", "\x1bE"), ("kf6", "\x1b]"), ("kf7", "\x1bL"), ("kf8", "\x1bv"), ("kf9", "\x1bM"), ("smso", "\x1bU"), ("clear", "\x18\x1b[H\x1b[2J"), ("tsl", "\x1bP2~"), ("smso", "\x1bB"), ("smso", "\x1b0Q\x1b)"), ("clear", "\x1bG\x1bk"), ("kf8", "\x029\x0d"), ("kf9", "\x02:\x0d"), ("kf10", "\x02;\x0d"), ("smso", "\x1bR\x1b0Q\x1bV"), ("kf1", "\x1b001"), ("kf2", "\x1b002"), ("kf3", "\x1b003"), ("kf4", "\x1b004"), ("kf5", "\x1b005"), ("kf6", "\x1b006"), ("kf7", "\x1b007"), ("kf8", "\x1b008"), ("kf9", "\x1b009"), ("kf10", "\x1b011"), ("tsl", "\x1b7\x1b[24;%p1%dH\x1b[1K"), ("clear", "\x1b[2;1H\x1b[J"), ("tsl", "\x1b7\x1b[1;%p1%dH\x1b[1K"), ("clear", "\x1b[H\x1b[2J\x1bPpS(E)\x1b\\"), ("tsl", "\x1b[1$}\x0d\x1b[K"), ("Se", "\x1b[1 q"), ("kf11", "\x1b[22~"), ("kf12", "\x1b[23~"), ("cvvis", "\x1b[?25h"), ("tsl", "\x1b[>,\x01"), ("fsl", "\x01"), ("kf1", "\x1b[?5i"), ("kf2", "\x1b[?3i"), ("kf3", "\x1b[2i"), ("kf4", "\x1b[@"), ("smso", "\x1b[1t\x1b[7m"), ("clear", "\x1b'\x1b(\x1a"), ("smcup", "\x1bc20\x1bc30"), ("rmcup", "\x1bc21\x1bc31"), ("cnorm", "\x1b`4\x1b`1"), ("cvvis", "\x1b`2\x1b`1"), ("khome", "\x1b{"), ("smcup", "\x1bw0"), ("rmcup", "\x1bw1"), ("smcup", "\x1bw1"), ("rmcup", "\x1bw0"), ("smcup", "\x1b[ Q"), ("rmcup", "\x1b[ R"), ("smkx", "\x1b[?1l\x1b="), ("tsl", "\x1b7\x1b[99;%i%p1%dH"), ("fsl", "\x1b[1;24r\x1b8"), ("khome", "\x1b[26~"), ("cvvis", "\x1b[?25h\x1b[34l"), ("smso", "\x1b`7\x1b)"), ("rmcup", "\x1bG0"), ("tsl", "\x1b[40l\x1b[40h\x1b7\x1b[99;%i%p1%dH"), ("kf1", "\x1b[?4i"), ("kich1", "\x1bOP"), ("kdch1", "\x1bOQ"), ("smcup", "\x1b[ Q\x1b[?67;8h"), ("smkx", "\x1b[?1l\x1b[?7h\x1b="), ("smso", "\x1b[17p"), ("tsl", "\x1b[40h\x1b7\x1b[25;%i%p1%dH"), ("kcbt", "\x1b[z"), ("cvvis", "\x1b[34l\x1b[?25h"), ("smso", "\x1b[7m "), ("smcup", "\x1b[22;0;0t"), ("rmcup", "\x1b[23;0;0t"), ("kend", "\x1bF"), ("knp", "\x1bS"), ("kpp", "\x1bT"), ("cnorm", "\x1b[?12h\x1b[?25h"), ("kf11", "\x1b[192z"), ("kf12", "\x1b[193z"), ("kich1", "\x1b[2z"), ("kdch1", "\x1b[3z"), ("smcup", "\x1b@0\x1b[?4s\x1b[?4h\x1b@1"), ("rmcup", "\x1b@0\x1b[?4r"), ("smso", "\x1bG6"), ("smkx", "\x1b[>7h"), ("rmkx", "\x1b[>7l"), ("cnorm", "\x1b[>5l"), ("civis", "\x1b[>5h"), ("tsl", "\x1b[s\x1b[>1h\x1b[25;%i%p1%dH"), ("fsl", "\x1b[u")];

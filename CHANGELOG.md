@@ -10,7 +10,9 @@ vtmux's version is the tmux release it is tested against: `3.8-beta1` is the fir
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
-**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 415 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
+**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 416 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
+
+**Your terminal.** Every `TERM` in ncurses 6.6's database (2,663, `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm` among them) attaches with the features, colours and capabilities tmux 3.8 gives it, on hosts that have no terminfo for it. Hardcopy terminals are refused with tmux's message.
 
 **Ghostty's emulator.** Each pane is a [libghostty-vt](https://github.com/ghostty-org/ghostty) terminal, with tmux's quirks kept where scripts can see them.
 
@@ -32,7 +34,7 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 Every opt-in is tmux 3.8, byte for byte, while off.
 
-**Built for speed.** Whole-program LTO: 6-18% less server CPU for agent panes and many clients, key echo 12% faster, a 9.8 MB stripped binary (was 10.7).
+**Built for speed.** Whole-program LTO: 6-18% less server CPU for agent panes and many clients, key echo 12% faster, a 10.0 MB stripped binary (the terminal table is 0.3 MB of it).
 
 **Lean where it counts** ([numbers](docs/PERFORMANCE.md)):
 

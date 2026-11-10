@@ -2015,6 +2015,78 @@ fn terminals_tmux_knows_attach() {
     }
 }
 
+/// `oracle/terminfo`: ncurses 6.6's entries for the terminals an older host
+/// lacks, put in the client's `TERMINFO_DIRS` so the reference finds them.
+const TERMINFO_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../oracle/terminfo");
+
+/// D-007: terminals from ncurses 6.6's database that an older host lacks
+/// attach as in tmux, with their own features, colours and capabilities. For
+/// each: the client's list and whether the alternate screen was entered and
+/// left.
+#[test]
+fn terminals_from_the_ncurses_database_attach() {
+    let fields = "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:Smulx}|#{Ic:setrgbf}|#{Ic:Ss}|#{Ic:Ms}|#{Ic:Sync}";
+    for term in ["wezterm", "contour", "foot", "foot-direct", "rio"] {
+        let mut seen = Vec::new();
+        for bin in bins() {
+            let w = World::new(bin.clone());
+            let pane = r"printf '\033[3mi\033[0m \033[38;2;10;20;30mB\033[0m\n'; exec cat";
+            assert!(
+                w.cli(&[
+                    "new", "-d", "-s", "a", "-x", "40", "-y", "10", "sh", "-c", pane
+                ])
+                .status
+                .success()
+            );
+            assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+            let mut a = w.attach_env(
+                &["attach", "-t", "a"],
+                40,
+                10,
+                &[("TERM", term), ("TERMINFO_DIRS", TERMINFO_FIXTURES)],
+            );
+            a.wait(|a| screen_text(a).contains('i'));
+            let list = w.cli(&["lsc", "-F", fields]);
+            let list = String::from_utf8_lossy(&list.stdout).trim().to_owned();
+            let started = a.text().contains("\x1b[?1049h");
+            a.keys(b"\x02d");
+            a.exited(0);
+            let left = a.text().contains("\x1b[?1049l");
+            seen.push((list, started, left));
+        }
+        assert_eq!(seen[0], seen[1], "{term}: vtmux vs reference");
+        assert!(seen[0].1 && seen[0].2, "{term}: alternate screen");
+    }
+}
+
+/// D-007: a hardcopy terminal (`hc`) is refused in the client before it
+/// connects, with `can't use hardcopy terminal: NAME` (`tty_term_read_list`),
+/// and `new` leaves no session behind.
+#[test]
+fn a_hardcopy_terminal_is_refused() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        assert!(
+            w.cli(&["new", "-d", "-s", "keep", "cat", "-"])
+                .status
+                .success()
+        );
+        let mut a = w.attach_env(
+            &["new", "-s", "x", "cat", "-"],
+            40,
+            10,
+            &[("TERM", "tty33"), ("TERMINFO_DIRS", TERMINFO_FIXTURES)],
+        );
+        a.exited(1);
+        let ls = w.cli(&["ls", "-F", "#{session_name}"]);
+        seen.push((a.text(), String::from_utf8_lossy(&ls.stdout).into_owned()));
+    }
+    assert_eq!(seen[0], seen[1], "vtmux vs reference");
+    assert_eq!(seen[0].0, "can't use hardcopy terminal: tty33\r\n");
+    assert_eq!(seen[0].1, "keep\n");
+}
+
 /// D-007: what tmux refuses. A terminal without `clear` (`dumb`, or an empty
 /// `TERM`) fails in `tty_term_create`; one terminfo does not have fails in
 /// tmux's client (`missing or unsuitable terminal`, client.c:325-331). The

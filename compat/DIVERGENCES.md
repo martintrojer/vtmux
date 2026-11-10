@@ -22,7 +22,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-004](#d-004) | Time formats use the C locale; odd `TZ` values and over-long output differ | Deferred, tmux bug | deferred |
 | [D-005](#d-005) | A format loop nested in one of the same kind no longer skips or repeats items | tmux bug | open |
 | [D-006](#d-006) | A pane with `history-limit 0` keeps nothing a narrowing pushes off the top | Deferred | deferred |
-| [D-007](#d-007) | Terminals come from a built-in table of 70 names, not terminfo | Deferred | deferred |
+| [D-007](#d-007) | Terminals come from a built-in table of 2,663 names (ncurses 6.6's database), not terminfo | Deferred | deferred |
 | [D-008](#d-008) | `respawn-window -k` on a zoomed window works; tmux crashes | tmux bug | open |
 | [D-009](#d-009) | A tab or `\001` in a config error shown at attach is dropped | Deferred | deferred |
 | [D-010](#d-010) | Copy mode redraws its whole screen, so no stale selection is left on screen | Deferred | deferred |
@@ -227,29 +227,30 @@ Closed (vtmux now matches tmux):
 <a id="d-007"></a>
 ### D-007: terminals come from a built-in table, and frames use fixed sequences
 
-- **Category:** Deferred: terminals outside the table; frames written with fixed sequences.
+- **Category:** Deferred: terminals outside the table (the 8-bit ones, and any entry a user's own terminfo adds); frames written with fixed sequences.
 - **Test:**
-  - `crates/vtmux-core/src/term_features/golden.rs`: 215 reference rows from `tests/term_features_cases.py`, 37 of them for the terminals and overrides below.
+  - `crates/vtmux-core/src/term_features/golden.rs`: 2,908 reference rows from `tests/term_features_cases.py`: one for every added terminal and every hardcopy or generic one tmux refuses (372 rows are refusals), and `COLORTERM`, feature and override rows for the older ones and for `wezterm`, `contour`, `foot`, `ansi`, `Eterm` and `rio`.
   - `term_features` `table_tests` and `code_tests`.
-  - `crates/vtmux/tests/attach.rs`: `terminal_features_apply_at_attach`, `terminals_tmux_knows_attach`, `terminals_tmux_refuses_leave_no_session`, `terminfo_keys_follow_the_terminal`, `overrides_remove_the_alternate_screen`, `colours_below_256_are_downgraded_like_tmux` (`linux`, `vt100`), `cursor_style_and_colour_reach_the_terminal`, `application_escape_mode_follows_the_appesc_feature`, `the_console_cursor_is_hidden_with_civis`.
+  - `crates/vtmux/tests/attach.rs`: `terminal_features_apply_at_attach`, `terminals_tmux_knows_attach`, `terminals_from_the_ncurses_database_attach`, `a_hardcopy_terminal_is_refused`, `terminals_tmux_refuses_leave_no_session`, `terminfo_keys_follow_the_terminal`, `overrides_remove_the_alternate_screen`, `colours_below_256_are_downgraded_like_tmux` (`linux`, `vt100`), `cursor_style_and_colour_reach_the_terminal`, `application_escape_mode_follows_the_appesc_feature`, `the_console_cursor_is_hidden_with_civis`.
   - `render`: `attributes_follow_the_terminal`, `underline_styles_colours_and_overline_follow_the_terminal`.
-  - Oracle `term_console_vt`, `attach_underline_styles`, `attach_attributes_by_terminal`.
+  - Oracle `term_console_vt`, `term_ncurses_terminals`, `attach_underline_styles`, `attach_attributes_by_terminal`.
 - **tmux:**
   - The client reads the terminal's terminfo entry (`tty_term_read_list`, tty-term.c). For any command run from a terminal, it refuses a name the database lacks (`missing or unsuitable terminal: NAME`, client.c:325-331).
   - `tty_term_create` applies `terminal-features` (tty-features.c), `COLORTERM`, then `terminal-overrides` (`tty_term_apply`) to any of ~250 capability names. It refuses a terminal without `clear` or `cup`.
   - Every sequence it writes is a terminfo string.
   - Later device-attribute replies add features too (`tty_default_features`: `XTVERSION`, DA2).
 - **vtmux: the table.** vtmux reads no terminfo (D8). Its terminals are a table generated from terminfo by `tests/terminfo_table.py` (`terminfo.rs`).
-  - 70 names: the `xterm` family with `xterm-kitty` and `xterm-ghostty`/`ghostty`; `screen`, `screen-16color`, `screen-256color` and the 19 `screen.*` entries; `tmux`, `tmux-256color`, `tmux-direct`; `linux`, `linux-16color`; `rxvt*`, `alacritty*`, `kitty*`, `foot*`, `st*`, `vte*`, `gnome*`, `konsole*`, `putty*`; `iterm2`, `mintty`, `ms-terminal`; `vt100`, `vt102`, `vt220` and `dumb`.
+  - 2,663 names: every entry and alias of ncurses 6.6's database (`wezterm`, `contour`, `foot`, `foot-direct`, `rio`, `ghostty`, `ansi`, `Eterm`, `vscode`, `hterm`, `mlterm`, `terminology`, the `xterm-*` and `screen*` families, `xterm-direct*`, and the old VT, Wyse and DEC ones), plus `xterm-ghostty`, `xterm-kitty` and urxvt's `rxvt-unicode*` from the first generation. Most are terminals nobody runs tmux in.
   - An `xterm*` name not in it takes `xterm`'s entry, with the colours its name suggests.
   - Each entry keeps the `tty_term_codes` names it has, which flags are false, `colors`, and the strings vtmux writes or decodes.
-  - Generated on CentOS 9: ncurses 6.2 with ncurses-term, kitty's terminfo, and Ghostty's from the pinned ghostty commit's `src/terminfo/ghostty.zig`.
-  - The cursor (`civis` too), underline and standout strings were added later on a CentOS 9 host without kitty's and Ghostty's entries or the newer ncurses ones. Those entries were carried over unchanged, with values from `ghostty.zig` (`ghostty`, `xterm-ghostty`) or from the ncurses entry each is built on (`alacritty-direct`, `kitty-direct` and `xterm-kitty` from `kitty`; `konsole-direct`, `linux-16color`, `st-direct`, `vte-direct`).
-  - `foot` and `foot-direct` are not in ncurses 6.2, so they take `xterm-256color`'s and `xterm-direct`'s entries until the table is regenerated on a host that has them. foot's XTVERSION reply adds its features at runtime, as in tmux.
+  - Left out: 163 entries with a byte above 0x7f in a string the table keeps (the 8-bit C1 terminals: `vt220-8bit`, `ansi.sys`, `ibmpc`, `qnx`, `p8`...), because the table holds UTF-8 text. They are refused as `missing or unsuitable terminal`, where tmux takes them. 75 hardcopy ones (`hc`: `tty33`, `diablo*`, `lpr`...) are refused as `can't use hardcopy terminal: NAME`, as in tmux's client, and 2 generic ones (`gn`: `unknown`, `ibm327x`) as `missing or unsuitable terminal`. 295 more attach nowhere in tmux either: no `clear` or `cup`, `open terminal failed`.
+  - The first generation (CentOS 9: ncurses 6.2 with ncurses-term, kitty's terminfo, and Ghostty's from the pinned ghostty commit's `src/terminfo/ghostty.zig`) is the 68 entries in `tests/terminfo_carried.json`; they take precedence over ncurses 6.6's, whose entries differ for some (`iterm2`, `kitty`, `vte-256color` have `Smulx`; ncurses' `ghostty` lacks `Tc`, `Sync` and `Setulc`). Their cursor (`civis` too), underline and standout strings were added on a host without kitty's and Ghostty's entries or the newer ncurses ones: values from `ghostty.zig` (`ghostty`, `xterm-ghostty`) or from the ncurses entry each is built on (`alacritty-direct`, `kitty-direct` and `xterm-kitty` from `kitty`; `konsole-direct`, `linux-16color`, `st-direct`, `vte-direct`).
+  - `foot` and `foot-direct` were stand-ins (`xterm-256color`'s and `xterm-direct`'s) until ncurses 6.6's entries; foot's XTVERSION reply adds its features at runtime, as in tmux.
+  - The goldens for the 2,595 added names ran the reference tmux 3.8 (ncurses 6.2's library) on the 6.6 database; `oracle/terminfo` has five of its entries and `tty33` as fixtures, so no host's terminfo matters to the tests.
 - **vtmux: refusing a terminal.**
   - A name outside the table is refused when its terminal is opened, with tmux's `missing or unsuitable terminal: NAME`. tmux refuses it in the client for every command; vtmux only for `attach` and `new`.
-  - A name the host's terminfo has but the table lacks is refused where tmux attaches it.
-  - A name the table has but the host's terminfo lacks attaches where tmux refuses it. Example: `TERM=xterm-ghostty` over SSH to a Linux host without Ghostty's terminfo. tmux says `missing or unsuitable terminal: xterm-ghostty`, exit 1; vtmux attaches with Ghostty's entry (audit_owner_setup_linux).
+  - A name the host's terminfo has but the table lacks is refused where tmux attaches it: an 8-bit terminal, or an entry newer than ncurses 6.6 or of the user's own (`~/.terminfo`).
+  - A name the table has but the host's terminfo lacks attaches where tmux refuses it. Example: `TERM=xterm-ghostty` or `TERM=wezterm` over SSH to a Linux host without that terminal's terminfo. tmux says `missing or unsuitable terminal: xterm-ghostty`, exit 1; vtmux attaches with Ghostty's entry (audit_owner_setup_linux).
   - A terminal left without `clear` or `cup` after the overrides (`dumb`, an empty `TERM`, `cup@`) is refused with `open terminal failed: terminal does not support clear`, as in tmux, before `new-session` makes the session.
   - Feature parsing, `terminal-features` matching, `COLORTERM`, the `-T`/`-2` flags and `TERM_VT100LIKE` (`XT`, or a `clear` that starts with CSI) follow tmux.
 - **vtmux: what follows the entry and the overrides.**

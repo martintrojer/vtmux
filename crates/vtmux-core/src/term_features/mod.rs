@@ -327,6 +327,9 @@ pub enum OpenError {
     /// The terminal is not one vtmux knows: what tmux's client says when the
     /// terminfo database has no such entry (`setupterm` fails).
     Missing(String),
+    /// A hardcopy terminal (`hc`): `setupterm` fails with 1 and the client
+    /// says `can't use hardcopy terminal` (`tty_term_read_list`).
+    Hardcopy(String),
     /// `tty_term_create` requires `clear` and `cup`; the text says which is
     /// missing.
     Lacks(&'static str),
@@ -336,6 +339,7 @@ impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Missing(name) => write!(f, "missing or unsuitable terminal: {name}"),
+            Self::Hardcopy(name) => write!(f, "can't use hardcopy terminal: {name}"),
             Self::Lacks(cap) => write!(f, "terminal does not support {cap}"),
         }
     }
@@ -347,16 +351,17 @@ impl std::fmt::Display for OpenError {
 /// empty name has no entry at all, as tmux's client reads none.
 fn entry(name: &str) -> Option<(&'static terminfo::Entry, Option<u32>, bool)> {
     const EMPTY: terminfo::Entry = terminfo::Entry {
-        names: &[],
+        names: terminfo::NO_NAMES,
         off: &[],
         colours: None,
         strings: &[],
     };
+    // Sorted by name (checked in `table_tests`).
     let find = |n: &str| {
         terminfo::TERMINALS
-            .iter()
-            .find(|(t, _)| *t == n)
-            .map(|(_, e)| e)
+            .binary_search_by_key(&n, |(t, _)| t)
+            .ok()
+            .map(|i| &terminfo::TERMINALS[i].1)
     };
     if name.is_empty() {
         return Some((&EMPTY, None, false));
@@ -435,11 +440,14 @@ impl Term {
         features: &[String],
         overrides: &[String],
     ) -> Result<Self, OpenError> {
+        if terminfo::HARDCOPY.contains(&name) {
+            return Err(OpenError::Hardcopy(name.to_owned()));
+        }
         let (entry, colours, direct) =
             entry(name).ok_or_else(|| OpenError::Missing(name.to_owned()))?;
         let mut caps = Cap::ALL
             .into_iter()
-            .filter(|c| entry.names.contains(&c.name()))
+            .filter(|c| entry.has(c.name()))
             .fold(0, |bits, c| bits | c.bit());
         if direct {
             caps |= Cap::Rgb.bit();
@@ -454,19 +462,10 @@ impl Term {
             colours256: false,
             rgb: false,
             overrides: overrides.to_vec(),
-            other: entry
-                .names
-                .iter()
-                .copied()
-                .filter(|n| !modelled(n))
-                .collect(),
+            other: entry.names().filter(|n| !modelled(n)).collect(),
             off: entry.off.iter().copied().collect(),
             colours,
-            values: entry
-                .strings
-                .iter()
-                .map(|&(n, v)| (n, v.to_owned()))
-                .collect(),
+            values: entry.strings().map(|(n, v)| (n, v.to_owned())).collect(),
             vt100_like: false,
             utf8: false,
         };
@@ -1365,6 +1364,67 @@ mod table_tests {
         ] {
             assert!(open(name, &[]).is_ok(), "{name}");
         }
+        // A hardcopy terminal (`hc`) is `setupterm` error 1; a generic one
+        // (`gn`) is error 0, like a name without an entry.
+        assert_eq!(
+            text(open("tty33", &[])).as_deref(),
+            Some("can't use hardcopy terminal: tty33")
+        );
+        assert_eq!(
+            text(open("unknown", &[])).as_deref(),
+            Some("missing or unsuitable terminal: unknown")
+        );
+    }
+
+    /// `entry` finds a terminal by binary search, and a hardcopy name has no
+    /// entry to find.
+    #[test]
+    fn the_table_is_sorted_and_has_no_hardcopy_entry() {
+        assert!(terminfo::TERMINALS.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(
+            terminfo::HARDCOPY
+                .iter()
+                .all(|n| !terminfo::TERMINALS.iter().any(|(t, _)| t == n))
+        );
+    }
+
+    /// The terminals of ncurses 6.6's database that were refused before
+    /// (D-007), with what their entries say. The reference's rows are in
+    /// `golden/cases.tsv`; these pin the entries' own values.
+    #[test]
+    fn terminals_of_the_ncurses_database_open() {
+        for name in [
+            "wezterm",
+            "contour",
+            "foot",
+            "foot-direct",
+            "rio",
+            "ansi",
+            "Eterm",
+            "vscode",
+            "xterm-direct2",
+            "mlterm",
+            "terminology",
+            "hterm",
+        ] {
+            open(name, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        let wezterm = open("wezterm", &[]).unwrap();
+        assert_eq!(wezterm.palette_size(), 256);
+        assert!(wezterm.has_name("Smulx") && wezterm.has_name("Ms"));
+        // contour's entry has no `Ms` or `sitm`.
+        assert!(!open("contour", &[]).unwrap().has_name("Ms"));
+        // `foot` and `foot-direct` have their own entries, not xterm's.
+        assert!(open("foot", &[]).unwrap().has_name("Smulx"));
+        assert_eq!(open("foot-direct", &[]).unwrap().colours(), 1 << 24);
+        // 8-bit terminals (C1 controls in their strings) stay outside.
+        assert_eq!(
+            open("vt220-8bit", &[])
+                .err()
+                .map(|e| e.to_string())
+                .as_deref(),
+            Some("missing or unsuitable terminal: vt220-8bit")
+        );
     }
 
     /// What the strings and flags vtmux writes with come from: the entry,

@@ -813,6 +813,12 @@ impl<'a> Runner<'a> {
         }
         if let Some(term) = term {
             cmd.env("TERM", term);
+            // The terminals older hosts' ncurses lacks (`wezterm`, `foot`):
+            // the reference's client reads them from here.
+            cmd.env(
+                "TERMINFO_DIRS",
+                super::workspace_root().join("oracle/terminfo"),
+            );
         }
         cmd.args(self.base_args());
         cmd.args(["attach", "-t", session]);

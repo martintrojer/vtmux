@@ -6295,7 +6295,8 @@ fn osc_title(raw: &[u8]) -> Option<String> {
 /// terminal failed` (cmd-attach-session.c:141, cmd-new-session.c:208).
 fn open_error(e: &vtmux_core::term_features::OpenError) -> EdgeError {
     match e {
-        vtmux_core::term_features::OpenError::Missing(_) => EdgeError::Message(e.to_string()),
+        vtmux_core::term_features::OpenError::Missing(_)
+        | vtmux_core::term_features::OpenError::Hardcopy(_) => EdgeError::Message(e.to_string()),
         vtmux_core::term_features::OpenError::Lacks(_) => {
             EdgeError::OpenTerminalFailed(e.to_string())
         }

@@ -28,7 +28,7 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | `capture-pane -S -` of 1M lines | 840 ms | 385 ms | 0.46x |
 | Alternate screen up over 1M lines of history | 3-73 ms | 1.8-4.0 s | **Worse** |
 | Live upgrade, 10 panes x 100k lines | kill-server | 0.6-0.9 s | |
-| Release binary, stripped | 1.3 MB | 9.8 MB | 7.7x **Worse** |
+| Release binary, stripped | 1.3 MB | 10.0 MB | 7.7x **Worse** |
 
 ## Memory
 
