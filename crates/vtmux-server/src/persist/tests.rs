@@ -228,14 +228,17 @@ fn a_torn_or_missing_manifest_falls_back_to_the_previous() {
 /// A torn `manifest` over a good `manifest.prev`: the next checkpoint
 /// replaces the torn one and keeps `manifest.prev`, the one checkpoint a
 /// crash can fall back to, at every stage; the one after rotates as usual.
+/// Also by a writer that wrote the manifest before it was torn
+/// ([`Writer::after`]): only the same bytes skip the read.
 #[test]
 fn a_torn_manifest_is_replaced_not_kept_over_the_good_previous() {
-    for stage in [
+    let stages = [
         Stage::ChunksWritten,
         Stage::ManifestWritten,
         Stage::PrevKept,
-    ] {
-        let dir = temp_dir(&format!("torn-rotate-{stage:?}"));
+    ];
+    for (stage, known) in stages.into_iter().flat_map(|s| [(s, false), (s, true)]) {
+        let dir = temp_dir(&format!("torn-rotate-{stage:?}-{known}"));
         let s1 = snapshot("one", &["alpha"]);
         let s2 = snapshot("two", &["beta"]);
         write(&dir, &s1, &mut ok()).unwrap();
@@ -251,10 +254,10 @@ fn a_torn_manifest_is_replaced_not_kept_over_the_good_previous() {
                 Ok(())
             }
         };
-        assert_eq!(
-            write(&dir, &s3, &mut crash).unwrap_err().to_string(),
-            "crash"
-        );
+        let mut w = Writer::new(&dir, &s3)
+            .unwrap()
+            .after(known.then(|| bytes.clone()));
+        assert_eq!(w.step(None, &mut crash).unwrap_err().to_string(), "crash");
         assert_eq!(
             load(&dir).unwrap(),
             (s1.clone(), MANIFEST_PREV),
