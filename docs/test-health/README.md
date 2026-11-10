@@ -17,7 +17,7 @@ This page is how the runs are made: the method, the scenarios, how to run them, 
 
 ### Host and load
 
-- A devserver: CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
+- A a shared Linux server, : Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
 - Load was 2.6 to 4.9 (`uptime`) over the refresh runs, every one under `flock /tmp/vtmux-stress.lock`. Later runs saw more (load 3 to 22; the release-profile run 9 to 15, under `muzzle run --class high`); each record says.
 - The host is shared, so run when `uptime` load is under 4, under that lock, and one bench at a time.
 - macOS numbers have not been collected yet.

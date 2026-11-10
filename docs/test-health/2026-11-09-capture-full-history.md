@@ -1,6 +1,6 @@
 # Capturing all of a long history, 2026-11-09
 
-Task `perf_capture_full_history`. Host: the devserver of *Method* in `PERFORMANCE.md` (CentOS Stream 9, 96 cpus), shared with other agents; load 12-13 during the runs below. Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `457a169` (`/tmp/w142/vtmux-base`), `after` the branch at `6ca43ff` (`/tmp/w142/vtmux-after`).
+Task `perf_capture_full_history`. Host: the Linux server of *Method* in `PERFORMANCE.md` (96 cpus), shared with other agents; load 12-13 during the runs below. Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `457a169` (`/tmp/w142/vtmux-base`), `after` the branch at `6ca43ff` (`/tmp/w142/vtmux-after`).
 
 Commits: `1dcbed4` (libghostty-vt: `row_cells` writes into the caller's buffer), `0e0e299` (lines of plain text from Ghostty's cells), `de3eb28` (styled text without `-e`, and the general path's buffers), `6ca43ff` (`-e` and `-N` with styles).
 

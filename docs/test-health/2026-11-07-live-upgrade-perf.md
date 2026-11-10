@@ -1,6 +1,6 @@
 # Live upgrade bench after `lu_upgrade_perf`, 2026-11-07
 
-Release builds (the after one uncommitted, so `1b0dba1+dirty` below) on the shared devserver (AMD EPYC-Genoa, 96 cpus, load 5-8 from other workers). Before:
+Release builds (the after one uncommitted, so `1b0dba1+dirty` below) on the shared Linux server (AMD EPYC-Genoa, 96 cpus, load 5-8 from other workers). Before:
 `1b0dba1`; after: `lu_upgrade_perf` (Wyhash blob checksum in patch 0017, the patch-stack question,
 every pane's history compressed on threads before a same-stack upgrade, the dry-run limit scaled by
 the rows it imports, the new image dropping the stream and trimming the heap). What each column means:

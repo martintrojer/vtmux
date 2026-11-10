@@ -1,6 +1,6 @@
 # Copy mode over a coloured history, 2026-11-09
 
-Task `perf_search_styled_history`. Host: the devserver of *Method* in `PERFORMANCE.md` (CentOS Stream 9, 96 cpus), shared with other agents; load 3-6 during the runs below. Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `636664b` (`/tmp/w146/vtmux-base`), `after` the branch at `5594f05` (`/tmp/w146/vtmux-after`).
+Task `perf_search_styled_history`. Host: the Linux server of *Method* in `PERFORMANCE.md` (96 cpus), shared with other agents; load 3-6 during the runs below. Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `636664b` (`/tmp/w146/vtmux-base`), `after` the branch at `5594f05` (`/tmp/w146/vtmux-after`).
 
 Commits: `8b0656e` (libghostty-vt: a clone copies a whole page as its memory, Ghostty patch 0035), `5594f05` (copy: search reads lines of styled characters past ASCII as text).
 

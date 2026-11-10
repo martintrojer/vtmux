@@ -6,7 +6,7 @@ Task `perf_many_clients`: clients that show one window alike share its drawing a
 - `8cddcba` a plain frame's status rows are tagged by their cells, so they are kept and compared by tag;
 - `417a3c4` a client takes another's plain frame without drawing it, the screen it leaves shared.
 
-Every number here is from release builds on the shared devserver (CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 cpus), `base` = main `0107471`, `vtmux` = `417a3c4` unless a row says otherwise, tmux 3.8 from `cargo xtask ref-tmux`. The host was shared with other workers: load 9-27 over the runs. Read the CPU numbers as rough; the ratios between binaries of one run are what counts.
+Every number here is from release builds on the shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 cpus), `base` = main `0107471`, `vtmux` = `417a3c4` unless a row says otherwise, tmux 3.8 from `cargo xtask ref-tmux`. The host was shared with other workers: load 9-27 over the runs. Read the CPU numbers as rough; the ratios between binaries of one run are what counts.
 
 ## `bench-micro.py clients`, before and after
 

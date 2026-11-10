@@ -1,7 +1,7 @@
 # Live upgrade bench, 2026-11-07
 
 `NO_BUILD=1 RUNS=3 OUT=/tmp/lut-bench-upgrade2 python3 scripts/bench.py upgrade` on the release build of
-`5ae699c` (lu_upgrade_tests, rebased onto e61fbe3 and 55a4739), on the shared devserver (load 14.8 at the start,
+`5ae699c` (lu_upgrade_tests, rebased onto e61fbe3 and 55a4739), on the shared Linux server (load 14.8 at the start,
 up to about 45 earlier in the day from other workers' builds; numbers are noisy). An earlier run on `40e06e1`
 (before 55a4739, load 49.8) gave the same picture within 20%: 10 x 100k idle 1670 ms, fresh refused 3 of 3.
 The JSON is [`2026-11-07-live-upgrade-bench.json`](2026-11-07-live-upgrade-bench.json). What each column means:

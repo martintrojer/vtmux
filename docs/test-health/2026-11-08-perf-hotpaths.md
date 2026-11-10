@@ -1,6 +1,6 @@
 # Performance hot paths, 2026-11-08
 
-Task `audit_perf_hotpaths`. Host: the devserver of *Method* (CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 cpus), shared with other agents' gates; load is given per run and was high for most of them (up to 118). Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `23ddb70` (`/tmp/aph/vtmux-base`), `vtmux` the branch.
+Task `audit_perf_hotpaths`. Host: the Linux server of *Method* (Linux 6.16, AMD EPYC Genoa, 96 cpus), shared with other agents' gates; load is given per run and was high for most of them (up to 118). Release builds of vtmux; tmux 3.8 from `cargo xtask ref-tmux`. `base` is main `23ddb70` (`/tmp/aph/vtmux-base`), `vtmux` the branch.
 
 Commits: `b64e419` (render: the status format context only on a status redraw), `7e6ab1f` (copy: plain ASCII search in a line's text), `503f2a4` (`scripts/bench-micro.py`).
 

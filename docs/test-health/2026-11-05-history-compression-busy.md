@@ -2,7 +2,7 @@
 
 Spec: `docs/specs/2026-10-31-history-memory.md`, *Starvation override*. Change: `compress.rs` `STARVE`
 (a pane whose history keeps changing, or keeps waiting for a pass, for 10 s steps in busy turns too).
-Host: devserver, CentOS Stream 9, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, shared with other agents
+Host: a shared Linux server, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, shared with other agents
 (load 4.7-13.6 during the latency runs, 5.5-9.6 during the trickle run; nobody else held
 `/tmp/vtmux-stress.lock`). Release builds: `before` is main `3682ca7`, `after` is this change on the same
 base (both from this worktree's target dir, same compiler). Reference tmux 3.8 from `cargo xtask ref-tmux`.

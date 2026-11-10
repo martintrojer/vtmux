@@ -2,7 +2,7 @@
 
 Task `release_profile`: `Cargo.toml` had no `[profile.release]`, so the shipped binary was cargo's default (thin-local LTO, 16 codegen units, debuginfo stripped, symbols kept). The owner's 2026-11-09 numbers: 10.1 MB (8.3 stripped) against tmux's 1.2 MB. This record picks a profile and measures it against the default.
 
-Host: the shared devserver (CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 cpus), load 9-15 over the runs from other workers; every run went through `muzzle run --class high` (not `flock /tmp/vtmux-stress.lock`). `base` = main `3e57394` with cargo's default release profile, `vtmux` = the same commit with `lto = "fat"`, `codegen-units = 1` (strip only changes the symbol table, so the benched binary is that one unstripped). tmux 3.8 from `cargo xtask ref-tmux`. Each candidate was built with `CARGO_PROFILE_RELEASE_*` overrides of the default. Read CPU as rough; base and vtmux in one run are what to compare.
+Host: the shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 cpus), load 9-15 over the runs from other workers; every run went through `muzzle run --class high` (not `flock /tmp/vtmux-stress.lock`). `base` = main `3e57394` with cargo's default release profile, `vtmux` = the same commit with `lto = "fat"`, `codegen-units = 1` (strip only changes the symbol table, so the benched binary is that one unstripped). tmux 3.8 from `cargo xtask ref-tmux`. Each candidate was built with `CARGO_PROFILE_RELEASE_*` overrides of the default. Read CPU as rough; base and vtmux in one run are what to compare.
 
 ## Size
 

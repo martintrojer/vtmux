@@ -1,10 +1,10 @@
 # Slow gate speed, 2026-11-08
 
-`scripts/check.sh` took 1102 s on dev0, against a 10 min budget. It now takes 220 s there (499 s with the suites one after another, as CI's runners run them), with the same tests, scenarios and regress scripts, all passing.
+`scripts/check.sh` took 1102 s on a build host, against a 10 min budget. It now takes 220 s there (499 s with the suites one after another, as CI's runners run them), with the same tests, scenarios and regress scripts, all passing.
 
 ## Method
 
-- Host: dev0 (CentOS 9, 96 CPUs, shared with other workers), warm `target/`, the gate under muzzle as AGENTS.md runs it (`muzzle run --class high --rule vtmux-check`: 3 slots, so `RUST_TEST_THREADS=3`).
+- Host: a build host (96 CPUs, shared with other workers), warm `target/`, the gate under muzzle as AGENTS.md runs it (`muzzle run --class high --rule vtmux-check`: 3 slots, so `RUST_TEST_THREADS=3`).
 - Gate phases: before, `bash -x` with a timestamp in `PS4`; after, `check.sh`'s own per-suite seconds. CPU from muzzle's `runs.jsonl` (`cpu_s` of the whole gate).
 - Per-test wall time: stable `cargo test` has no per-test times (`--report-time` is nightly), and nextest is not a dependency, so `scripts/test-times.sh` (added here) runs every test of a binary alone (`--exact`, one thread), 8 at once, and sums them. The sum is what a test binary costs on N threads, about sum / N, unless one test is longer than that.
 - Profiles: `perf record` of the slowest CPU-bound test; for the oracle, a temporary counter of settles that waited out their 3 s reaction limit (not committed).

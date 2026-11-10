@@ -3,7 +3,7 @@
 Spec: `docs/specs/2026-10-31-history-memory.md`, *Shared rest*. Change: `compress.rs` `rest`/`MAX_SHARE` (the
 rest after a compression step is `REST_FACTOR` times the step divided by the number of starved panes, up to 25,
 at least `STEP_GAP`; it was `REST_FACTOR` times the step whatever the number of panes).
-Host: devserver, CentOS Stream 9, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, shared with other agents (load
+Host: a shared Linux server, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, shared with other agents (load
 1.8-4.9 during these runs; every run held `/tmp/vtmux-stress.lock`). Release builds from this worktree's target
 dir, same compiler: `before` is main `6b9812f`, `after` is this change on it, `nocompress` is `before` with
 `scripts/bench-nocompress.patch`. Reference tmux 3.8 from `cargo xtask ref-tmux`.

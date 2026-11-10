@@ -1,6 +1,6 @@
 # Live upgrade: pane terminal state through the snapshot 2026-11-06 (lu_pane_state)
 
-Spec: `docs/specs/2026-11-06-live-upgrade.md`, decisions 5, 11 and 23. Host: devserver, CentOS Stream 9,
+Spec: `docs/specs/2026-11-06-live-upgrade.md`, decisions 5, 11 and 23. Host: a shared Linux server, 
 96 cpus, shared with other agents. Built on `8a63595` (main `ee4957d` + snapshot crate + spike) over a stopgap
 per-page API; rebased onto main `3ae218e` on the spike's streaming API (*Rebased onto main* below).
 
@@ -131,7 +131,7 @@ key_echo p50: 0.32 -> 0.30 ms (idle), 0.44 -> 0.45 ms (flood). All within noise.
 
 One branch on main `a19b4b4` (highest patch there 0016): 0017 (state export), one copy of 0018 (reflow
 hyperlink map), 0019 (reflow retry) on top, the import validation, the model plug-in, and `CheckpointFull`
-writing every pane's terminal in the row form (`612e22b`). Measured on the tip `612e22b`, same devserver
+writing every pane's terminal in the row form (`612e22b`). Measured on the tip `612e22b`, same server
 (96 cores, shared, load 6-10):
 
 | check | result |

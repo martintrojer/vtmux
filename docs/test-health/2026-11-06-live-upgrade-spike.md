@@ -1,7 +1,7 @@
 # Live upgrade spike: Ghostty state export/import 2026-11-06 (lu_spike_ghostty_export)
 
 Spec: `docs/specs/2026-11-06-live-upgrade.md`, *Snapshot > Ghostty access* and *Spike first*; decisions 5, 11, 23
-and 24. Host: devserver, CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
+and 24. Host: a shared Linux server, Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
 Base main `ee4957d`.
 
 ## What was built

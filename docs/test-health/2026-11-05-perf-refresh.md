@@ -10,7 +10,7 @@ Every row of `docs/PERFORMANCE.md`'s tables comes from the runs below. Raw JSON 
   `/tmp/pr178/vtmux`, measured with `NO_BUILD=1 VTMUX=/tmp/pr178/vtmux`. Main later moved to `2b9d8a9` (a test and
   a DIVERGENCES line only; no server code), and `9ae86d2` was rebased onto it as `8b43983`.
 - **Reference:** tmux 3.8 from `cargo xtask ref-tmux` (`~/.cache/vtmux/tmux-3.8/bin/tmux`).
-- **Host:** devserver, CentOS Stream 9, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, 235 GB RAM, shared with other
+- **Host:** a shared Linux server, Linux 6.16.1, AMD EPYC-Genoa, 96 cpus, 235 GB RAM, shared with other
   agents. Every step ran under `flock /tmp/vtmux-stress.lock`, one after another, from `/tmp/pr178/drive.sh`.
   Within a step the binaries alternate the way the harness runs them (`bench.py`: all tmux runs of a scenario, then
   all vtmux runs; `bench-history-memory.sh`: tmux then vtmux per scenario; hidden panes: tmux, vtmux, four times).

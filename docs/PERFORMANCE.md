@@ -150,7 +150,7 @@ Ghostty is linked in statically (1.35 MB of text; tmux links libevent and ncurse
 
 ## How it's measured
 
-- Host: a shared devserver (CentOS Stream 9, Linux 6.16, AMD EPYC Genoa, 96 CPUs). macOS numbers are not collected yet.
+- Host: a shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 CPUs). macOS numbers are not collected yet.
 - Only the server process: CPU from `/proc/<pid>/stat` or `schedstat`, RSS from `VmRSS`, never the pane children. Medians of 3 or 5 runs.
 - Clients are the binary's own `attach` on a PTY the bench drains, counting every byte and synchronized frame.
 - Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes, many clients, key echo and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
