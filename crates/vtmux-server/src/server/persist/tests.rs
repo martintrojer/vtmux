@@ -465,6 +465,41 @@ fn full_set_to_layout_writes_a_layout_checkpoint_and_prunes() {
     assert_eq!(server.checkpoint(), None);
 }
 
+/// `full` set to `layout` and the server shut down in the same turn
+/// (`set -s vtmux-persist layout ; kill-server`): the shutdown checkpoint
+/// prunes, as the next turn would have.
+#[test]
+fn full_set_to_layout_then_shut_down_at_once_prunes() {
+    let (mut server, dir) = server("ckpt-prune-exit");
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "full"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    server.persist_timers(Instant::now());
+    assert!(server.checkpoint().is_some());
+    let out = run(&mut server, &dir, &["rename-window", "-t", "a:0", "next"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    assert!(server.checkpoint().is_some());
+    let load = |name| crate::persist::load_file(&state, name).unwrap().0;
+    assert!(shows_secret(&load(MANIFEST_PREV)));
+
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "layout"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    server.checkpoint_exit();
+    for name in [MANIFEST, MANIFEST_PREV] {
+        let s = load(name);
+        assert_eq!(s.meta.purpose, snap::Purpose::CheckpointLayout, "{name}");
+        assert!(s.panes.iter().all(|p| p.term.is_none()), "{name}");
+    }
+    for f in all_files(&state) {
+        let bytes = std::fs::read(&f).unwrap();
+        assert!(
+            !bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()),
+            "{f:?}"
+        );
+    }
+}
+
 /// Two servers whose checkpoints would share a directory: the first to
 /// write holds its lock, the other writes nothing and says why once.
 #[test]

@@ -14,7 +14,8 @@
 //! without anyone remembering to mark it dirty.
 //!
 //! `vtmux-persist` set from `full` to `layout` writes a `layout`
-//! checkpoint at the next loop turn whether anything changed or not, with
+//! checkpoint at the next loop turn (or the shutdown checkpoint, if that
+//! comes first) whether anything changed or not, with
 //! `manifest.prev` a copy of it and the chunks no manifest names deleted
 //! ([`Server::persist_timers`], [`crate::persist::Writer::replacing_prev`]),
 //! so no screen or history stays on disk until the next change.
@@ -266,13 +267,21 @@ impl Server {
     }
 
     /// The checkpoint of a clean shutdown, before the panes are hung up;
-    /// once, and all at once.
+    /// once, and all at once. `full` set to `layout` with no loop turn
+    /// since (`set -s vtmux-persist layout ; kill-server`) prunes here,
+    /// as that turn would have ([`Server::persist_timers`]).
     pub(crate) fn checkpoint_exit(&mut self) {
         if std::mem::replace(&mut self.persist.exited, true) {
             return;
         }
         self.persist.due = None;
-        self.checkpoint();
+        if self.persist_mode() == Some(Mode::Layout)
+            && std::mem::take(&mut self.persist.full_may_be_on_disk)
+        {
+            self.checkpoint_layout_now();
+        } else {
+            self.checkpoint();
+        }
     }
 
     /// Write a checkpoint now, all at once, if `vtmux-persist` is on and
