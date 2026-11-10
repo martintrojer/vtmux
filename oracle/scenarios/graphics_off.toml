@@ -1,0 +1,18 @@
+# D33 off (spec, *Protocol extensions (D28)*): with `vtmux-graphics` at its
+# default, a pane program's kitty graphics commands are APCs as tmux 3.8
+# takes them (input.c `input_exit_apc`): each sets the pane title, and none
+# is answered. The program sends a transmit-and-display (`a=T`), a query
+# (`a=q`) and a placement (`a=p`), then DSR 5, and prints what it reads back
+# through `cat -v`: only the 4 bytes of the DSR's answer, where an answer to
+# the query would come first. The attached client's screen shows no image
+# and the text around the commands as it was.
+name = "graphics_off"
+size = [60, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "sh", "-c", "stty raw -echo opost onlcr; printf 'a\\033_Ga=T,f=24,s=1,v=1,i=1;/wAA\\033\\\\b\\033_Ga=q,i=2,s=1,v=1,f=24;AAAA\\033\\\\c\\033_Ga=p,i=1,p=3\\033\\\\d\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; exec cat"] },
+  { wait_for = "rdy" },
+  { run = ["display", "-p", "-t", "%0", "#{pane_title}"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

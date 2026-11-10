@@ -1968,6 +1968,10 @@ impl Server {
             output_generation: x.output_generation,
             last_output_time: x.last_output_time,
             kitty_owner: [x.kitty_owner_primary, x.kitty_owner_alternate],
+            graphics: false,
+            graphics_owner: [None; 2],
+            graphics_bytes: [0; 2],
+            graphics_loaded: [None; 2],
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,

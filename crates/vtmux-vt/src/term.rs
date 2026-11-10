@@ -471,6 +471,19 @@ pub struct PaneTerm {
     /// feed (primary, alternate): a program was granted
     /// ([`PaneTerm::take_kitty_grants`]).
     kitty_new: [bool; 2],
+    /// The server's `vtmux-graphics` (D33) the next input is read under.
+    graphics_option: bool,
+    /// D33: each screen's grant, primary then alternate.
+    graphics_granted: [bool; 2],
+    /// D33: a screen granted in the last input, for the server to note
+    /// its owner ([`PaneTerm::take_graphics_grants`]).
+    graphics_new: [bool; 2],
+    /// D33: the storage limit a screen gets when it is granted (the
+    /// server's share of `vtmux-graphics-limit`).
+    graphics_share: u64,
+    /// D33: set while a granted screen's graphics command ends, so its
+    /// reply reaches the program (`tmux_reply`).
+    graphics_reply: Rc<StdCell<bool>>,
     /// The links cells of this pane are drawn with (tmux's
     /// `s->hyperlinks`), shared with its grid's copies.
     pub(crate) links: Rc<RefCell<crate::link::Links>>,
@@ -552,6 +565,8 @@ impl PaneTerm {
         let mouse_scan = Rc::clone(&mouse);
         let inband = Rc::new(StdCell::new(InbandResize::default()));
         let inband_seen = Rc::clone(&inband);
+        let graphics_reply = Rc::new(StdCell::new(false));
+        let graphics_seen = Rc::clone(&graphics_reply);
         let events = Rc::new(RefCell::new(Events::default()));
         let belled = Rc::clone(&events);
         let notified = Rc::clone(&events);
@@ -562,6 +577,7 @@ impl PaneTerm {
                     cursor: cursor_seen.get(),
                     mouse: mouse_seen.get(),
                     inband: inband_seen.get(),
+                    graphics: graphics_seen.get(),
                 };
                 if let Some(reply) = tmux_reply(term, modes, data) {
                     push_bytes(&mut sink.borrow_mut(), &reply);
@@ -665,6 +681,11 @@ impl PaneTerm {
             kitty_option: false,
             kitty_stale: false,
             kitty_new: [false; 2],
+            graphics_option: false,
+            graphics_granted: [false; 2],
+            graphics_new: [false; 2],
+            graphics_share: 0,
+            graphics_reply,
             links: Rc::default(),
         };
         pane.retain();
@@ -887,6 +908,8 @@ impl PaneTerm {
                         // kitty stacks (Terminal.zig `fullReset`), so a
                         // `reset` gives the shell tmux's keys back.
                         self.reset_kitty_keys();
+                        // D33: the grants end and the images go.
+                        self.reset_graphics();
                     }
                     // D29: a kitty keyboard push, pop, set or query reaches
                     // Ghostty while `vtmux-kitty-keys` is on or the screen
@@ -907,6 +930,23 @@ impl PaneTerm {
                     ScanEvent::Osc133 => self.cancel_string(bytes[i]),
                     // An OSC 0 or 2 is tmux's alone (`input_exit_osc`):
                     // Ghostty never keeps a title of its own.
+                    // D33: a graphics command (`APC G`) is Ghostty's while
+                    // `vtmux-graphics` is on or the screen is granted; else
+                    // it is a title, as every APC is in tmux
+                    // (`input_exit_apc`), and Ghostty never runs it.
+                    ScanEvent::Title if self.scan.title_done.as_ref().is_some_and(|t| t.kitty) => {
+                        if self.graphics_option
+                            || self.graphics_granted[usize::from(self.alternate_on())]
+                        {
+                            self.scan.title_done = None;
+                            self.graphics_command(&bytes[i..=i]);
+                        } else {
+                            if bytes[i] == 0x1b {
+                                self.term.vt_write(b"\x18");
+                            }
+                            self.feed_piece(&bytes[i..=i]);
+                        }
+                    }
                     ScanEvent::Title if self.scan.title_done.as_ref().is_some_and(|t| !t.apc) => {
                         self.cancel_string(bytes[i]);
                     }
@@ -2288,10 +2328,27 @@ impl PaneTerm {
     /// own size in pixels follows at the next resize. A zero stands for
     /// tmux's default on its axis (16x32).
     pub fn set_cell_pixels(&mut self, (x, y): (u32, u32)) {
+        let before = self.cell_px;
         self.cell_px = (
             if x == 0 { DEFAULT_CELL_PX.0 } else { x },
             if y == 0 { DEFAULT_CELL_PX.1 } else { y },
         );
+        // D33: a granted screen sizes its placements by it now.
+        if self.cell_px != before && self.graphics_granted != [false; 2] {
+            self.push_cell_pixels();
+        }
+    }
+
+    /// Give Ghostty the cell size in pixels without a resize: a resize to
+    /// the size it has, which also ends Ghostty's synchronized output
+    /// mode (`Terminal.resize`), so that is set back.
+    fn push_cell_pixels(&mut self) {
+        let sync = self.term.mode(Mode::SYNC_OUTPUT).unwrap_or(false);
+        let (cols, rows) = (self.cols(), self.rows());
+        let _ = self.term.resize(cols, rows, self.cell_px.0, self.cell_px.1);
+        if sync {
+            let _ = self.term.set_mode(Mode::SYNC_OUTPUT, true);
+        }
     }
 
     /// The cell size in pixels replies use ([`Self::set_cell_pixels`]).
@@ -2328,6 +2385,98 @@ impl PaneTerm {
     /// gone) or RIS.
     pub fn end_inband_resize(&mut self) {
         self.set_inband_granted(false);
+    }
+
+    /// The server's `vtmux-graphics` (D33) the next input is read under:
+    /// whether a graphics command (`APC G`) on a screen not granted grants
+    /// it. A granted screen keeps its grant either way (D28 rule 5).
+    pub fn set_graphics(&mut self, on: bool) {
+        self.graphics_option = on;
+    }
+
+    /// D33: each screen's grant, primary then alternate.
+    #[must_use]
+    pub fn graphics_grants(&self) -> [bool; 2] {
+        self.graphics_granted
+    }
+
+    /// D33: the screens granted since the last call, primary then
+    /// alternate, whose owner the server notes.
+    pub fn take_graphics_grants(&mut self) -> [bool; 2] {
+        std::mem::take(&mut self.graphics_new)
+    }
+
+    /// D33: a screen's grant ends or, from a snapshot, is given back. Its
+    /// images stay: a program that sent them and left keeps its picture.
+    pub fn set_graphics_grant(&mut self, alternate: bool, granted: bool) {
+        self.graphics_granted[usize::from(alternate)] = granted;
+        if granted {
+            self.enable_graphics(usize::from(alternate));
+        }
+    }
+
+    /// D33: RIS or a respawn: both grants end and every image goes.
+    pub fn reset_graphics(&mut self) {
+        self.graphics_granted = [false; 2];
+        self.graphics_new = [false; 2];
+        for screen in 0..2 {
+            if self.graphics_storage(screen == 1) != (0, 0) {
+                let _ = self.term.vtmux_set_kitty_limit(screen, 0);
+            }
+        }
+    }
+
+    /// D33: screen `alternate`'s image storage: the bytes its images hold
+    /// and its limit (0: no images can load).
+    #[must_use]
+    pub fn graphics_storage(&self, alternate: bool) -> (u64, u64) {
+        self.term
+            .vtmux_kitty_storage(u8::from(alternate))
+            .unwrap_or((0, 0))
+    }
+
+    /// D33: set screen `alternate`'s storage limit; lowering it evicts as
+    /// Ghostty does (unused images first, then the oldest).
+    pub fn set_graphics_limit(&mut self, alternate: bool, limit: u64) {
+        let _ = self.term.vtmux_set_kitty_limit(u8::from(alternate), limit);
+    }
+
+    /// D33: the storage limit a screen granted from now on starts with.
+    pub fn set_graphics_share(&mut self, limit: u64) {
+        self.graphics_share = limit;
+    }
+
+    /// A graphics command on the active screen ends with `end`: the
+    /// screen is granted if it was not, and Ghostty runs the command and
+    /// answers it, honouring its `q`.
+    fn graphics_command(&mut self, end: &[u8]) {
+        let screen = usize::from(self.alternate_on());
+        if !self.graphics_granted[screen] {
+            self.graphics_granted[screen] = true;
+            self.graphics_new[screen] = true;
+            self.enable_graphics(screen);
+        }
+        self.graphics_reply.set(true);
+        self.feed_piece(end);
+        self.graphics_reply.set(false);
+    }
+
+    /// A granted screen's storage: a limit if it has none, the PNG
+    /// decoder, and the media Ghostty allows (`allWithTempDir`,
+    /// termio/Termio.zig:295: file, temporary file, shared memory).
+    fn enable_graphics(&mut self, screen: usize) {
+        crate::graphics::install_png_decoder();
+        self.push_cell_pixels();
+        let alternate = screen == 1;
+        if self.graphics_storage(alternate).1 == 0 {
+            let share = self.graphics_share;
+            self.set_graphics_limit(alternate, share);
+        }
+        let tmp = std::env::temp_dir();
+        let t = &mut self.term;
+        let _ = t.set_kitty_image_from_file_allowed(true);
+        let _ = t.set_kitty_image_from_shared_mem_allowed(true);
+        let _ = t.set_kitty_image_temp_dir(tmp.to_str());
     }
 
     pub(crate) fn set_inband_granted(&mut self, granted: bool) {
@@ -3788,6 +3937,8 @@ struct TitleString {
 #[derive(Debug)]
 struct TitleDone {
     apc: bool,
+    /// An APC that is a kitty graphics command (`APC G`, D33).
+    kitty: bool,
     text: Option<Vec<u8>>,
 }
 
@@ -3884,6 +4035,7 @@ impl AltModeScanner {
         let Some(t) = self.title.take() else {
             return;
         };
+        let kitty = t.apc && t.buf.first() == Some(&b'G');
         let text = if t.apc {
             Some(t.buf)
         } else {
@@ -3895,6 +4047,7 @@ impl AltModeScanner {
         };
         self.title_done = Some(TitleDone {
             apc: t.apc,
+            kitty,
             text: text.filter(|_| !t.discard),
         });
     }
@@ -4851,6 +5004,10 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// Protocol APC. DSR ?996 is [`Reply::Theme`], from the colour-scheme
 /// effect.
 fn tmux_reply(term: &Terminal<'_, '_>, modes: SeenModes, data: &[u8]) -> Option<Vec<u8>> {
+    // D33: Ghostty's answer to a granted screen's graphics command.
+    if modes.graphics && data.starts_with(b"\x1b_G") {
+        return Some(data.to_vec());
+    }
     if let Some(body) = data.strip_prefix(b"\x1b[") {
         if let Some(params) = body.strip_suffix(b"$y") {
             return decrqm_reply(term, modes, params);
@@ -4888,6 +5045,8 @@ struct SeenModes {
     cursor: CursorState,
     mouse: MouseModes,
     inband: InbandResize,
+    /// D33: a granted screen's graphics command is ending.
+    graphics: bool,
 }
 
 /// DECRQM reply from tmux's table. `params` is the Ghostty reply between
@@ -4897,6 +5056,7 @@ fn decrqm_reply(term: &Terminal<'_, '_>, modes: SeenModes, params: &[u8]) -> Opt
         cursor,
         mouse,
         inband,
+        ..
     } = modes;
     let (private, rest) = match params.strip_prefix(b"?") {
         Some(rest) => (true, rest),

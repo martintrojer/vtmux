@@ -304,6 +304,32 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
         })?;
         Ok((cols, rows))
     }
+
+    /// Screen `screen`'s (0 primary, 1 alternate) kitty image storage:
+    /// the bytes its images hold and its limit (patch 0038). A screen not
+    /// started yet holds nothing and has the primary's limit.
+    pub fn vtmux_kitty_storage(&self, screen: u8) -> Result<(u64, u64)> {
+        let (mut bytes, mut limit) = (0u64, 0u64);
+        from_result(unsafe {
+            ffi::ghostty_vtmux_kitty_storage(
+                self.inner.as_raw(),
+                screen,
+                &raw mut bytes,
+                &raw mut limit,
+            )
+        })?;
+        Ok((bytes, limit))
+    }
+
+    /// Set screen `screen`'s kitty image storage limit alone (patch
+    /// 0038); lowering it evicts as Ghostty does (unused images first,
+    /// then the oldest), 0 deletes every image. A screen not started yet
+    /// is left: it takes the primary's limit when it starts.
+    pub fn vtmux_set_kitty_limit(&mut self, screen: u8, limit: u64) -> Result<()> {
+        from_result(unsafe {
+            ffi::ghostty_vtmux_set_kitty_limit(self.inner.as_raw(), screen, limit)
+        })
+    }
 }
 
 fn reserve<T>(v: &mut Vec<T>, len: usize) {

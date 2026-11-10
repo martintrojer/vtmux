@@ -331,6 +331,15 @@ pub struct Pane {
     /// on each screen (primary, alternate), whose end ends the grant
     /// ([`crate::pane_kitty`]).
     pub kitty_owner: [Option<i32>; 2],
+    /// D33: a screen of it was granted kitty graphics, or still holds an
+    /// image ([`crate::pane_graphics`]).
+    pub graphics: bool,
+    /// D33: the process group each screen's graphics grant belongs to.
+    pub graphics_owner: [Option<i32>; 2],
+    /// D33: each screen's image bytes when last counted, and when they
+    /// last grew (the eviction order across panes).
+    pub graphics_bytes: [u64; 2],
+    pub graphics_loaded: [Option<std::time::Instant>; 2],
 }
 
 /// A pane's shell prompts and commands as OSC 133 reported them
@@ -465,6 +474,9 @@ pub struct Model {
     /// The time and the panes' foreground processes, read once per render
     /// turn ([`crate::live`]).
     pub live: crate::live::LiveReads,
+    /// D33: some pane has [`Pane::graphics`]; nothing of graphics is
+    /// looked at until then.
+    pub graphics_used: bool,
 }
 
 /// An attached client as [`Model::client_targets`] lists it.
@@ -512,6 +524,7 @@ impl Default for Model {
             dropped: Vec::new(),
             client_targets: Vec::new(),
             live: crate::live::LiveReads::default(),
+            graphics_used: false,
         }
     }
 }

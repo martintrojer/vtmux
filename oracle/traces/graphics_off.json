@@ -1,0 +1,120 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "graphics_off",
+  "inputs": {
+    "name": "graphics_off",
+    "size": [
+      60,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "",
+          ";",
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "stty raw -echo opost onlcr; printf 'a\\033_Ga=T,f=24,s=1,v=1,i=1;/wAA\\033\\\\b\\033_Ga=q,i=2,s=1,v=1,f=24;AAAA\\033\\\\c\\033_Ga=p,i=1,p=3\\033\\\\d\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; exec cat"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "Ga=p,i=1,p=3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcd^[[0n|",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          10,
+          0
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcd^[[0n|\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

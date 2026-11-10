@@ -7,6 +7,7 @@
 
 pub mod capture;
 mod dcs;
+pub mod graphics;
 pub mod kitty_keys;
 pub mod link;
 pub mod notify;

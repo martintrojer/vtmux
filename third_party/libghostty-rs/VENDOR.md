@@ -1341,6 +1341,27 @@ Recorded per commit in git history; the list is kept current:
   -Dapp-runtime=none` with `-Dtest-filter=vtmux` 233/233 and
   `-Dtest-filter=PageList` 701/701 (Debug). Oracle
   `reflow_line_flags_bulk`. Not an upstream candidate (tmux's model).
+- `patches/0040-kitty-graphics-vtmux.patch` (`c/vtmux_state.zig`
+  `kitty_storage`, `set_kitty_limit`; `c/kitty_graphics.zig`
+  `vtmux_placement_active_pos`; exported as `ghostty_vtmux_*`, declared in
+  `vtmux_state.h`, bindings by hand in `bindings.rs`, wrapped in
+  `libghostty-vt/src/vtmux.rs` and `kitty/graphics.rs`): what D33 (kitty
+  graphics) needs. Each screen's image storage, the bytes it holds and its
+  limit, and setting one screen's limit alone (`ghostty_terminal_set`
+  sets every screen's), so vtmux holds the images of all its panes to one
+  cap and evicts through Ghostty's own `ImageStorage.setLimit`; and a
+  direct placement's position relative to the active area's top, however
+  far into history, where `viewport_pos` gives only placements on screen
+  (vtmux draws history itself, in copy mode). Rust tests:
+  `vtmux-vt` `graphics::tests` (storage, limits, placements) and
+  `vtmux-server` `pane_graphics::tests` (the shared limit evicting across
+  panes). Not an upstream candidate as is (vtmux's model), though a
+  per-screen limit may be.
+- `libghostty-vt/src/kitty/graphics.rs`:
+  `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
+  `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a
+  `GhosttyString` (the directory); replaced by `set_kitty_image_temp_dir(
+  Option<&str>)`, which passes the string or NULL. Upstream candidate.
 
 ## Bumping ghostty
 

@@ -10,7 +10,7 @@ Long-standing tmux annoyances vtmux fixes without breaking compliance: each fix 
 | Upgrading kills every session | tmux FAQ, "protocol version mismatch" (client.c `client_dispatch_wait`) | Live upgrade: the server moves onto the new binary, panes and clients stay | `tmux vtmux-upgrade -b <binary>` |
 | A crash or reboot loses every session; tmux-resurrect brings back the layout and a guess at the commands | the same FAQ; tmux-resurrect | Restore with screens and scrollback, panes dead until `respawn-pane` | `set -s vtmux-persist full` |
 
-Terminal protocols tmux 3.8 drops (kitty keys, notifications, in-band resize) are listed with the options below.
+Terminal protocols tmux 3.8 drops (kitty keys, notifications, in-band resize, kitty graphics) are listed with the options below.
 
 ## vtmux options
 
@@ -32,8 +32,10 @@ set -s vtmux-persist full
 | `vtmux-kitty-keys` | server | `off`, `on` | A program that asks for the kitty keyboard protocol gets kitty-encoded keys, typed or sent with `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as before. |
 | `vtmux-notifications` | server | `off`, `on` | A pane's desktop notifications (OSC 9, OSC 777) reach attached Ghostty clients, from any window and from `display-popup -E` programs, at Ghostty's own rate limits. No `allow-passthrough` needed. |
 | `vtmux-inband-resize` | server | `off`, `on` | A program that sets mode 2048 gets each new size of its pane in-band, at once and after every resize, with no `SIGWINCH` race. |
+| `vtmux-graphics` | server | `off`, `on` | Kitty graphics without `allow-passthrough`: `kitten icat`, yazi, chafa and image.nvim images drawn by vtmux for Ghostty clients, clipped at pane edges, under popups, zoomed, in copy mode and across window switches. Images are dropped by a live upgrade or restore. |
+| `vtmux-graphics-limit` | server | MB, default 256 | Image memory of every pane together; over it, the images loaded least recently go first. |
 
-A grant (kitty keys, in-band resize) outlives the option being turned off, and a live upgrade keeps it. Kitty keys end with the program that asked; in-band resize at `?2048l`, a reset or a respawn.
+A grant (kitty keys, in-band resize, graphics) outlives the option being turned off, and a live upgrade keeps it. Kitty keys and graphics end with the program that asked; in-band resize at `?2048l`, a reset or a respawn.
 
 `vtmux-upgrade [-b binary]` is a command, not an option: bind it like any other. Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary.
 

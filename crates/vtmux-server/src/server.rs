@@ -3205,6 +3205,8 @@ impl Server {
     /// done ([`Self::pending_exits`]) and the format jobs; the turn's pane
     /// redraws and bursts are used up.
     fn render_and_exit(&mut self) {
+        // D33: a lowered `vtmux-graphics-limit` evicts at once.
+        self.model.balance_graphics(None, Instant::now());
         self.render_clients();
         self.release_hidden_screens(Instant::now());
         let exits = std::mem::take(&mut self.pending_exits);
@@ -5508,6 +5510,10 @@ impl Server {
             last_output_time: None,
             shell_commands: crate::model::ShellCommands::default(),
             kitty_owner: [None; 2],
+            graphics: false,
+            graphics_owner: [None; 2],
+            graphics_bytes: [0; 2],
+            graphics_loaded: [None; 2],
         })
     }
 
@@ -5700,6 +5706,8 @@ impl Server {
         // both screens.
         pane.term.reset_kitty_keys();
         pane.kitty_owner = [None; 2];
+        // D33: and its graphics grants, with its images.
+        pane.reset_graphics();
         // grid_clear_lines: an erase, never into history (scroll-on-clear
         // is for the program's clears).
         pane.term.set_scroll_on_clear(false);
@@ -5874,6 +5882,7 @@ impl Server {
         } = self.pane_input_options.get(&self.model, p);
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let cell = self.model.cell_pixels_of(p);
+        self.model.prepare_graphics(p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
         };
@@ -5919,6 +5928,7 @@ impl Server {
         // non-empty read (input.c:1053): W/t sorts and lsw -O
         // activity order by it.
         let window = pane.window;
+        self.model.graphics_fed(p, now);
         // input.c:1054-1056: pane-activity once a loop turn
         // (server_client_loop clears PANE_ACTIVITY), before what the
         // output itself fires.

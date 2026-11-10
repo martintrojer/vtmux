@@ -287,11 +287,21 @@ impl Terminal<'_, '_> {
         self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_FILE, &allowed)?;
         Ok(self)
     }
-    /// Enable or disable Kitty image loading via the temporary file medium.
+    /// Enable Kitty image loading via the temporary file medium, for files
+    /// under `dir` only, or disable it (`None`).
     ///
     /// Has no effect when Kitty graphics are disabled at build time.
-    pub fn set_kitty_image_from_temp_file_allowed(&mut self, allowed: bool) -> Result<&mut Self> {
-        self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE, &allowed)?;
+    /// (vtmux: the option takes a `GhosttyString`, the directory; upstream
+    /// passed a `bool` here, which the library read as a string.)
+    pub fn set_kitty_image_temp_dir(&mut self, dir: Option<&str>) -> Result<&mut Self> {
+        let s = dir.map(|d| ffi::String {
+            ptr: d.as_ptr(),
+            len: d.len(),
+        });
+        self.set_optional(
+            ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            s.as_ref(),
+        )?;
         Ok(self)
     }
     /// Enable or disable Kitty image loading via the shared memory medium.
@@ -593,6 +603,22 @@ impl<'t, 'alloc> PlacementIteration<'t, 'alloc> {
             ffi::ghostty_kitty_graphics_placement_viewport_pos(
                 self.0.inner.as_raw(),
                 image.inner.as_raw(),
+                terminal.inner.as_raw(),
+                &raw mut pos.col,
+                &raw mut pos.row,
+            )
+        };
+        from_optional_result_uninit(result, MaybeUninit::new(pos))
+    }
+
+    /// vtmux (patch 0038): the placement's top-left cell, its row relative
+    /// to the active area's top row (negative: in history), visible or
+    /// not. `None` for a virtual placement or a chain rooted at one.
+    pub fn vtmux_active_pos(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<ViewportPos>> {
+        let mut pos = ViewportPos::default();
+        let result = unsafe {
+            ffi::ghostty_vtmux_kitty_placement_active_pos(
+                self.0.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut pos.col,
                 &raw mut pos.row,

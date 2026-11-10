@@ -16,7 +16,35 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 7] = [
+pub(super) static EXTENSIONS: [OptionDef; 9] = [
+    // D33: kitty graphics, drawn as unicode placeholders (a D28 protocol
+    // extension).
+    OptionDef {
+        name: "vtmux-graphics",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Draw panes' kitty graphics for Ghostty clients."),
+        unit: None,
+    },
+    // D33: the image memory of the whole server, in MB (10^6 bytes).
+    OptionDef {
+        name: "vtmux-graphics-limit",
+        scope: Scope::Server,
+        kind: Kind::Number {
+            min: 0,
+            max: 1_000_000,
+        },
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Number(256),
+        text: Some("Image memory of every pane together."),
+        unit: Some("MB"),
+    },
     // D31: in-band resize, mode 2048 (a D28 protocol extension).
     OptionDef {
         name: "vtmux-inband-resize",

@@ -1,0 +1,186 @@
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+--- a/include/ghostty/vt/vtmux_state.h
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -25,6 +25,7 @@
+ #include <ghostty/vt/types.h>
+ #include <ghostty/vt/style.h>
+ #include <ghostty/vt/terminal.h>
++#include <ghostty/vt/kitty_graphics.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -378,6 +379,28 @@ GHOSTTY_API GhosttyResult ghostty_vtmux_importer_primary_size(
+     uint16_t cols,
+     uint16_t rows);
+ 
++/** Screen `screen`'s (0 primary, 1 alternate) kitty image storage: the
++ * bytes its images hold and its limit (vtmux patch 0038). */
++GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_storage(GhosttyTerminal terminal,
++                                                      uint8_t screen,
++                                                      uint64_t* bytes,
++                                                      uint64_t* limit);
++
++/** Set screen `screen`'s kitty image storage limit alone; lowering it
++ * evicts as Ghostty does, 0 deletes every image (vtmux patch 0038). */
++GHOSTTY_API GhosttyResult ghostty_vtmux_set_kitty_limit(GhosttyTerminal terminal,
++                                                        uint8_t screen,
++                                                        uint64_t limit);
++
++/** The current placement's top-left cell, its row relative to the active
++ * area's top (negative: in history), visible or not (vtmux patch 0038).
++ * GHOSTTY_NO_VALUE for a virtual placement. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_placement_active_pos(
++    GhosttyKittyGraphicsPlacementIterator iterator,
++    GhosttyTerminal terminal,
++    int32_t* col,
++    int32_t* row);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -397,6 +397,9 @@ comptime {
+         @export(&c.vtmux_set_alternate_saved, .{ .name = "ghostty_vtmux_set_alternate_saved" });
+         @export(&c.vtmux_primary_size, .{ .name = "ghostty_vtmux_primary_size" });
+         @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
++        @export(&c.vtmux_kitty_storage, .{ .name = "ghostty_vtmux_kitty_storage" });
++        @export(&c.vtmux_set_kitty_limit, .{ .name = "ghostty_vtmux_set_kitty_limit" });
++        @export(&c.vtmux_kitty_placement_active_pos, .{ .name = "ghostty_vtmux_kitty_placement_active_pos" });
+         if (features.snapshot) {
+             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+diff --git a/src/terminal/c/kitty_graphics.zig b/src/terminal/c/kitty_graphics.zig
+--- a/src/terminal/c/kitty_graphics.zig
++++ b/src/terminal/c/kitty_graphics.zig
+@@ -529,6 +529,53 @@ pub fn placement_viewport_pos(
+     return .success;
+ }
+ 
++/// vtmux patch 0038: the placement's top-left cell, its row relative to
++/// the active area's top row: negative is in history, however far up, as
++/// `placement_viewport_pos` would give it with no visibility cut (vtmux
++/// draws history rows itself, in copy mode). GHOSTTY_NO_VALUE for a
++/// virtual placement or a chain rooted at one.
++pub fn vtmux_placement_active_pos(
++    iter_: PlacementIterator,
++    terminal_: terminal_c.Terminal,
++    out_col: *i32,
++    out_row: *i32,
++) callconv(lib.calling_conv) Result {
++    if (comptime !build_options.kitty_graphics) return .no_value;
++
++    const wrapper = terminal_ orelse return .invalid_value;
++    const iter = iter_ orelse return .invalid_value;
++    const entry = iter.entry orelse return .invalid_value;
++    const t = wrapper.terminal;
++    var col_offset: i32 = 0;
++    var row_offset: i32 = 0;
++    const pin: *const PageList.Pin = switch (entry.value_ptr.location) {
++        .pin => |pin| pin,
++        .virtual => return .no_value,
++        .relative => |rel| pin: {
++            const chain = t.screens.active.kitty_images.resolveChain(rel) orelse
++                return .no_value;
++            switch (chain.root.location) {
++                .pin => |root_pin| {
++                    col_offset = chain.horizontal_offset;
++                    row_offset = chain.vertical_offset;
++                    break :pin root_pin;
++                },
++                .virtual => return .no_value,
++                .relative => unreachable, // resolveChain roots are never relative
++            }
++        },
++    };
++    if (pin.garbage) return .no_value;
++    const pages = &t.screens.active.pages;
++    const pin_screen = pages.pointFromPin(.screen, pin.*) orelse return .no_value;
++    const top = pages.pointFromPin(.screen, pages.getTopLeft(.active)) orelse
++        return .no_value;
++    out_row.* = (@as(i32, @intCast(pin_screen.screen.y)) -
++        @as(i32, @intCast(top.screen.y))) +| row_offset;
++    out_col.* = @as(i32, @intCast(pin_screen.screen.x)) +| col_offset;
++    return .success;
++}
++
+ pub fn placement_source_rect(
+     iter_: PlacementIterator,
+     image_: ImageHandle,
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -258,6 +258,9 @@ pub const vtmux_alternate_saved = vtmux_state.alternate_saved;
+ pub const vtmux_set_alternate_saved = vtmux_state.set_alternate_saved;
+ pub const vtmux_primary_size = vtmux_state.primary_size;
+ pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
++pub const vtmux_kitty_storage = vtmux_state.kitty_storage;
++pub const vtmux_set_kitty_limit = vtmux_state.set_kitty_limit;
++pub const vtmux_kitty_placement_active_pos = kitty_graphics.vtmux_placement_active_pos;
+ pub const snapshot_decoder_set = snapshot.decoder_set;
+ pub const snapshot_decoder_get = snapshot.decoder_get;
+ pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -14,6 +14,7 @@ const lib = @import("../lib.zig");
+ const Result = @import("result.zig").Result;
+ const terminal_c = @import("terminal.zig");
+ const style_c = @import("style.zig");
++const build_options = @import("terminal_options");
+ const ZigTerminal = @import("../Terminal.zig");
+ const Screen = @import("../Screen.zig");
+ const ScreenKey = @import("../ScreenSet.zig").Key;
+@@ -1585,6 +1586,51 @@ pub fn importer_primary_size(
+     return .success;
+ }
+ 
++/// vtmux patch 0038: screen `key`'s (0 primary, 1 alternate) kitty image
++/// storage, the bytes its images hold and its limit. A screen not yet
++/// initialized holds nothing and has the primary's limit, which it takes
++/// when it starts (`Terminal.switchScreen`).
++pub fn kitty_storage(
++    terminal_: terminal_c.Terminal,
++    key: u8,
++    bytes: ?*u64,
++    limit: ?*u64,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const b = bytes orelse return .invalid_value;
++    const l = limit orelse return .invalid_value;
++    if (key > 1) return .invalid_value;
++    b.* = 0;
++    l.* = 0;
++    if (comptime !build_options.kitty_graphics) return .success;
++    const screens = &wrapper.terminal.screens;
++    const screen = screens.get(if (key == 0) .primary else .alternate) orelse
++        screens.get(.primary) orelse return .no_value;
++    l.* = screen.kitty_images.total_limit;
++    if (screens.get(if (key == 0) .primary else .alternate) != null)
++        b.* = screen.kitty_images.total_bytes;
++    return .success;
++}
++
++/// vtmux patch 0038: set the kitty image storage limit of screen `key`
++/// alone (`ghostty_terminal_set` sets every screen's). Lowering it evicts
++/// as Ghostty does (`ImageStorage.setLimit`: unused images first, then the
++/// oldest); 0 deletes every image. A screen not yet initialized is left:
++/// it takes the primary's limit when it starts.
++pub fn set_kitty_limit(
++    terminal_: terminal_c.Terminal,
++    key: u8,
++    limit: u64,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    if (key > 1) return .invalid_value;
++    if (comptime !build_options.kitty_graphics) return .success;
++    const screen = wrapper.terminal.screens.get(if (key == 0) .primary else .alternate) orelse
++        return .no_value;
++    screen.kitty_images.setLimit(screen.io, screen.alloc, screen, @intCast(limit));
++    return .success;
++}
++
+ test "vtmux state: rows round trip into a fresh terminal" {
+     const testing = std.testing;
+     var a: terminal_c.Terminal = null;

@@ -102,7 +102,7 @@ impl Pane {
     }
 }
 
-fn group_alive(group: i32) -> bool {
+pub(crate) fn group_alive(group: i32) -> bool {
     #[cfg(test)]
     if let Some(alive) = fake::alive(group) {
         return alive;

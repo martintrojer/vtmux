@@ -17,6 +17,10 @@ include = ["/src/**/*.rs", "/LICENSE"]
 # vtmux's fork of libghostty-vt, published as vtmux-ghostty-vt
 # (third_party/libghostty-rs/VENDOR.md); imported as `libghostty_vt`.
 libghostty-vt = { package = "vtmux-ghostty-vt", version = "=3.8.0-beta.1", path = "../../third_party/libghostty-rs/libghostty-vt" }
+# D33: Ghostty's PNG decoder hook, and the zlib of uploads to the outer
+# terminal (`o=z`).
+png = "0.18"
+flate2 = "1"
 
 [lints]
 workspace = true
