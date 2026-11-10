@@ -317,27 +317,30 @@ pub fn compose_cached(
     rows: u16,
 ) -> bool {
     let rows = scene.rows.min(rows);
-    let key = DrawKey::of(d, theme.clone(), cols, rows);
     let same = cache.scene.as_ref().is_some_and(|s| Rc::ptr_eq(s, scene))
-        && cache.key.as_ref() == Some(&key);
+        && cache
+            .key
+            .as_ref()
+            .is_some_and(|k| k.matches(d, theme, cols, rows));
     if !same {
         cache.rows.clear();
         cache.scene = Some(Rc::clone(scene));
-        cache.key = Some(key);
+        cache.key = Some(DrawKey::of(d, theme.clone(), cols, rows));
     }
     let mut changed = !same;
     let mut ended_written = false;
+    cache.composed = 0;
     for y in 0..rows {
-        let sig = row_signature(scene, d, y);
         let i = usize::from(y);
         if let Some(row) = cache.rows.get(i)
-            && sig.is_some()
-            && row.sig == sig
             && row.above == ended_written
+            && row_unchanged(scene, d, y, row.sig.as_deref())
         {
             ended_written = row.ended;
             continue;
         }
+        let sig = row_signature(scene, d, y);
+        cache.composed += 1;
         if cache.rows.len() <= i {
             cache.rows.push(CachedRow {
                 sig: None,
@@ -387,6 +390,8 @@ pub struct ComposeCache {
     /// How many [`compose_cached`] calls composed a row again: a client
     /// that last drew at another generation has rows to draw.
     generation: u64,
+    /// How many rows the last [`compose_cached`] call composed.
+    composed: u16,
 }
 
 impl ComposeCache {
@@ -394,6 +399,13 @@ impl ComposeCache {
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// How many rows the last [`compose_cached`] call composed again.
+    #[cfg(test)]
+    #[must_use]
+    pub fn composed(&self) -> u16 {
+        self.composed
     }
 
     /// Draw what [`compose_cached`] composed into the top rows of `screen`.
@@ -444,7 +456,7 @@ impl ComposeCache {
 #[derive(Debug)]
 struct CachedRow {
     /// [`row_signature`] when composed.
-    sig: Option<Vec<(PaneId, u32, u64, u64)>>,
+    sig: Option<Vec<RowInput>>,
     /// The row above ended written (see [`compose`]'s `ended_written`).
     above: bool,
     ended: bool,
@@ -487,6 +499,35 @@ struct DrawKey {
 }
 
 impl DrawKey {
+    /// `self == DrawKey::of(d, theme, cols, rows)`, without building one.
+    fn matches(&self, d: &Draw, theme: &Theme, cols: u16, rows: u16) -> bool {
+        self.size == (cols, rows)
+            && self.active == d.active
+            && self.marked == d.marked
+            && self.border == d.border
+            && self.lines == d.lines
+            && self.outside == d.outside
+            && self.inside == d.inside
+            && self.clear == d.clear
+            && self.isolates == d.isolates
+            && self.theme == *theme
+            && self.panes.len() == d.panes.len()
+            && self.panes.iter().zip(&d.panes).all(|(k, (&id, p))| {
+                k.id == id
+                    && k.index == p.index
+                    && k.defaults == p.defaults
+                    && k.lines == p.lines
+                    && k.border == p.border
+                    && k.status == p.status
+                    && k.selected == p.selected
+                    && k.scrollbar == p.scrollbar
+                    && k.palette == p.palette
+                    && k.no_palette == p.no_palette
+                    && k.dim == p.dim
+                    && k.blend == p.blend
+            })
+    }
+
     fn of(d: &Draw, theme: Theme, cols: u16, rows: u16) -> Self {
         Self {
             panes: d
@@ -521,21 +562,45 @@ impl DrawKey {
     }
 }
 
-/// The content rows row `y` of the scene shows, as (pane, content row,
-/// its stamp, the stamp of the row above it, which decides `wrapped`);
-/// `None` if a pane's stamps are unknown.
-fn row_signature(scene: &Scene, d: &Draw, y: u16) -> Option<Vec<(PaneId, u32, u64, u64)>> {
-    let mut sig: Vec<(PaneId, u32, u64, u64)> = Vec::new();
-    for &(pane, py) in scene.row_panes(y) {
-        let stamps = &d.panes.get(&pane)?.stamps;
-        let at = usize::try_from(py).ok()?;
-        let stamp = *stamps.get(at)?;
-        let above = at
-            .checked_sub(1)
-            .map_or(Some(0), |a| stamps.get(a).copied())?;
-        sig.push((pane, py, stamp, above));
-    }
-    Some(sig)
+/// One content row a scene row shows, as [`row_signature`] has it: the
+/// pane, the content row, its stamp, and whether the content row above it
+/// wrapped (which decides `wrapped`, see [`compose_row`]).
+type RowInput = (PaneId, u32, u64, bool);
+
+/// What composing scene row `y` reads of pane `pane`'s content row `py`
+/// ([`RowInput`]); `None` if the pane's stamps are unknown.
+fn row_input(d: &Draw, pane: PaneId, py: u32) -> Option<RowInput> {
+    let p = d.panes.get(&pane)?;
+    let at = usize::try_from(py).ok()?;
+    let stamp = *p.stamps.get(at)?;
+    let above = at
+        .checked_sub(1)
+        .is_some_and(|a| p.content.wrapped.get(a).copied().unwrap_or(false));
+    Some((pane, py, stamp, above))
+}
+
+/// The content rows row `y` of the scene shows ([`RowInput`]); `None` if
+/// a pane's stamps are unknown.
+fn row_signature(scene: &Scene, d: &Draw, y: u16) -> Option<Vec<RowInput>> {
+    scene
+        .row_panes(y)
+        .iter()
+        .map(|&(pane, py)| row_input(d, pane, py))
+        .collect()
+}
+
+/// Whether scene row `y` still shows the content rows `sig` was taken of
+/// ([`row_signature`]), without building a new signature.
+fn row_unchanged(scene: &Scene, d: &Draw, y: u16, sig: Option<&[RowInput]>) -> bool {
+    let Some(sig) = sig else {
+        return false;
+    };
+    let shown = scene.row_panes(y);
+    shown.len() == sig.len()
+        && shown
+            .iter()
+            .zip(sig)
+            .all(|(&(pane, py), was)| row_input(d, pane, py).as_ref() == Some(was))
 }
 
 /// Row `y` of [`compose`]; `above_ended_written` is what the row above
@@ -1140,19 +1205,11 @@ mod tests {
         assert!(row[13..].iter().all(|c| c.text.is_empty()));
     }
 
-    /// The row cache composes what a full compose does, after every change
-    /// to two side-by-side panes (echo, scroll, soft wrap, erase), and
-    /// reports no change when nothing changed.
-    #[test]
-    #[allow(clippy::too_many_lines, reason = "one scenario, step by step")]
-    fn cached_compose_matches_a_full_one() {
-        use super::super::scene::{Indicators, SceneCache, ScenePane, WindowView};
+    /// Two side-by-side panes, 9 and 10 columns wide, 4 rows.
+    fn two_pane_view() -> super::super::scene::WindowView {
+        use super::super::scene::{Indicators, ScenePane, WindowView};
         use vtmux_core::layout::{Geometry, PaneStatus};
-        let mut terms = [
-            vtmux_vt::PaneTerm::new(9, 4, 10),
-            vtmux_vt::PaneTerm::new(10, 4, 10),
-        ];
-        let view = WindowView {
+        WindowView {
             sx: 20,
             sy: 4,
             ox: 0,
@@ -1173,11 +1230,67 @@ mod tests {
                 .collect(),
             indicators: Indicators::Colour,
             two_pane: None,
+        }
+    }
+
+    /// The drawing of [`two_pane_view`] showing `terms`.
+    fn two_pane_draw(terms: &[vtmux_vt::PaneTerm; 2]) -> Draw {
+        let space = styled::Cell {
+            text: " ".into(),
+            width: 1,
+            style: CellStyle::default(),
         };
+        Draw {
+            marked: None,
+            panes: (0..2u32)
+                .map(|p| {
+                    let view = terms[p as usize].screen();
+                    (
+                        PaneId(p),
+                        PaneDraw {
+                            content: view.shared(),
+                            stamps: view.row_stamps().to_vec(),
+                            index: Some(p),
+                            defaults: CellStyle::default(),
+                            lines: Lines::Single,
+                            border: CellStyle::default(),
+                            status: Vec::new(),
+                            status_ranges: Vec::new(),
+                            selected: Vec::new(),
+                            scrollbar: None,
+                            palette: None,
+                            no_palette: Vec::new(),
+                            dim: None,
+                            blend: None,
+                        },
+                    )
+                })
+                .collect(),
+            active: Some(PaneId(1)),
+            border: CellStyle::default(),
+            lines: Lines::Single,
+            outside: space.clone(),
+            inside: space,
+            clear: Clear::Bce,
+            isolates: false,
+        }
+    }
+
+    /// The row cache composes what a full compose does, after every change
+    /// to two side-by-side panes (echo, scroll, soft wrap, erase), and
+    /// reports no change when nothing changed.
+    #[test]
+    fn cached_compose_matches_a_full_one() {
+        use super::super::scene::SceneCache;
+        let mut terms = [
+            vtmux_vt::PaneTerm::new(9, 4, 10),
+            vtmux_vt::PaneTerm::new(10, 4, 10),
+        ];
+        let view = two_pane_view();
         let scenes = SceneCache::default();
         let mut cache = ComposeCache::default();
         let theme = Theme::default();
-        let steps: [(usize, &[u8]); 8] = [
+        let steps: [(usize, &[u8]); 10] = [
             (0, b"a"),
             (1, b"one\r\ntwo"),
             (0, b"\x1b[31mbcdefghijkl"),
@@ -1185,49 +1298,15 @@ mod tests {
             (0, b"\x1b[2J\x1b[H"),
             (1, b"\x1b[44m\x1b[K"),
             (0, b"0123456789abcdefgh"),
+            // The wrapped row is erased: the row it wrapped onto is no
+            // longer a continuation.
+            (0, b"\x1b[H\x1b[2K"),
+            (0, b"\x1b[Hstill wrapping on"),
             (1, b"\x1bc"),
         ];
-        let space = styled::Cell {
-            text: " ".into(),
-            width: 1,
-            style: CellStyle::default(),
-        };
         for (i, (pane, bytes)) in steps.iter().enumerate() {
             terms[*pane].feed(bytes);
-            let draw = Draw {
-                marked: None,
-                panes: (0..2u32)
-                    .map(|p| {
-                        let view = terms[p as usize].screen();
-                        (
-                            PaneId(p),
-                            PaneDraw {
-                                content: view.shared(),
-                                stamps: view.row_stamps().to_vec(),
-                                index: Some(p),
-                                defaults: CellStyle::default(),
-                                lines: Lines::Single,
-                                border: CellStyle::default(),
-                                status: Vec::new(),
-                                status_ranges: Vec::new(),
-                                selected: Vec::new(),
-                                scrollbar: None,
-                                palette: None,
-                                no_palette: Vec::new(),
-                                dim: None,
-                                blend: None,
-                            },
-                        )
-                    })
-                    .collect(),
-                active: Some(PaneId(1)),
-                border: CellStyle::default(),
-                lines: Lines::Single,
-                outside: space.clone(),
-                inside: space.clone(),
-                clear: Clear::Bce,
-                isolates: false,
-            };
+            let draw = two_pane_draw(&terms);
             let scene = Scene::cached(&scenes, view.clone(), 20, 4);
             let blank = |cols, rows| vtmux_vt::Snapshot {
                 cols,
@@ -1251,6 +1330,34 @@ mod tests {
                 "step {i}: nothing new"
             );
         }
+    }
+
+    /// A key's echo rewrites one row of a pane: the cache composes that
+    /// row alone, not the row below it too (whose `wrapped` reads only
+    /// whether the row above wrapped, and it did not before or after).
+    #[test]
+    fn an_echo_composes_one_row() {
+        use super::super::scene::SceneCache;
+        let mut terms = [
+            vtmux_vt::PaneTerm::new(9, 4, 10),
+            vtmux_vt::PaneTerm::new(10, 4, 10),
+        ];
+        terms[1].feed(b"one\r\ntwo\r\nthree\x1b[2;1H");
+        let (scenes, theme) = (SceneCache::default(), Theme::default());
+        let scene = Scene::cached(&scenes, two_pane_view(), 20, 4);
+        let mut cache = ComposeCache::default();
+        compose_cached(&mut cache, &scene, &two_pane_draw(&terms), &theme, 20, 4);
+        assert_eq!(cache.composed(), 4);
+        terms[1].feed(b"\r\x1b[Kx");
+        assert!(compose_cached(
+            &mut cache,
+            &scene,
+            &two_pane_draw(&terms),
+            &theme,
+            20,
+            4
+        ));
+        assert_eq!(cache.composed(), 1, "only the echoed row");
     }
 
     #[test]
