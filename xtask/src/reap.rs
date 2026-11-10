@@ -25,7 +25,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with};
+use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, connect, socket};
 
 fn signal(sig: &str, pids: &[u32]) {
     let _ = Command::new("kill")
@@ -367,6 +367,15 @@ pub fn test_sockets(dirs: &[PathBuf]) -> Vec<PathBuf> {
     found
 }
 
+/// A non-blocking `connect()` to the socket at `p`. The flags are set after
+/// `socket()`, not passed to it: macOS has no `SOCK_NONBLOCK`/`SOCK_CLOEXEC`.
+fn probe_connect(p: &Path) -> rustix::io::Result<()> {
+    let s = socket(AddressFamily::UNIX, SocketType::STREAM, None)?;
+    rustix::io::fcntl_setfd(&s, rustix::io::FdFlags::CLOEXEC)?;
+    rustix::io::ioctl_fionbio(&s, true)?;
+    connect(&s, &SocketAddrUnix::new(p)?)
+}
+
 /// Remove the sockets in `dirs` that are test-labelled ([`is_test_label`]),
 /// satisfy `also`, and are dead: a `connect()` is refused, which is what a
 /// socket file with no server behind it gives. Live ones (a connect succeeds
@@ -379,16 +388,7 @@ pub fn sweep_sockets(dirs: &[PathBuf], also: impl Fn(&str) -> bool, dry: bool) -
             p.file_name().and_then(|n| n.to_str()).is_some_and(&also)
                 && p.symlink_metadata()
                     .is_ok_and(|m| m.file_type().is_socket())
-                && matches!(
-                    socket_with(
-                        AddressFamily::UNIX,
-                        SocketType::STREAM,
-                        SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
-                        None,
-                    )
-                    .and_then(|s| connect(&s, &SocketAddrUnix::new(p)?)),
-                    Err(rustix::io::Errno::CONNREFUSED)
-                )
+                && matches!(probe_connect(p), Err(rustix::io::Errno::CONNREFUSED))
         })
         .filter(|p| dry || std::fs::remove_file(p).is_ok())
         .collect()
