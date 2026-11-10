@@ -30,18 +30,39 @@ impl ListKeys {
     }
 }
 
-/// `utf8_cstrwidth` (utf8.c:964): columns a string takes.
+/// `utf8_cstrwidth` (utf8.c:964): columns a string takes. A byte that is
+/// not UTF-8 has none, but the four bytes of a key past U+10FFFF
+/// (`F4 90..BF ..`) are one character to glibc's `mbtowc`, which
+/// `utf8_width` gives one column (`wcwidth` -1).
 #[must_use]
 pub fn display_width(s: &str) -> usize {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii() {
-                usize::from(c > '\u{1f}' && c != '\u{7f}')
-            } else {
-                usize::from(char_width(u32::from(c)))
-            }
-        })
-        .sum()
+    use crate::rawstr::Unit;
+    let units: Vec<Unit> = crate::rawstr::units(s).collect();
+    let mut width = 0;
+    let mut i = 0;
+    while i < units.len() {
+        let beyond = matches!(
+            units.get(i..i + 4),
+            Some([
+                Unit::Byte(0xf4),
+                Unit::Byte(0x90..=0xbf),
+                Unit::Byte(0x80..=0xbf),
+                Unit::Byte(0x80..=0xbf)
+            ])
+        );
+        if beyond {
+            width += 1;
+            i += 4;
+            continue;
+        }
+        width += match units[i] {
+            Unit::Byte(_) => 0,
+            Unit::Char(c) if c.is_ascii() => usize::from(c > '\u{1f}' && c != '\u{7f}'),
+            Unit::Char(c) => usize::from(char_width(u32::from(c))),
+        };
+        i += 1;
+    }
+    width
 }
 
 /// `utf8_padcstr`: pad on the right to `width` columns.

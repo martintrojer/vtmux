@@ -5468,6 +5468,28 @@ fn hooks_exit_signal() {
     });
 }
 
+/// A key past U+10FFFF (`0x110000` to `0x13FFFF`, which glibc's `wctomb`
+/// writes as four bytes) is listed as those bytes, and pads the key column
+/// as one column (`utf8_width` gives `wcwidth`'s -1 one). Darwin's `wctomb`
+/// fails, so the key is unknown there (D-019).
+#[test]
+fn keys_past_u10ffff_are_listed_as_their_bytes() {
+    if !GLIBC_REFERENCE {
+        return;
+    }
+    compare("keys_past_u10ffff_are_listed_as_their_bytes", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run(&["bind", "-T", "rvt", "0x110000", "display", "x"]),
+            w.run(&["bind", "-T", "rvt", "a", "display", "y"]),
+            w.run(&["list-keys", "-T", "rvt"]),
+            w.run(&["unbind", "-T", "rvt", "a"]),
+            w.run(&["bind", "-T", "rvt", "0x13FFFF", "display", "z"]),
+            w.run(&["list-keys", "-T", "rvt", "0x13FFFF"]),
+        ]
+    });
+}
+
 /// Words that are not UTF-8 are bytes end to end, as tmux's C strings are
 /// (reviewer-44, `low_non_utf_8_bytes_in_a_command_string`): argv, `run -C`,
 /// `source-file`, a control client's stdin, `if-shell`, and the `\377` /

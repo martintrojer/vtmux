@@ -218,9 +218,16 @@ fn utf8_text(uc: u64) -> String {
         let bytes = [byte(uc, 0), byte(uc, 1), byte(uc, 2)];
         String::from_utf8_lossy(&bytes[..size]).into_owned()
     } else {
-        // The four-byte index; a code point above U+10FFFF has no UTF-8
-        // string form in Rust (tmux writes its four bytes).
-        char::from_u32((uc & 0xff_ffff) as u32).map_or_else(|| "\u{fffd}".to_owned(), String::from)
+        // The four-byte index. A code point above U+10FFFF is no `char`:
+        // its four bytes as tmux writes them, in the raw string form.
+        let cp = (uc & 0xff_ffff) as u32;
+        char::from_u32(cp).map_or_else(
+            || {
+                let tail = |shift: u32| 0x80 | (cp >> shift & 0x3f) as u8;
+                crate::rawstr::from_bytes(&[0xf0 | (cp >> 18) as u8, tail(12), tail(6), tail(0)])
+            },
+            String::from,
+        )
     }
 }
 
@@ -271,7 +278,11 @@ impl Key {
         if key >> 32 != ty::UNICODE {
             return None;
         }
-        utf8_text(key).chars().next()
+        utf8_text(key).chars().next().map(|c| match c {
+            // A code point past U+10FFFF (its bytes, [`utf8_text`]).
+            '\0' => '\u{fffd}',
+            c => c,
+        })
     }
 
     /// `key_string_lookup_string`. `None` is `KEYC_UNKNOWN`; `"None"` is
