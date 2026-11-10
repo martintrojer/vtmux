@@ -15,11 +15,11 @@ ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
 
 Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
-With cargo, once the crates are on crates.io (not yet). The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:
+With cargo. The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:
 
 ```sh
 mise use -g zig@0.17
-cargo install --locked vtmux
+cargo install --locked vtmux@3.8.0-beta.1   # a beta: cargo needs the version named
 ```
 
 That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
