@@ -1,0 +1,521 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "window_cell_pixels",
+  "inputs": {
+    "name": "window_cell_pixels",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001b[8;24;80t\u001b[4;480;800t"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_cell_width}x#{client_cell_height}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "60",
+          "-y",
+          "20"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a",
+          "window-size",
+          "largest"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "b"
+        }
+      },
+      {
+        "keys_to": {
+          "id": "b",
+          "keys": "\u001b[8;24;80t\u001b[4;720;1200t"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_cell_width}x#{client_cell_height}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "on"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{window_cell_width}x#{window_cell_height}]"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[4;768;1280t\n^[[5;768;1280t\n^[[6;32;16t\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[16x32]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "10x20\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[16x32]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[10x20]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[4;480;800t\n^[[5;480;800t\n^[[6;20;10t\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[16x32]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[4;640;960t\n^[[5;640;960t\n^[[6;32;16t\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[10x20]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "10x20\n15x30\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[10x20]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[15x30]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[4;690;1200t\n^[[5;690;1200t\n^[[6;30;15t\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

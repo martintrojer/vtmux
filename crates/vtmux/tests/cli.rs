@@ -8258,7 +8258,7 @@ fn pane_output_generation_and_last_output_time() {
 /// entries in its order, then the tree's (the command, copy mode's) by
 /// name (format.c `format_each`). The values that change from run to run
 /// are masked; the variables vtmux has yet to model are left out of both
-/// (compat/DIVERGENCES.md D-014, D-046).
+/// (compat/DIVERGENCES.md D-046).
 #[test]
 fn display_message_all() {
     const VOLATILE: &[&str] = &[
@@ -8272,13 +8272,7 @@ fn display_message_all() {
         "buffer_created",
         "top_line_time",
     ];
-    const UNMODELLED: &[&str] = &[
-        "window_cell_width",
-        "window_cell_height",
-        "history_added",
-        "history_collected",
-        "history_generation",
-    ];
+    const UNMODELLED: &[&str] = &["history_added", "history_collected", "history_generation"];
     let all = |w: &World, args: &[&str]| {
         let mut r = w.run(args);
         r.stdout = r

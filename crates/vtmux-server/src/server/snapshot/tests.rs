@@ -166,6 +166,8 @@ const VARIABLES: &[&str] = &[
     "window_panes",
     "window_width",
     "window_height",
+    "window_cell_width",
+    "window_cell_height",
     "window_manual_width",
     "window_manual_height",
     "window_zoomed_flag",
@@ -1259,6 +1261,32 @@ fn a_clients_pan_is_kept() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D-014: a window's cell size in pixels, and the one waiting with a
+/// pending size, come back as they were; the panes' replies use it.
+#[test]
+fn a_windows_cell_pixels_are_kept() {
+    let dir = temp_dir("cellpx");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let w = vtmux_core::ids::WindowId(0);
+    let window = a.model.windows.get_mut(&w).unwrap();
+    window.cell_pixels = (10, 20);
+    window.pending_size = Some((70, 20));
+    window.pending_pixels = (8, 16);
+    let b = rebuild(&a, &dir, "b");
+    let window = &b.model.windows[&w];
+    assert_eq!(
+        (window.cell_pixels, window.pending_pixels),
+        ((10, 20), (8, 16))
+    );
+    assert_eq!(b.model.panes[&PaneId(0)].term.cell_pixels(), (10, 20));
+    // A snapshot from a build before has none: tmux's default.
+    let c = rebuild_with(&a, &dir, |s| s.windows[0].cell_pixels = (0, 0));
+    assert_eq!(c.model.windows[&w].cell_pixels, (16, 32));
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A client's view comes back as it was, not worked out again: tmux works
 /// it out only on some events, so it may lag what it follows.
 #[test]
@@ -1347,6 +1375,15 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
+    // A window sized by a client whose terminal gave its cell size in
+    // pixels (D-014).
+    a.clients.get_mut(&client).unwrap().cell_pixels = (10, 20);
+    ok(&mut a, &dir, &["set", "-g", "status", "off"]);
+    a.check_window_resizes();
+    assert_eq!(
+        a.model.windows[&vtmux_core::ids::WindowId(0)].cell_pixels,
+        (10, 20)
+    );
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()

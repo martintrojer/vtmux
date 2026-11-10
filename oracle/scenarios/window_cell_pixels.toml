@@ -1,0 +1,48 @@
+# D-014, the window side: a window's cell size in pixels (#{window_cell_*},
+# XTWINOPS CSI 14/15/16 t in its panes, input.c input_csi_dispatch_winops)
+# is tmux's 16x32 until a resize takes its clients' (resize.c
+# clients_calculate_size: the first wider and taller than any before). A
+# client's cell size alone resizes nothing; a manual size takes none. Each
+# probe respawns the pane with a program that asks for the three reports,
+# so no `tmux wait-for` is left in flight for an upgrade to wait on; it
+# reads with a timeout, then waits on `cat` without one.
+name = "window_cell_pixels"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { attach = { session = "a" } },
+  { keys = "\u001b[8;24;80t\u001b[4;480;800t" },
+  { settle = {} },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { run = ["set", "-g", "status", "off"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { run = ["respawn-pane", "-k", "-t", "a", "sh", "-c", "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { run = ["resize-window", "-t", "a", "-x", "60", "-y", "20"] },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { run = ["respawn-pane", "-k", "-t", "a", "sh", "-c", "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { run = ["set", "-w", "-t", "a", "window-size", "largest"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { attach = { session = "a", id = "b" } },
+  { keys_to = { id = "b", keys = "\u001b[8;24;80t\u001b[4;720;1200t" } },
+  { settle = {} },
+  { run = ["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"] },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { run = ["set", "-g", "status", "on"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{window_cell_width}x#{window_cell_height}]"] },
+  { run = ["respawn-pane", "-k", "-t", "a", "sh", "-c", "stty raw -echo min 0 time 50; q() { printf \"$1\"; dd bs=64 count=1 2>/dev/null | LC_ALL=C cat -v; printf '\\r\\n'; }; q '\\033[14t'; q '\\033[15t'; q '\\033[16t'; stty min 1 time 0; tmux wait-for -S done; exec cat"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

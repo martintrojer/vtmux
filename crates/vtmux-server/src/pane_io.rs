@@ -136,9 +136,10 @@ impl PaneIo {
     }
 
     /// Tell the pane program its new size (`TIOCSWINSZ`; the kernel sends
-    /// the foreground process group SIGWINCH).
-    pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
-        crate::sys::pty::resize(&self.master, cols, rows)
+    /// the foreground process group SIGWINCH), and the size in pixels
+    /// (`ws_xpixel`, `ws_ypixel`).
+    pub fn resize(&self, cols: u16, rows: u16, pixels: (u16, u16)) -> io::Result<()> {
+        crate::sys::pty::resize(&self.master, cols, rows, pixels)
     }
 
     /// The size the pty has now (`TIOCGWINSZ`): columns and rows.

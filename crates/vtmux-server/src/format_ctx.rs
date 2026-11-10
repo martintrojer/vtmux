@@ -497,6 +497,9 @@ impl<'a> Ctx<'a> {
             "window_panes" => w.panes.panes.len().to_string(),
             "window_width" => w.sx().to_string(),
             "window_height" => w.sy().to_string(),
+            // format_cb_window_cell_width/_height (format.c:3157-3172).
+            "window_cell_width" => w.cell_pixels.0.to_string(),
+            "window_cell_height" => w.cell_pixels.1.to_string(),
             // format.c:3213-3226, 3415-3428: empty unless window-size manual.
             "window_manual_width" | "window_manual_height" => {
                 let manual = self

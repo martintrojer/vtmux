@@ -673,6 +673,7 @@ mod tests {
                     extra_env: Vec::new(),
                     update_env: false,
                     default_size: None,
+                    cell_pixels: (0, 0),
                     group: None,
                 })
                 .unwrap();

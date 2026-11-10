@@ -28,7 +28,6 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-010](#d-010) | Copy mode redraws its whole screen, so no stale selection is left on screen | Deferred | deferred |
 | [D-012](#d-012) | A new window or pane is named after its command, never `tmux` by chance | tmux bug | open |
 | [D-013](#d-013) | Byte sequences that glibc decodes but that are not UTF-8 count as separate bytes | Deferred | deferred |
-| [D-014](#d-014) | Window pixel sizes are empty and panes get no pixel size | Deferred | deferred |
 | [D-015](#d-015) | The cell after a pane prompt's input is always styled (tmux: depends on width) | tmux bug | open |
 | [D-016](#d-016) | With `status off` and `status-position top`, the prompt's cursor is on the prompt | tmux bug | open |
 | [D-017](#d-017) | `show-messages -T` lists features, not every terminfo capability | Deferred | deferred |
@@ -80,6 +79,7 @@ Closed (vtmux now matches tmux):
 | ID | Was | Status |
 |---|---|---|
 | [D-011](#d-011) | U+0085 and TAB cells | closed |
+| [D-014](#d-014) | Window pixel sizes and pane PTY pixels | closed |
 | [D-018](#d-018) | `clear-history -H` kept links | closed |
 | [D-021](#d-021) | Typed M-BSpace under a keypad or BTab `backspace` | closed |
 | [D-025](#d-025) | RIS erased history | closed |
@@ -397,20 +397,14 @@ Closed (vtmux now matches tmux):
 - **Evidence:** `set -g @o "$(printf '\370\210\200\200\200')"; display -p '#{s/./x/:@o}'`: tmux `x`, vtmux `\370\210\200\200\200`. `/tmp/bytes_args/p7.sh` (bytes_args worker) lists every differing row.
 
 <a id="d-014"></a>
-### D-014: window pixel sizes don't follow the clients' cell sizes
+### D-014: closed (window pixel sizes follow the clients' cell sizes)
 
-- **Category:** Deferred. It comes with image passthrough work: it spans the window resize path, pane PTY sizes, the vt crate's XTWINOPS hook and the snapshot's window records.
-- **Test:**
-  - None for the window side.
-  - The client side matches tmux, pinned by oracle `client_cell_pixels` and attach.rs `cell_pixel_size_from_the_terminal_or_its_reply`:
-    - A terminal that gives no pixel size (`ws_xpixel` or `ws_ypixel` under one per cell) is sent `ESC[18t ESC[14t` by `tty_resize` (tty.c:144-150), on every resize and popup `-b` (popup.c:551).
-    - `TTY_WINSIZEQUERY` holds the 500 ms partial-key delay until its `ESC[4;h;wt` reply (tty-keys.c:1002-1008, `tty_keys_winsz`), indefinitely on a terminal that never answers.
-    - `#{client_cell_width}` and `#{client_cell_height}` come from the terminal's size or that reply.
-- **tmux:**
-  - A window's cell size in pixels (`w->xpixel`, `w->ypixel`; `#{window_cell_width}`, `#{window_cell_height}`) is the largest of the clients that size it. It is taken only when the window is resized (`clients_calculate_size`, resize.c:212-215; `default_window_size`, resize.c:300-301), and is 16x32 (`DEFAULT_XPIXEL`, `DEFAULT_YPIXEL`, window.c:575-578) when no client gives one.
-  - A pane's terminal gets it times its size as `ws_xpixel`/`ws_ypixel` (spawn.c:451-452, `window_pane_send_resize`), and XTWINOPS `CSI 14/15/16 t` in a pane answers with it (input.c:2163-2180).
-- **vtmux:** `#{window_cell_width}` and `#{window_cell_height}` are empty, panes get `ws_xpixel = ws_ypixel = 0`, and XTWINOPS replies always use 16x32.
-- **Evidence:** `new -d -s a cat -; display -p -t a '[#{window_cell_width}x#{window_cell_height}]'`: tmux `[16x32]`, vtmux `[x]`.
+- **Was:** `#{window_cell_width}` and `#{window_cell_height}` were empty, panes got `ws_xpixel = ws_ypixel = 0`, and XTWINOPS replies always used 16x32.
+- **Now:**
+  - A window's cell size is that of the clients that size it, taken only when it is resized: the first client counted whose cell is wider and taller than any before (`clients_calculate_size`, resize.c:212-215), the creating client's for a new window (`default_window_size`, resize.c:300-301), the old window's for `break-pane` (cmd-break-pane.c:159), and 16x32 (`DEFAULT_XPIXEL`, `DEFAULT_YPIXEL`, window.c:575-578) under a manual size or with no client giving one.
+  - A pane's PTY gets it times its size (spawn.c:451-452, `window_pane_send_resize`), and XTWINOPS `CSI 14/15/16 t` and mode 2048 (D-067) answer with it (input.c:2163-2180). A live upgrade carries it.
+  - The client side, unchanged: a terminal that gives no pixel size is sent `ESC[18t ESC[14t` by `tty_resize` (tty.c:144-150), and `TTY_WINSIZEQUERY` holds the partial-key delay until its `ESC[4;h;wt` reply (tty-keys.c:1002-1008).
+- **Test:** oracle `window_cell_pixels` and `client_cell_pixels`; attach.rs `window_cell_pixels_size_the_pane_ptys` (PTY pixels against the reference) and `cell_pixel_size_from_the_terminal_or_its_reply`; cli `display_message_all` compares both formats; vtmux-vt `size_reports_use_the_cell_size_given`; vtmux-server `a_windows_cell_pixels_are_kept`, `the_pty_carries_its_size_in_pixels`.
 
 <a id="d-015"></a>
 ### D-015: the cell after a pane prompt's input keeps message-style at some widths
@@ -910,7 +904,7 @@ Closed (vtmux now matches tmux):
 - **tmux:**
   - `#{history_added}`, `#{history_collected}` and `#{history_generation}` count the lines scrolled into history, the lines the limit collected (a tenth of `history-limit` at a time, grid.c `grid_collect_history`), and the clears and reflows (`scroll_added`, `scroll_collected`, `scroll_generation`, grid.c:455-521, 1609).
   - `display-message -v` writes each step of the expansion before the result (`format_log`, `FORMAT_VERBOSE`).
-- **vtmux:** these variables are empty (so `display-message -a` does not list them), and `-v` prints only the result. `#{window_cell_width}` and `#{window_cell_height}` are D-014.
+- **vtmux:** these variables are empty (so `display-message -a` does not list them), and `-v` prints only the result.
 - **Evidence:** `new -d -s a cat -; display -p '#{history_added}|#{history_collected}'`: tmux `0|0`, vtmux `|`. `display -pv '#{session_name}'`: tmux five `# ...` lines then `a`, vtmux `a`.
 
 <a id="d-047"></a>
@@ -1169,7 +1163,7 @@ Closed (vtmux now matches tmux):
   - On: `crates/vtmux/tests/attach.rs` `inband_resize_reports_every_size_change` (a report at the set and one per path: layout, zoom, attach, client resize, swap, break, join, `resize-window`, respawn), `inband_resize_grant_follows_the_program`, `inband_resize_carries_across_an_upgrade`, `inband_resize_grant_refuses_a_downgrade_until_released`; vtmux-vt `inband_resize_grant`, `inband_resize_off_is_tmux`; vtmux-server `a_mode_2048_grant_and_a_queued_report_survive_a_rebuild`.
 - **tmux:** no mode 2048. DECRQM `?2048` answers 0 (`input_csi_dispatch`, input.c:1651-1722), `?2048h` is ignored (`input_csi_dispatch_sm_private`, input.c:2022), and a program learns a new size only from `SIGWINCH`.
 - **vtmux:** with `set -s vtmux-inband-resize on`:
-  - A program that sets `?2048h` is granted. It gets `CSI 48 ; rows ; cols ; height ; width t` at once and after every size change of its pane, written right after the pty's `TIOCSWINSZ` (pixels from tmux's 16x32 cell, D-014).
+  - A program that sets `?2048h` is granted. It gets `CSI 48 ; rows ; cols ; height ; width t` at once and after every size change of its pane, written right after the pty's `TIOCSWINSZ` (pixels from the window's cell size, D-014).
   - DECRQM answers 1 granted, 2 offered.
   - The grant outlives the option, and ends at `?2048l`, RIS or a respawn.
   - Off (the default), and for a program that set the mode while it was off, everything is tmux's.

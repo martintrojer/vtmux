@@ -179,10 +179,10 @@ fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
     }
 }
 
-/// Pixel size of one cell in XTWINOPS replies: tmux's `DEFAULT_XPIXEL` and
-/// `DEFAULT_YPIXEL` (tmux.h:122-123), used when no client reports a size.
-const CELL_WIDTH_PX: u32 = 16;
-const CELL_HEIGHT_PX: u32 = 32;
+/// Pixel size of one cell until [`PaneTerm::set_cell_pixels`]: tmux's
+/// `DEFAULT_XPIXEL` and `DEFAULT_YPIXEL` (tmux.h:122-123), a window's when
+/// no client gives one.
+const DEFAULT_CELL_PX: (u32, u32) = (16, 32);
 
 /// In-band resize, mode 2048 (spec D31, an extension under D28): whether
 /// the server offers it (`vtmux-inband-resize`, read at every feed) and
@@ -211,15 +211,16 @@ impl InbandResize {
     }
 }
 
-/// A mode 2048 report for a pane of `cols` x `rows`: Ghostty's
-/// `size_report.encode(.mode_2048)` (size_report.zig:49-58), with the cell
-/// size of tmux's XTWINOPS replies (D-014), as [`PaneTerm::size_report`].
-fn inband_report(cols: u16, rows: u16) -> Vec<u8> {
+/// A mode 2048 report for a pane of `cols` x `rows` cells of `cell` pixels:
+/// Ghostty's `size_report.encode(.mode_2048)` (size_report.zig:49-58),
+/// with the cell size of tmux's XTWINOPS replies, as
+/// [`PaneTerm::size_report`].
+fn inband_report(cols: u16, rows: u16, (xp, yp): (u32, u32)) -> Vec<u8> {
     let (x, y) = (u32::from(cols), u32::from(rows));
     format!(
         "\x1b[48;{y};{x};{};{}t",
-        y * CELL_HEIGHT_PX,
-        x * CELL_WIDTH_PX
+        y.wrapping_mul(yp),
+        x.wrapping_mul(xp)
     )
     .into_bytes()
 }
@@ -370,6 +371,9 @@ pub struct PaneTerm {
     mouse: Rc<StdCell<MouseModes>>,
     /// Mode 2048 ([`InbandResize`]), shared with the reply hook for DECRQM.
     inband: Rc<StdCell<InbandResize>>,
+    /// A cell's width and height in pixels (`w->xpixel`, `w->ypixel`):
+    /// XTWINOPS and mode 2048 report with it, and Ghostty is sized by it.
+    cell_px: (u32, u32),
     /// The newest `hsize` history rows, copied when the alternate screen was
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
@@ -602,6 +606,7 @@ impl PaneTerm {
             cursor,
             mouse,
             inband,
+            cell_px: DEFAULT_CELL_PX,
             scan: AltModeScanner {
                 cursor: cursor_scan,
                 mouse: mouse_scan,
@@ -1873,12 +1878,12 @@ impl PaneTerm {
             // The height first, as screen_resize_y does before the reflow.
             if rows.max(1) != self.rows() {
                 self.term
-                    .resize(self.cols(), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                    .resize(self.cols(), rows.max(1), self.cell_px.0, self.cell_px.1)
                     .expect("libghostty resize");
             }
             let blank = self.trailing_blank_rows();
             self.term
-                .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .resize(cols.max(1), rows.max(1), self.cell_px.0, self.cell_px.1)
                 .expect("libghostty resize");
             self.take_hscrolled(carry);
             if blank < rows.max(1) {
@@ -1886,7 +1891,7 @@ impl PaneTerm {
             }
         } else {
             self.term
-                .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .resize(cols.max(1), rows.max(1), self.cell_px.0, self.cell_px.1)
                 .expect("libghostty resize");
             self.take_hscrolled(carry);
         }
@@ -2098,7 +2103,7 @@ impl PaneTerm {
         let cy = self.cursor().1;
         let resize = |t: &mut Self, r: u16| {
             t.term
-                .resize(t.cols(), r, CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .resize(t.cols(), r, t.cell_px.0, t.cell_px.1)
                 .expect("libghostty resize");
         };
         // The cursor changes rows only by VPA, which keeps its column and
@@ -2224,6 +2229,24 @@ impl PaneTerm {
         std::mem::take(&mut self.events.borrow_mut().list)
     }
 
+    /// A cell's size in pixels, its window's (`w->xpixel`, `w->ypixel`),
+    /// from the next reply or resize on: XTWINOPS `CSI 14/15/16 t`
+    /// (input.c:2163-2180) and mode 2048 report with it, and Ghostty's
+    /// own size in pixels follows at the next resize. A zero stands for
+    /// tmux's default on its axis (16x32).
+    pub fn set_cell_pixels(&mut self, (x, y): (u32, u32)) {
+        self.cell_px = (
+            if x == 0 { DEFAULT_CELL_PX.0 } else { x },
+            if y == 0 { DEFAULT_CELL_PX.1 } else { y },
+        );
+    }
+
+    /// The cell size in pixels replies use ([`Self::set_cell_pixels`]).
+    #[must_use]
+    pub fn cell_pixels(&self) -> (u32, u32) {
+        self.cell_px
+    }
+
     /// `vtmux-inband-resize` (D31): whether a `?2048h` from now on grants
     /// mode 2048, and what DECRQM says of it. A grant already held stays
     /// either way (D28 rule 5).
@@ -2245,7 +2268,7 @@ impl PaneTerm {
     #[must_use]
     pub fn inband_resize_report(&self, cols: u16, rows: u16) -> Option<Vec<u8>> {
         self.inband_resize_granted()
-            .then(|| inband_report(cols, rows))
+            .then(|| inband_report(cols, rows, self.cell_px))
     }
 
     /// The program's grant of mode 2048 ends: a respawn (the program is
@@ -2273,7 +2296,7 @@ impl PaneTerm {
         }
         self.inband.set(m);
         if set && m.granted {
-            let report = inband_report(self.cols(), self.rows());
+            let report = inband_report(self.cols(), self.rows(), self.cell_px);
             push_bytes(&mut self.scan.answers, &report);
         }
     }
@@ -2282,14 +2305,15 @@ impl PaneTerm {
     /// the title on a stack of at most ten (`screen_push_title`); a pop
     /// restores the newest, if any (`screen_pop_title`), and reports the
     /// title either way.
-    /// tmux's reply to XTWINOPS report `n` (input.c:2160-2186), with
-    /// tmux's default cell size in pixels (D-014).
+    /// tmux's reply to XTWINOPS report `n` (input.c:2160-2186), with the
+    /// cell size in pixels [`Self::set_cell_pixels`] gave.
     fn size_report(&self, n: u64) -> Vec<u8> {
         let (x, y) = (u32::from(self.cols()), u32::from(self.rows()));
-        let (xp, yp) = (CELL_WIDTH_PX, CELL_HEIGHT_PX);
+        let (xp, yp) = self.cell_px;
+        let (width, height) = (x.wrapping_mul(xp), y.wrapping_mul(yp));
         match n {
-            14 => format!("\x1b[4;{};{}t", y * yp, x * xp),
-            15 => format!("\x1b[5;{};{}t", y * yp, x * xp),
+            14 => format!("\x1b[4;{height};{width}t"),
+            15 => format!("\x1b[5;{height};{width}t"),
             16 => format!("\x1b[6;{yp};{xp}t"),
             18 => format!("\x1b[8;{y};{x}t"),
             19 => format!("\x1b[9;{y};{x}t"),
@@ -5464,6 +5488,31 @@ mod tests {
         // A report's position read as another's argument is not one.
         assert_eq!(replies_to(20, 5, b"\x1b[9;18t\x1b[3;1;18t"), b"");
         assert_eq!(replies_to(20, 5, b"\x1b[3;1t\x1b[18t"), b"\x1b[8;5;20t");
+    }
+
+    /// D-014: the reports use the window's cell size once the server gives
+    /// it (input.c:2163-2180 read `w->xpixel`, `w->ypixel`), mode 2048's
+    /// too; a zero is tmux's default on that axis.
+    #[test]
+    fn size_reports_use_the_cell_size_given() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_cell_pixels((10, 21));
+        t.feed(b"\x1b[14t\x1b[15t\x1b[16t");
+        assert_eq!(
+            t.take_replies(),
+            b"\x1b[4;105;200t\x1b[5;105;200t\x1b[6;21;10t"
+        );
+        t.set_inband_resize(true);
+        t.feed(b"\x1b[?2048h");
+        assert_eq!(t.take_replies(), b"\x1b[48;5;20;105;200t");
+        assert_eq!(
+            t.inband_resize_report(30, 6).unwrap(),
+            b"\x1b[48;6;30;126;300t"
+        );
+        t.set_cell_pixels((0, 7));
+        assert_eq!(t.cell_pixels(), (16, 7));
+        t.feed(b"\x1b[16t");
+        assert_eq!(t.take_replies(), b"\x1b[6;7;16t");
     }
 
     #[test]

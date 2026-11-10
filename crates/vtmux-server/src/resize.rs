@@ -7,6 +7,11 @@
 //! window it is. A new size waits (`WINDOW_RESIZE`) until the window is
 //! current in an attached session ([`Server::check_window_resizes`]);
 //! a manual one applies at once.
+//!
+//! A size comes with a cell size in pixels: that of the first client
+//! counted whose cell is wider and taller than any before (resize.c:
+//! 212-215), 0 for none (and so tmux's 16x32) under `manual`. A window
+//! takes it only when it is resized.
 
 use std::time::Instant;
 
@@ -71,6 +76,10 @@ fn clamp_size((sx, sy): (u32, u32)) -> (u32, u32) {
         sy.clamp(WINDOW_MINIMUM, WINDOW_MAXIMUM),
     )
 }
+
+/// A size the clients give a window: its cells, then a cell's size in
+/// pixels (`xpixel`, `ypixel`; 0 when no client gives one).
+pub type ClientsSize = ((u32, u32), (u32, u32));
 
 /// `default-size` as `%ux%u`.
 fn parse_size(text: &str) -> Option<(u32, u32)> {
@@ -167,27 +176,27 @@ impl Server {
     /// `clients_calculate_size` (resize.c:131-276): `given` always counts.
     /// Under `latest` with more than one client on the window only the
     /// window's latest client counts; under `manual` the window's own
-    /// manual size stands for theirs. Either way a size a control client
-    /// gave the window caps it.
+    /// manual size stands for theirs (and no client's pixels). Either way
+    /// a size a control client gave the window caps it.
     fn clients_calculate_size(
         &self,
         policy: SizePolicy,
         given: Option<ClientId>,
         among: &Among,
         w: Option<WindowId>,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<ClientsSize> {
         let window = w.and_then(|w| self.model.windows.get(&w));
-        let size = if policy == SizePolicy::Manual {
+        let sized = if policy == SizePolicy::Manual {
             // resize.c:164-166: `goto skip`, past the clients but not
             // past the per-window sizes below.
-            Some(window?.manual_size)
+            Some((window?.manual_size, (0, 0)))
         } else {
             self.clients_size(policy, given, among, w, window)
         };
         // resize.c:225-252: no size is larger than a per-window size a
         // control client gave this window.
-        let (Some(w), Some(mut size)) = (w, size) else {
-            return size;
+        let (Some(w), Some((mut size, pixels))) = (w, sized) else {
+            return sized;
         };
         for (&id, c) in &self.clients {
             if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
@@ -206,11 +215,11 @@ impl Server {
                 size.1 = size.1.min(cy);
             }
         }
-        Some(size)
+        Some((size, pixels))
     }
 
     /// resize.c:169-218: the size the clients measure, `None` when none
-    /// counts.
+    /// counts, with the cell size in pixels they give.
     fn clients_size(
         &self,
         policy: SizePolicy,
@@ -218,7 +227,7 @@ impl Server {
         among: &Among,
         w: Option<WindowId>,
         window: Option<&crate::model::Window>,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<ClientsSize> {
         let only = match (policy, w, window) {
             (SizePolicy::Latest, Some(w), Some(window)) if self.clients_with_window(w) > 1 => {
                 Some(window.latest)
@@ -226,6 +235,7 @@ impl Server {
             _ => None,
         };
         let mut size: Option<(u32, u32)> = None;
+        let mut pixels = (0, 0);
         for (&id, c) in &self.clients {
             if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
                 continue;
@@ -241,15 +251,20 @@ impl Server {
                 (Some((sx, sy)), SizePolicy::Largest) => (sx.max(cx), sy.max(cy)),
                 (Some((sx, sy)), _) => (sx.min(cx), sy.min(cy)),
             });
+            // resize.c:212-215: wider and taller, both.
+            if c.cell_pixels.0 > pixels.0 && c.cell_pixels.1 > pixels.1 {
+                pixels = c.cell_pixels;
+            }
         }
-        size
+        Some((size?, pixels))
     }
 
     /// `default_window_size` (resize.c:291-343): the size for a new window
     /// of session `s` (or for resize-window -a/-A on `w`). `policy` `None`
     /// is the global `window-size`. Under `latest` a given terminal client
-    /// with a session decides; otherwise the clients are measured, and
-    /// failing that the session's `default-size`.
+    /// with a session decides, its pixels whatever they are; otherwise the
+    /// clients are measured, and failing that the session's
+    /// `default-size`, with no pixels.
     #[must_use]
     pub fn default_window_size(
         &self,
@@ -257,7 +272,7 @@ impl Server {
         s: SessionId,
         w: Option<WindowId>,
         policy: Option<SizePolicy>,
-    ) -> (u32, u32) {
+    ) -> ClientsSize {
         let policy = policy.unwrap_or_else(|| {
             SizePolicy::from_choice(
                 self.model
@@ -270,7 +285,7 @@ impl Server {
             && !self.ignore_client_size(c)
             && let Some(size) = self.client_size(c, w)
         {
-            return clamp_size(size);
+            return (clamp_size(size), c.cell_pixels);
         }
         // A control client creating the window does not size it.
         let given = given.filter(|(_, c)| c.control.is_none()).map(|(id, _)| id);
@@ -278,17 +293,42 @@ impl Server {
             session: s,
             window: w,
         };
-        let size = self
+        let (size, pixels) = self
             .clients_calculate_size(policy, given, &among, w)
-            .unwrap_or_else(|| self.default_size(TreeId::Session(s)));
-        clamp_size(size)
+            .unwrap_or_else(|| (self.default_size(TreeId::Session(s)), (0, 0)));
+        (clamp_size(size), pixels)
+    }
+
+    /// The cell size in pixels [`Self::default_window_size`] gives the
+    /// first window of a new session, which no client is attached to yet
+    /// (cmd-new-session.c:293-294, spawn.c:192): only the creating
+    /// terminal client `given` counts (none when detached; a control
+    /// client never), as it is under `latest` once it has a session, else
+    /// when its cell has both sides (resize.c:212-215).
+    #[must_use]
+    pub fn new_session_pixels(&self, given: Option<ClientId>) -> (u32, u32) {
+        let Some(c) = given.and_then(|id| self.clients.get(&id)) else {
+            return (0, 0);
+        };
+        let policy = SizePolicy::from_choice(
+            self.model
+                .number_option(TreeId::GlobalWindow, "window-size"),
+        );
+        let both = c.cell_pixels.0 > 0 && c.cell_pixels.1 > 0;
+        let latest = policy == SizePolicy::Latest && !self.ignore_client_size(c);
+        if c.control.is_none() && policy != SizePolicy::Manual && (both || latest) {
+            c.cell_pixels
+        } else {
+            (0, 0)
+        }
     }
 
     /// `recalculate_size` (resize.c:345-424): work out window `w`'s size
     /// from its clients. Nothing happens when no client gives one or the
     /// size is the one already pending (else the window's own) unless
-    /// `now`. `now` or `manual` resize at once; otherwise the size waits
-    /// for [`Self::check_window_resizes`].
+    /// `now`: a new cell size in pixels alone changes nothing. `now` or
+    /// `manual` resize at once; otherwise the size waits for
+    /// [`Self::check_window_resizes`], with its pixels.
     pub fn recalculate_size(&mut self, w: WindowId, now: bool) {
         if !self.model.windows.contains_key(&w) {
             return;
@@ -302,7 +342,8 @@ impl Server {
         // resize.c:392-422: a size that does not change, or waits, still
         // works the window's views out again (tty_update_window_offset);
         // a resize does it in resize_window.
-        let Some(size) = self.clients_calculate_size(policy, None, &among, Some(w)) else {
+        let Some((size, pixels)) = self.clients_calculate_size(policy, None, &among, Some(w))
+        else {
             self.update_window_offset(w);
             return;
         };
@@ -312,9 +353,10 @@ impl Server {
             return;
         }
         if now || policy == SizePolicy::Manual {
-            self.model.resize_window(w, size.0, size.1);
+            self.model.resize_window(w, size.0, size.1, pixels);
         } else if let Some(window) = self.model.windows.get_mut(&w) {
             window.pending_size = Some(size);
+            window.pending_pixels = pixels;
             self.update_window_offset(w);
         }
     }
@@ -348,8 +390,11 @@ impl Server {
             .map(|(_, w, _)| w)
             .collect();
         for w in current {
-            if let Some((sx, sy)) = self.model.windows.get(&w).and_then(|x| x.pending_size) {
-                self.model.resize_window(w, sx, sy);
+            if let Some(window) = self.model.windows.get(&w)
+                && let Some((sx, sy)) = window.pending_size
+            {
+                let pixels = window.pending_pixels;
+                self.model.resize_window(w, sx, sy, pixels);
             }
         }
     }
@@ -422,8 +467,15 @@ impl Server {
     pub(crate) fn send_pane_resizes(&mut self) {
         let now = Instant::now();
         let mut reported = Vec::new();
+        let windows = &self.model.windows;
         for (&id, pane) in &mut self.model.panes {
-            if pane.send_resizes(now) {
+            if pane.resizes.is_empty() {
+                continue;
+            }
+            let cell = windows
+                .get(&pane.window)
+                .map_or_else(|| crate::model::cell_pixels((0, 0)), |w| w.cell_pixels);
+            if pane.send_resizes(now, cell) {
                 reported.push(id);
             }
         }

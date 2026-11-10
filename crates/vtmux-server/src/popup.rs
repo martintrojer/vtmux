@@ -307,6 +307,8 @@ impl Server {
             env,
             cols: jx.max(1),
             rows: jy.max(1),
+            // job_run sets no pixels (job.c:114-115).
+            pixels: (0, 0),
         }) else {
             return false;
         };
@@ -389,7 +391,7 @@ impl Server {
                 let (jx, jy) = p.inner();
                 p.term.resize(jx.max(1), jy.max(1));
                 if let Some(io) = &p.io {
-                    let _ = io.resize(jx.max(1), jy.max(1));
+                    let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
                 }
             }
         }
@@ -423,7 +425,7 @@ impl Server {
             let (jx, jy) = p.inner();
             p.term.resize(jx.max(1), jy.max(1));
             if let Some(io) = &p.io {
-                let _ = io.resize(jx.max(1), jy.max(1));
+                let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
             }
         }
     }
@@ -778,7 +780,7 @@ impl Server {
                 let (jx, jy) = p.inner();
                 p.term.resize(jx.max(1), jy.max(1));
                 if let Some(io) = &p.io {
-                    let _ = io.resize(jx.max(1), jy.max(1));
+                    let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
                 }
             }
         }

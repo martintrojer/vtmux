@@ -1721,6 +1721,71 @@ fn cell_pixel_size_from_the_terminal_or_its_reply() {
     });
 }
 
+/// D-014, the window side: a window's cell size in pixels is its
+/// clients' when it is created or resized (resize.c:212-215, spawn.c:192),
+/// 16x32 under a manual size (window.c:575-578); every pane's PTY gets it
+/// times its size (spawn.c:451-452, `window_pane_send_resize`), a pane
+/// broken out keeps it (cmd-break-pane.c:159), and a new cell size alone
+/// resizes nothing.
+#[test]
+fn window_cell_pixels_size_the_pane_ptys() {
+    let pty = |w: &World, pane: &str| {
+        let tty = cli_ok(w, &["display", "-p", "-t", pane, "#{pane_tty}"]);
+        let fd = rustix::fs::open(
+            tty.as_str(),
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        let ws = rustix::termios::tcgetwinsize(&fd).unwrap();
+        format!(
+            "{}x{} {}x{}",
+            ws.ws_col, ws.ws_row, ws.ws_xpixel, ws.ws_ypixel
+        )
+    };
+    let cell = |w: &World, t: &str| display_t(w, t, "#{window_cell_width}x#{window_cell_height}");
+    par::each(&bins(), |bin| {
+        let mut w = World::new(bin.clone());
+        let name = bin.display().to_string();
+        let settle = |a: &Attached, w: &World, want: &[(&str, &str)]| {
+            a.wait_labelled(&name, Duration::from_secs(30), |_| {
+                want.iter().all(|(p, s)| pty(w, p) == *s)
+            });
+        };
+        w.pixels = (400, 200);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert_eq!(cell(&w, "a"), "10x20", "{name}");
+        assert_eq!(pty(&w, "%0"), "40x9 400x180", "{name}");
+        cli_ok(&w, &["splitw", "-h", "-d", "-t", "a", "cat", "-"]);
+        settle(&a, &w, &[("%0", "20x9 200x180"), ("%1", "19x9 190x180")]);
+        // A manual size takes no client's pixels.
+        cli_ok(&w, &["resize-window", "-t", "a", "-x", "30"]);
+        assert_eq!(cell(&w, "a"), "16x32", "{name}");
+        settle(&a, &w, &[("%0", "15x9 240x288"), ("%1", "14x9 224x288")]);
+        cli_ok(&w, &["set", "-w", "-t", "a", "window-size", "latest"]);
+        a.wait_labelled(&name, Duration::from_secs(30), |_| cell(&w, "a") == "10x20");
+        settle(&a, &w, &[("%0", "20x9 200x180"), ("%1", "19x9 190x180")]);
+        cli_ok(&w, &["breakp", "-d", "-s", "%1"]);
+        assert_eq!(cell(&w, "a:1"), "10x20", "{name}");
+        settle(&a, &w, &[("%0", "40x9 400x180"), ("%1", "40x9 400x180")]);
+        // The same size with other pixels changes nothing.
+        a.resize_pixels(40, 10, (320, 160));
+        a.wait_labelled(&name, Duration::from_secs(30), |_| {
+            String::from_utf8_lossy(
+                &w.cli(&["lsc", "-F", "#{client_cell_width}x#{client_cell_height}"])
+                    .stdout,
+            )
+            .trim()
+                == "8x16"
+        });
+        assert_eq!(cell(&w, "a"), "10x20", "{name}");
+        a.resize_pixels(48, 10, (384, 160));
+        a.wait_labelled(&name, Duration::from_secs(30), |_| cell(&w, "a") == "8x16");
+        settle(&a, &w, &[("%0", "48x9 384x144")]);
+    });
+}
+
 fn kt(w: &World) -> String {
     String::from_utf8_lossy(
         &w.cli(&[

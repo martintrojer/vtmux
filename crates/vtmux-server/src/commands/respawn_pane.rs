@@ -77,6 +77,7 @@ pub(super) fn respawn(
             argv: command,
             cwd,
             rect,
+            cell_pixels: server.model.windows[&w].cell_pixels,
             shell,
             // cmd-respawn-pane.c:78-79.
             empty: args.flag('E'),

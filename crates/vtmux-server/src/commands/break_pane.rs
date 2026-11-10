@@ -173,6 +173,8 @@ fn move_to_new_window(
     let old = m.windows.get_mut(&w).expect("source window");
     old.layout.close_pane(wp);
     let (sx, sy) = (old.sx(), old.sy());
+    // cmd-break-pane.c:159: the old window's cell size too.
+    let cell_pixels = old.cell_pixels;
     let opts = old.layout.opts;
     m.fix_panes(w);
     // layout_close_pane always fires window-layout-changed (layout.c:1548).
@@ -209,6 +211,8 @@ fn move_to_new_window(
             last_layout: None,
             old_layout: None,
             pending_size: None,
+            pending_pixels: (0, 0),
+            cell_pixels,
             manual_size: (sx, sy),
             // cmd-break-pane.c:166.
             latest,

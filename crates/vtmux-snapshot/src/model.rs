@@ -445,6 +445,14 @@ record! {
         20 => one alerts: u32,
         21 => opt silence_in_ms: Option<u64>,
         22 => many options: Vec<OptionEntry>,
+        /// A cell's width and height in pixels (`w->xpixel`, `w->ypixel`),
+        /// which panes' PTYs and XTWINOPS replies use. Added within v1, 0
+        /// in the golden sample: a reader without it (and a stream
+        /// without it) gives tmux's default 16x32 until the next resize.
+        23 => one cell_pixels: (u32, u32),
+        /// The cell size that comes with `pending_size` (`w->new_xpixel`,
+        /// `new_ypixel`), 0 for the default. Added within v1, as above.
+        24 => one pending_pixels: (u32, u32),
     }
 }
 
@@ -1267,6 +1275,9 @@ pub(crate) mod tests {
             alerts: 3,
             silence_in_ms: Some(1500),
             options: sample_options(),
+            // Added within v1, so out of the sample the golden file pins.
+            cell_pixels: (0, 0),
+            pending_pixels: (0, 0),
         }
     }
 

@@ -831,6 +831,28 @@ fn the_current_version_encodes_to_its_golden_file() {
     );
 }
 
+/// A window's cell size in pixels and the one pending came within v1:
+/// they round trip, and a stream without them (the golden file's) has 0,
+/// which a reader takes as tmux's default.
+#[test]
+fn window_cell_pixels_round_trip_and_default_to_zero() {
+    let mut s = sample();
+    s.windows[0].cell_pixels = (10, 20);
+    s.windows[0].pending_pixels = (8, 16);
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(
+        (back.windows[0].cell_pixels, back.windows[0].pending_pixels),
+        ((10, 20), (8, 16))
+    );
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(
+        golden
+            .windows
+            .iter()
+            .all(|w| w.cell_pixels == (0, 0) && w.pending_pixels == (0, 0))
+    );
+}
+
 /// `Server::start_binary` came within v1, so the golden sample leaves it
 /// empty: it gets its own round trip, and a stream without it decodes
 /// with it empty.

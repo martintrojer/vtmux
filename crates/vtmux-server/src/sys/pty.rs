@@ -36,6 +36,10 @@ pub struct SpawnSpec {
     pub env: Vec<(String, String)>,
     pub cols: u16,
     pub rows: u16,
+    /// The size in pixels (`ws_xpixel`, `ws_ypixel`): a pane's cells times
+    /// its window's cell size (spawn.c:451-452), 0 for a popup (job.c:
+    /// 114-115).
+    pub pixels: (u16, u16),
 }
 
 /// A running pane process.
@@ -148,8 +152,8 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     let ws = libc::winsize {
         ws_row: spec.rows,
         ws_col: spec.cols,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
+        ws_xpixel: spec.pixels.0,
+        ws_ypixel: spec.pixels.1,
     };
 
     // spawn.c:454-456: block every signal across the fork so no handler
@@ -446,15 +450,21 @@ pub(super) unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
     }
 }
 
-/// `TIOCSWINSZ` on a pane's master (window.c `window_pane_send_resize`).
-pub fn resize(master: impl std::os::fd::AsFd, cols: u16, rows: u16) -> io::Result<()> {
+/// `TIOCSWINSZ` on a pane's master (window.c `window_pane_send_resize`):
+/// `cols` x `rows`, `pixels` wide and high.
+pub fn resize(
+    master: impl std::os::fd::AsFd,
+    cols: u16,
+    rows: u16,
+    (xpixel, ypixel): (u16, u16),
+) -> io::Result<()> {
     rustix::termios::tcsetwinsize(
         master,
         rustix::termios::Winsize {
             ws_row: rows,
             ws_col: cols,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
+            ws_xpixel: xpixel,
+            ws_ypixel: ypixel,
         },
     )?;
     Ok(())
@@ -635,6 +645,7 @@ mod tests {
             env: vec![("PATH".into(), "/usr/bin:/bin".into())],
             cols: 18,
             rows: 4,
+            pixels: (0, 0),
         };
         let out = output(&spec(Program::Command("echo $0; stty size; pwd".into())));
         assert_eq!(out, "sh\r\n4 18\r\n/\r\n");
@@ -646,6 +657,32 @@ mod tests {
             "b".into(),
         ])));
         assert_eq!(out, "a b\r\n");
+    }
+
+    /// The PTY starts at the size in pixels asked for, and a resize sets
+    /// it with the cells (spawn.c:451-452, `window_pane_send_resize`).
+    #[test]
+    fn the_pty_carries_its_size_in_pixels() {
+        let spawned = spawn(&SpawnSpec {
+            program: Program::Argv(vec!["sleep".into(), "100".into()]),
+            shell: PathBuf::from("/bin/sh"),
+            cwd: PathBuf::from("/"),
+            home: None,
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            cols: 18,
+            rows: 4,
+            pixels: (180, 80),
+        })
+        .expect("spawn");
+        let size = || {
+            let ws = rustix::termios::tcgetwinsize(&spawned.master).unwrap();
+            (ws.ws_col, ws.ws_row, ws.ws_xpixel, ws.ws_ypixel)
+        };
+        assert_eq!(size(), (18, 4, 180, 80));
+        resize(&spawned.master, 20, 5, (320, 160)).unwrap();
+        assert_eq!(size(), (20, 5, 320, 160));
+        let _ = rustix::process::kill_process(spawned.pid, rustix::process::Signal::KILL);
+        let _ = rustix::process::waitpid(Some(spawned.pid), rustix::process::WaitOptions::empty());
     }
 
     /// The master is close-on-exec, so nothing else the server starts
@@ -666,6 +703,7 @@ mod tests {
             env: vec![("PATH".into(), "/usr/bin:/bin".into())],
             cols: 20,
             rows: 4,
+            pixels: (0, 0),
         };
         let spawned = spawn(&spec).expect("spawn");
         let flags = rustix::io::fcntl_getfd(&spawned.master).unwrap();

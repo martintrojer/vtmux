@@ -56,10 +56,16 @@ pub fn exec(
     } else if args.flag('D') {
         sy += adjust;
     }
+    // The pixels go unused: a manual size takes none, so the window's
+    // cell is tmux's 16x32 again (resize.c:164-166, window.c:575-578).
     if args.flag('A') {
-        (sx, sy) = server.default_window_size(None, s, Some(w), Some(SizePolicy::Largest));
+        (sx, sy) = server
+            .default_window_size(None, s, Some(w), Some(SizePolicy::Largest))
+            .0;
     } else if args.flag('a') {
-        (sx, sy) = server.default_window_size(None, s, Some(w), Some(SizePolicy::Smallest));
+        (sx, sy) = server
+            .default_window_size(None, s, Some(w), Some(SizePolicy::Smallest))
+            .0;
     }
     server.model.options.set_table_value(
         TreeId::Window(w),

@@ -136,6 +136,7 @@ impl Server {
             argv: vec![format!("{editor} {}", path.display())],
             cwd: PathBuf::from("/tmp/"),
             rect,
+            cell_pixels: self.model.windows[&w].cell_pixels,
             shell: None,
             empty: false,
         });

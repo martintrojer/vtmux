@@ -1172,6 +1172,8 @@ impl Server {
                 alerts: u32::from(w.alerts.flags),
                 silence_in_ms: w.alerts.silence_deadline().map(|d| until(now, d)),
                 options: tree((4, w.id.0)),
+                cell_pixels: w.cell_pixels,
+                pending_pixels: w.pending_pixels,
             })
             .collect();
 
@@ -1753,6 +1755,9 @@ impl Server {
                     .and_then(|n| NamedLayout::ALL.into_iter().find(|l| l.name() == n)),
                 old_layout: x.old_layout.clone(),
                 pending_size: x.pending_size,
+                pending_pixels: x.pending_pixels,
+                // 0 from a build before: the default until a resize.
+                cell_pixels: crate::model::cell_pixels(x.cell_pixels),
                 manual_size: x.manual_size,
                 latest: x.latest_client.map(|c| ClientId(c as usize)),
                 alerts: crate::alerts::WindowAlerts::restored(
@@ -1774,6 +1779,13 @@ impl Server {
                 salvaged.as_deref_mut(),
             )?;
             server.model.panes.insert(pane.id, pane);
+        }
+        // A terminal's replies use its window's cell size.
+        let windows = &server.model.windows;
+        for pane in server.model.panes.values_mut() {
+            if let Some(w) = windows.get(&pane.window) {
+                pane.term.set_cell_pixels(w.cell_pixels);
+            }
         }
 
         if let Some(m) = &s.marked {

@@ -448,6 +448,9 @@ pub struct PaneSpawn<'a> {
     pub cwd: PathBuf,
     /// The pane's rectangle; its size is the PTY's.
     pub rect: Geometry,
+    /// Its window's cell size in pixels (`w->xpixel`, `w->ypixel`), which
+    /// times the size is the PTY's in pixels (spawn.c:451-452).
+    pub cell_pixels: (u32, u32),
     /// respawn-pane keeps the pane's shell (spawn.c:422-428); otherwise
     /// it comes from `default-shell`.
     pub shell: Option<PathBuf>,
@@ -517,6 +520,8 @@ pub struct NewSession {
     pub update_env: bool,
     /// `-x`/`-y` given: the session's `default-size`.
     pub default_size: Option<(u16, u16)>,
+    /// The window's cell size in pixels, 0 for tmux's default.
+    pub cell_pixels: (u32, u32),
     /// `-t`: the session group to join.
     pub group: Option<NewGroup>,
 }
@@ -4854,10 +4859,18 @@ impl Server {
             argv: spec.argv,
             cwd: spec.cwd.clone(),
             rect: Geometry::new(cols, rows, 0, 0),
+            cell_pixels: crate::model::cell_pixels(spec.cell_pixels),
             shell: None,
             empty: false,
         })?;
-        self.insert_window(window_id, pane, spec.window_name, cols, rows, None);
+        self.insert_window(
+            window_id,
+            pane,
+            spec.window_name,
+            (cols, rows),
+            spec.cell_pixels,
+            None,
+        );
         // spawn_window with idx -1: the first free index from base-index
         // (spawn.c:183-185); the session is new, so that is base-index.
         let index = u32::try_from(
@@ -4971,8 +4984,8 @@ impl Server {
         window_id: WindowId,
         mut pane: Pane,
         name: Option<String>,
-        cols: u32,
-        rows: u32,
+        (cols, rows): (u32, u32),
+        cell_pixels: (u32, u32),
         latest: Option<ClientId>,
     ) {
         let pane_id = pane.id;
@@ -5016,6 +5029,9 @@ impl Server {
                 last_layout: None,
                 old_layout: None,
                 pending_size: None,
+                pending_pixels: (0, 0),
+                // window_create (window.c:414-417).
+                cell_pixels: crate::model::cell_pixels(cell_pixels),
                 manual_size: (cols, rows),
                 latest,
                 alerts: crate::alerts::WindowAlerts::default(),
@@ -5059,7 +5075,7 @@ impl Server {
                 .next_free_index(s, base)
                 .ok_or_else(|| format!("couldn't add window -{}", i64::from(base) + 1))?
         };
-        let (cols, rows) = self.default_window_size(nw.client, s, None, None);
+        let ((cols, rows), pixels) = self.default_window_size(nw.client, s, None, None);
         let window_id = self.model.window_ids.allocate();
         let pane_id = self.model.pane_ids.allocate();
         let session_env = self.model.sessions[&s].env.clone();
@@ -5074,11 +5090,19 @@ impl Server {
                 argv: nw.argv.clone(),
                 cwd: nw.cwd.clone(),
                 rect: Geometry::new(cols, rows, 0, 0),
+                cell_pixels: crate::model::cell_pixels(pixels),
                 shell: None,
                 empty: nw.empty,
             })
             .map_err(|e| spawn_failed(&e))?;
-        self.insert_window(window_id, pane, nw.name.clone(), cols, rows, nw.client);
+        self.insert_window(
+            window_id,
+            pane,
+            nw.name.clone(),
+            (cols, rows),
+            pixels,
+            nw.client,
+        );
         let session = self.model.sessions.get_mut(&s).expect("target session");
         session.windows.insert(index, window_id);
         session.sync_link_tree();
@@ -5145,9 +5169,31 @@ impl Server {
         child
     }
 
+    /// A new pane's terminal (`window_pane_create`, `screen_init`).
+    fn new_pane_term(
+        &self,
+        ps: &PaneSpawn<'_>,
+        (cols, rows): (u16, u16),
+        history: usize,
+    ) -> PaneTerm {
+        let mut term = PaneTerm::new(cols, rows, history);
+        term.set_cell_pixels(ps.cell_pixels);
+        term.number_links_from(&self.link_numbers);
+        term.set_colour_names(vtmux_core::colour::x11_rgb);
+        // screen_init: the new screen's key mode follows `extended-keys`.
+        term.set_extended_keys(self.model.extended_keys());
+        term.reset_key_mode();
+        // window.c:1479-1480: the host name, set directly (no event).
+        term.set_title(&self.info.host);
+        if ps.empty {
+            empty_pane_modes(&mut term);
+        }
+        term
+    }
+
     /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
     /// (`environ_for_session` plus the spawn additions), the shell from
-    /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
+    /// `default-shell`, the PTY sized to `rect` (in pixels too), and a terminal whose title
     /// starts as the host name (window.c:1479-1480). The caller links the
     /// returned pane into the model.
     pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
@@ -5189,21 +5235,12 @@ impl Server {
                 env: child.for_process(),
                 cols,
                 rows,
+                pixels: crate::model::pty_pixels((cols, rows), ps.cell_pixels),
             })?)
         };
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
-        let mut term = PaneTerm::new(cols, rows, history_limit);
-        term.number_links_from(&self.link_numbers);
-        term.set_colour_names(vtmux_core::colour::x11_rgb);
-        // screen_init: the new screen's key mode follows `extended-keys`.
-        term.set_extended_keys(self.model.extended_keys());
-        term.reset_key_mode();
-        // window.c:1479-1480: the host name, set directly (no event).
-        term.set_title(&self.info.host);
-        if ps.empty {
-            empty_pane_modes(&mut term);
-        }
+        let term = self.new_pane_term(ps, (cols, rows), history_limit);
         let (io, pid, tty) = match spawned {
             Some(spawned) => {
                 let tty = sys::pty::tty_name(&spawned.master).unwrap_or_default();
@@ -5635,9 +5672,12 @@ impl Server {
             .number_option(TreeId::Server, "vtmux-inband-resize")
             != 0;
         let redraw_pending = self.model.redraw_panes.contains(&p);
+        let cell = self.model.cell_pixels_of(p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
         };
+        // input.c:2163-2180 read the window's cell size as they answer.
+        pane.term.set_cell_pixels(cell);
         pane.term.set_cursor_style_option(cursor_style);
         pane.term.set_scroll_on_clear(scroll_on_clear);
         pane.term.set_allow_set_title(allow_set_title);
@@ -5673,7 +5713,7 @@ impl Server {
         let answers = pane.term.take_answers();
         let toggled_alternate = alternate != pane.term.alternate_on();
         // A mode 2048 report (D31) may have gone to the program.
-        let reported = entered_alternate && pane.flush_resizes();
+        let reported = entered_alternate && pane.flush_resizes(cell);
         // input_parse_buffer -> window_update_activity on every
         // non-empty read (input.c:1053): W/t sorts and lsw -O
         // activity order by it.
@@ -7018,6 +7058,7 @@ mod tests {
                 extra_env: Vec::new(),
                 update_env: false,
                 default_size: None,
+                cell_pixels: (0, 0),
                 group: None,
             })
             .unwrap();

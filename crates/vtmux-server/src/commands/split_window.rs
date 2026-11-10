@@ -286,6 +286,7 @@ pub fn exec(
             .collect(),
         cwd,
         rect,
+        cell_pixels: server.model.windows[&w].cell_pixels,
         shell: None,
         empty,
     });

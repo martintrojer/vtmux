@@ -228,6 +228,7 @@ pub fn exec(
         update_env: item.client.is_some() && !args.flag('E'),
         default_size: (args.flag('x') || args.flag('y'))
             .then(|| (x.unwrap_or(cols), y.unwrap_or(rows))),
+        cell_pixels: server.new_session_pixels(item.client.filter(|_| !detached)),
         group,
     };
     let s = server

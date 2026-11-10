@@ -86,6 +86,15 @@ impl Session {
 /// `PANE_LINES_NONE`: the `none` choice of `pane-border-lines`.
 pub const LINES_NONE: i64 = 6;
 
+/// A window's cell size in pixels from the one its clients give, `0` for
+/// none on that axis: tmux's `DEFAULT_XPIXEL` and `DEFAULT_YPIXEL`
+/// (tmux.h:122-123) stand in (`window_create`, `window_resize`,
+/// window.c:414-417, 575-578).
+#[must_use]
+pub fn cell_pixels((x, y): (u32, u32)) -> (u32, u32) {
+    (if x == 0 { 16 } else { x }, if y == 0 { 32 } else { y })
+}
+
 #[derive(Debug)]
 pub struct Zoom {
     pub pane: PaneId,
@@ -118,6 +127,14 @@ pub struct Window {
     /// `WINDOW_RESIZE` with `new_sx`/`new_sy`: the size `recalculate_sizes`
     /// chose, applied once the window is current in an attached session.
     pub pending_size: Option<(u32, u32)>,
+    /// `w->new_xpixel`/`new_ypixel`: the cell size in pixels that comes
+    /// with [`Self::pending_size`], 0 for tmux's default.
+    pub pending_pixels: (u32, u32),
+    /// `w->xpixel`/`w->ypixel`: a cell's size in pixels, from the clients
+    /// that sized the window when it was last resized, else 16x32 (see
+    /// [`cell_pixels`]). A pane's PTY gets it times its size and its
+    /// XTWINOPS replies use it.
+    pub cell_pixels: (u32, u32),
     /// `w->manual_sx`/`manual_sy`: the size `window-size manual` keeps;
     /// the creation size until resize-window sets it.
     pub manual_size: (u32, u32),
@@ -548,6 +565,16 @@ impl Model {
     #[must_use]
     pub fn session_named(&self, name: &str) -> Option<&Session> {
         self.by_name.get(name).map(|id| &self.sessions[id])
+    }
+
+    /// The cell size in pixels of pane `p`'s window (`w->xpixel`,
+    /// `w->ypixel`); tmux's default for a pane with no window.
+    #[must_use]
+    pub fn cell_pixels_of(&self, p: PaneId) -> (u32, u32) {
+        self.panes
+            .get(&p)
+            .and_then(|pane| self.windows.get(&pane.window))
+            .map_or_else(|| cell_pixels((0, 0)), |w| w.cell_pixels)
     }
 
     /// The session's current window and its active pane.
@@ -1724,8 +1751,10 @@ impl Model {
 
     /// `resize_window` (resize.c:27-69): unzoom, resize the layout (the
     /// window is no smaller than it), give the panes their new rectangles
-    /// (terminal and PTY), and zoom again.
-    pub fn resize_window(&mut self, w: WindowId, sx: u32, sy: u32) {
+    /// (terminal and PTY), and zoom again. `pixels` is the cell size the
+    /// clients give (`window_resize`, window.c:573-592; 0 for tmux's
+    /// default); the panes' PTYs hear of it with their next size.
+    pub fn resize_window(&mut self, w: WindowId, sx: u32, sy: u32, pixels: (u32, u32)) {
         let zoomed = self
             .windows
             .get(&w)
@@ -1735,7 +1764,16 @@ impl Model {
             return;
         };
         window.pending_size = None;
+        // window_resize sets it after layout_resize, before any pane's
+        // queued size goes out (server_client_check_pane_resize).
+        window.cell_pixels = cell_pixels(pixels);
         let old = (window.sx(), window.sy());
+        let cell = window.cell_pixels;
+        for p in &window.panes.panes {
+            if let Some(pane) = self.panes.get_mut(p) {
+                pane.term.set_cell_pixels(cell);
+            }
+        }
         self.sync_borderless(w);
         let window = self.windows.get_mut(&w).expect("checked above");
         window.layout.resize_window(sx, sy);
@@ -2310,7 +2348,7 @@ impl Pane {
     /// sees a change and redraws.
     ///
     /// Whether a mode 2048 report went to the program ([`Self::send_size`]).
-    pub fn send_resizes(&mut self, now: Instant) -> bool {
+    pub fn send_resizes(&mut self, now: Instant, cell: (u32, u32)) -> bool {
         if self.io.is_none() || self.resizes.is_empty() {
             return false;
         }
@@ -2334,19 +2372,19 @@ impl Pane {
             to
         };
         self.resize_timer = Some(now + delay);
-        self.send_size(to)
+        self.send_size(to, cell)
     }
 
     /// `screen_write_alternateon` (screen-write.c:3157-3166): entering the
     /// alternate screen sends the pane's size at once if any was queued.
     /// Whether a mode 2048 report went to the program.
-    pub fn flush_resizes(&mut self) -> bool {
+    pub fn flush_resizes(&mut self, cell: (u32, u32)) -> bool {
         if self.resizes.is_empty() {
             return false;
         }
         self.resizes.clear();
         self.resize_timer = None;
-        self.send_size((self.rect.sx, self.rect.sy))
+        self.send_size((self.rect.sx, self.rect.sy), cell)
     }
 
     /// When the queue next wants a turn of the loop.
@@ -2358,21 +2396,23 @@ impl Pane {
         Some(self.resize_timer.unwrap_or_else(Instant::now))
     }
 
-    /// `window_pane_send_resize`: `TIOCSWINSZ`; the kernel sends the
-    /// foreground process group SIGWINCH when the size differs. A program
-    /// granted mode 2048 (D31) is sent its report then too, once the pty
-    /// has the size, so the two always agree; whether one went.
-    fn send_size(&mut self, (sx, sy): (u32, u32)) -> bool {
+    /// `window_pane_send_resize` (window.c:597-621): `TIOCSWINSZ`, with
+    /// the window's cell size `cell` times the size in pixels; the kernel
+    /// sends the foreground process group SIGWINCH when the size differs.
+    /// A program granted mode 2048 (D31) is sent its report then too, once
+    /// the pty has the size, so the two always agree; whether one went.
+    fn send_size(&mut self, (sx, sy): (u32, u32), cell: (u32, u32)) -> bool {
         let Some(io) = &mut self.io else {
             return false;
         };
         let size = (clamp16(sx), clamp16(sy));
+        self.term.set_cell_pixels(cell);
         // As SIGWINCH: only a size the pty did not have already.
         let report = self
             .term
             .inband_resize_report(size.0, size.1)
             .filter(|_| io.size().ok() != Some(size));
-        let _ = io.resize(size.0, size.1);
+        let _ = io.resize(size.0, size.1, pty_pixels(size, cell));
         let Some(report) = report else {
             return false;
         };
@@ -2383,6 +2423,18 @@ impl Pane {
 
 fn clamp16(n: u32) -> u16 {
     u16::try_from(n).unwrap_or(u16::MAX)
+}
+
+/// `ws_xpixel` and `ws_ypixel` for a PTY of `cols` x `rows` cells of
+/// `cell` pixels (spawn.c:451-452, window.c:610-611): a `u_int` product
+/// stored in the `unsigned short`, so it wraps as C's conversion does.
+#[must_use]
+pub fn pty_pixels((cols, rows): (u16, u16), (x, y): (u32, u32)) -> (u16, u16) {
+    let short = |n: u32| u16::try_from(n & 0xffff).expect("masked");
+    (
+        short(u32::from(cols).wrapping_mul(x)),
+        short(u32::from(rows).wrapping_mul(y)),
+    )
 }
 
 /// Seconds since the epoch.
