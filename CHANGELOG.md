@@ -16,6 +16,8 @@ Next is `3.8-beta2`.
 
 **vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s). A live upgrade with it up costs what one without does, and moving back onto an older build keeps the history it hides.
 
+**Faster frames.** A key's echo takes 0.30 ms (was 0.38; tmux 0.24). Agent TUIs cost 0.76-0.92x tmux's server CPU at 5-20 panes with one or two clients (was up to 1.25x), and 5 clients on one window 1.4x (was 1.85x). A one-cell change composes one row, a pane's screen is read once per write whatever the number of clients, and a client's frame acknowledgement wakes no render. Frames are byte for byte what they were ([numbers](docs/PERFORMANCE.md)).
+
 - The cursor hides under a floating pane, in a shown overlay scrollbar, and in a pending wrap at the window's right edge, as tmux's does; it no longer draws over a floating pane.
 - `#{V:...}` loops over the session, global (`V/g`) and client (`V/c`) environment; it was always empty.
 - `TZ` names under `posix/` and `right/` give their zone (and leap seconds), and `TZ=:` is UTC.

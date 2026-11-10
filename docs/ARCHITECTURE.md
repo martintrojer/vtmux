@@ -66,8 +66,8 @@ Under `vtmux-vt` sit `vtmux-ghostty-vt` and `vtmux-ghostty-vt-sys` (`third_party
 ## Output: a program prints
 
 1. The server reads the pane's pty and feeds the bytes to its libghostty-vt terminal. A query (DA, cursor position) is answered in tmux's words, not Ghostty's.
-2. Once per loop tick, the compositor (`render/`) builds each attached client's screen: panes at their layout cells, borders, status line, menus and popups. Each pane keeps one Ghostty render state that re-reads only dirty rows, and each client caches its composed rows, so a one-cell change recomposes one row. A tick where nothing changed builds no frame.
-3. The screen is diffed against the client's last frame and only the changed cells are encoded for that client's terminal (`terminal-features`, D8, with its terminfo entry from a generated table: vtmux reads no terminfo), inside synchronized output, with the cursor placed once at the end.
+2. Once per loop tick, the compositor (`render/`) builds each attached client's screen: panes at their layout cells, borders, status line, menus and popups. Each pane keeps one Ghostty render state that re-reads only dirty rows, once per write however many clients and views look, and each client caches its composed rows, so a one-cell change recomposes one row. A tick where nothing changed builds no frame, and a tick that only takes clients' frame acknowledgements does not render at all.
+3. The screen is diffed against the client's last frame, only between the first and last changed cell of each changed row, and only the changed cells are encoded for that client's terminal (`terminal-features`, D8, with its terminfo entry from a generated table: vtmux reads no terminfo), inside synchronized output, with the cursor placed once at the end.
 4. The client writes the frame and acknowledges it.
 
 Steps 2 and 3 are why the cursor doesn't jump under heavy output (D14): tmux forwards each pane update as it happens, vtmux only sends finished pictures. Pane blend (D26, `render/blend.rs`) works for the same reason: the compositor can change every cell's colour before encoding.

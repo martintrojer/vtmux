@@ -17,11 +17,11 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | Pane output, one client attached | | | 0.42-0.62x CPU |
 | 8 clients, a 20 MB flood | | | 0.06-0.19x CPU |
 | Redraw-heavy output, bytes to the terminal | 10.1 MB | 0.07 MB | about 140x fewer, at 0.3x CPU |
-| Agent TUIs, 5-20 panes | | | 0.85-1.25x CPU **Worse** at 2 clients |
+| Agent TUIs, 5-20 panes, 1-2 clients | | | 0.76-0.92x CPU |
 | 100 agent panes | | | 0.70x CPU |
 | 32 clients on one window | | | 1.6x CPU **Worse** |
 | Idle server with the owner's config | 171 ms CPU a minute | 47 ms | 0.28x |
-| Key echo, p50 | 0.26 ms | 0.38 ms | 1.5x **Worse** |
+| Key echo, p50 | 0.24 ms | 0.30 ms | 1.25x **Worse** |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | Creating 400 panes | 200 ms CPU | 380 ms | 1.9x **Worse** |
 | Search a 1M-line history | 1.65 s | 0.55 s | 0.34x |
@@ -77,31 +77,31 @@ vtmux parses output faster than tmux and draws whole frames: one per client, onl
 
 ## Agent panes and many clients
 
-Agent TUIs (`scripts/agent_tui.py`, a synthetic pi-like renderer: a spinner, streamed words, tool output, all in synchronized updates) cost about what tmux spends. Server CPU, release profile:
+Agent TUIs (`scripts/agent_tui.py`, a synthetic pi-like renderer: a spinner, streamed words, tool output, all in synchronized updates) cost less than tmux spends. Server CPU, release profile:
 
 | | tmux 3.8 | vtmux | vtmux / tmux | RSS (tmux) |
 |---|---|---|---|---|
-| 5 panes, 1 client | 1.9% | 1.9% | 1.00x | 18.4 MB (6.1) |
-| 5 panes, 2 clients | 2.0% | 2.5% | 1.25x | 20.9 MB (6.2) |
-| 20 panes, 1 client | 5.3% | 4.5% | 0.85x | 31.8 MB (8.0) |
-| 20 panes, 2 clients | 5.4% | 5.5% | 1.02x | 34.5 MB (8.1) |
+| 5 panes, 1 client | 1.7% | 1.4% | 0.82x | 18.8 MB (6.1) |
+| 5 panes, 2 clients | 2.2% | 1.8% | 0.82x | 21.1 MB (6.2) |
+| 20 panes, 1 client | 4.9% | 3.7% | 0.76x | 33.2 MB (8.0) |
+| 20 panes, 2 clients | 5.0% | 4.6% | 0.92x | 35.6 MB (8.1) |
 | 50 panes, 1 client | 15.3% | 11.1% | 0.73x | 56 MB (11.5) |
 | 100 panes, 1 client | 32.1% | 22.5% | 0.70x | 100 MB (17.8) |
 | 16 clients on one window of 4 panes | 3.0% | 5.3% | 1.7x | 25.5 MB (7.1) |
 | 32 clients on one window of 4 panes | 5.2% | 8.3% | 1.6x | 42.8 MB (9.2) |
 
-tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays per frame, so it wins on many panes and loses on many clients. Clients that show a window alike share its drawing and frame bytes, which took 32 clients from 5.2x tmux to 1.6x. Switching to a hidden full window (`C-b n` to its last byte) takes 2.5 ms against tmux's 5.1 ms.
+tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays per frame, so it wins on many panes and loses on many clients. Clients that show a window alike share its drawing and frame bytes, which took 32 clients from 5.2x tmux to 1.6x. A frame now costs one composed row per changed row, and a client's acknowledgement wakes no render: 5 clients on one window went from 1.85x tmux to 1.39x. Switching to a hidden full window (`C-b n` to its last byte) takes 2.5 ms against tmux's 5.1 ms.
 
 ## Latency
 
 | | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|
-| key echo p50 / p90, other pane idle | 0.26 / 0.30 ms | 0.38 / 0.43 ms | 1.5x |
-| key echo p50 / p90, next to a `yes` flood | 0.55 / 0.97 ms | 0.45 / 0.71 ms | 0.82x |
+| key echo p50 / p90, other pane idle | 0.24 / 0.29 ms | 0.30 / 0.37 ms | 1.25x |
+| key echo p50 / p90, next to a `yes` flood | 0.56 / 0.83 ms | 0.39 / 0.74 ms | 0.70x |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | start with the owner's config until it answers | 102 ms | 101 ms | 0.99x |
 
-vtmux is 0.1 ms behind with no flood: each frame does work proportional to the screen (the window's drawing context, the row diff). Next to a flood it is ahead, because flood output is paced and a key's echo is not.
+vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is now one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not.
 
 ## Big histories
 
@@ -158,7 +158,7 @@ Ghostty is linked in statically (1.35 MB of text; tmux links libevent and ncurse
 - Host: a shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 CPUs). macOS numbers are not collected yet.
 - Only the server process: CPU from `/proc/<pid>/stat` or `schedstat`, RSS from `VmRSS`, never the pane children. Medians of 3 or 5 runs.
 - Clients are the binary's own `attach` on a PTY the bench drains, counting every byte and synchronized frame.
-- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes, many clients, key echo and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
+- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes (5-20) and key echo: the 2026-11-10 run. 50-100 agent panes, 16-32 clients and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
 - The host is shared and the load varied (3 to 22), so read CPU rows as rough; each run compares binaries side by side.
 
 ## Running the benchmarks
