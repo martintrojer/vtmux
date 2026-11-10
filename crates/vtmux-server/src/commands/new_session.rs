@@ -253,6 +253,11 @@ pub fn exec(
         }
         super::attach(server, item, s, false, false, None)?;
     }
+    // cmd-new-session.c:358-359: the commands after this one start from
+    // the new session, unless it was made in the background.
+    if !args.flag('d') {
+        item.new_current = Some(Found::from_session(&server.model, s));
+    }
     // cmd-new-session.c:361-362.
     item.hook_target = Some(Some(Found::from_session(&server.model, s)));
     // cmd-new-session.c:364-365: also for a detached session another

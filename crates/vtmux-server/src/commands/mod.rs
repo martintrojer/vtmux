@@ -580,7 +580,7 @@ fn dispatch(
         ),
         "respawn-pane" => respawn_pane::exec(server, item, args, found),
         "respawn-window" => respawn_window::exec(server, item, args, found),
-        "rotate-window" => rotate_window::exec(server, args, found),
+        "rotate-window" => rotate_window::exec(server, item, args, found),
         "display-message" => display_message::exec(server, item, args, found),
         "display-panes" => display_panes::exec(server, item, args, source, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
@@ -703,6 +703,11 @@ fn dispatch(
             // cmd-attach-session.c:93-106: the target window and pane become
             // the session's current ones.
             keys::select_target(server, found, None);
+            // cmd-attach-session.c:97-100: the commands after this one start
+            // from there.
+            item.new_current = found
+                .index
+                .map(|i| Found::from_winlink(&server.model, session, i));
             // cmd-attach-session.c:108-111: -c is the session's directory.
             if let Some(cwd) = args.value('c') {
                 let cwd = expand(server, found, cwd);

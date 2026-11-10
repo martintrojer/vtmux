@@ -18,7 +18,7 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
-    item: &Item,
+    item: &mut Item,
     args: &Args,
     source: Found,
     found: Found,
@@ -108,6 +108,8 @@ pub fn exec(
     if !args.flag('d') {
         server.model.set_active(dst_w, src_wp);
         server.model.set_current(dst_s, dst_idx);
+        // cmd-join-pane.c:523-526.
+        item.new_current = Some(Found::from_session(&server.model, dst_s));
     }
     // cmd-join-pane.c:531-536.
     server

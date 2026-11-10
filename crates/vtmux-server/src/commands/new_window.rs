@@ -104,8 +104,14 @@ pub fn exec(
             empty: args.flag('E') || empty_command,
         })
         .map_err(EdgeError::CreateWindowFailed)?;
+    let new_wl = Found::from_winlink(&server.model, s, index);
+    // cmd-new-window.c:166-167: the commands after this one start from
+    // the new window, unless it was made in the background.
+    if !args.flag('d') || server.model.sessions[&s].current == index {
+        item.new_current = Some(new_wl);
+    }
     // cmd-new-window.c:181-182.
-    item.hook_target = Some(Some(Found::from_winlink(&server.model, s, index)));
+    item.hook_target = Some(Some(new_wl));
     if args.flag('P') {
         let w = server.model.sessions[&s].windows[&index];
         let new = Found {

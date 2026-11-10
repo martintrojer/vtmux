@@ -1,0 +1,51 @@
+name = "target_current_after_commands"
+# The commands that move the queue's current state, so the commands after
+# them in the same list start there: new-session unless -d
+# (cmd-new-session.c:358-359), attach-session (cmd-attach-session.c:97-100),
+# new-window unless -d
+# (cmd-new-window.c:166-167), select-window (cmd-select-window.c:123-140,
+# -T only within the current session), select-pane and last-pane when the
+# active pane changed (cmd-select-pane.c:196-197, 284), break-pane of a
+# pane from a bigger window (cmd-break-pane.c:188-191), join-pane and
+# move-pane unless -d (cmd-join-pane.c:523-526), rotate-window
+# (cmd-rotate-window.c:110). Session b is the newer, so with no current
+# state the CLI defaults to it.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-t", "a:", "-n", "w", "cat", "-", ";", "display", "-p", "nw=#{session_name}:#{window_index}"] },
+  { run = ["new-window", "-d", "-t", "a:", "-n", "w", "cat", "-", ";", "display", "-p", "nwd=#{session_name}:#{window_index}"] },
+  { run = ["select-window", "-t", "a:0", ";", "display", "-p", "sw=#{session_name}:#{window_index}"] },
+  { run = ["select-window", "-t", "a:0", ";", "display", "-p", "same=#{session_name}:#{window_index}"] },
+  { run = ["next-window", "-t", "a:", ";", "display", "-p", "next=#{session_name}:#{window_index}"] },
+  { run = ["select-window", "-T", "-t", "a:1", ";", "display", "-p", "T=#{session_name}:#{window_index}"] },
+  { run = ["select-window", "-t", "a:1", ";", "select-window", "-T", "-t", "a:1", ";", "display", "-p", "T2=#{session_name}:#{window_index}"] },
+  { run = ["split-window", "-d", "-t", "a:0", "cat", "-", ";", "break-pane", "-s", "a:0.1", "-t", "a:", ";", "display", "-p", "bp=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["break-pane", "-s", "a:3", "-t", "a:5", ";", "display", "-p", "bp1=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["split-window", "-d", "-t", "a:0", "cat", "-", ";", "break-pane", "-d", "-s", "a:0.1", "-t", "a:", ";", "display", "-p", "bpd=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["join-pane", "-s", "a:5", "-t", "a:0", ";", "display", "-p", "jp=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["move-pane", "-d", "-s", "a:2", "-t", "a:0", ";", "display", "-p", "mpd=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["select-pane", "-t", "a:0.0", ";", "display", "-p", "sp=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["select-pane", "-t", "a:0.0", ";", "display", "-p", "spsame=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["last-pane", "-t", "a:0", ";", "display", "-p", "lp=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["rotate-window", "-t", "a:0", ";", "display", "-p", "rw=#{session_name}:#{window_index}.#{pane_index}"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_panes} #{window_active}"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "new-window -t b: -n w cat - ; display -p 'nw=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "split-window -d -t b:0 cat - ; select-pane -t b:0.1 ; display -p 'sp=#{session_name}:#{window_index}.#{pane_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "select-window -T -t b:0 ; display -p 'T=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "select-window -T -t b:0 ; display -p 'T2=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "rotate-window -t b:0 ; display -p 'rw=#{session_name}:#{window_index}.#{pane_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "select-window -t a:1 ; new -s c -n w cat - ; display -p 'ns=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "select-window -t a:0 ; new -d -s d -n w cat - ; display -p 'nsd=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "select-window -t a:1 ; attach -t b:1 ; display -p 'at=#{session_name}:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+]

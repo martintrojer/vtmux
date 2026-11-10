@@ -21,7 +21,14 @@ pub fn exec(
     };
     let zflag = args.flag('Z');
     if last_pane || args.flag('l') {
-        return last(server, w, args, zflag);
+        if last(server, w, args, zflag)? {
+            // cmd-select-pane.c:196-197.
+            item.new_current = found
+                .session
+                .zip(found.index)
+                .map(|(s, i)| Found::from_winlink(&server.model, s, i));
+        }
+        return Ok(());
     }
     if args.flag('m') || args.flag('M') {
         mark(server, found, wp, args.flag('M'));
@@ -100,16 +107,17 @@ pub fn exec(
     }
     // cmd-select-pane.c:283-285: the hook's target is the new pane when
     // it became active, else the queue's current state.
-    let changed = activate(server, w, wp, zflag);
-    item.hook_target = Some(if changed {
-        Some(Found {
+    // cmd-select-pane.c:283-285: the new pane becomes the queue's current
+    // state when it became active (the commands after this one start from
+    // it); the hook's target is that state.
+    if activate(server, w, wp, zflag) {
+        item.new_current = Some(Found {
             window: Some(w),
             pane: Some(wp),
             ..found
-        })
-    } else {
-        item.origin.current
-    });
+        });
+    }
+    item.hook_target = Some(item.new_current.or(item.origin.current));
     Ok(())
 }
 
@@ -166,8 +174,9 @@ fn mark(server: &mut Server, found: Found, wp: PaneId, clear: bool) {
     }
 }
 
-/// `last-pane` / `select-pane -l` (cmd-select-pane.c:167-205).
-fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<(), CmdError> {
+/// `last-pane` / `select-pane -l` (cmd-select-pane.c:167-205); whether
+/// the active pane changed.
+fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<bool, CmdError> {
     let window = &server.model.windows[&w];
     let mut lastwp = window.panes.last.first().copied();
     // A pane spawned without being visited (split-window -d) is not on the
@@ -189,10 +198,9 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
             p.input_off = args.flag('d') && !args.flag('e');
         }
         server.model.redraw(Redraw::WindowStatus(w));
-        return Ok(());
+        return Ok(false);
     }
-    activate(server, w, lastwp, zflag);
-    Ok(())
+    Ok(activate(server, w, lastwp, zflag))
 }
 
 /// Make `wp` active the way select-pane does: a hidden pane in a zoomed

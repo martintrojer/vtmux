@@ -35,6 +35,9 @@ pub fn exec(
     // succeeds without a redraw (cmd-select-window.c:136-139,
     // session_select returning 1).
     let mut changed = true;
+    // -T on the current window moves the queue's current state only when
+    // it was in this session (cmd-select-window.c:133-134).
+    let mut moves_current = true;
     if which == Which::Next || args.flag('n') {
         model
             .next_window(s, args.flag('a'))
@@ -52,6 +55,7 @@ pub fn exec(
         // -T on the current window goes to the last one instead.
         if args.flag('T') && model.sessions[&s].current == index {
             last(model, s).ok_or_else(|| no("last"))?;
+            moves_current = item.origin.current.and_then(|f| f.session) == Some(s);
         } else {
             changed = model.set_current(s, index) == Some(true);
         }
@@ -59,13 +63,13 @@ pub fn exec(
     if changed {
         model.redraw(crate::model::Redraw::Session(s));
     }
-    // cmd-select-window.c:122-143: after-select-window always, with the
-    // session as current state once it changed.
-    item.hook_target = Some(if changed {
-        Some(Found::from_session(model, s))
-    } else {
-        item.origin.current
-    });
+    // cmd-select-window.c:122-143: the session becomes the queue's
+    // current state once it changed (the commands after this one start
+    // from it); after-select-window always, from that state.
+    if changed && moves_current {
+        item.new_current = Some(Found::from_session(model, s));
+    }
+    item.hook_target = Some(item.new_current.or(item.origin.current));
     // cmd-select-window.c:145-147: an attached calling client becomes the
     // new window's latest, and the window takes any size pending.
     if let Some(c) = super::latest_client(server, item) {

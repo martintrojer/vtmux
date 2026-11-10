@@ -126,6 +126,9 @@ pub fn exec(
             .fire_pane_moved(wp, (w, Some(src_idx)), (new_w, Some(index)));
         if !detached {
             server.model.set_current(dst_s, index);
+            // cmd-break-pane.c:188-191 (not for a one-pane window, which
+            // goes to `out` first).
+            item.new_current = Some(Found::from_session(&server.model, dst_s));
         }
         (index, new_w)
     };
