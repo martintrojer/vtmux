@@ -406,6 +406,58 @@ fn a_failed_dry_run_refuses_and_the_server_carries_on() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The requester's queue is not carried across the exec, and the new
+/// image answers the requester as its command list's end: commands after
+/// `vtmux-upgrade` in it would never run. It is refused at once, naming
+/// them, and the rest of its group goes with the error, as after any
+/// failed command (cmd-queue.c `cmdq_remove_group`). Alone it runs.
+#[test]
+fn commands_after_the_upgrade_in_its_queue_refuse_it() {
+    let (mut server, dir) = setup("behind");
+    let binary = passing(&dir);
+    let b = binary.to_str().unwrap();
+    let a = command(
+        &mut server,
+        &dir,
+        &[
+            "vtmux-upgrade",
+            "-b",
+            b,
+            ";",
+            "set",
+            "-g",
+            "@after",
+            "yes",
+            ";",
+            "display-message",
+            "-p",
+            "after",
+        ],
+        Instant::now(),
+    );
+    assert_eq!(
+        (a.out.as_str(), a.err.as_str(), a.exit),
+        (
+            "",
+            "set-option and display-message after vtmux-upgrade would not run: \
+             run vtmux-upgrade on its own, then them\n",
+            Some(1)
+        )
+    );
+    assert!(execs().is_empty() && server.upgrade.pending.is_none());
+    let a = command(
+        &mut server,
+        &dir,
+        &["show", "-gv", "@after"],
+        Instant::now(),
+    );
+    assert_eq!((a.out.as_str(), a.exit), ("", Some(1)));
+    let a = upgrade(&mut server, &dir, &binary);
+    assert_eq!(a.err, format!("{}: test exec\n", binary.display()));
+    assert_eq!(execs().len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Decision 10: a `run-shell` job still running holds the upgrade; at the
 /// end of the wait it is refused, naming the job.
 #[test]

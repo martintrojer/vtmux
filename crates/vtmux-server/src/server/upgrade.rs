@@ -309,6 +309,9 @@ impl Server {
             ));
         }
         self.upgrade_inside_job(requester)?;
+        if let Some(message) = self.upgrade_behind(requester) {
+            return Err(message);
+        }
         let binary = clean_path(binary);
         check_binary(&binary)?;
         self.upgrade.pending = Some(Pending {
@@ -435,6 +438,13 @@ impl Server {
             self.upgrade.pending = None;
             self.upgrade_tokens_void();
             self.upgrade_refuse(requester, "the server is exiting");
+            return;
+        }
+        // A key pressed meanwhile queues behind the requester.
+        if let Some(message) = self.upgrade_behind(requester) {
+            self.upgrade.pending = None;
+            self.upgrade_tokens_void();
+            self.upgrade_refuse(requester, &message);
             return;
         }
         if !self.upgrade_checked(now) {
@@ -571,6 +581,38 @@ impl Server {
              vtmux-upgrade again ({message})",
             binary.display()
         )
+    }
+
+    /// Why the work queued behind a `vtmux-upgrade` refuses it: the
+    /// requester's queue is not carried across the exec, and the image
+    /// that serves next answers the requester as its command list's end,
+    /// so the commands after it in a list (`vtmux-upgrade ; set ...`), a
+    /// file it is sourced from, or keys pressed while it waits would be
+    /// lost.
+    fn upgrade_behind(&self, requester: Requester) -> Option<String> {
+        let Requester::Command { step, .. } = requester else {
+            return None;
+        };
+        let mut what: Vec<&str> = Vec::new();
+        for work in self.cmdq.queued_after(step) {
+            let name = match work {
+                crate::cmdq::Work::Command { call, .. } => call.entry.name,
+                crate::cmdq::Work::Key(_) => "keys pressed meanwhile",
+                _ => "commands",
+            };
+            if !what.contains(&name) {
+                what.push(name);
+            }
+        }
+        let (final_one, before) = what.split_last()?;
+        let names = if before.is_empty() {
+            (*final_one).to_owned()
+        } else {
+            format!("{} and {final_one}", before.join(", "))
+        };
+        Some(format!(
+            "{names} after vtmux-upgrade would not run: run vtmux-upgrade on its own, then them"
+        ))
     }
 
     /// Who asked, as the snapshot names them.

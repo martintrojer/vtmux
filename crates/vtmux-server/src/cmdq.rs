@@ -313,6 +313,25 @@ impl Cmdq {
             .collect()
     }
 
+    /// The work queued after step `id` in its queue, but what only hands
+    /// back a batch's results (its end, a `source-file` that read every
+    /// file): a live upgrade carries no queue across `execve`, so its
+    /// requester's must hold nothing more (live-upgrade spec, decision
+    /// 26).
+    #[must_use]
+    pub fn queued_after(&self, id: StepId) -> Vec<&Work> {
+        let Some(steps) = self.queues.values().find(|s| s.iter().any(|s| s.id == id)) else {
+            return Vec::new();
+        };
+        steps
+            .iter()
+            .skip_while(|s| s.id != id)
+            .skip(1)
+            .filter_map(|s| s.work.as_ref())
+            .filter(|w| !matches!(w, Work::End(_) | Work::SourceDone { failed: false }))
+            .collect()
+    }
+
     /// The queue step `id` is in, while it is queued.
     #[must_use]
     pub fn queue_of(&self, id: StepId) -> Option<QueueId> {
