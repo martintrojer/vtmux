@@ -28,14 +28,6 @@ use crate::dcs::{self, Dcs, Dispatch, Step};
 use crate::palette::{self, OscEnd, Palette, Reply};
 pub use state::*;
 
-/// Where a history row is read from.
-pub(crate) enum HistoryRow<'a> {
-    /// Row of Ghostty's active screen (history included).
-    Screen(usize),
-    /// The primary history copied when the alternate screen came up.
-    Frozen(&'a FrozenRow),
-}
-
 thread_local! {
     /// Reads of history Ghostty holds, by any pane on this thread (see
     /// [`history_reads`]).
@@ -374,10 +366,6 @@ pub struct PaneTerm {
     /// A cell's width and height in pixels (`w->xpixel`, `w->ypixel`):
     /// XTWINOPS and mode 2048 report with it, and Ghostty is sized by it.
     cell_px: (u32, u32),
-    /// The newest `hsize` history rows, copied when the alternate screen was
-    /// entered: libghostty only reads the active screen, and tmux keeps
-    /// showing the primary history while an alternate screen is up.
-    frozen: Option<Rc<Vec<FrozenRow>>>,
     /// The primary screen's visible rows, copied as the alternate screen
     /// came up (tmux's `saved_grid`, screen.c:704-705), while it is up.
     saved: Option<Rc<Vec<FrozenRow>>>,
@@ -399,7 +387,7 @@ pub struct PaneTerm {
     /// follow the line. Ghostty's own semantic prompt state marks rows
     /// differently (a `C` then an `A` on one line keeps only the prompt).
     marks: Vec<(TrackedGridRef, Osc133)>,
-    /// The marks of the history copied when the alternate screen came up.
+    /// The marks of the primary history as the alternate screen came up.
     frozen_marks: Vec<(usize, Osc133)>,
     /// The input since the parser last left the ground state, while it has
     /// not returned to it (tmux's `since_ground`, input.c:1022-1024).
@@ -613,7 +601,6 @@ impl PaneTerm {
                 osc_cap: dcs::capacity(dcs::DEFAULT_BUFFER_SIZE),
                 ..AltModeScanner::default()
             },
-            frozen: None,
             saved: None,
             alt_entry: None,
             clear_primary_history: false,
@@ -821,10 +808,12 @@ impl PaneTerm {
                 let size = (alternate && e == ScanEvent::AltMode(b'l'))
                     .then(|| (self.cols(), self.rows()));
                 match e {
-                    // The alternate screen is about to switch: last chance to
-                    // read the primary history.
+                    // The alternate screen is about to switch. tmux goes on
+                    // showing the primary history (screen.c:700-721 saves
+                    // only the visible rows), which Ghostty leaves as it is
+                    // and reads in place (patch 0038): only the visible
+                    // rows and the marks are kept.
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
-                        self.frozen = Some(Rc::new(self.freeze_history()));
                         self.saved = Some(Rc::new(self.freeze_visible()));
                         self.frozen_marks = self.osc133_lines();
                         self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
@@ -832,7 +821,7 @@ impl PaneTerm {
                     // tmux's ED3 clears the grid's history, which under the
                     // alternate screen is the primary one (input.c:1758).
                     ScanEvent::ClearHistory if self.alternate_on() => {
-                        self.frozen = Some(Rc::default());
+                        self.drop_oldest_frozen_marks(self.hsize);
                         self.hsize = 0;
                         self.hscrolled = 0;
                         self.clear_primary_history = true;
@@ -1452,7 +1441,6 @@ impl PaneTerm {
         }
         self.term.vt_write(piece);
         if !self.alternate_on() {
-            self.frozen = None;
             self.saved = None;
             let entry = self.alt_entry.take();
             if std::mem::take(&mut self.clear_primary_history) {
@@ -1578,39 +1566,38 @@ impl PaneTerm {
             .unwrap_or(0)
     }
 
-    /// History row `id` while it is still retained: the primary screen's,
-    /// or the copy taken when the alternate screen came up.
-    pub(crate) fn history_screen_row(&self, id: u64) -> Option<HistoryRow<'_>> {
+    /// The screen row history row `id` is while it is still retained, as
+    /// `capture.rs` looks rows up: under the alternate screen a row of the
+    /// primary screen's history ([`crate::capture::PRIMARY`]).
+    pub(crate) fn history_screen_row(&self, id: u64) -> Option<usize> {
         let back = usize::try_from(self.scrolled.checked_sub(id)?).ok()?;
         if back == 0 {
             return None;
         }
         if self.alternate_on() {
-            let frozen = self.frozen.as_ref()?;
-            return frozen
-                .get(frozen.len().checked_sub(back)?)
-                .map(HistoryRow::Frozen);
+            if back > self.hsize {
+                return None;
+            }
+            let y = self.primary_history_rows().checked_sub(back)?;
+            return Some(crate::capture::PRIMARY + y);
         }
         let retained = self.retained_rows();
-        retained.checked_sub(back).map(HistoryRow::Screen)
+        retained.checked_sub(back)
     }
 
-    /// Copy the newest `hsize` primary history rows.
-    fn freeze_history(&self) -> Vec<FrozenRow> {
-        self.note_history_read();
-        self.freeze(self.hidden_rows(), self.hsize)
+    /// The primary screen's history rows Ghostty retains, active or not
+    /// (patch 0038): while the alternate screen is up the primary is left
+    /// as it was (patch 0028), and tmux's history is its newest `hsize`.
+    pub(crate) fn primary_history_rows(&self) -> usize {
+        self.term.vtmux_screen_scrollback_rows(0).unwrap_or(0)
     }
 
     /// Copy the visible rows of the primary screen.
     fn freeze_visible(&self) -> Vec<FrozenRow> {
-        self.freeze(self.retained_rows(), usize::from(self.rows()))
-    }
-
-    /// Copy `n` rows of the active screen from screen row `top`.
-    fn freeze(&self, top: usize, n: usize) -> Vec<FrozenRow> {
         let cols = usize::from(self.cols());
+        let top = self.retained_rows();
         let mut last = None;
-        (top..top + n)
+        (top..top + usize::from(self.rows()))
             .map(|y| FrozenRow::capture(&self.term, y, cols, &mut last))
             .collect()
     }
@@ -1730,7 +1717,7 @@ impl PaneTerm {
 
     /// The lines OSC 133 marked as a prompt's or output's start, as rows
     /// of tmux's grid (see [`PaneTerm::row`]), oldest first. Under the
-    /// alternate screen, those of the primary history copied on entry.
+    /// alternate screen, those of the primary history as it came up.
     #[must_use]
     pub fn line_marks(&self) -> Vec<(usize, LineMark)> {
         let mut out = Vec::new();
@@ -1765,17 +1752,6 @@ impl PaneTerm {
             .collect();
         out.sort_by_key(|&(y, _)| y);
         out
-    }
-
-    /// History row `y` (0 = oldest tmux still has) while the alternate screen
-    /// is up.
-    pub(crate) fn frozen_row(&self, y: usize) -> Option<&FrozenRow> {
-        self.frozen.as_ref()?.get(y)
-    }
-
-    /// The history copied when the alternate screen came up, while it is.
-    pub(crate) fn frozen_rows(&self) -> Option<Rc<Vec<FrozenRow>>> {
-        self.frozen.clone()
     }
 
     /// The visible grid, brought up to date (only the rows Ghostty marked
@@ -1903,7 +1879,7 @@ impl PaneTerm {
         if on_primary {
             // Reflow moves rows in and out of history: tmux's history
             // starts at the row that was its oldest. (While the alternate
-            // screen is up the frozen copy is not reflowed.)
+            // screen is up the primary is not resized, patch 0028.)
             let after = self.retained_rows();
             let hidden = oldest
                 .and_then(|pin| pin.point(PointSpace::Screen).ok().flatten())
@@ -2570,11 +2546,7 @@ impl PaneTerm {
     /// alternate screen is on: tmux keeps the primary history.
     #[must_use]
     pub fn history_size(&self) -> usize {
-        if self.alternate_on() && self.frozen.is_none() {
-            0
-        } else {
-            self.hsize
-        }
+        self.hsize
     }
 
     /// History rows Ghostty retains on the active screen: at least
@@ -2595,14 +2567,37 @@ impl PaneTerm {
     /// with `history_lines` 0 a budget only costs memory: `history_size`
     /// stays 0 whatever Ghostty retains.
     ///
-    /// Ghostty applies the budget to the primary screen only, and can only
-    /// count the active screen's history rows: under the alternate screen
-    /// the model is brought in line when the primary screen is back.
+    /// Ghostty applies the budget to the primary screen only, also under
+    /// the alternate screen, whose history is the primary's: the pruned
+    /// rows leave it now (patch 0038 counts the primary's rows), and the
+    /// ids and times follow when the primary screen is back.
     pub fn set_history_budget(&mut self, bytes: usize) {
         let _ = self.term.set_scrollback_max_bytes(Some(bytes.max(1)));
-        if !self.alternate_on() {
+        if self.alternate_on() {
+            let retained = self.primary_history_rows();
+            if self.hsize > retained {
+                self.drop_oldest_history(self.hsize - retained);
+            }
+        } else {
             self.clamp_history_to_retained();
         }
+    }
+
+    /// The `n` oldest rows of tmux's history went from the primary screen
+    /// under the alternate one (a budget pruned them).
+    fn drop_oldest_history(&mut self, n: usize) {
+        self.drop_oldest_frozen_marks(n);
+        self.hsize -= n;
+        self.hscrolled = self.hscrolled.min(self.hsize);
+    }
+
+    /// The `n` oldest history rows went under the alternate screen: the
+    /// marks kept for them go and the others move up.
+    fn drop_oldest_frozen_marks(&mut self, n: usize) {
+        self.frozen_marks = std::mem::take(&mut self.frozen_marks)
+            .into_iter()
+            .filter_map(|(y, m)| Some((y.checked_sub(n)?, m)))
+            .collect();
     }
 
     /// `grid_clear_history` (grid.c:515-525), as `clear-history` calls it on
@@ -2619,7 +2614,7 @@ impl PaneTerm {
     pub fn clear_history(&mut self) {
         self.generation += 1;
         if self.alternate_on() {
-            self.frozen = Some(Rc::default());
+            self.drop_oldest_frozen_marks(self.hsize);
             self.hsize = 0;
             self.hscrolled = 0;
             self.clear_primary_history = true;
@@ -2647,8 +2642,9 @@ impl PaneTerm {
     /// history whatever the limit becomes (see the `history` field).
     ///
     /// Ghostty prunes whole pages, so the rows collected here may stay
-    /// retained beneath `history_size` until its line limit catches up. The
-    /// copy of the history taken for the alternate screen is trimmed too.
+    /// retained beneath `history_size` until its line limit catches up.
+    /// Under the alternate screen tmux's history is the primary's newest
+    /// `hsize` rows, so it loses its oldest.
     pub fn set_history_limit(&mut self, limit: usize) {
         self.history_lines = limit;
         if !self.history {
@@ -2660,16 +2656,8 @@ impl PaneTerm {
             self.hsize -= ny;
             self.hscrolled = self.hscrolled.min(self.hsize);
             self.trim_times(self.hsize);
-            if let Some(frozen) = &mut self.frozen {
-                // A copy mode may share the rows: it keeps its own.
-                let frozen = Rc::make_mut(frozen);
-                frozen.drain(..ny.min(frozen.len()));
-                self.frozen_marks = std::mem::take(&mut self.frozen_marks)
-                    .into_iter()
-                    .filter_map(|(y, m)| Some((y.checked_sub(ny)?, m)))
-                    .collect();
-            }
             if self.alternate_on() {
+                self.drop_oldest_frozen_marks(ny);
                 self.alt_collected += ny;
             }
         }
@@ -6336,6 +6324,14 @@ mod tests {
         assert_eq!(t.history_size(), 1);
         t.feed(b"\x1b[?1049h\x1b]133;A\x07");
         assert_eq!(t.line_marks()[0], (0, LineMark::Prompt));
+        // ED3 under the alternate screen clears the primary history
+        // (input.c:1758), and the history's marks go with its lines.
+        t.feed(b"\x1b[3J");
+        assert_eq!(t.history_size(), 0);
+        assert_eq!(
+            t.line_marks(),
+            [(0, LineMark::Output), (2, LineMark::Prompt)]
+        );
     }
 
     /// An ED or ECH that clears a whole line empties it, OSC 133 flags
@@ -6573,9 +6569,15 @@ mod tests {
     #[test]
     fn history_budget_lowered_under_the_alternate_screen() {
         let mut t = PaneTerm::new(80, 5, 2000);
-        t.feed(&b"x\r\n".repeat(2500));
+        t.feed(&lines(0, 2500, false));
         t.feed(b"\x1b[?1049h");
+        let newest = t.row(t.history_size() - 1).text();
         t.set_history_budget(3 * PAGE_BYTES);
+        // The history shown meanwhile is the primary's, pruned now.
+        let retained = t.primary_history_rows();
+        assert!(retained < 2000, "{retained}");
+        assert_eq!(t.history_size(), retained);
+        assert_eq!(t.row(retained - 1).text(), newest);
         t.feed(b"\x1b[?1049l");
         let retained = t.term.scrollback_rows().unwrap();
         assert!(retained < 2000, "{retained}");

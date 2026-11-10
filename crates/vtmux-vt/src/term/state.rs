@@ -351,9 +351,9 @@ pub struct PaneState {
     /// OSC 133 marks: each line's row in the primary screen (Ghostty's
     /// screen coordinates) and what was recorded.
     pub marks: Vec<(u32, Osc133)>,
-    /// The primary history and screen copied when the alternate screen
-    /// came up, and the history's marks.
-    pub frozen: Option<Vec<FrozenRowState>>,
+    /// The marks of the primary history and the primary screen's visible
+    /// rows as the alternate screen came up. The history itself is the
+    /// primary screen's, which the alternate screen leaves as it was.
     pub frozen_marks: Vec<(usize, Osc133)>,
     pub saved: Option<Vec<FrozenRowState>>,
     /// The primary row tmux's history started at when the alternate screen
@@ -1270,10 +1270,6 @@ impl PaneTerm {
                 .iter()
                 .filter_map(|(pin, data)| Some((screen_y(pin)?, *data)))
                 .collect(),
-            frozen: self
-                .frozen
-                .as_ref()
-                .map(|rows| rows.iter().map(FrozenRow::to_state).collect()),
             frozen_marks: self.frozen_marks.clone(),
             saved: self
                 .saved
@@ -1354,10 +1350,6 @@ impl PaneTerm {
         self.alt_collected = p.alt_collected;
         self.clear_primary_history = p.clear_primary_history;
         self.redraw = p.redraw;
-        self.frozen = p
-            .frozen
-            .as_ref()
-            .map(|rows| Rc::new(rows.iter().map(FrozenRow::from_state).collect()));
         self.frozen_marks.clone_from(&p.frozen_marks);
         self.saved = p
             .saved
@@ -1592,17 +1584,15 @@ impl StateImport {
         let _ = pane.term.vtmux_set_title(&title);
         let _ = pane.term.vtmux_set_pwd(&pwd);
 
-        // tmux's history is the newest `hsize` rows Ghostty retains
-        // (`PaneTerm::history`); under an alternate screen it is the copy
-        // taken on entry (none: no history), and Ghostty may have
-        // reflowed the primary since. Leaving it clamps to what is
-        // retained (`clamp_history_to_retained`).
-        let history = if alternate_active {
-            pane.frozen.as_ref().map_or(usize::MAX, |rows| rows.len())
-        } else {
-            pane.term.scrollback_rows().unwrap_or(0)
-        };
-        if pane.hsize > history {
+        // tmux's history is the newest `hsize` rows Ghostty retains on the
+        // primary screen (`PaneTerm::history`), under an alternate screen
+        // too. A writer that kept a copy of it there may have kept rows a
+        // lowered budget has pruned since: they go, as
+        // `PaneTerm::set_history_budget` drops them now.
+        let history = pane.primary_history_rows();
+        if pane.hsize > history && alternate_active {
+            pane.drop_oldest_history(pane.hsize - history);
+        } else if pane.hsize > history {
             return Err(StateError::Invalid("history size over the rows retained"));
         }
         let pin = |pane: &PaneTerm, y: u32| {

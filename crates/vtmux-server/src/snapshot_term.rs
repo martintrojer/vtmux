@@ -1020,31 +1020,6 @@ fn frozen_in(row: &snap::Row) -> FrozenRowState {
     }
 }
 
-fn frozen_pages(rows: &[FrozenRowState]) -> Vec<snap::HistoryPage> {
-    let mut pages = Vec::new();
-    let mut b = PageBuilder::new();
-    for r in rows {
-        let row = frozen_out(r);
-        if b.rows() > 0 && !b.fits(&row) {
-            pages.push(std::mem::take(&mut b).finish(false));
-        }
-        b.push(&row);
-    }
-    if b.rows() > 0 {
-        pages.push(b.finish(false));
-    }
-    pages
-}
-
-fn frozen_rows(pages: &[snap::HistoryPage]) -> Result<Vec<FrozenRowState>, TermError> {
-    let mut out = Vec::new();
-    for p in pages {
-        p.each_row(|r| out.push(frozen_in(r)))
-            .map_err(|e| TermError::Snapshot(e.to_string()))?;
-    }
-    Ok(out)
-}
-
 fn sync_out(screen: &vt::Snapshot, left: Duration) -> snap::term::SyncHold {
     let cols = usize::from(screen.cols);
     let rows = screen
@@ -1490,8 +1465,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             default: Some(m.default),
         })
         .collect();
-    let alt = p.frozen.is_some()
-        || p.saved.is_some()
+    let alt = p.saved.is_some()
         || p.alt_entry.is_some()
         || !p.frozen_marks.is_empty()
         || p.alt_collected != 0
@@ -1502,7 +1476,9 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             .as_ref()
             .map(|rows| rows.iter().map(frozen_out).collect())
             .unwrap_or_default(),
-        history: p.frozen.as_deref().map(frozen_pages).unwrap_or_default(),
+        // The primary screen's own history, in `primary`: the alternate
+        // screen leaves it as it was (Ghostty patch 0038).
+        history: Vec::new(),
         marks: p
             .frozen_marks
             .iter()
@@ -1513,7 +1489,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         collected: p.alt_collected as u64,
         entry_row: p.alt_entry.map(|(y, _)| u64::from(y)),
         has_saved: p.saved.is_some(),
-        has_history: p.frozen.is_some(),
+        has_history: false,
     });
     let (g0, g1, shifted, (s0, s1, ss)) = p.charset;
     let (shape, blinking, blinking_set, option) = p.cursor_style;
@@ -1783,11 +1759,8 @@ pub fn term_from_snapshot_with(
     }
     let h = &t.history;
     let usize_of = |v: u64, what| narrow::<usize>(v, what);
-    let frozen = if alt.has_history {
-        Some(frozen_rows(&alt.history)?)
-    } else {
-        None
-    };
+    // A writer from before Ghostty patch 0038 copied the primary history
+    // into `alt.history`; the primary screen still has it.
     let hsize = usize_of(h.hsize, "history size")?;
     let saved: Option<Vec<FrozenRowState>> = alt
         .has_saved
@@ -1869,7 +1842,6 @@ pub fn term_from_snapshot_with(
             .iter()
             .map(|m| Ok((narrow(m.row, "mark row")?, osc133_in(&m.mark)?)))
             .collect::<Result<_, TermError>>()?,
-        frozen,
         frozen_marks: alt
             .marks
             .iter()

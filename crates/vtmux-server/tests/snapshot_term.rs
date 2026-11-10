@@ -304,6 +304,44 @@ fn long_history_in_both_forms() {
     round_trip(&mut a, Form::Rows, b"\x1b[?1049l", "long alternate, rows");
 }
 
+/// A writer from before Ghostty patch 0038 copied the history an
+/// alternate screen hides into `AltEntry::history`. The primary screen
+/// has it all the same and it is read from there; history that writer's
+/// copy kept after a lowered budget pruned it from the primary is dropped,
+/// not refused.
+#[test]
+fn an_old_writers_copy_of_the_hidden_history_is_not_read() {
+    let text: Vec<u8> = (0..300)
+        .flat_map(|i| format!("line {i}\r\n").into_bytes())
+        .collect();
+    let mut a = pane(40, 5, 1000, &text);
+    a.feed(b"\x1b[?1049hvim");
+    let hsize = a.history_size();
+    assert!(hsize > 200, "{hsize}");
+    let want: Vec<String> = (0..hsize).map(|y| a.row(y).text()).collect();
+    assert_eq!(want[hsize - 1], "line 295");
+    let mut t = term_to_snapshot(&a, Form::Rows);
+    let alt = t.alt_entry.as_mut().expect("alternate screen up");
+    assert!(alt.history.is_empty() && !alt.has_history, "not written");
+    // What the old writer put there, blank rows standing in for it.
+    alt.history = vec![snap::HistoryPage::from_rows(
+        &vec![snap::Row::default(); hsize],
+        false,
+    )];
+    alt.has_history = true;
+    let b = term_from_snapshot(&t, PATCH_STACK).expect("import");
+    assert_eq!(b.history_size(), hsize);
+    let got: Vec<String> = (0..hsize).map(|y| b.row(y).text()).collect();
+    assert_eq!(got, want);
+    // Its copy kept 7 rows more than the primary has.
+    t.history.hsize += 7;
+    t.history.scrolled += 7;
+    let b = term_from_snapshot(&t, PATCH_STACK).expect("import");
+    assert_eq!(b.history_size(), hsize);
+    let got: Vec<String> = (0..hsize).map(|y| b.row(y).text()).collect();
+    assert_eq!(got, want);
+}
+
 /// Each page of the primary screen: rows, width and capacity, or a blob.
 fn page_shapes(t: &PaneTerm) -> Vec<String> {
     t.export_state_with(vtmux_vt::CompressedPages::Rows)

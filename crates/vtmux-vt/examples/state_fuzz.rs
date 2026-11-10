@@ -294,7 +294,7 @@ fn mutate_state(st: &mut TermState, r: &mut Rng) {
             if let Some((held, _)) = st.pane.sync.as_mut() {
                 held.cols = r.wild16();
                 held.cursor = Some((r.wild16(), r.wild16()));
-            } else if let Some(row) = st.pane.frozen.as_mut().and_then(|rows| rows.first_mut()) {
+            } else if let Some(row) = st.pane.saved.as_mut().and_then(|rows| rows.first_mut()) {
                 row.len = r.wild() as usize;
             }
         }

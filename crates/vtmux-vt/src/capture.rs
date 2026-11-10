@@ -16,7 +16,7 @@ use std::io::Write as _;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::term::{HistoryRow, LineMark, PaneTerm};
+use crate::term::{LineMark, PaneTerm};
 
 mod raw;
 pub use raw::capture_grid;
@@ -123,6 +123,9 @@ struct PaneRows {
     cols: usize,
     retained: usize,
     alternate: bool,
+    /// The primary screen's history rows while the alternate screen is up
+    /// (see [`PRIMARY`]).
+    primary: usize,
 }
 
 impl PaneRows {
@@ -133,6 +136,11 @@ impl PaneRows {
             cols: usize::from(term.cols()),
             retained: term.term.scrollback_rows().unwrap_or(0),
             alternate: term.alternate_on(),
+            primary: if term.alternate_on() {
+                term.primary_history_rows()
+            } else {
+                0
+            },
         }
     }
 
@@ -142,9 +150,8 @@ impl PaneRows {
     /// from line to line, so a line costs no allocation.
     ///
     /// While the alternate screen is up, tmux keeps showing the primary
-    /// history (screen.c:700-721 saves only the visible rows), but Ghostty
-    /// can only read the active screen, so history comes from the copy
-    /// taken on entry.
+    /// history (screen.c:700-721 saves only the visible rows): it is read
+    /// from the primary screen in place ([`PRIMARY`]).
     fn read<'t>(
         &self,
         t: &'t PaneTerm,
@@ -154,9 +161,8 @@ impl PaneRows {
         cells: &mut Vec<RowCell>,
     ) -> bool {
         let Some((at, walk)) = self.screen_row(y) else {
-            let wrapped;
-            (*cells, wrapped) = t.frozen_row(y).map(FrozenRow::thaw).unwrap_or_default();
-            return wrapped;
+            cells.clear();
+            return false;
         };
         if y < self.hsize {
             t.note_history_read();
@@ -182,7 +188,7 @@ impl PaneRows {
     /// long history.
     fn kept(&self, t: &PaneTerm, y: usize, last: &LastRow<'_>) -> LineKept {
         match self.screen_row(y) {
-            None => t.frozen_row(y).map(|f| f.kept).unwrap_or_default(),
+            None => LineKept::default(),
             Some((at, _)) => match last {
                 Some((from, row_ref)) if *from == at => ref_kept(row_ref),
                 _ => row_ref_at(&t.term, at)
@@ -194,11 +200,13 @@ impl PaneRows {
 
     /// The Ghostty screen row line `y` is (`y + retained - hsize`: Ghostty
     /// may retain more history than tmux has) and the rows a lookup of it
-    /// walks (see [`row_ref_near`]); `None` for the primary history under
-    /// the alternate screen, which is read from its copy.
+    /// walks (see [`row_ref_near`]). Under the alternate screen the
+    /// history is the primary's newest `hsize` rows ([`PRIMARY`]); `None`
+    /// for one it no longer has.
     fn screen_row(&self, y: usize) -> Option<(usize, usize)> {
         if self.alternate && y < self.hsize {
-            return None;
+            let at = self.primary.checked_sub(self.hsize - y)?;
+            return Some((PRIMARY + at, at));
         }
         let at = y + self.retained - self.hsize;
         let walk = at
@@ -978,13 +986,9 @@ impl PaneTerm {
     #[must_use]
     pub fn history_row(&self, id: u64) -> Option<Row> {
         let cols = usize::from(self.cols());
-        let (cells, wrapped) = match self.history_screen_row(id)? {
-            HistoryRow::Screen(y) => {
-                self.note_history_read();
-                read_screen_row(&self.term, y, cols)
-            }
-            HistoryRow::Frozen(f) => f.thaw(),
-        };
+        let y = self.history_screen_row(id)?;
+        self.note_history_read();
+        let (cells, wrapped) = read_screen_row(&self.term, y, cols);
         Some(Row {
             cells: to_cells(&cells, &self.links, false),
             wrapped,
@@ -993,8 +997,7 @@ impl PaneTerm {
 
     /// Row `y` of tmux's grid: `0..history_size()` is history, oldest
     /// first, then the visible rows. While the alternate screen is up the
-    /// history is the primary screen's, copied on entry. Out of range is an
-    /// empty row.
+    /// history is the primary screen's. Out of range is an empty row.
     #[must_use]
     pub fn row(&self, y: usize) -> Row {
         self.rows_in(y..y + 1).next().unwrap_or_default()
@@ -1031,17 +1034,21 @@ pub struct ScreenCopy {
     /// Ghostty's history rows in `term`: tmux's row `y` is screen row
     /// `y + retained - hsize` (see [`PaneRows::screen_row`]).
     retained: usize,
-    /// The primary history copied when the alternate screen came up, which
-    /// is tmux's history while it is up (see [`PaneRows::read`]).
-    frozen: Option<Rc<Vec<FrozenRow>>>,
+    /// Taken under the alternate screen: a copy of the primary screen,
+    /// whose newest `hsize` history rows are tmux's history then (see
+    /// [`PaneRows::read`]), and its history rows. Its rows are looked up
+    /// as [`PRIMARY`] rows.
+    primary: Option<(Terminal<'static, 'static>, usize)>,
+    alternate: bool,
     hsize: usize,
     rows: usize,
     cols: usize,
     /// `grid_line_time` of each history row.
     times: Vec<i64>,
     marks: Vec<(usize, LineMark)>,
-    /// The screen row of `term` read last, which the next read steps from
-    /// (see [`row_ref_near`]). Read only through [`ScreenCopy::row_ref`].
+    /// The screen row of `term` (or [`PRIMARY`] row of `primary`) read
+    /// last, which the next read steps from (see [`row_ref_near`]). Read
+    /// only through [`ScreenCopy::row_ref`].
     last: RefCell<LastRow<'static>>,
     /// The cells and codepoints of the row [`ScreenCopy::text`] read
     /// last, kept for the next: a search reads every row.
@@ -1086,41 +1093,52 @@ impl ScreenCopy {
 
     /// Row `y` is a row of the alternate screen (history is the primary's).
     fn alternate_at(&self, y: usize) -> bool {
-        self.frozen.is_some() && y >= self.hsize
+        self.alternate && y >= self.hsize
+    }
+
+    /// The screen row tmux's row `y` is in the copy: of `term`, or under
+    /// the alternate screen a [`PRIMARY`] row of `primary` for history;
+    /// `None` past the end or for a row the primary no longer has.
+    fn screen_row(&self, y: usize) -> Option<usize> {
+        if y >= self.hsize + self.rows {
+            return None;
+        }
+        if self.alternate && y < self.hsize {
+            let (_, retained) = self.primary.as_ref()?;
+            return Some(PRIMARY + retained.checked_sub(self.hsize - y)?);
+        }
+        Some(y + self.retained - self.hsize)
     }
 
     /// The row's cells; with `used_only` they may stop after the last
     /// cell Ghostty has anything in.
     fn row_cells(&self, y: usize, used_only: bool) -> (Vec<RowCell>, bool) {
-        if y >= self.hsize + self.rows {
-            return (Vec::new(), false);
-        }
-        match (&self.frozen, &self.term) {
-            (Some(frozen), _) if y < self.hsize => {
-                frozen.get(y).map(FrozenRow::thaw).unwrap_or_default()
-            }
-            (_, Some(_)) => match self.row_ref(y + self.retained - self.hsize) {
-                Some(row_ref) => read_cells(&row_ref, self.cols, used_only),
-                None => (Vec::new(), false),
-            },
-            (_, None) => (Vec::new(), false),
+        match self.screen_row(y).and_then(|at| self.row_ref(at)) {
+            Some(row_ref) => read_cells(&row_ref, self.cols, used_only),
+            None => (Vec::new(), false),
         }
     }
 
-    /// The reference to screen row `y` of the copy's terminal, stepped to
-    /// from the row read before it when that is nearer than a lookup
-    /// ([`row_ref_near`]): a search or a reflow reads the rows in order.
+    /// The reference to screen row `y` of the copy's terminal (a
+    /// [`PRIMARY`] row: of `primary`), stepped to from the row read before
+    /// it when that is nearer than a lookup ([`row_ref_near`]): a search or
+    /// a reflow reads the rows in order. Rows of the two never step to one
+    /// another (see [`PRIMARY`]).
     fn row_ref(&self, y: usize) -> Option<GridRef<'_>> {
-        let term = self.term.as_ref()?;
+        let term = if y >= PRIMARY {
+            &self.primary.as_ref()?.0
+        } else {
+            self.term.as_ref()?
+        };
         let last = self.last.borrow().clone();
         let row_ref = row_ref_near(term, y, last.as_ref())?;
-        // SAFETY: a `GridRef` is a plain pointer into `term`'s page list
-        // (no drop); the lifetime is only a borrow of `term`. `term` is
-        // owned by this copy and never changed after it is taken (it is
-        // only read, through `&self`; reading a compressed page restores it
-        // in place, keeping its node), so the reference stays valid for as
-        // long as the copy lives, and it leaves `last` only through this
-        // method, shortened to a borrow of `self`.
+        // SAFETY: a `GridRef` is a plain pointer into the page list of
+        // `term` or `primary` (no drop); the lifetime is only a borrow of
+        // it. Both are owned by this copy and never changed after it is
+        // taken (they are only read, through `&self`; reading a compressed
+        // page restores it in place, keeping its node), so the reference
+        // stays valid for as long as the copy lives, and it leaves `last`
+        // only through this method, shortened to a borrow of `self`.
         let keep = unsafe { std::mem::transmute::<GridRef<'_>, GridRef<'static>>(row_ref.clone()) };
         *self.last.borrow_mut() = Some((y, keep));
         Some(row_ref)
@@ -1140,10 +1158,7 @@ impl ScreenCopy {
     /// line.
     pub fn text(&self, y: usize, out: &mut String) -> Option<bool> {
         out.clear();
-        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
-            return None;
-        }
-        let row_ref = self.row_ref(y + self.retained - self.hsize)?;
+        let row_ref = self.row_ref(self.screen_row(y)?)?;
         let wrapped = row_ref.row().ok()?.is_wrapped().ok()?;
         let (raw, codepoints) = &mut *self.scratch.borrow_mut();
         row_ref.row_cells(raw).ok()?;
@@ -1174,7 +1189,7 @@ impl ScreenCopy {
     /// none.
     #[must_use]
     pub fn hyperlink(&self, x: usize, y: usize) -> Option<String> {
-        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
+        if y >= self.hsize + self.rows || (self.alternate && y < self.hsize) {
             return None;
         }
         hyperlink_at(self.term.as_ref()?, y + self.retained - self.hsize, x)
@@ -1189,10 +1204,7 @@ impl ScreenCopy {
         out: &mut Vec<u32>,
         styles: &mut StyleRow,
     ) -> Option<bool> {
-        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
-            return None;
-        }
-        let row_ref = self.row_ref(y + self.retained - self.hsize)?;
+        let row_ref = self.row_ref(self.screen_row(y)?)?;
         plain_cells(&row_ref, self.cols, kind, raw, out, styles)
     }
 
@@ -1274,16 +1286,22 @@ impl PaneTerm {
 
     /// Copy the grid (see [`ScreenCopy`]). Compressed history pages are
     /// copied compressed: the pane's stay so, the copy decodes a page on
-    /// its first read.
+    /// its first read. Under the alternate screen the primary screen is
+    /// copied too, for its history (`window_copy_clone_screen` copies the
+    /// grid, which holds it in tmux).
     #[must_use]
     pub fn copy_screen(&self) -> ScreenCopy {
         let hsize = self.history_size();
-        let frozen = if self.alternate_on() {
-            self.frozen_rows()
+        if hsize > 0 {
+            self.note_history_read();
+        }
+        let alternate = self.alternate_on();
+        let primary = if alternate && hsize > 0 {
+            self.term.vtmux_clone_screen_of(0).ok().map(|t| {
+                let retained = t.scrollback_rows().unwrap_or(0);
+                (t, retained)
+            })
         } else {
-            if hsize > 0 {
-                self.note_history_read();
-            }
             None
         };
         let term = self.term.clone_screen().ok();
@@ -1294,7 +1312,8 @@ impl PaneTerm {
         ScreenCopy {
             term,
             retained,
-            frozen,
+            primary,
+            alternate,
             hsize,
             rows: usize::from(self.rows()),
             cols: usize::from(self.cols()),
@@ -1446,6 +1465,16 @@ fn read_screen_row_near<'t>(
 /// Ghostty keeps) and the reference to it: the row a reader resolved last.
 pub(crate) type LastRow<'t> = Option<(usize, GridRef<'t>)>;
 
+/// Screen row `PRIMARY + y` is row `y` of the primary screen's history,
+/// active or not (patch 0038): under the alternate screen tmux's history
+/// is the primary's, which Ghostty leaves as it was (patch 0028) and
+/// vtmux reads in place, so bringing the alternate screen up copies
+/// nothing. A lookup ([`row_ref_at`]) resolves it on the primary screen;
+/// it is so far from every row of the active screen that a reader never
+/// steps from a row of one screen to a row of the other
+/// ([`row_ref_stepped`] steps no further than a lookup would walk).
+pub(crate) const PRIMARY: usize = 1 << (usize::BITS - 2);
+
 /// The reference to row `y` of a screen, as [`row_ref_at`] gives it, but
 /// stepped to from `last` (patch 0033's `ghostty_grid_ref_down` and `_up`)
 /// when that crosses no more rows than the lookup's walk would: a lookup
@@ -1460,9 +1489,12 @@ fn row_ref_near<'t>(
 ) -> Option<GridRef<'t>> {
     // The rows the lookup's walk crosses: the history above a history
     // row, the screen and the screen rows above an active row.
-    let walk = y
-        .checked_sub(term.scrollback_rows().unwrap_or(0))
-        .map_or(y, |active| active + usize::from(term.rows().unwrap_or(0)));
+    let walk = match y.checked_sub(PRIMARY) {
+        Some(history) => history,
+        None => y
+            .checked_sub(term.scrollback_rows().unwrap_or(0))
+            .map_or(y, |active| active + usize::from(term.rows().unwrap_or(0))),
+    };
     row_ref_stepped(term, y, walk, last)
 }
 
@@ -1512,6 +1544,13 @@ fn ref_kept(row_ref: &GridRef<'_>) -> LineKept {
 fn row_ref_at<'t>(term: &'t Terminal<'_, '_>, y: usize) -> Option<GridRef<'t>> {
     #[cfg(test)]
     tests::LOOKUPS.with(|n| n.set(n.get() + 1));
+    if let Some(history) = y.checked_sub(PRIMARY) {
+        let at = Point::Screen(PointCoordinate {
+            x: 0,
+            y: u32::try_from(history).ok()?,
+        });
+        return term.vtmux_screen_grid_ref(0, at).ok();
+    }
     term.grid_ref(screen_point(term, 0, y)).ok()
 }
 
@@ -2604,21 +2643,48 @@ mod tests {
         assert!(lookups() - before <= 8, "{} lookups", lookups() - before);
     }
 
-    /// The alternate screen coming up copies the primary history (tmux
-    /// goes on showing it) a step per row, and the copy reads as the rows
-    /// did: a lookup per row made `vim` or `less` take seconds to start
-    /// over a long history.
+    /// The alternate screen coming up reads none of the primary history
+    /// (tmux goes on showing it): it is read in place (Ghostty patch 0038),
+    /// where copying it a row at a time made `vim` or `less` take seconds
+    /// to start over a long history. Only the visible rows are kept
+    /// (`saved_grid`). The history reads as it did, from the pane, its
+    /// copy, a capture, and by history id.
     #[test]
-    fn alternate_screen_copies_history_a_step_per_row() {
+    fn alternate_screen_reads_the_primary_history_in_place() {
         let mut t = long_history();
         let hsize = t.history_size();
         let want: Vec<Row> = (0..hsize).map(|y| t.row(y)).collect();
-        let before = lookups();
+        let reads = || lookups() + STEPS.with(std::cell::Cell::get);
+        let before = reads();
         t.feed(b"\x1b[?1049h");
         assert!(t.alternate_on());
-        assert!(lookups() - before <= 4, "{} lookups", lookups() - before);
+        let rows = usize::from(t.rows());
+        assert!(
+            reads() - before <= rows + 1,
+            "{} rows read",
+            reads() - before
+        );
         assert_eq!(t.history_size(), hsize);
         assert!((0..hsize).all(|y| t.row(y) == want[y]));
+        let copy = t.copy_screen();
+        assert!((0..hsize).all(|y| copy.row(y) == want[y]));
+        let ids: Vec<u64> = (0..hsize).map(|y| t.history_id(y)).collect();
+        assert!(
+            ids.iter()
+                .zip(&want)
+                .all(|(&id, row)| t.history_row(id).as_ref() == Some(row))
+        );
+        let all = CaptureOpts {
+            start: LineRef::Start,
+            ..Default::default()
+        };
+        let lines = String::from_utf8(capture(&t, all)).unwrap();
+        let history: Vec<&str> = lines.lines().take(hsize).collect();
+        let texts: Vec<String> = want.iter().map(Row::text).collect();
+        assert_eq!(
+            history,
+            texts.iter().map(|s| s.trim_end()).collect::<Vec<_>>()
+        );
     }
 
     /// Rows stepped to read the same as rows looked up, in any order:
@@ -2690,8 +2756,8 @@ mod tests {
     /// A few rows of such cells are read from cells too: a tab a resize cut
     /// and the column a wrapped wide character left read as blanks, but
     /// are not plain in Ghostty's cell. Over random content: resident,
-    /// compressed, and the alternate screen (the primary history it hides
-    /// is read from cells).
+    /// compressed, and the alternate screen (whose history is the primary
+    /// screen's, read in place).
     #[test]
     fn a_copy_row_as_text_is_its_cells() {
         let mut rng = Rng(0x2545_f491_4f6c_dd1d);
@@ -2713,10 +2779,6 @@ mod tests {
             let mut text = String::new();
             for y in 0..copy.history_size() + 6 {
                 let got = copy.text(y, &mut text);
-                if round == 2 && y < copy.history_size() {
-                    assert_eq!(got, None, "row {y}");
-                    continue;
-                }
                 let row = copy.used_row(y);
                 let narrow = row
                     .cells

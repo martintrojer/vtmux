@@ -1,0 +1,583 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "alt_screen_copy_mode_history",
+  "inputs": {
+    "name": "alt_screen_copy_mode_history",
+    "size": [
+      24,
+      9
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "z",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right][#{scroll_position}/#{history_size}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "history-limit",
+          "5000"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "60",
+          "-y",
+          "8",
+          "-n",
+          "w",
+          "sh",
+          "-c",
+          "stty -echo; i=0; while [ $i -lt 3000 ]; do printf 'line %04d %s\\n' $i abcdefghijklmnopqrstuvwxyz0123456789; i=$((i+1)); done; printf '\\033[?1049h\\033[HALT SCREEN'; tmux wait-for -S alt; read x; printf '\\033[?1049l'; echo BACK; tmux wait-for -S back; exec cat"
+        ]
+      },
+      {
+        "wait_for": "alt"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{alternate_on} #{history_size}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-3",
+          "-E",
+          "1",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-E",
+          "-2990",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "wait_screen": {
+          "has": [
+            "ALT SCREEN"
+          ]
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{alternate_on} #{history_size} #{pane_width}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-E",
+          "-2995",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-2",
+          "-E",
+          "0",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "history-top"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "history-bottom"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "search-backward",
+          "line 1234"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{copy_cursor_y} #{scroll_position} #{copy_cursor_line}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "history-limit",
+          "1000"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{alternate_on} #{history_size}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-E",
+          "-998",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%1",
+          "bytes": "\r"
+        }
+      },
+      {
+        "wait_for": "back"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{alternate_on} #{history_size}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-E",
+          "-998",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-3",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 2993\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 2990 abcdefghijklmnopqrstuvwxyz0123456789\nline 2991 abcdefghijklmnopqrstuvwxyz0123456789\nline 2992 abcdefghijklmnopqrstuvwxyz0123456789\nALT SCREEN\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 0000 abcdefghijklmnopqrstuvwxyz0123456789\nline 0001 abcdefghijklmnopqrstuvwxyz0123456789\nline 0002 abcdefghijklmnopqrstuvwxyz0123456789\nline 0003 abcdefghijklmnopqrstuvwxyz0123456789\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 2993 24\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 0000 abcdefghijklmn\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 2991 abcdefghijklmn\nline 2992 abcdefghijklmn\nALT SCREEN\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line 0000 abc\\e[30m\\e[43m[2993/2993]",
+          "\\e[39m\\e[49mline 0001 abcdefghijklmn",
+          "line 0002 abcdefghijklmn",
+          "line 0003 abcdefghijklmn",
+          "line 0004 abcdefghijklmn",
+          "line 0005 abcdefghijklmn",
+          "line 0006 abcdefghijklmn",
+          "line 0007 abcdefghijklmn",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line 1228 abc\\e[30m\\e[43m[1765/2993]",
+          "\\e[39m\\e[49mline 1229 abcdefghijklmn",
+          "line 1230 abcdefghijklmn",
+          "line 1231 abcdefghijklmn",
+          "line 1232 abcdefghijklmn",
+          "line 1233 abcdefghijklmn",
+          "\\e[30m\\e[45mline 1234\\e[39m\\e[49m abcdefghijklmn",
+          "line 1235 abcdefghijklmn",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          6
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "6 1765 line 1234 abcdefghijklmn\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "ALT SCREEN",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          10,
+          0
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 1000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 1993 abcdefghijklmn\nline 1994 abcdefghijklmn\nline 1995 abcdefghijklmn\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 1908\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "line 2043 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2044 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2045 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2046 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2047 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2048 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2049 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2050 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2051 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2052 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2053 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2054 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2055 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2056 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2057 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2058 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2059 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2060 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2061 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2062 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2063 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2064 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2065 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2066 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2067 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2068 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2069 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2070 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2071 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2072 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2073 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2074 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2075 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2076 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2077 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2078 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2079 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2080 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2081 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2082 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2083 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2084 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2085 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2086 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2087 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2088 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2089 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2090 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2091 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2092 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2093 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2094 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2095 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2096 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2097 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2098 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2099 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2100 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2101 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2102 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2103 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2104 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2105 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2106 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2107 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2108 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2109 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2110 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2111 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2112 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2113 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2114 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2115 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2116 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2117 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2118 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2119 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2120 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2121 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2122 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2123 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2124 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2125 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2126 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2127 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2128 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2129 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2130 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2131 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2132 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2133 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2134 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2135 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2136 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2137 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2138 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2139 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2140 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2141 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2142 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2143 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2144 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2145 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2146 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2147 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2148 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2149 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2150 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2151 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2152 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2153 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2154 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2155 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2156 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2157 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2158 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2159 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2160 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2161 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2162 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2163 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2164 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2165 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2166 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2167 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2168 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2169 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2170 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2171 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2172 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2173 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2174 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2175 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2176 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2177 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2178 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2179 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2180 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2181 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2182 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2183 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2184 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2185 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2186 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2187 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2188 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2189 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2190 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2191 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2192 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2193 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2194 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2195 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2196 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2197 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2198 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2199 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2200 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2201 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2202 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2203 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2204 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2205 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2206 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2207 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2208 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2209 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2210 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2211 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2212 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2213 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2214 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2215 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2216 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2217 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2218 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2219 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2220 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2221 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2222 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2223 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2224 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2225 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2226 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2227 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2228 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2229 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2230 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2231 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2232 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2233 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2234 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2235 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2236 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2237 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2238 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2239 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2240 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2241 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2242 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2243 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2244 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2245 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2246 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2247 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2248 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2249 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2250 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2251 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2252 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2253 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2254 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2255 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2256 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2257 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2258 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2259 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2260 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2261 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2262 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2263 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2264 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2265 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2266 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2267 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2268 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2269 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2270 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2271 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2272 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2273 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2274 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2275 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2276 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2277 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2278 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2279 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2280 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2281 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2282 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2283 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2284 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2285 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2286 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2287 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2288 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2289 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2290 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2291 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2292 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2293 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2294 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2295 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2296 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2297 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2298 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2299 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2300 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2301 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2302 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2303 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2304 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2305 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2306 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2307 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2308 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2309 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2310 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2311 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2312 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2313 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2314 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2315 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2316 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2317 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2318 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2319 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2320 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2321 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2322 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2323 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2324 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2325 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2326 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2327 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2328 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2329 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2330 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2331 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2332 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2333 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2334 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2335 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2336 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2337 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2338 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2339 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2340 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2341 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2342 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2343 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2344 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2345 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2346 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2347 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2348 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2349 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2350 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2351 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2352 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2353 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2354 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2355 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2356 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2357 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2358 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2359 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2360 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2361 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2362 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2363 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2364 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2365 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2366 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2367 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2368 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2369 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2370 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2371 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2372 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2373 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2374 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2375 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2376 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2377 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2378 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2379 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2380 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2381 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2382 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2383 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2384 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2385 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2386 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2387 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2388 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2389 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2390 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2391 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2392 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2393 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2394 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2395 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2396 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2397 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2398 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2399 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2400 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2401 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2402 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2403 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2404 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2405 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2406 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2407 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2408 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2409 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2410 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2411 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2412 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2413 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2414 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2415 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2416 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2417 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2418 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2419 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2420 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2421 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2422 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2423 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2424 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2425 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2426 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2427 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2428 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2429 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2430 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2431 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2432 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2433 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2434 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2435 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2436 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2437 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2438 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2439 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2440 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2441 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2442 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2443 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2444 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2445 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2446 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2447 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2448 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2449 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2450 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2451 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2452 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2453 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2454 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2455 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2456 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2457 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2458 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2459 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2460 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2461 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2462 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2463 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2464 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2465 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2466 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2467 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2468 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2469 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2470 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2471 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2472 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2473 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2474 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2475 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2476 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2477 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2478 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2479 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2480 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2481 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2482 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2483 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2484 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2485 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2486 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2487 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2488 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2489 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2490 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2491 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2492 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2493 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2494 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2495 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2496 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2497 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2498 abcdefghijklmn\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "opqrstuvwxyz0123456789\nline 2996 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2997 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2998 abcdefghijklmn\nopqrstuvwxyz0123456789\nline 2999 abcdefghijklmn\nopqrstuvwxyz0123456789\nBACK\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

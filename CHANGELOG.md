@@ -6,6 +6,8 @@ vtmux's version is the tmux release it is tested against: `3.8-beta1` is the fir
 
 **Fixes.** A split or respawned pane's window is named after its command, as a new window's is, not after the process caught before it execs (the server binary, `vtmux-<sha>`, on macOS).
 
+**vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s).
+
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).

@@ -304,7 +304,7 @@ fn pane(p: &PaneState) -> Result<(), StateError> {
         u32::try_from(p.input_buffer_size).is_ok(),
         "input buffer size",
     )?;
-    for rows in [&p.frozen, &p.saved].into_iter().flatten() {
+    if let Some(rows) = &p.saved {
         rows.iter().try_for_each(frozen_row)?;
     }
     if let Some((held, _)) = &p.sync {

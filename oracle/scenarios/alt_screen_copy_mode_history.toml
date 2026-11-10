@@ -1,0 +1,48 @@
+name = "alt_screen_copy_mode_history"
+size = [24, 9]
+# The primary history an alternate screen hides stays tmux's history while it
+# is up (screen.c screen_alternate_on saves only the visible rows): captures,
+# copy mode and its search read it, a resize under the alternate screen does
+# not reflow it (window_pane_resize: screen_resize with reflow off) and a
+# capture cuts it at the pane's width (grid_string_cells with the pane's sx),
+# a lowered history-limit trims it (session_update_history), and it is all
+# there again when the program leaves. 3000 lines span many Ghostty pages,
+# read in place under the alternate screen (Ghostty patch 0038).
+steps = [
+  { run = ["new", "-d", "-s", "z", "cat", "-"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{scroll_position}/#{history_size}]"] },
+  { run = ["set", "-g", "history-limit", "5000"] },
+  { run = ["new", "-d", "-s", "a", "-x", "60", "-y", "8", "-n", "w", "sh", "-c", "stty -echo; i=0; while [ $i -lt 3000 ]; do printf 'line %04d %s\\n' $i abcdefghijklmnopqrstuvwxyz0123456789; i=$((i+1)); done; printf '\\033[?1049h\\033[HALT SCREEN'; tmux wait-for -S alt; read x; printf '\\033[?1049l'; echo BACK; tmux wait-for -S back; exec cat"] },
+  { wait_for = "alt" },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}"] },
+  { run = ["capture-pane", "-p", "-S", "-3", "-E", "1", "-t", "a"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-E", "-2990", "-t", "a"] },
+  # Attached at 24x9: the window narrows to 24x8 under the alternate screen.
+  { attach = { session = "a" } },
+  { wait_screen = { has = ["ALT SCREEN"] } },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size} #{pane_width}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-E", "-2995", "-t", "a"] },
+  { run = ["capture-pane", "-p", "-J", "-S", "-2", "-E", "0", "-t", "a"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-top"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "history-bottom"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "line 1234"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{copy_cursor_y} #{scroll_position} #{copy_cursor_line}"] },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # A lower limit trims the hidden history at once.
+  { run = ["set", "-g", "history-limit", "1000"] },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-E", "-998", "-t", "a"] },
+  { feed = { pane = "%1", bytes = "\r" } },
+  { wait_for = "back" },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-E", "-998", "-t", "a"] },
+  { run = ["capture-pane", "-p", "-S", "-3", "-t", "a"] },
+]

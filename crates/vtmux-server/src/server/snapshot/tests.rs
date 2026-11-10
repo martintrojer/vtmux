@@ -1384,6 +1384,10 @@ fn an_ordinary_attached_client_requires_no_feature() {
         a.model.windows[&vtmux_core::ids::WindowId(0)].cell_pixels,
         (10, 20)
     );
+    // An editor up over history: the primary history it hides is read in
+    // place (Ghostty patch 0038), and only the visible rows are kept.
+    a.pane_input(vtmux_core::ids::PaneId(0), &b"line\r\n".repeat(200), false);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?1049hvim", false);
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
@@ -1395,6 +1399,8 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert!(q.da && q.da2 && q.xtversion, "{q:?}");
     assert!(c.terminal_title.is_some(), "set-titles set one");
     assert!(!s.panes[0].term.as_ref().unwrap().inband_resize);
+    let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
+    assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
     assert_eq!(s.meta.requires, Vec::<String>::new());
     drop(a);
     let _ = std::fs::remove_dir_all(dir);

@@ -26,7 +26,7 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | Creating 400 panes | 200 ms CPU | 380 ms | 1.9x **Worse** |
 | Search a 1M-line history | 1.65 s | 0.55 s | 0.34x |
 | `capture-pane -S -` of 1M lines | 840 ms | 385 ms | 0.46x |
-| Alternate screen up over 1M lines of history | 3-73 ms | 1.8-4.0 s | **Worse** |
+| Alternate screen up over 1M lines of history | 3-4 ms | 3 ms | 1x |
 | Live upgrade, 10 panes x 100k lines | kill-server | 0.6-0.9 s | |
 | Release binary, stripped | 1.3 MB | 10.0 MB | 7.7x **Worse** |
 
@@ -105,7 +105,7 @@ vtmux is 0.1 ms behind with no flood: each frame does work proportional to the s
 
 ## Big histories
 
-Reading a 1M-line history is faster than tmux; bringing up the alternate screen over one is not. Release build, one 120x40 pane of log lines:
+Reading a 1M-line history is faster than tmux, and bringing up the alternate screen over one costs the same. Release build, one 120x40 pane of log lines:
 
 | 1M lines | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|
@@ -114,9 +114,10 @@ Reading a 1M-line history is faster than tmux; bringing up the alternate screen 
 | `capture-pane -p -e -S -` | 4.6 s | 0.93 s | 0.20x |
 | enter copy mode, history compressed | 220 ms | 57 ms | 0.26x |
 | enter copy mode, fresh history | 236 ms | 281 ms | 1.19x **Worse** |
-| alternate screen up (vim, less) | 3 ms | 4.0 s | **Worse** |
+| alternate screen up (vim, less) | 3-4 ms | 3 ms | 1x |
+| copy-mode search with the alternate screen up | 1.74 s | 0.57 s | 0.33x |
 
-The alternate screen copies the whole primary history, because Ghostty reads only the active screen and tmux keeps showing that history. On another host (a laptop) it took 1.8 s at 1M lines and 172 ms at 100k; at the default `history-limit` of 2000 it is 10-20 ms.
+The alternate screen leaves the primary history where it is, and vtmux reads it there, as tmux does. Copy mode on top of it copies that history, as tmux's does: entering costs what fresh-history entry costs.
 
 ## Live upgrade
 
