@@ -97,22 +97,28 @@ impl Normalizer {
         r
     }
 
-    /// A control-mode stream (or any stdout): `text`, guard lines with
+    /// A control-mode stream (or any stdout): guard lines with
     /// timestamps dropped and command numbers renumbered by first appearance
     /// (absolute numbers count internal queue items, cmd-queue.c:713,745-746),
     /// and runs of `%output` coalesced per pane into one decoded payload
     /// (chunking depends on buffering, control.c:807-855,936-948).
     pub fn stream(&self, s: &str) -> Vec<String> {
-        let text = self.text(s);
         let mut numbers: HashMap<String, usize> = HashMap::new();
         let mut out = Vec::new();
         let mut pending: Vec<(String, Vec<u8>)> = Vec::new();
         let flush = |pending: &mut Vec<(String, Vec<u8>)>, out: &mut Vec<String>| {
             for (pane, bytes) in pending.drain(..) {
-                out.push(format!("%output {pane} {}", bytes.escape_ascii()));
+                // Normalize only after decoding and coalescing: control.c
+                // control_write_pending can split a volatile token anywhere.
+                let mut normalized = Vec::new();
+                for chunk in bytes.utf8_chunks() {
+                    normalized.extend_from_slice(self.text(chunk.valid()).as_bytes());
+                    normalized.extend_from_slice(chunk.invalid());
+                }
+                out.push(format!("%output {pane} {}", normalized.escape_ascii()));
             }
         };
-        for line in text.split('\n') {
+        for line in s.split('\n') {
             let line = line.strip_suffix('\r').unwrap_or(line);
             if let Some(rest) = line.strip_prefix("%output ") {
                 let (pane, payload) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -131,7 +137,7 @@ impl Normalizer {
                 write!(l, "%{} <TIME> #{n} {}", &c[1], &c[3]).unwrap();
                 out.push(l);
             } else {
-                out.push(line.to_string());
+                out.push(self.text(line));
             }
         }
         flush(&mut pending, &mut out);
@@ -259,6 +265,53 @@ mod tests {
                 "%end <TIME> #2 1",
                 "%exit",
             ]
+        );
+    }
+
+    #[test]
+    fn output_normalization_is_independent_of_chunk_boundaries() {
+        let n = norm();
+        let payload = "/tmp/r/s,4242,0 /dev/pts/3 Thu Oct 29 16:56:06 2026 20:23 29-Oct-26";
+        let want = ["%output %0 <SOCKET>,<PID>,0 <TTY> <DATE> <CLOCK>"];
+        assert_eq!(n.stream(&format!("%output %0 {payload}\n")), want);
+        assert_eq!(
+            n.stream("%output %0 /tm\n%output %0 p/r/s,4242,0 /dev/pts/3 Thu Oct 29 16:56:06 2026 20:23 29-Oct-26\n"),
+            want
+        );
+        // control.c control_write_pending may split at any byte. Exercise
+        // both literal and octal-encoded bytes at every split.
+        for cut in 0..=payload.len() {
+            for encoded in [false, true] {
+                let encode = |s: &str| {
+                    if encoded {
+                        let mut out = String::new();
+                        for b in s.bytes() {
+                            write!(out, "\\{b:03o}").unwrap();
+                        }
+                        out
+                    } else {
+                        s.to_string()
+                    }
+                };
+                let raw = format!(
+                    "%output %0 {}\n%output %1 other\n%output %0 {}\n",
+                    encode(&payload[..cut]),
+                    encode(&payload[cut..])
+                );
+                assert_eq!(
+                    n.stream(&raw),
+                    [want[0], "%output %1 other"],
+                    "cut {cut}, encoded {encoded}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decoded_output_normalizes_before_escaping_and_keeps_invalid_bytes() {
+        assert_eq!(
+            norm().stream("%output %0 \\015\\012Thu Oct 29 16:56:06 2026\\01220:23 29-Oct-26\\015\\012/tmp/r/s\\377\\303\\251\n"),
+            ["%output %0 \\r\\n<DATE>\\n<CLOCK>\\r\\n<SOCKET>\\xff\\xc3\\xa9"]
         );
     }
 
