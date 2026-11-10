@@ -148,11 +148,10 @@ impl Server {
         }
     }
 
-    /// The client's terminal less its status lines (resize.c:194-198),
-    /// A control
-    /// client has the size `refresh-client -C` gave it (80x24 before
-    /// that), or for window `w` the one it gave that window
-    /// (resize.c:189-195).
+    /// The client's terminal less its status lines. A control client has
+    /// the size `refresh-client -C` gave it (80x24 before that), or for
+    /// window `w` the one it gave that window (`clients_calculate_size`,
+    /// resize.c:189-198).
     fn client_size(&self, c: &Client, w: Option<WindowId>) -> Option<(u32, u32)> {
         let (cols, rows) = if let Some(cs) = &c.control {
             w.and_then(|w| cs.window_size(w))

@@ -41,6 +41,9 @@ const LISTENER: Token = Token(0);
 const SIGNALS: Token = Token(1);
 /// Client tokens start here; pane tokens are `PANE_BASE + pane id`.
 const CLIENT_BASE: usize = 1 << 32;
+/// Client IDs wrap here (skipping the live ones): a popup's token is
+/// `POPUP_BASE + client id`, which must stay below `CLIENT_BASE`.
+const CLIENT_ID_SPAN: usize = CLIENT_BASE - crate::popup::POPUP_BASE;
 const PANE_BASE: usize = 16;
 /// Tokens of the PTYs a live upgrade's last resort holds
 /// (`resume::Server::hold`): `HELD_BASE + index in held`, above any
@@ -1515,10 +1518,21 @@ impl Server {
         }
     }
 
+    /// The next client ID: counting up, wrapping at [`CLIENT_ID_SPAN`],
+    /// never one a client still has.
+    fn alloc_client_id(&mut self) -> ClientId {
+        loop {
+            let id = ClientId(self.next_client % CLIENT_ID_SPAN);
+            self.next_client = id.0 + 1;
+            if !self.clients.contains_key(&id) {
+                return id;
+            }
+        }
+    }
+
     /// `server_client_create`: a new client on `stream`, read from now on.
     fn add_client(&mut self, mut stream: mio::net::UnixStream) {
-        let id = ClientId(self.next_client);
-        self.next_client += 1;
+        let id = self.alloc_client_id();
         let activity = self.model.touch();
         if self
             .poll
@@ -1710,9 +1724,6 @@ impl Server {
         }
     }
 
-    /// `tty_set_selection` (tty.c:2149-2166): OSC 52 through the client
-    /// terminal's `Ms`, whatever `set-clipboard` says, once its tty has
-    /// started.
     /// `tty_clipboard_query` (tty.c:3206-3216): ask the terminal for its
     /// clipboard, once at a time, for a started terminal that has `Ms`.
     /// The reply is the next OSC 52 the client sends; none within
@@ -1760,8 +1771,10 @@ impl Server {
         self.set_selection_clip(id, "", data);
     }
 
-    /// [`Self::set_selection`] naming the clipboard (`tty_set_selection`'s
-    /// `clip`).
+    /// [`Self::set_selection`] naming the clipboard: `tty_set_selection`
+    /// (tty.c:2149-2166), OSC 52 through the client terminal's `Ms`,
+    /// whatever `set-clipboard` says, once its tty has started. `clip` is its
+    /// clipboard argument.
     pub(crate) fn set_selection_clip(&mut self, id: ClientId, clip: &str, data: &[u8]) {
         let Some(bytes) = self
             .clients
@@ -5119,7 +5132,7 @@ impl Server {
         } else {
             cmd
         };
-        let cwd = pane.cwd.to_string_lossy().into_owned();
+        let cwd = vtmux_core::rawstr::from_os_str(pane.cwd.as_os_str());
         let ev = crate::events::Event::new("pane-created")
             .target(crate::target::Found {
                 pane: Some(p),
@@ -6617,6 +6630,34 @@ struct WindowDrawing {
 mod tests {
     use super::Server;
     use crate::mode::prompt::tests::setup;
+
+    /// A popup's token is `POPUP_BASE + client id`: client IDs wrap before
+    /// it would reach `CLIENT_BASE`, where the popup's PTY events would go
+    /// to another client's socket; an ID a client still has is skipped.
+    #[test]
+    fn client_ids_wrap_inside_the_popup_token_range() {
+        use super::{CLIENT_BASE, CLIENT_ID_SPAN};
+        let (mut server, _, _, _, dir) = setup();
+        let held = server.clients.len();
+        server.next_client = CLIENT_ID_SPAN - 1;
+        let mut peers = Vec::new();
+        for _ in 0..3 {
+            let (ours, peer) = mio::net::UnixStream::pair().unwrap();
+            server.add_client(ours);
+            peers.push(peer);
+        }
+        let ids: Vec<usize> = server.clients.keys().map(|c| c.0).collect();
+        assert_eq!(ids.len(), held + 3, "no ID was reused: {ids:?}");
+        assert!(
+            ids.contains(&(CLIENT_ID_SPAN - 1)) && ids.contains(&0),
+            "{ids:?}"
+        );
+        assert!(
+            ids.iter()
+                .all(|&i| crate::popup::POPUP_BASE + i < CLIENT_BASE)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn passthrough_titles_are_found() {

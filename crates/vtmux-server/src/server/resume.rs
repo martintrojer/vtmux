@@ -24,9 +24,10 @@
 //!
 //! The preflight and quiesce (steps 1-2) are `upgrade.rs`'s, and so are
 //! the attached clients' tokens and notices (step 6) and their re-attach
-//! in the image that serves next. Pane terminal state is not carried
-//! yet (`snapshot.rs`, `restore_term`): panes come back with blank
-//! terminals of their size, their PTY, process and pid kept.
+//! in the image that serves next. Pane terminal state (screens, history,
+//! modes) is carried, and a pane's PTY, process and pid are kept; one
+//! that does not import is rebuilt blank, its size and title kept
+//! (`snapshot.rs`, `restore_term`, [`last_resorts`]).
 
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};

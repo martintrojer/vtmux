@@ -23,6 +23,11 @@ use crate::sys;
 /// Job tokens are `JOB_BASE + id`, between the panes' and the clients'.
 pub(crate) const JOB_BASE: usize = 1 << 31;
 
+/// How many job IDs there are before the pipes' tokens begin: IDs wrap
+/// here, skipping any still running, so a long-lived server's jobs never
+/// get a token another kind of event source owns.
+const JOB_SPAN: usize = crate::pipe::PIPE_BASE - JOB_BASE;
+
 /// A job's ID (its token).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct JobId(pub usize);
@@ -111,6 +116,18 @@ impl std::fmt::Debug for Jobs {
 }
 
 impl Jobs {
+    /// The next job ID: counting up, wrapping at [`JOB_SPAN`], never one a
+    /// running job has.
+    fn alloc(&mut self) -> JobId {
+        loop {
+            let id = JobId(self.next);
+            self.next = (self.next + 1) % JOB_SPAN;
+            if !self.running.contains_key(&id) {
+                return id;
+            }
+        }
+    }
+
     /// `job_still_running`: a job the server waits for has not finished.
     #[must_use]
     pub fn still_running(&self) -> bool {
@@ -225,8 +242,7 @@ impl Server {
             env: self.job_environ(spec.session),
             show_stderr: spec.show_stderr,
         })?;
-        let id = JobId(self.jobs.next);
-        self.jobs.next += 1;
+        let id = self.jobs.alloc();
         self.poll.registry().register(
             &mut SourceFd(&spawned.fd.as_raw_fd()),
             Token(JOB_BASE + id.0),
@@ -490,5 +506,46 @@ impl Server {
             return cwd;
         }
         crate::server::find_home(&self.global_env).unwrap_or_else(|| PathBuf::from("/"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Job IDs wrap before their token reaches the pipes' range
+    /// (`PIPE_BASE`), where a job's events would go to `pipe_event` and its
+    /// output freeze; an ID a running job holds is skipped.
+    #[test]
+    fn job_ids_wrap_inside_their_token_range() {
+        let mut jobs = Jobs {
+            next: JOB_SPAN - 2,
+            ..Jobs::default()
+        };
+        let ids: Vec<usize> = (0..4).map(|_| jobs.alloc().0).collect();
+        assert_eq!(ids, [JOB_SPAN - 2, JOB_SPAN - 1, 0, 1]);
+        assert!(ids.iter().all(|&i| JOB_BASE + i < crate::pipe::PIPE_BASE));
+        jobs.next = JOB_SPAN - 1;
+        jobs.running.insert(JobId(0), dummy_job());
+        assert_eq!(jobs.alloc(), JobId(JOB_SPAN - 1));
+        assert_eq!(jobs.alloc(), JobId(1), "0 is running");
+    }
+
+    fn dummy_job() -> Job {
+        Job {
+            command: String::new(),
+            raw_fd: -1,
+            fd: None,
+            pid: None,
+            output: Vec::new(),
+            input: Vec::new(),
+            input_done: false,
+            status: None,
+            nowait: false,
+            blocks_upgrade: false,
+            show_stderr: false,
+            update: None,
+            complete: None,
+        }
     }
 }

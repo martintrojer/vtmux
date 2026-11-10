@@ -8,15 +8,14 @@
 //! an internal numbering cannot change what a snapshot means.
 //!
 //! Modes carried across an upgrade: copy mode (its frozen grid, D-010, and
-//! position) and clock mode. View mode is closed for now: its backing
-//! terminal is pane terminal state, and [`PaneMode::View`] is kept for when
-//! that is carried. Tree, buffer, client, customize, switch and
-//! display-panes modes, prompts and menus are closed by the upgrade and
-//! re-opened by the user (spec, *Open questions*); a mode a reader doesn't
-//! know reads as [`PaneMode::Closed`], so carrying a new mode later doesn't
-//! make older readers refuse the stream. Popups are carried with their
-//! pty; one editing a buffer or an option (its editor's temp file) is
-//! closed.
+//! position) and clock mode. View mode is closed: the server writes none,
+//! and [`PaneMode::View`] is kept in the format for when it does. Tree,
+//! buffer, client, customize, switch and display-panes modes, prompts and
+//! menus are closed by the upgrade and re-opened by the user (spec, *Open
+//! questions*); a mode a reader doesn't know reads as
+//! [`PaneMode::Closed`], so carrying a new mode later doesn't make older
+//! readers refuse the stream. Popups are carried with their pty; one
+//! editing a buffer or an option (its editor's temp file) is closed.
 
 use crate::row::{HistoryPage, Row};
 use crate::term::TermState;

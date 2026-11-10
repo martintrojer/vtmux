@@ -12,14 +12,16 @@
 //!
 //! What a snapshot leaves out, by design:
 //!
-//! - Modes: copy and clock mode are carried; view mode (its backing terminal
-//!   is terminal state), the tree modes (`choose-tree`, `choose-buffer`,
-//!   `choose-client`, `customize-mode`, `switch-mode`), `display-panes`,
-//!   prompts (status line, pane and mode prompts), menus and popups are
-//!   closed by the upgrade and re-opened by the user (spec, *Open
-//!   questions*). The editor a tree mode's `e` opened stays a modal pane,
-//!   but its edit goes with the mode (as `spawn_cancel_editor`) and its
-//!   temporary file stays behind.
+//! - Modes: view mode (its backing terminal is terminal state), the tree
+//!   modes (`choose-tree`, `choose-buffer`, `choose-client`,
+//!   `customize-mode`, `switch-mode`), `display-panes`, prompts (status
+//!   line, pane and mode prompts), menus and a popup editing a buffer or
+//!   an option are closed by the upgrade and re-opened by the user (spec,
+//!   *Open questions*). Copy and clock mode and the other popups (geometry,
+//!   styles, the pty and its process, the terminal state) are carried. The
+//!   editor a tree mode's `e` opened stays a modal pane, but its edit goes
+//!   with the mode (as `spawn_cancel_editor`) and its temporary file stays
+//!   behind.
 //! - Work in flight: command queues, jobs and file operations. The upgrade
 //!   preflight refuses while any is pending (decisions 10 and 26).
 //! - Caches and timers the loop rebuilds: compositor state, frames not yet
