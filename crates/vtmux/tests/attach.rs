@@ -5520,6 +5520,57 @@ fn the_console_cursor_is_hidden_with_civis() {
     });
 }
 
+/// `server_client_reset_state` (server-client.c:2240-2276) hides the
+/// pane's cursor, at its place, where `window_visible_ranges` says no
+/// window cell shows: under a floating pane, and in the window's last
+/// column while a wrap is pending (one past the window). It also hides it
+/// in the columns of a shown overlay scrollbar.
+#[test]
+fn the_cursor_hides_where_its_cell_does_not_show() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
+        let what = bin.display().to_string();
+        let w = World::new(bin);
+        let script = r"stty -echo; i=0; while [ $i -lt 30 ]; do echo $i; i=$((i+1)); done; printf '\033[2J\033[4;10HA'; read x; printf '\r%079dB' 0; exec cat";
+        let new = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23"];
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{what}: {args:?}");
+        ok(&[&new[..], &["sh", "-c", script]].concat());
+        ok(&["set", "-g", "status-right", ""]);
+        ok(&["selectp", "-t", "%0", "-T", "t"]);
+        let a = w.attach_sized(&["attach", "-t", "a"], 80, 24);
+        let cursor = |shown: bool, at: (u16, u16)| {
+            move |a: &Attached| {
+                let t = a.screen();
+                t.screen_modes().cursor_visible == shown && t.cursor() == at
+            }
+        };
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            pane_text(a).contains('A') && cursor(true, (10, 3))(a)
+        });
+        // A floating pane over the cursor's cell (4,2 40x6 by default).
+        ok(&["new-pane", "-d", "-t", "a", "cat", "-"]);
+        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (10, 3)));
+        ok(&["kill-pane", "-t", "%1"]);
+        a.wait_labelled(&what, Duration::from_secs(5), cursor(true, (10, 3)));
+        // A full line: the wrap pending at column 80 is outside the window.
+        ok(&["send", "-t", "%0", "Enter"]);
+        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+            pane_text(a).contains("0B") && cursor(false, (79, 3))(a)
+        });
+        // Copy mode's cursor in the last column, under a modal scrollbar
+        // shown by a scroll, and in the first.
+        ok(&["set", "-g", "pane-scrollbars", "modal"]);
+        ok(&["set", "-g", "pane-scrollbars-timeout", "60000"]);
+        ok(&["copy-mode", "-t", "%0"]);
+        ok(&["send", "-X", "-t", "%0", "scroll-up"]);
+        ok(&["send", "-X", "-t", "%0", "scroll-down"]);
+        ok(&["send", "-X", "-t", "%0", "end-of-line"]);
+        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (79, 3)));
+        ok(&["send", "-X", "-t", "%0", "start-of-line"]);
+        a.wait_labelled(&what, Duration::from_secs(5), cursor(true, (0, 3)));
+    });
+}
+
 /// `tty_update_features` and `tty_stop_tty` (tty.c:506, 565): a terminal
 /// with the `appesc` feature (mintty's) gets `Enesc` once its features
 /// are known and `Dsesc` when the client detaches.

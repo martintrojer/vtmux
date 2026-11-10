@@ -1097,6 +1097,9 @@ fn two_pane(model: &Model, w: WindowId) -> Option<Dir> {
 /// view, its right and bottom edges included, is at its place there, no
 /// further right than the terminal's last column (`tty_cursor`); one
 /// outside it is hidden at the terminal's 0,0, the status lines not added.
+/// A cursor in the view is still hidden, at its place, where a pane above
+/// covers it or past the window's last column ([`cursor_cell_visible`]),
+/// or in the columns of the pane's overlay scrollbar.
 #[must_use]
 pub fn cursor_of(
     draw: &Draw,
@@ -1129,13 +1132,110 @@ pub fn cursor_of(
     if !shown(x, view.sx) || !shown(y, view.sy) {
         return (Some((0, 0)), false);
     }
+    // server-client.c:2252-2268: tmux asks with the view's coordinates
+    // where the window's are meant, so does vtmux.
+    let covered = !cursor_cell_visible(model, p, x, y) || in_overlay_bar(model, p, cx);
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
         return (Some((0, 0)), false);
     };
     (
         Some((x.min(cols.saturating_sub(1)), y.saturating_add(top))),
-        d.content.cursor_visible,
+        d.content.cursor_visible && !covered,
     )
+}
+
+/// `window_visible_ranges` (window-visible.c:51-227) for one cell and
+/// `window_position_is_visible`: whether window cell (`px`, `py`) of
+/// `base` shows. Nothing does on a row or from a column outside the
+/// window, so neither does a pending wrap's cursor in the window's last
+/// column. A pane above `base` in the z-order covers its cells and its
+/// borders (a reserved scrollbar's columns included); a tiled pane's top
+/// and bottom border rows are left out, and its top row is the window's
+/// first when it has no border above.
+fn cursor_cell_visible(model: &Model, base: PaneId, px: i64, py: i64) -> bool {
+    let Some(w) = model.panes.get(&base).map(|p| p.window) else {
+        return true;
+    };
+    let Some(window) = model.windows.get(&w) else {
+        return true;
+    };
+    let (wsx, wsy) = (i64::from(window.sx()), i64::from(window.sy()));
+    if px < 0 || py < 0 || px >= wsx || py >= wsy {
+        return false;
+    }
+    let left_bar = model.scrollbar_left(w);
+    // `w->z_index` from the top: the panes before `base` are above it.
+    for &q in window.panes.z_order.iter().take_while(|&&q| q != base) {
+        let Some(pane) = model.panes.get(&q) else {
+            continue;
+        };
+        if !window.is_visible(q) {
+            continue;
+        }
+        let g = pane.rect;
+        let (xoff, yoff) = (i64::from(g.xoff), i64::from(g.yoff));
+        let (sx, sy) = (i64::from(g.sx), i64::from(g.sy));
+        let floating = window.is_floating_now(q);
+        let tree = if floating {
+            TreeId::Pane(q)
+        } else {
+            TreeId::Window(w)
+        };
+        let no_border = floating
+            && Lines::from_choice(model.number_option(tree, "pane-border-lines")) == Lines::None;
+        let (tb, bb) = if no_border {
+            (yoff, yoff + sy - 1)
+        } else {
+            ((yoff - 1).max(0), yoff + sy)
+        };
+        if py < tb || py > bb || (!floating && (py == tb || py == bb)) {
+            continue;
+        }
+        let bar = if model.scrollbar_reserve(q) {
+            let style = model.scrollbar_style(q);
+            i64::from(style.width + style.pad)
+        } else {
+            0
+        };
+        let (lb, mut rb) = if no_border {
+            (xoff, xoff + sx - 1)
+        } else if bar != 0 && left_bar {
+            (if xoff > bar { xoff - 1 - bar } else { 0 }, xoff + sx)
+        } else {
+            ((xoff - 1).max(0), xoff + sx + bar)
+        };
+        if rb < 0 {
+            continue;
+        }
+        if (no_border && rb >= wsx) || (!no_border && rb > wsx) {
+            rb = wsx - 1;
+        }
+        if (lb..=rb).contains(&px) {
+            return false;
+        }
+    }
+    true
+}
+
+/// server-client.c:2256-2268: whether pane column `cx` is under the
+/// pane's overlay scrollbar (`modal` or `auto-hide`, while shown), the bar
+/// as wide as its style without the padding.
+fn in_overlay_bar(model: &Model, p: PaneId, cx: u16) -> bool {
+    let Some(pane) = model.panes.get(&p) else {
+        return false;
+    };
+    if !model.scrollbar_overlay(p) || !model.scrollbar_visible(p) {
+        return false;
+    }
+    let width = model.scrollbar_style(p).width.min(pane.rect.sx);
+    if width == 0 {
+        return false;
+    }
+    if model.scrollbar_left(pane.window) {
+        u32::from(cx) < width
+    } else {
+        u32::from(cx) >= pane.rect.sx - width
+    }
 }
 
 /// `screen_select_cell` (screen.c:641-661): the selection style over a
