@@ -9275,3 +9275,44 @@ fn clients_with_and_without_hyperlinks_get_their_own_frames() {
     });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// D33 across a live upgrade: a Ghostty client gets vtmux's id range freed
+/// then the upload at its first graphics frame, and again after
+/// `vtmux-upgrade` (its re-exec attaches afresh). The grant comes over,
+/// the image does not: the program's next image is drawn, uploaded anew.
+#[test]
+fn graphics_range_is_freed_and_uploaded_again_after_an_upgrade() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), true);
+    w.cli(&["set", "-s", "vtmux-graphics", "on"]);
+    w.cli(&["select-window", "-t", "a:0"]);
+    a.wait(|a| status_row(a).contains("0:w*"));
+    let image: &[u8] = b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;/wAA\x1b\\";
+    let range = b"\x1b_Ga=d,d=R,x=3992977408,y=4009754623,q=2\x1b\\";
+    let upload = b"\x1b_Ga=t,f=24,s=1,v=1,o=z,i=";
+    let has = |got: &[u8], what: &[u8]| got.windows(what.len()).position(|x| x == what);
+    let got = notify_emit(&w, &a, 0, image);
+    let (r, u) = (has(&got, range), has(&got, upload));
+    assert!(
+        r.is_some() && u.is_some() && r < u,
+        "{:?}",
+        String::from_utf8_lossy(&got)
+    );
+    let before = a.bytes.lock().unwrap().len();
+    let up = w.cli(&["vtmux-upgrade"]);
+    assert!(up.status.success(), "{up:?}");
+    a.wait(|a| status_row(a).contains("0:w*"));
+    notify_emit(&w, &a, 1, image);
+    let got = a.bytes.lock().unwrap()[before..].to_vec();
+    let (r, u) = (has(&got, range), has(&got, upload));
+    assert!(
+        r.is_some() && u.is_some() && r < u,
+        "after the upgrade: {:?}",
+        String::from_utf8_lossy(&got)
+    );
+    // Still granted: the image was no title.
+    let title = w.cli(&["display", "-p", "-t", "a:0", "#{pane_title}"]);
+    assert!(
+        !String::from_utf8_lossy(&title.stdout).starts_with("Ga="),
+        "{title:?}"
+    );
+}
