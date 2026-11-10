@@ -1,0 +1,20 @@
+# #{V:...} (format.c format_loop_environ): the session's environment in
+# name order (no flag or `s`), the global one (`g`) or the command
+# client's (`c`); each entry sets environ_name, environ_value,
+# environ_hidden, environ_removed, loop_index and loop_last_flag. The
+# session's holds update-environment's names the client lacks, removed.
+# Another flag loops over nothing.
+name = "format_environ_loop"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["setenv", "-t", "a", "FOO", "bar"] },
+  { run = ["setenv", "-h", "-t", "a", "HID", "x"] },
+  { run = ["setenv", "-r", "-t", "a", "GONE"] },
+  { run = ["display", "-p", "-t", "a", "#{V:#{loop_index}:#{environ_name}=#{environ_value}/#{environ_hidden}#{environ_removed}#{?loop_last_flag,.,;}}"] },
+  { run = ["display", "-p", "-t", "a", "#{V/s:#{environ_name},}"] },
+  { run = ["setenv", "-g", "GLOB", "1"] },
+  { run = ["display", "-p", "-t", "a", "#{V/g:#{environ_name},}"] },
+  { run = ["display", "-p", "-t", "a", "#{V/c:#{?#{==:#{environ_name},PS1},[#{environ_value}],}}"] },
+  { run = ["display", "-p", "-t", "a", "[#{V/x:#{environ_name},}]"] },
+  { run = ["display", "-p", "-t", "a", "#{V:#{session_name}}"] },
+]

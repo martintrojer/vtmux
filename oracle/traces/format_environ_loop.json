@@ -1,0 +1,217 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_environ_loop",
+  "inputs": {
+    "name": "format_environ_loop",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-t",
+          "a",
+          "FOO",
+          "bar"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-h",
+          "-t",
+          "a",
+          "HID",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-r",
+          "-t",
+          "a",
+          "GONE"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V:#{loop_index}:#{environ_name}=#{environ_value}/#{environ_hidden}#{environ_removed}#{?loop_last_flag,.,;}}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V/s:#{environ_name},}"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-g",
+          "GLOB",
+          "1"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V/g:#{environ_name},}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V/c:#{?#{==:#{environ_name},PS1},[#{environ_value}],}}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{V/x:#{environ_name},}]"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V:#{session_name}}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0:DISPLAY=/01;1:FOO=bar/00;2:GONE=/01;3:HID=x/10;4:KRB5CCNAME=/01;5:MSYSTEM=/01;6:SSH_AGENT_PID=/01;7:SSH_ASKPASS=/01;8:SSH_AUTH_SOCK=/01;9:SSH_CONNECTION=/01;10:WAYLAND_DISPLAY=/01;11:WINDOWID=/01;12:XAUTHORITY=/01;13:XDG_CURRENT_DESKTOP=/01;14:XDG_SESSION_DESKTOP=/01;15:XDG_SESSION_TYPE=/01.\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "DISPLAY,FOO,GONE,HID,KRB5CCNAME,MSYSTEM,SSH_AGENT_PID,SSH_ASKPASS,SSH_AUTH_SOCK,SSH_CONNECTION,WAYLAND_DISPLAY,WINDOWID,XAUTHORITY,XDG_CURRENT_DESKTOP,XDG_SESSION_DESKTOP,XDG_SESSION_TYPE,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "GLOB,HOME,LC_ALL,PATH,PS1,PWD,SHELL,TERM,TMUX_TMPDIR,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[$ ]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

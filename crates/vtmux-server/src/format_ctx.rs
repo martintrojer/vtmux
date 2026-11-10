@@ -4,8 +4,8 @@
 use std::rc::Rc;
 
 use vtmux_core::format::{
-    ClientQuery, FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop,
-    SearchFlags,
+    ClientQuery, EnvScope, EnvVar, FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope,
+    OptionsLoop, SearchFlags,
 };
 use vtmux_core::ids::{SessionId, WindowId};
 use vtmux_core::layout::PaneStatus;
@@ -182,6 +182,21 @@ pub struct Ctx<'a> {
     /// control client without `new-layouts`, so layouts dump as v1
     /// (format.c `format_cb_window_layout`, `LAYOUT_CUSTOM_OLD_FORMAT`).
     pub old_layouts: bool,
+    /// The client the tree was created for (`ft->client`), whose
+    /// environment `#{V/c:...}` loops over.
+    pub tree_client: TreeClient,
+}
+
+/// `ft->client` as `#{V/c:...}` sees it (format.c `format_loop_environ`).
+#[derive(Clone, Debug, Default)]
+pub enum TreeClient {
+    /// The client the formats are for (`ft->c`, [`Ctx::client`]): a client
+    /// draws its own status lines and borders.
+    #[default]
+    Described,
+    /// A command's client: its environment (`c->environ`), or none when
+    /// no client runs the command (the config, `run-shell -b`).
+    Command(Option<Rc<[(String, String)]>>),
 }
 
 impl<'a> Ctx<'a> {
@@ -231,6 +246,7 @@ impl<'a> Ctx<'a> {
             buffer: None,
             jobs: None,
             old_layouts: false,
+            tree_client: TreeClient::Described,
         }
     }
 
@@ -250,6 +266,7 @@ impl<'a> Ctx<'a> {
         c.client = client;
         // format_create(c, item, FORMAT_NONE, ft->flags): the client, the flags.
         c.old_layouts = self.old_layouts;
+        c.tree_client = self.tree_client.clone();
         c.jobs = self.jobs.clone().map(|j| j.with_tag(0));
         c
     }
@@ -1202,6 +1219,33 @@ impl FormatContext for Ctx<'_> {
                     .or_else(|| self.global_env.find(name))?;
                 entry.value.clone()
             })
+    }
+
+    /// `format_loop_environ` (format.c:5686-5714): the session's (none
+    /// without one), the global or `ft->client`'s environment, in name
+    /// order.
+    fn environ(&self, scope: EnvScope) -> Option<Vec<EnvVar>> {
+        let of = |env: &Environ| {
+            env.iter()
+                .map(|(name, e)| EnvVar {
+                    name: name.to_owned(),
+                    value: e.value.clone(),
+                    hidden: e.hidden,
+                })
+                .collect()
+        };
+        match scope {
+            EnvScope::Session => self.session().map(|s| of(&s.env)),
+            EnvScope::Global => Some(of(self.global_env)),
+            EnvScope::Client => {
+                let sent = match &self.tree_client {
+                    TreeClient::Described => self.client().map(|c| Rc::clone(&c.environ)),
+                    TreeClient::Command(env) => env.clone(),
+                }?;
+                // environ_put: a later entry of a name replaces an earlier.
+                Some(of(&Environ::from_pairs(sent.iter().cloned())))
+            }
+        }
     }
 
     /// `format_window_name` (format.c:5295).

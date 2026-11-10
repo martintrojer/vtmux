@@ -4340,6 +4340,7 @@ impl Server {
                     self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
                 ctx.jobs = Some(jobs);
                 ctx.kind = crate::format_ctx::Kind::Unknown;
+                ctx.tree_client = crate::format_ctx::TreeClient::Described;
                 ctx
             };
             status.prepare(&source, ctx, s, caps, size, lines, top)
@@ -4716,6 +4717,11 @@ impl Server {
         // client owns the jobs, whatever client the formats describe.
         ctx.jobs = Some(self.job_handle(self.cmd_client));
         ctx.old_layouts = self.old_layouts(self.cmd_client);
+        ctx.tree_client = crate::format_ctx::TreeClient::Command(
+            self.cmd_client
+                .and_then(|id| self.clients.get(&id))
+                .map(|c| std::rc::Rc::clone(&c.environ)),
+        );
         ctx
     }
 

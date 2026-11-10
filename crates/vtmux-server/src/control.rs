@@ -1166,6 +1166,7 @@ impl Server {
             // client's own format tree.
             ctx.jobs = Some(self.job_handle(Some(id)));
             ctx.old_layouts = self.old_layouts(Some(id));
+            ctx.tree_client = crate::format_ctx::TreeClient::Described;
             // The layouts when the event fired, not now.
             if let Some(l) = layouts {
                 let (layout, visible) = if ctx.old_layouts {
