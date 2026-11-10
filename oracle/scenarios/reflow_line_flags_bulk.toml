@@ -1,0 +1,18 @@
+name = "reflow_line_flags_bulk"
+size = [40, 10]
+# tmux's reflow writes every cell it moves with grid_set_cell, which sets
+# GRID_LINE_EXTENDED on the line it lands on (grid.c grid_reflow_split,
+# grid_reflow_join), and the flag stays once the cells are overwritten.
+# A narrow non-ASCII character in a run of plain cells, joined onto the
+# next row at 4 columns: Ghostty copies the run whole (ReflowCursor.copyRun,
+# patch 0039). The rows are then overwritten with ASCII, so -F shows the
+# flag the row holds, not what its cells say.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "10", "-y", "8", "sh", "-c", "printf 'abcdefghijklmn\\303\\251opqrstuvw\\r\\n'; tmux wait-for -S ready; tmux wait-for go; printf '\\033[HZZZZZZZZZZZZZZZZZZZZZZZZ'; tmux wait-for -S done; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["resize-window", "-t", "a", "-x", "4"] },
+  { run = ["capturep", "-pF", "-S", "-"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["capturep", "-pF", "-S", "-"] },
+]

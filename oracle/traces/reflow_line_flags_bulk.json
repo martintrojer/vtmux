@@ -1,0 +1,132 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "reflow_line_flags_bulk",
+  "inputs": {
+    "name": "reflow_line_flags_bulk",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "10",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmn\\303\\251opqrstuvw\\r\\n'; tmux wait-for -S ready; tmux wait-for go; printf '\\033[HZZZZZZZZZZZZZZZZZZZZZZZZ'; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "4"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pF",
+          "-S",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pF",
+          "-S",
+          "-"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "W abcd\nW efgh\nW ijkl\nWX mnéo\nW pqrs\n- tuvw\n- \n- \n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "W abcd\nW efgh\nW ijkl\nWX ZZZZ\nW ZZZZ\nW ZZZZ\nW ZZZZ\nW ZZZZ\n- ZZZZ\n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

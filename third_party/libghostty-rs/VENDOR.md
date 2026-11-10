@@ -1280,6 +1280,27 @@ Recorded per commit in git history; the list is kept current:
   "temporary file outside directory prefix is rejected") and the one
   leak, in both test binaries. Not an upstream candidate (tmux's model).
 
+- `patches/0039-reflow-bulk-copy-line-flags.patch` (`PageList.zig`
+  `ReflowCursor.copyRun`, new `tmuxRunExtended`): a reflow's bulk copy
+  of a run of narrow cells sharing a style sets `Row.tmux_extended` on the
+  row it lands on when a cell of the run is one tmux holds extended, as
+  `ReflowCursor.writeCell` does (patch 0034, `tmuxCellExtended`): tmux
+  writes every cell its reflow moves with `grid_set_cell` (grid.c
+  `grid_reflow_split`, `grid_reflow_join`). The run shares one style and
+  has no wide, tab, link or grapheme cell, so the first cell's style and
+  each cell's character and RGB background decide. Patch 0034 missed this
+  path: a row a reflow filled with overlined text, or a character past
+  ASCII amid plain ones, lacked the flag, and lost it for good once its
+  cells were overwritten (tmux keeps it); a live upgrade, which gave the
+  row the flags its cells said, did not. The fuzzer of vtmux's
+  `snapshot_term.rs` found it (seed 141). Test: new `Terminal: tmux line
+  flags follow a bulk-copied reflow (vtmux)` (an extended style, a
+  character past ASCII, an RGB background cell, each on rows with no pin;
+  fails without the change); `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` with `-Dtest-filter=vtmux` 233/233 and
+  `-Dtest-filter=PageList` 701/701 (Debug). Oracle
+  `reflow_line_flags_bulk`. Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

@@ -1,0 +1,92 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 0e23089..3921a6f 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -2789,6 +2789,10 @@ const ReflowCursor = struct {
+             for (dst_cells) |*cell| cell.style_id = dst_style_id;
+         }
+         if (dst_style_id != stylepkg.default_id) self.page_row.styled = true;
++        // vtmux: tmux's reflow writes each cell with grid_set_cell, which
++        // flags the line it lands on (Row.tmux_extended), as writeCell does.
++        if (!self.page_row.tmux_extended and tmuxRunExtended(src_cells, src_page))
++            self.page_row.tmuxMarkExtended(false);
+ 
+         // Advance the cursor, matching what repeated cursorForward
+         // calls after each cell write would have done.
+@@ -3510,6 +3514,20 @@ fn tmuxCellExtended(cell: *const pagepkg.Cell, page: *const Page) bool {
+         (s.flags.underline != .none and s.flags.underline != .single);
+ }
+ 
++/// vtmux: whether a run ReflowCursor.copyRun copies has a cell tmux holds
++/// in its extended form (tmuxCellExtended). The run shares one style and
++/// has no wide, tab, link or grapheme cell, so past its first cell only
++/// the character and a background cell's colour can tell.
++fn tmuxRunExtended(cells: []const pagepkg.Cell, page: *const Page) bool {
++    if (tmuxCellExtended(&cells[0], page)) return true;
++    for (cells[1..]) |*cell| switch (cell.content_tag) {
++        .codepoint => if (cell.content.codepoint.data >= 0x80 and !cell.protected) return true,
++        .bg_color_rgb => return true,
++        else => {},
++    };
++    return false;
++}
++
+ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+     // We only set the new minimums if we're not reflowing. If we are
+     // reflowing, then the outer resize call handles this for us.
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 07d0fa3..372d7e4 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -17041,6 +17041,51 @@ test "Terminal: tmux line flags (vtmux)" {
+     try testing.expect(!row.at(&t, 5).tmux_hyperlink);
+ }
+ 
++test "Terminal: tmux line flags follow a bulk-copied reflow (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    const T = struct {
++        fn extended(term: *Terminal, y: usize) bool {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?.row.tmux_extended;
++        }
++        // `input` on 10 columns, the cursor left on a row of its own (a
++        // row with a pin takes the per-cell path), reflowed to 4.
++        fn reflowed(this_io: anytype, a: Allocator, input: []const u8) !Terminal {
++            var t = try init(this_io, a, .{ .rows = 8, .cols = 10 });
++            errdefer t.deinit(a);
++            var s = t.vtStream();
++            defer s.deinit();
++            s.nextSlice(input);
++            s.nextSlice("\x1b[m\r\nX");
++            try t.resize(a, .{ .cols = 4, .rows = 8 });
++            return t;
++        }
++    };
++    // Runs of narrow cells sharing a style are copied whole
++    // (ReflowCursor.copyRun); a row they land on takes the flag, as a row
++    // writeCell writes to does (grid_set_cell). The rows tmux 3.8 flags
++    // (capture-pane -R after the cells are overwritten):
++    //
++    // An extended style: every row.
++    inline for (.{ "\x1b[53m", "\x1b[38;2;1;2;3m", "\x1b[9m" }) |pen| {
++        var t = try T.reflowed(io_impl, alloc, pen ++ "abcdefghijklmnopqrstuvwxy");
++        defer t.deinit(alloc);
++        for (0..7) |y| try testing.expect(T.extended(&t, y));
++    }
++    // A character past ASCII: its row only.
++    {
++        var t = try T.reflowed(io_impl, alloc, "abcdefghijklmn\u{e9}opqrstuvw");
++        defer t.deinit(alloc);
++        for (0..6) |y| try testing.expectEqual(y == 3, T.extended(&t, y));
++    }
++    // A background cell in an RGB colour: its row, and the line's first.
++    {
++        var t = try T.reflowed(io_impl, alloc, "abcde\x1b[48;2;9;8;7m\x1b[3X\x1b[m\x1b[3Cxyklmnopqrst");
++        defer t.deinit(alloc);
++        for (0..5) |y| try testing.expectEqual(y < 2, T.extended(&t, y));
++    }
++}
++
+ test "Terminal: tmux line flags follow a reflow (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
