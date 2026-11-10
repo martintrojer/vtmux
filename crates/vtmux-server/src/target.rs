@@ -350,7 +350,7 @@ fn ambiguous_window(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     let window = part.text.as_str();
     let exact = |n: &str| n == window;
     let prefix = |n: &str| n.starts_with(window);
-    let pattern = |n: &str| fnmatch(window, n);
+    let pattern = |n: &str| fnmatch(window, n, false);
     let preds: &[&dyn Fn(&str) -> bool] = if part.exact {
         &[&exact]
     } else {
