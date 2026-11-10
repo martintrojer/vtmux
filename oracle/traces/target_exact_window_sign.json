@@ -1,0 +1,247 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "target_exact_window_sign",
+  "inputs": {
+    "name": "target_exact_window_sign",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-t",
+          "a:5",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:=+1",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:+1",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "a:=+1"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "=+1"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "a:=+1",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "a:=-1",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "rename-window",
+          "-t",
+          "a:1",
+          "+1"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "a:=+1",
+          ";",
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_name} #{window_active}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: +1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: +1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: +1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: -1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 w 0\n1 +1 1\n5 w 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -344,7 +344,10 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             _ => {}
         }
     }
-    if let Ok(idx) = strtonum(window, 0, i64::from(i32::MAX))
+    // cmd-find.c:425: not for a leading sign, which strtonum would take
+    // (an exact `=+1` is a name).
+    if !window.starts_with(['+', '-'])
+        && let Ok(idx) = strtonum(window, 0, i64::from(i32::MAX))
         && let Some(f) = at(u32::try_from(idx).ok()?)
     {
         return Some(f);

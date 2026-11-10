@@ -1,0 +1,19 @@
+name = "target_exact_window_sign"
+# An exact window part with a leading `+` or `-` is not an offset and is
+# not tried as an index (cmd-find.c:425): only as a name. Under
+# CMD_FIND_CANFAIL (display-message) a failed lookup shows the current
+# window.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:1", "-n", "w", "cat", "-"] },
+  { run = ["new-window", "-t", "a:5", "-n", "w", "cat", "-"] },
+  { run = ["display", "-p", "-t", "a:=+1", "#{window_index}"] },
+  { run = ["display", "-p", "-t", "a:+1", "#{window_index}"] },
+  { run = ["select-window", "-t", "a:=+1"] },
+  { run = ["select-window", "-t", "=+1"] },
+  { run = ["new-window", "-d", "-t", "a:=+1", "-n", "w", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:=-1", "-n", "w", "cat", "-"] },
+  { run = ["rename-window", "-t", "a:1", "+1"] },
+  { run = ["select-window", "-t", "a:=+1", ";", "display", "-p", "#{window_index}"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_name} #{window_active}"] },
+]
