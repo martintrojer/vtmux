@@ -345,6 +345,9 @@ record! {
         14 => many link_tree: Vec<RbNode>,
         /// When `lock-after-time` locks it (`s->lock_timer`), if armed.
         15 => opt lock_in_ms: Option<u64>,
+        /// `cwd`'s bytes when it is not UTF-8 (`cwd` has it lossily, as a
+        /// reader before this field takes it). Ignorable.
+        16 => opt cwd_bytes: Option<Vec<u8>>,
     }
 }
 
@@ -673,6 +676,8 @@ record! {
         /// `#{pane_last_output_time}`: epoch seconds of the program's last
         /// output. Ignorable: an older reader leaves it empty.
         45 => opt last_output_time: Option<i64>,
+        /// `cwd`'s bytes when it is not UTF-8, as for [`Session`].
+        46 => opt cwd_bytes: Option<Vec<u8>>,
     }
 }
 
@@ -875,6 +880,8 @@ record! {
         /// would give now. Not required: without it the view is worked
         /// out afresh.
         47 => opt view: Option<ClientView>,
+        /// `cwd`'s bytes when it is not UTF-8, as for [`Session`].
+        48 => opt cwd_bytes: Option<Vec<u8>>,
     }
 }
 
@@ -1200,6 +1207,9 @@ pub(crate) mod tests {
             group: Some("g".into()),
             link_tree: vec![RbNode { key: 0, red: false }, RbNode { key: 4, red: true }],
             lock_in_ms: Some(1500),
+            // Added within v1: out of the golden sample
+            // (a_path_that_is_not_utf8_round_trips).
+            cwd_bytes: None,
         }
     }
 
@@ -1421,6 +1431,8 @@ pub(crate) mod tests {
             command_status: None,
             kitty_owner_primary: None,
             kitty_owner_alternate: None,
+            // Added within v1 too (a_path_that_is_not_utf8_round_trips).
+            cwd_bytes: None,
         }
     }
 
@@ -1583,6 +1595,8 @@ pub(crate) mod tests {
             pan: None,
             // Added within v1 too (a_clients_view_round_trips).
             view: None,
+            // Added within v1 too (a_path_that_is_not_utf8_round_trips).
+            cwd_bytes: None,
         }
     }
 

@@ -267,6 +267,23 @@ fn a_clients_view_round_trips() {
     assert!(golden.clients.iter().all(|c| c.view.is_none()));
 }
 
+/// A working directory whose name is not UTF-8 goes as its bytes too,
+/// beside the lossy text a reader before them takes; a stream without
+/// them (the golden one) decodes with none.
+#[test]
+fn a_path_that_is_not_utf8_round_trips() {
+    let mut s = sample();
+    let bytes = Some(b"/tmp/x\xff".to_vec());
+    s.sessions[0].cwd_bytes.clone_from(&bytes);
+    s.panes[0].cwd_bytes.clone_from(&bytes);
+    s.clients[0].cwd_bytes.clone_from(&bytes);
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.sessions.iter().all(|x| x.cwd_bytes.is_none()));
+    assert!(golden.panes.iter().all(|x| x.cwd_bytes.is_none()));
+    assert!(golden.clients.iter().all(|x| x.cwd_bytes.is_none()));
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();

@@ -51,7 +51,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixListener as StdListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -127,6 +127,24 @@ fn since_taken(s: &snap::Snapshot) -> Duration {
 /// short of a snapshot with much history in rows.)
 fn taken_limit(s: &snap::Snapshot) -> Duration {
     2 * super::resume::dry_run_limit(s) + super::upgrade::FLUSH_WAIT
+}
+
+/// A path's bytes for the snapshot when they are not UTF-8, so not what
+/// its lossy text beside them says (a directory named with a byte 0xff).
+fn path_bytes(p: &Path) -> Option<Vec<u8>> {
+    use std::os::unix::ffi::OsStrExt as _;
+    p.to_str()
+        .is_none()
+        .then(|| p.as_os_str().as_bytes().to_vec())
+}
+
+/// A path from the snapshot: its bytes if it has them, else its text.
+fn path_in(text: &str, bytes: Option<&[u8]>) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt as _;
+    bytes.map_or_else(
+        || PathBuf::from(text),
+        |b| PathBuf::from(std::ffi::OsStr::from_bytes(b)),
+    )
 }
 
 fn small(n: usize) -> u32 {
@@ -1115,6 +1133,7 @@ impl Server {
                     activity: s.activity,
                     activity_secs: s.activity_secs,
                     cwd: s.cwd.to_string_lossy().into_owned(),
+                    cwd_bytes: path_bytes(&s.cwd),
                     windows: s
                         .windows
                         .iter()
@@ -1209,6 +1228,7 @@ impl Server {
                     argv: p.argv.clone(),
                     shell: p.shell.to_string_lossy().into_owned(),
                     cwd: p.cwd.to_string_lossy().into_owned(),
+                    cwd_bytes: path_bytes(&p.cwd),
                     environment: Vec::new(),
                     empty: p.empty,
                     exited: p.exited,
@@ -1354,6 +1374,7 @@ impl Server {
             version: hello.version,
             argv: hello.argv.clone(),
             cwd: hello.cwd.to_string_lossy().into_owned(),
+            cwd_bytes: path_bytes(&hello.cwd),
             environment: hello.env.clone(),
             term_name: tty.map(|t| t.term.clone()).unwrap_or_default(),
             term_features: tty.map(|t| t.features.clone()).unwrap_or_default(),
@@ -1696,7 +1717,7 @@ impl Server {
                 created: x.created,
                 activity: x.activity,
                 activity_secs: x.activity_secs,
-                cwd: PathBuf::from(&x.cwd),
+                cwd: path_in(&x.cwd, x.cwd_bytes.as_deref()),
                 windows: x
                     .windows
                     .iter()
@@ -1897,7 +1918,7 @@ impl Server {
             tty: x.tty.clone(),
             argv: x.argv.clone(),
             shell: PathBuf::from(&x.shell),
-            cwd: PathBuf::from(&x.cwd),
+            cwd: path_in(&x.cwd, x.cwd_bytes.as_deref()),
             empty: x.empty,
             wait_step: None,
             editor: None,
@@ -1988,7 +2009,7 @@ impl Server {
             },
             pid: x.pid,
             argv: x.argv.clone(),
-            cwd: PathBuf::from(&x.cwd),
+            cwd: path_in(&x.cwd, x.cwd_bytes.as_deref()),
             env: x.environment.clone(),
             tty: x.has_tty.then(|| TtyInfo {
                 name: x.tty.clone(),

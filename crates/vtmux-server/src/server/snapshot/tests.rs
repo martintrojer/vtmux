@@ -1375,6 +1375,14 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // As a redraw does (server_client_set_title).
     let session = a.clients[&client].attached.unwrap();
     assert!(a.client_title(client, session).is_some());
+    // A window whose pane started in a directory not named in UTF-8
+    // (`cwd_bytes`).
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        let bad = dir.join(std::ffi::OsStr::from_bytes(b"x\xff"));
+        std::fs::create_dir(&bad).unwrap();
+        ok(&mut a, &bad, &["new-window", "-d", "-t", "s", "cat", "-"]);
+    }
     // A window sized by a client whose terminal gave its cell size in
     // pixels (D-014).
     a.clients.get_mut(&client).unwrap().cell_pixels = (10, 20);
@@ -1784,6 +1792,44 @@ fn pipe_pane_output_not_yet_written_survives() {
         let pid = rustix::process::Pid::from_raw(pipe(&a, p).0).unwrap();
         let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
     }
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A working directory whose name is not UTF-8 (a byte 0xff) is the same
+/// directory after a rebuild: the session's, the pane's (where
+/// `respawn-pane` starts it again) and the client's. Ignorable: a reader
+/// before takes the lossy text, as every build did.
+#[test]
+fn a_working_directory_not_utf8_survives_a_rebuild() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let dir = temp_dir("cwd");
+    let bad = dir.join(std::ffi::OsStr::from_bytes(b"x\xff"));
+    std::fs::create_dir(&bad).unwrap();
+    let mut a = server(&dir);
+    ok(&mut a, &bad, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = connect(
+        &mut a,
+        hello(
+            &["attach-session", "-t", "s"],
+            &bad,
+            None,
+            ControlMode::Control,
+        ),
+    );
+    a.pending_exits.clear();
+    let cwds = |s: &Server| {
+        (
+            s.model.sessions.values().next().unwrap().cwd.clone(),
+            s.model.panes[&PaneId(0)].cwd.clone(),
+            s.clients[&client].hello.as_ref().unwrap().cwd.clone(),
+        )
+    };
+    assert_eq!(cwds(&a), (bad.clone(), bad.clone(), bad.clone()));
+    let taken = a.to_snapshot(snap::Meta::default());
+    assert_eq!(taken.meta.requires, Vec::<String>::new());
+    let b = rebuild(&a, &dir, "b");
+    assert_eq!(cwds(&b), cwds(&a));
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
