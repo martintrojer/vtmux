@@ -159,6 +159,7 @@ struct Control {
     out: Arc<Mutex<Vec<u8>>>,
     err: Arc<Mutex<Vec<u8>>>,
     done: Arc<AtomicBool>,
+    err_done: Arc<AtomicBool>,
     /// Stream offset when the last line was sent.
     mark: usize,
 }
@@ -692,6 +693,7 @@ impl<'a> Runner<'a> {
         let out = Arc::new(Mutex::new(Vec::new()));
         let err = Arc::new(Mutex::new(Vec::new()));
         let done = Arc::new(AtomicBool::new(false));
+        let err_done = Arc::new(AtomicBool::new(false));
         let (o, e) = (Arc::clone(&out), Arc::clone(&err));
         spawn_reader(
             child.stdout.take().unwrap(),
@@ -702,7 +704,7 @@ impl<'a> Runner<'a> {
         spawn_reader(
             child.stderr.take().unwrap(),
             Arc::clone(&self.act),
-            Arc::new(AtomicBool::new(false)),
+            Arc::clone(&err_done),
             move |b| e.lock().unwrap().extend_from_slice(b),
         );
         let stdin = child.stdin.take();
@@ -714,6 +716,7 @@ impl<'a> Runner<'a> {
                 out,
                 err,
                 done,
+                err_done,
                 mark: 0,
             },
         );
@@ -766,7 +769,9 @@ impl<'a> Runner<'a> {
             thread::sleep(POLL);
         };
         let limit = Instant::now() + DRAIN_LIMIT;
-        while !ctl.done.load(Ordering::SeqCst) && Instant::now() < limit {
+        while !(ctl.done.load(Ordering::SeqCst) && ctl.err_done.load(Ordering::SeqCst))
+            && Instant::now() < limit
+        {
             thread::sleep(POLL);
         }
         let obs = match status {
@@ -1186,6 +1191,34 @@ mod tests {
         assert!(
             alive.is_empty(),
             "pane descendants survived teardown: {alive:?}"
+        );
+    }
+
+    #[test]
+    fn control_close_drains_stderr_after_stdout_eof() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = make_root().unwrap();
+        let fake = root.join("client");
+        fs::write(&fake, "#!/bin/sh\ncase \"$*\" in *kill-server*) exit 0;; esac\nprintf '%%session-changed\\n'\nexec 1>&-\nwhile IFS= read -r line; do :; done\n(sleep 0.2; printf 'late error\\n' >&2) &\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let sc = Scenario {
+            name: "stderr-drain".into(),
+            size: [80, 24],
+            steps: Vec::new(),
+        };
+        let mut runner = Runner::new(&fake, &sc, Opts::default()).unwrap();
+        runner.control_start("c", &[]).unwrap();
+        runner.control_close(0, "c").unwrap();
+        let items = std::mem::take(&mut runner.items);
+        drop(runner);
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            items[0].observation,
+            Observation::Control {
+                lines: vec!["%session-changed".into()],
+                stderr: "late error\n".into(),
+                exit: 0
+            }
         );
     }
 
