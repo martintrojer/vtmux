@@ -1365,8 +1365,19 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let dir = temp_dir("ordinary");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["set", "-g", "set-titles", "on"]);
+    ok(&mut a, &dir, &["set", "-g", "history-limit", "0"]);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    // A row lacking a line flag its cells say (`snap::Row::lacks`): a
+    // scroll in an RGB background with no history.
+    a.pane_input(
+        vtmux_core::ids::PaneId(0),
+        b"\x1b[48;2;9;8;7m\x1b[S\x1b[m",
+        false,
+    );
+    let scrolled = a.to_snapshot(snap::Meta::default());
+    let rows = &scrolled.panes[0].term.as_ref().unwrap().primary.rows;
+    assert!(rows.iter().any(|r| r.lacks.extended));
     a.on_client_input(
         client,
         b"\x1b[?62;22c\x1b[>84;0;0c\x1bP>|xterm(390)\x1b\\\x1b]11;rgb:1010/2020/3030\x1b\\",

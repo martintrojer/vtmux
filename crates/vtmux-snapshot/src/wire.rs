@@ -18,7 +18,8 @@
 //!
 //! A `many` field of rows may name a second tag (`1 / 13 => many rows`):
 //! the rows' kept line flags go under it, after them
-//! ([`crate::row::KeptRows`]).
+//! ([`crate::row::KeptRows`]); and a third (`1 / 13 / 14`) for the flags
+//! they lack ([`crate::row::Row::lacks`]).
 
 use crate::Error;
 use std::cell::Cell;
@@ -413,7 +414,7 @@ macro_rules! record {
     (
         $(#[$m:meta])*
         pub struct $name:ident {
-            $( $(#[$fm:meta])* $tag:literal $(/ $kept:literal)? => $mode:ident $field:ident : $ty:ty ),* $(,)?
+            $( $(#[$fm:meta])* $tag:literal $(/ $kept:literal $(/ $lacks:literal)?)? => $mode:ident $field:ident : $ty:ty ),* $(,)?
         }
     ) => {
         $(#[$m])*
@@ -426,7 +427,10 @@ macro_rules! record {
             fn put(&self, out: &mut Vec<u8>) {
                 $(
                     $crate::wire::$mode::put(out, $tag, &self.$field);
-                    $( $crate::row::kept::put(out, $kept, &self.$field); )?
+                    $(
+                        $crate::row::kept::put(out, $kept, &self.$field);
+                        $( $crate::row::lacks::put(out, $lacks, &self.$field); )?
+                    )?
                 )*
             }
 
@@ -438,7 +442,10 @@ macro_rules! record {
                     match tag {
                         $(
                             $tag => $crate::wire::$mode::get(&mut v.$field, body, cx)?,
-                            $( $kept => $crate::row::kept::get(&mut v.$field, body, cx)?, )?
+                            $(
+                                $kept => $crate::row::kept::get(&mut v.$field, body, cx)?,
+                                $( $lacks => $crate::row::lacks::get(&mut v.$field, body, cx)?, )?
+                            )?
                         )*
                         _ => {}
                     }

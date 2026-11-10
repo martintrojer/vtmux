@@ -76,8 +76,10 @@
 //!   produces goes beside the rows under a new tag instead, where an older
 //!   reader skips it: tmux's line flags a row keeps where its cells no
 //!   longer say so ([`Row::kept`], [`KeptRows`]: `echo café` and two
-//!   backspaces in bash). The older reader derives them from the cells,
-//!   as its own build held them.
+//!   backspaces in bash), and those a row lacks though its cells say so
+//!   ([`Row::lacks`]: Ghostty's scroll in an RGB background with no
+//!   history). The older reader derives them from the cells, as its own
+//!   build held them.
 //! - Anything else (a tag's meaning, the row codec, the header) bumps
 //!   [`FORMAT_VERSION`] and adds a migration step and a golden file
 //!   `tests/golden/v<N>.snap`.

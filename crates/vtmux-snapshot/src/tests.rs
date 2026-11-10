@@ -677,6 +677,46 @@ fn kept_line_flags_round_trip_and_require_nothing() {
     assert!(golden.pages().iter().all(|p| p.kept.is_empty()));
 }
 
+/// Rows lacking line flags their cells say ([`Row::lacks`], added within
+/// v1 beside a screen's rows and in a history page's record) round-trip
+/// and need no [`Meta::requires`] entry: they are extra tags, which a
+/// reader before them skips, giving the rows the flags their cells say.
+#[test]
+fn lacked_line_flags_round_trip_and_require_nothing() {
+    let plain = sample();
+    let mut s = sample();
+    let lacks = KeptLineFlags {
+        extended: true,
+        hyperlink: false,
+    };
+    let row = Row {
+        lacks,
+        ..sample_row()
+    };
+    let term = s.panes[0].term.as_mut().unwrap();
+    term.primary.rows[1].lacks = lacks;
+    term.primary.history = vec![HistoryPage::from_rows(&[row.clone(), sample_row()], true)];
+    assert!(!term.primary.history[0].lacks.is_empty());
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back.meta.requires, Vec::<String>::new());
+    assert_eq!(back, s);
+    let t = back.panes[0].term.as_ref().unwrap();
+    assert_eq!(t.primary.history[0].decode_rows().unwrap()[0], row);
+    // The page's data and name don't depend on them.
+    let page = &t.primary.history[0];
+    let without = HistoryPage::from_rows(&[sample_row(), sample_row()], true);
+    assert_eq!((&page.data, page.hash), (&without.data, without.hash));
+
+    // Without them the stream is the sample's.
+    let mut cleared = back;
+    let term = cleared.panes[0].term.as_mut().unwrap();
+    term.primary.rows[1].lacks = KeptLineFlags::default();
+    term.primary
+        .history
+        .clone_from(&plain.panes[0].term.as_ref().unwrap().primary.history);
+    assert_eq!(encode(&cleared), encode(&plain));
+}
+
 #[test]
 fn a_stream_requiring_an_unknown_feature_is_refused() {
     let mut s = sample();

@@ -446,7 +446,7 @@ impl<'a> PageOut<'a> {
                 tab: tab_out(c.tab),
             });
         }
-        keep_line_flags(
+        line_flags_out(
             out,
             r.flags & RowState::TMUX_EXTENDED != 0,
             r.flags & RowState::TMUX_HYPERLINK != 0,
@@ -498,11 +498,28 @@ fn keep_line_flags(row: &mut snap::Row, extended: bool, hyperlink: bool) {
     };
 }
 
+/// A pane row's line flags as the emulator holds them, which a row can
+/// lack though its cells say them (Ghostty moved or cleared the cells
+/// where tmux sets the flag): [`keep_line_flags`], and those it lacks
+/// ([`snap::Row::lacks`]), so the flags come back as they were and later
+/// output that overwrites the cells finds the same flags.
+fn line_flags_out(row: &mut snap::Row, extended: bool, hyperlink: bool) {
+    keep_line_flags(row, extended, hyperlink);
+    let (by_cells, linked) = line_flags_of_cells(row);
+    row.lacks = snap::KeptLineFlags {
+        extended: by_cells && !extended,
+        hyperlink: linked && !hyperlink,
+    };
+}
+
 /// The line flags a snapshot row puts back: kept, or said by its cells
-/// (which the row held as it was written).
+/// (which the row held as it was written), unless the row lacks them.
 fn line_flags_in(row: &snap::Row) -> (bool, bool) {
     let (by_cells, linked) = line_flags_of_cells(row);
-    (row.kept.extended || by_cells, row.kept.hyperlink || linked)
+    (
+        (row.kept.extended || by_cells) && !row.lacks.extended,
+        (row.kept.hyperlink || linked) && !row.lacks.hyperlink,
+    )
 }
 
 fn layout_of(p: &PageRows) -> snap::term::PageLayout {

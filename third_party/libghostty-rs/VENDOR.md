@@ -1158,10 +1158,12 @@ Recorded per commit in git history; the list is kept current:
     Ghostty's protected bit, as ASCII). Cells moved between rows
     (`moveCells`, a partial `clonePartialRowFrom`: left and right
     margins, which tmux has not got) bring their row's bits. So a row
-    with an extended cell always has the bit, which vtmux's snapshot
-    relies on (it stores only the bits a row's cells don't imply, beside
-    the rows under their own tags, `vtmux_snapshot::KeptRows`, which a
-    build before them skips).
+    with an extended cell should always have the bit; vtmux's snapshot
+    stores the bits a row's cells don't imply, and those a row lacks
+    though its cells imply them (a path that misses the bit: `CSI S` in
+    an RGB background with no history), beside the rows under their own
+    tags (`vtmux_snapshot::KeptRows`, `Row::lacks`), which a build before
+    them skips.
     Readers OR them with what the cells say now (vtmux `capture.rs`
     `LineKept`).
   - A narrow character over half of a wide one: tmux writes the other

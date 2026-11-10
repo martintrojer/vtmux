@@ -170,8 +170,9 @@ record! {
     /// One screen: its visible rows, its history and its cursor state.
     /// The alternate screen has no history.
     pub struct Screen {
-        /// The visible rows, top first.
-        1 / 13 => many rows: Vec<Row>,
+        /// The visible rows, top first; tags 13 and 14 their line flags
+        /// ([`Row::kept`], [`Row::lacks`]).
+        1 / 13 / 14 => many rows: Vec<Row>,
         /// History, oldest page first; each page's rows oldest first.
         2 => many history: Vec<HistoryPage>,
         3 => one cursor: Cursor,

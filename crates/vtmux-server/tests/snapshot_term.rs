@@ -502,6 +502,23 @@ fn kept_line_flags_cross_a_snapshot() {
     }
 }
 
+/// A row lacking a line flag its cells say crosses a snapshot as it was
+/// (Ghostty's `CSI S` with no history fills the new rows in an RGB
+/// background without the flag, where tmux's `grid_empty_line` sets it):
+/// output that then overwrites the cells finds the same flags, so a live
+/// upgrade or a restore doesn't change what `capture-pane -R` says later.
+#[test]
+fn a_line_flag_a_row_lacks_crosses_a_snapshot() {
+    let scrolled = b"x\x1b[48;2;9;8;7m\x1b[S\x1b[m";
+    for form in [Form::Rows, Form::SamePin] {
+        let mut a = pane(10, 6, 0, scrolled);
+        let t = term_to_snapshot(&a, form);
+        assert!(t.primary.rows[5].lacks.extended, "{form:?}");
+        assert!(!t.primary.rows[4].lacks.any(), "{form:?}");
+        round_trip(&mut a, form, b"\x1b[6Habcdefghij", &format!("{form:?}"));
+    }
+}
+
 /// The alternate screen up over primary history, the frozen copy and
 /// marks with it, a sync hold, links with bytes that aren't UTF-8.
 /// What main added to a pane's state after the spike: REP's last print

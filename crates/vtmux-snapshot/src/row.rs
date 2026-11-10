@@ -213,6 +213,12 @@ pub struct Row {
     /// Not in the row's encoding: beside the rows that hold it
     /// ([`KeptRows`]).
     pub kept: KeptLineFlags,
+    /// tmux's line flags the row lacks though its cells say so (Ghostty
+    /// moved or cleared the cells where tmux sets the flag). Beside the
+    /// rows like [`Row::kept`], under a tag of its own where a reader has
+    /// one: a reader before it, or a run without the tag, gives the row
+    /// the flags its cells say.
+    pub lacks: KeptLineFlags,
 }
 
 /// tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` as a row keeps
@@ -234,7 +240,8 @@ impl KeptLineFlags {
 }
 
 /// The rows of a run (a record's rows, a history page's) that keep line
-/// flags ([`Row::kept`]), by index in the run, ascending: a field under
+/// flags ([`Row::kept`]), or lack them ([`Row::lacks`]), by index in the
+/// run, ascending: a field under
 /// its own tag beside the rows, not in the row codec, whose readers of the
 /// version refuse a row flag they don't know. A reader before it skips the
 /// field and derives the flags from the cells, as its own build held them
@@ -245,12 +252,13 @@ impl KeptLineFlags {
 pub struct KeptRows(Vec<(u32, KeptLineFlags)>);
 
 impl KeptRows {
-    /// The flags of `rows`.
+    /// The flags `which` takes of each of `rows` ([`Row::kept`] or
+    /// [`Row::lacks`]).
     #[must_use]
-    pub fn of(rows: &[Row]) -> Self {
+    pub fn of(rows: &[Row], which: fn(&Row) -> KeptLineFlags) -> Self {
         let mut k = Self::default();
         for (i, r) in rows.iter().enumerate() {
-            k.note(u32::try_from(i).unwrap_or(u32::MAX), r.kept);
+            k.note(u32::try_from(i).unwrap_or(u32::MAX), which(r));
         }
         k
     }
@@ -273,13 +281,14 @@ impl KeptRows {
         self.0.last().map_or(0, |&(i, _)| u64::from(i) + 1)
     }
 
-    /// Put the flags back on `rows`; refuses a row they don't have.
-    fn apply(&self, rows: &mut [Row]) -> Result<(), Error> {
+    /// Put the flags back on `rows` with `set`; refuses a row they don't
+    /// have.
+    fn apply(&self, rows: &mut [Row], set: fn(&mut Row, KeptLineFlags)) -> Result<(), Error> {
         if self.needs() > rows.len() as u64 {
             return Err(Error::Malformed("kept line flags past the rows"));
         }
         for &(i, k) in &self.0 {
-            rows[i as usize].kept = k;
+            set(&mut rows[i as usize], k);
         }
         Ok(())
     }
@@ -334,11 +343,27 @@ pub(crate) mod kept {
     use crate::wire::{Ctx, Value, one};
 
     pub fn put(out: &mut Vec<u8>, tag: u64, rows: &[Row]) {
-        one::put(out, tag, &KeptRows::of(rows));
+        one::put(out, tag, &KeptRows::of(rows, |r| r.kept));
     }
 
     pub fn get(rows: &mut [Row], buf: &[u8], cx: &Ctx) -> Result<(), Error> {
-        KeptRows::get(buf, cx)?.apply(rows)
+        KeptRows::get(buf, cx)?.apply(rows, |r, k| r.kept = k)
+    }
+}
+
+/// Field mode `lacks` (`record!`'s `tag / kept_tag / lacks_tag`): the
+/// [`Row::lacks`] of a `many` field of rows, after them under its own tag.
+pub(crate) mod lacks {
+    use super::{KeptRows, Row};
+    use crate::Error;
+    use crate::wire::{Ctx, Value, one};
+
+    pub fn put(out: &mut Vec<u8>, tag: u64, rows: &[Row]) {
+        one::put(out, tag, &KeptRows::of(rows, |r| r.lacks));
+    }
+
+    pub fn get(rows: &mut [Row], buf: &[u8], cx: &Ctx) -> Result<(), Error> {
+        KeptRows::get(buf, cx)?.apply(rows, |r, k| r.lacks = k)
     }
 }
 
@@ -675,6 +700,7 @@ impl Row {
         self.continuation = flags & ROW_CONTINUATION != 0;
         // Beside the row, not in it ([`KeptRows`]).
         self.kept = KeptLineFlags::default();
+        self.lacks = KeptLineFlags::default();
         self.prompt = match (flags >> ROW_PROMPT_SHIFT) & 3 {
             0 => RowPrompt::None,
             1 => RowPrompt::Prompt,
@@ -913,6 +939,8 @@ pub struct HistoryPage {
     /// The page's rows that keep line flags ([`Row::kept`]): in the
     /// record, not in `data`, so the page's name doesn't depend on them.
     pub kept: KeptRows,
+    /// The page's rows that lack line flags ([`Row::lacks`]), as `kept`.
+    pub lacks: KeptRows,
 }
 
 /// Builds a [`HistoryPage`] one row at a time, so a pane's history never
@@ -923,6 +951,7 @@ pub struct PageBuilder {
     rows: u32,
     cells: u64,
     kept: KeptRows,
+    lacks: KeptRows,
 }
 
 impl PageBuilder {
@@ -936,6 +965,7 @@ impl PageBuilder {
     pub fn push(&mut self, row: &Row) {
         row.encode_into(&mut self.raw);
         self.kept.note(self.rows, row.kept);
+        self.lacks.note(self.rows, row.lacks);
         self.rows += 1;
         self.cells += row.cells.len() as u64;
     }
@@ -978,6 +1008,7 @@ impl PageBuilder {
             data,
             ghostty: Vec::new(),
             kept: self.kept,
+            lacks: self.lacks,
         }
     }
 }
@@ -1049,14 +1080,18 @@ impl HistoryPage {
         let mut r = Reader::new(raw);
         let mut row = Row::default();
         let mut cells = 0u64;
-        if self.kept.needs() > u64::from(self.rows) {
+        if self.kept.needs().max(self.lacks.needs()) > u64::from(self.rows) {
             return Err(Error::Malformed("kept line flags past the rows"));
         }
         let mut kept = self.kept.0.iter().peekable();
+        let mut lacks = self.lacks.0.iter().peekable();
         for i in 0..self.rows {
             row.decode_from(&mut r)?;
             if let Some(&(_, k)) = kept.next_if(|&&(at, _)| at == i) {
                 row.kept = k;
+            }
+            if let Some(&(_, k)) = lacks.next_if(|&&(at, _)| at == i) {
+                row.lacks = k;
             }
             cells += row.cells.len() as u64;
             if cells > MAX_PAGE_CELLS {
@@ -1100,6 +1135,8 @@ impl Value for HistoryPage {
                 6 => one::get(&mut p.ghostty, body, cx)?,
                 // Skipped by a reader before it ([`KeptRows`]).
                 7 => one::get(&mut p.kept, body, cx)?,
+                // Skipped by a reader before it, as 7 ([`Row::lacks`]).
+                8 => one::get(&mut p.lacks, body, cx)?,
                 _ => {}
             }
         }
@@ -1121,6 +1158,7 @@ impl HistoryPage {
         }
         one::put(out, 6, &self.ghostty);
         one::put(out, 7, &self.kept);
+        one::put(out, 8, &self.lacks);
     }
 
     /// A page in Ghostty's own compressed form ([`HistoryPage::ghostty`]).
@@ -1217,6 +1255,7 @@ pub(crate) mod tests {
             time: 1_790_000_000,
             // Added within v1, beside the row (kept_line_flags_go_beside_the_row_codec).
             kept: KeptLineFlags::default(),
+            lacks: KeptLineFlags::default(),
         }
     }
 
@@ -1294,7 +1333,7 @@ pub(crate) mod tests {
         let mut again = Vec::new();
         last.put(&mut again);
         assert_eq!(KeptRows::get(&again, &cx).unwrap(), last);
-        assert!(last.apply(&mut [sample_row()]).is_err());
+        assert!(last.apply(&mut [sample_row()], |r, k| r.kept = k).is_err());
         let mut page = HistoryPage::from_rows(&[sample_row(), sample_row()], false);
         page.kept = KeptRows::get(&kept(&[1, 1]), &cx).unwrap();
         assert!(page.each_row(|_| {}).is_ok());
