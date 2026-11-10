@@ -1238,10 +1238,7 @@ fn in_overlay_bar(model: &Model, p: PaneId, cx: u16) -> bool {
     }
 }
 
-/// `screen_select_cell` (screen.c:641-661): the selection style over a
-/// cell, its default colours the cell's own; `noattr` drops the cell's
-/// attributes, else they are added to the style's.
-/// window-copy.c `window_copy_update_style` (5141-5147): on the cursor's
+/// window-copy.c `window_copy_update_style` (5141-5146): on the cursor's
 /// line, `copy-mode-current-line-style`'s colours replace the cell's where
 /// the style sets them and its attributes are added.
 fn current_line_cell(style: &CellStyle, themed: vtmux_vt::Style, c: &mut vtmux_vt::Cell) {
@@ -1265,6 +1262,9 @@ fn current_line_cell(style: &CellStyle, themed: vtmux_vt::Style, c: &mut vtmux_v
     }
 }
 
+/// `screen_select_cell` (screen.c:642-661): the selection style over a
+/// cell, its default colours the cell's own; `noattr` drops the cell's
+/// attributes, else they are added to the style's.
 fn select_cell(theme: &super::compose::Theme, sel: &CellStyle, c: &mut vtmux_vt::Cell) {
     use vtmux_core::style::Attrs;
     let default = |x: Colour| matches!(x, Colour::Default | Colour::Terminal);

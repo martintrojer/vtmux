@@ -29,7 +29,8 @@ pub struct Theme {
     pub links: vtmux_vt::LinkNumbers,
 }
 
-/// One server's themes are the same theme when their colours are.
+/// Two themes are the same theme when their colours are and they number
+/// links with one counter (one server's).
 impl PartialEq for Theme {
     fn eq(&self, other: &Self) -> bool {
         self.colours == other.colours && self.links.same(&other.links)
@@ -444,7 +445,7 @@ impl ComposeCache {
 struct CachedRow {
     /// [`row_signature`] when composed.
     sig: Option<Vec<(PaneId, u32, u64, u64)>>,
-    /// The row above ended written (see [`compose`]'s `wrapped`).
+    /// The row above ended written (see [`compose`]'s `ended_written`).
     above: bool,
     ended: bool,
     /// Unique per composition of the row ([`ROW_VERSION`]).
@@ -697,7 +698,9 @@ const START_ISOLATE: char = '\u{2066}';
 /// with it rather than adding another. A blank cell left of the span is
 /// written as a space to carry it: tmux's own grid joins a zero-width
 /// character to an erased cell, but libghostty-vt (and so an outer vtmux)
-/// drops it there (compat/DIVERGENCES.md D-039). Cells with equal border data are one span (`redraw_compare_data`), an
+/// drops it there (compat/DIVERGENCES.md D-039).
+///
+/// Cells with equal border data are one span (`redraw_compare_data`), an
 /// arrow cell always one of its own. Only with [`Draw::isolates`].
 fn put_isolates(scene: &Scene, d: &Draw, line: &mut [Cell], y: u16, width: u16) {
     if !d.isolates {
