@@ -269,6 +269,40 @@ fn controls_inside_a_half_parsed_sequence_run_once() {
     }
 }
 
+/// A DCS passthrough half-written at the export ends after the import as
+/// it would have without: whole when `input-buffer-size` holds it (a
+/// raised limit; a payload of escaped ESCs, two bytes each), discarded
+/// when it does not (input.c `input_input`), never cut short.
+#[test]
+fn a_long_dcs_carries_on_whole() {
+    let escaped = b"\x1b\x1bx".repeat(450_000);
+    let cases: [(usize, Vec<u8>, Option<usize>); 4] = [
+        (2 << 20, vec![b'x'; 1_200_000], Some(1_200_004)),
+        (2 << 20, escaped, Some(900_004)),
+        (1 << 20, vec![b'x'; 1_200_000], None),
+        (1 << 20, vec![b'x'; 600_000], Some(600_004)),
+    ];
+    for (n, (limit, body, want)) in cases.into_iter().enumerate() {
+        let mut a = PaneTerm::new(20, 4, 10);
+        a.set_input_buffer_size(limit);
+        a.feed(b"\x1bPtmux;");
+        a.feed(&body);
+        let mut b = PaneTerm::import_state(&a.export_state()).expect("import");
+        for t in [&mut a, &mut b] {
+            t.feed(b"TAIL\x1b\\");
+        }
+        let lens = |t: &mut PaneTerm| {
+            t.take_passthrough()
+                .iter()
+                .map(|p| p.data.len())
+                .collect::<Vec<_>>()
+        };
+        let (la, lb) = (lens(&mut a), lens(&mut b));
+        assert_eq!(la, want.into_iter().collect::<Vec<_>>(), "case {n}: source");
+        assert_eq!(lb, la, "case {n}: import");
+    }
+}
+
 /// REP repeats only a character printed right before it (tmux's
 /// `INPUT_LAST`, input.c `INPUT_CSI_REP`): whether one was is carried,
 /// also with the REP half-parsed at the export.

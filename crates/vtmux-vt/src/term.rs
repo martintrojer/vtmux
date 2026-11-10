@@ -249,10 +249,15 @@ const CELLS_ALIGN: usize = 128;
 /// `tv_sec = 1`, screen-write.c:1035).
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The most pending input [`PaneTerm::pending_input`] keeps (one byte more
-/// says it was cut): tmux keeps all of it, but discards a string past
-/// `input-buffer-size`, 1 MiB by default, anyway.
-const PENDING_MAX: usize = 1 << 20;
+/// The default `input-buffer-size` (`INPUT_BUF_DEFAULT_SIZE`, also the
+/// option's minimum), which [`PaneTerm::pending_max`] starts from.
+const PENDING_MAX: usize = dcs::DEFAULT_BUFFER_SIZE;
+
+/// A DCS's introducer, parameters and intermediates, which come before the
+/// payload `input-buffer-size` counts: `ESC P`, at most 63 parameter bytes
+/// and 3 intermediates, one more of either discards it (`dcs.rs`), with
+/// room to spare.
+const PENDING_SLACK: usize = 128;
 
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -1055,7 +1060,7 @@ impl PaneTerm {
 
     /// Keep `b` in the pending input while the parser is out of the ground
     /// state after it; back in the ground state the input is dropped
-    /// (`input_ground`). Past [`PENDING_MAX`] it keeps the current
+    /// (`input_ground`). Past [`Self::pending_max`] it keeps the current
     /// sequence, from its ESC: [`Self::ghostty_partial`] needs its start,
     /// and over the limit it is the only one there.
     fn note_pending(&mut self, b: u8, in_sequence: bool) {
@@ -1066,14 +1071,31 @@ impl PaneTerm {
         if b == 0x1b && self.scan.state == ScanState::Esc {
             self.pending_start = self.pending.len();
         }
-        if self.pending.len() > PENDING_MAX && self.pending_start > 0 {
+        let max = self.pending_max();
+        if self.pending.len() > max && self.pending_start > 0 {
             self.pending
                 .drain(..self.pending_start.min(self.pending.len()));
             self.pending_start = 0;
         }
-        if self.pending.len() <= PENDING_MAX {
+        if self.pending.len() <= max {
             self.pending.push(b);
         }
+    }
+
+    /// The most pending input [`PaneTerm::pending_input`] keeps (one byte
+    /// more says it was cut). tmux keeps all of it but discards a string
+    /// past `input-buffer-size` (input.c `input_input`), so this keeps
+    /// every string tmux does not discard, whole: the live upgrade carries
+    /// it, and a sequence cut short there would end as another one after
+    /// it (a DCS passthrough with its middle gone). A DCS payload takes two
+    /// bytes for each ESC it holds (`ESC ESC`, input.c
+    /// `input_state_dcs_escape_table` keeps the second), hence twice the
+    /// limit, and its header comes first ([`PENDING_SLACK`]).
+    fn pending_max(&self) -> usize {
+        self.input_buffer_size
+            .max(PENDING_MAX)
+            .saturating_mul(2)
+            .saturating_add(PENDING_SLACK)
     }
 
     /// `capture-pane -P`: the start of an escape sequence the pane has not
@@ -2019,7 +2041,7 @@ impl PaneTerm {
     ///   CAN and SUB never reach the tail: they end the sequence.
     /// - In a CSI, 0x7f-0xff are the scanner's alone ([`ScanEvent::Skip`]).
     /// - A string longer than the pending input keeps has lost its middle
-    ///   (the input stops growing at [`PENDING_MAX`], the default
+    ///   (the input stops growing at [`Self::pending_max`], past
     ///   `input-buffer-size`, and tmux discards a string past that limit:
     ///   `input_input` sets `INPUT_DISCARD`, `input_exit_osc` and the
     ///   other exits then do nothing). Ghostty gets an OSC it rejects at
@@ -2030,7 +2052,7 @@ impl PaneTerm {
         let state = self.scan.state;
         match state {
             ScanState::Ground | ScanState::Dcs | ScanState::Rename => return Vec::new(),
-            ScanState::Str | ScanState::Apc if self.pending.len() > PENDING_MAX => {
+            ScanState::Str | ScanState::Apc if self.pending.len() > self.pending_max() => {
                 return b"\x1b];".to_vec();
             }
             _ => {}
@@ -7567,7 +7589,7 @@ mod tests {
         assert_eq!(t.cursor(), (9, 1));
     }
 
-    /// The pending input stops at [`PENDING_MAX`]. A string past it has
+    /// The pending input stops at [`PaneTerm::pending_max`]. A string past it has
     /// lost its middle, and tmux discards one past `input-buffer-size`
     /// (`input_input`): a resize leaves Ghostty swallowing the rest, not
     /// a string with a hole. A sequence after such a string is kept whole.
@@ -7575,13 +7597,13 @@ mod tests {
     fn a_resize_drops_a_string_past_the_pending_limit() {
         use crate::snapshot::Color;
         let screen = b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H";
-        let long = vec![b'a'; PENDING_MAX + 10];
+        let long = vec![b'a'; PaneTerm::new(1, 1, 0).pending_max() + 10];
         // A long OSC 2 still open: Ghostty must not get its start again.
         let mut t = PaneTerm::new(20, 6, 100);
         t.feed(screen);
         t.feed(b"\x1b]2;");
         t.feed(&long);
-        assert_eq!(t.pending_input().len(), PENDING_MAX + 1);
+        assert_eq!(t.pending_input().len(), t.pending_max() + 1);
         assert_eq!(t.ghostty_partial(), b"\x1b];");
         t.resize(20, 4);
         t.feed(b"b\x07X");
