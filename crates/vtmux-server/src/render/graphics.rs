@@ -470,3 +470,76 @@ impl ClientGraphics {
         !self.uploaded.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(pane: u32, image: u32, generation: u64) -> ImageKey {
+        ImageKey {
+            pane: PaneId(pane),
+            alternate: false,
+            image,
+            generation,
+        }
+    }
+
+    /// One id per (pane, screen, image, generation), from vtmux's range:
+    /// two panes' image 1 are two images, a new generation a new id, and
+    /// an id is kept while its image is placed and forgotten after.
+    #[test]
+    fn ids_are_per_pane_image_and_generation() {
+        let mut ids = Ids::default();
+        let a = ids.id(key(0, 1, 5));
+        let b = ids.id(key(1, 1, 5));
+        let c = ids.id(key(0, 1, 6));
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert!([a, b, c].iter().all(|id| (FIRST..=LAST).contains(id)));
+        assert_eq!(ids.id(key(0, 1, 5)), a, "the same image keeps its id");
+        assert_eq!(ids.key(b), Some(key(1, 1, 5)));
+        ids.keep(&[key(0, 1, 6)].into_iter().collect());
+        assert_eq!((ids.key(a), ids.key(c)), (None, Some(key(0, 1, 6))));
+    }
+
+    fn row(text: &str) -> Snapshot {
+        let mut s = crate::render::blank(None, 6, 1);
+        for (cell, ch) in s.cells.iter_mut().zip(text.chars()) {
+            cell.text = ch.to_string().as_str().into();
+        }
+        s
+    }
+
+    /// A direct placement covers its cells, cut at the content's edge; one
+    /// below the text leaves the cells with text; a placement scrolled off
+    /// above draws nothing.
+    #[test]
+    fn a_direct_placement_covers_its_cells() {
+        let pg = PaneGraphics::default();
+        let at = |col, below| Direct {
+            id: FIRST,
+            placement: 7,
+            col,
+            row: 0,
+            cols: 3,
+            rows: 1,
+            below,
+        };
+        let content = row("ab");
+        let (over, _) = overlay(&content, &[], &pg, &[at(4, false)], 0).unwrap();
+        let shown: Vec<_> = over.cells.iter().map(shown).collect();
+        assert_eq!(shown[..4], [None; 4]);
+        assert_eq!(shown[4..], [Some((FIRST, 7)); 2], "cut at the edge");
+        let (under, _) = overlay(&content, &[], &pg, &[at(0, true)], 0).unwrap();
+        assert_eq!(under.cells[0].text.as_str(), "a", "below the text");
+        assert_eq!(shown_of(&under, 2), Some((FIRST, 7)));
+        assert!(
+            overlay(&content, &[], &pg, &[at(0, false)], 1).is_none(),
+            "above the top"
+        );
+    }
+
+    fn shown_of(s: &Snapshot, x: usize) -> Option<(u32, u32)> {
+        shown(&s.cells[x])
+    }
+}
