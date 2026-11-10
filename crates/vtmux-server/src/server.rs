@@ -5155,11 +5155,10 @@ impl Server {
         // The shell and history budget come from the session's options,
         // not the starting client's shell.
         let session_tree = TreeId::Session(ps.session);
-        let shell = if let Some(kept) = &ps.shell {
-            kept.clone()
-        } else {
-            self.default_shell(session_tree)
-        };
+        let shell = ps
+            .shell
+            .clone()
+            .unwrap_or_else(|| self.default_shell(session_tree));
         // spawn.c:379-390: with no command and not respawning, the
         // session's `default-command` is the one word `$SHELL -c` runs.
         // A respawn keeps the pane's stored words.
@@ -5176,7 +5175,6 @@ impl Server {
             }
         }
         child.set("SHELL", &shell.to_string_lossy(), false);
-
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
         // spawn.c:458-464: an empty pane forks nothing.
@@ -5264,6 +5262,7 @@ impl Server {
             close_on_cancel: false,
             requests: crate::term_queries::PaneRequests::default(),
             output_generation: 0,
+            last_output_time: None,
             shell_commands: crate::model::ShellCommands::default(),
             kitty_owner: [None; 2],
         })
@@ -5907,7 +5906,14 @@ impl Server {
                 return;
             };
             match io.read() {
-                ReadResult::Data(bytes) => self.pane_input(p, &bytes, flooding),
+                ReadResult::Data(bytes) => {
+                    // input_parse_pane (input.c:1037): only the program's
+                    // own output stamps it, not `display-message -I`.
+                    if let Some(pane) = self.model.panes.get_mut(&p) {
+                        pane.last_output_time = Some(crate::model::now_epoch());
+                    }
+                    self.pane_input(p, &bytes, flooding);
+                }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
                     closed = true;

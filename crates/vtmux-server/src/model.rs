@@ -300,6 +300,9 @@ pub struct Pane {
     /// `wp->output_generation`: how many times output was parsed into it
     /// (input.c:1052, `#{pane_output_generation}`).
     pub output_generation: u64,
+    /// `wp->last_output_time`: epoch seconds of the last read from the
+    /// program (input.c:1037, `#{pane_last_output_time}`).
+    pub last_output_time: Option<i64>,
     /// What its shell said of its prompts and commands through OSC 133.
     pub shell_commands: ShellCommands,
     /// D29: the process group that was granted the kitty keyboard protocol

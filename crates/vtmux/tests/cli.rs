@@ -8208,6 +8208,52 @@ fn set_hook_monitor_fires_on_change() {
     });
 }
 
+/// `#{pane_output_generation}` and `#{pane_last_output_time}` (format.c
+/// `format_cb_pane_output_generation`, `format_cb_pane_last_output_time`):
+/// a pane that has printed nothing has a generation of 0 and no time (so
+/// `display -a` lists neither); after its program's output the time is
+/// set, a read of the clock and no older than the server.
+#[test]
+fn pane_output_generation_and_last_output_time() {
+    // Raw before any output (0 and empty); after it the reads' count and
+    // the second differ between runs, so only what they imply is shown.
+    const BEFORE: &str = "[#{pane_output_generation}][#{pane_last_output_time}]";
+    const AFTER: &str = "#{?#{>:#{pane_output_generation},0},gen,none}|#{?pane_last_output_time,set,empty}|#{e|>=:#{pane_last_output_time},#{start_time}}|#{e|<=:#{e|-:#{pane_last_output_time},#{start_time}},120}";
+    let listed = |w: &World| {
+        let r = w.run(&["display", "-a"]);
+        let names: Vec<&str> = r
+            .stdout
+            .lines()
+            .filter_map(|l| l.split_once('=').map(|(k, _)| k))
+            .filter(|k| k.starts_with("pane_output_") || k.starts_with("pane_last_output_"))
+            .collect();
+        names.join(",")
+    };
+    compare("pane_output_generation_and_last_output_time", |w| {
+        let mut out = steps(
+            w,
+            &[&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"]],
+        );
+        w.wait_all_running("cat");
+        out.push(w.run(&["display", "-p", BEFORE]));
+        out.push(Run {
+            stdout: format!("{}\n", listed(w)),
+            stderr: String::new(),
+            code: 0,
+        });
+        out.push(w.run(&["send-keys", "-t", "a", "x", "Enter"]));
+        w.wait_for_text("a", "x\nx");
+        out.push(w.run(&["display", "-p", AFTER]));
+        out.push(Run {
+            stdout: format!("{}\n", listed(w)),
+            stderr: String::new(),
+            code: 0,
+        });
+        out.push(w.run(&["kill-server"]));
+        out
+    });
+}
+
 /// `display-message -a` lists every format with a value: `format_table`'s
 /// entries in its order, then the tree's (the command, copy mode's) by
 /// name (format.c `format_each`). The values that change from run to run
@@ -8232,8 +8278,6 @@ fn display_message_all() {
         "history_added",
         "history_collected",
         "history_generation",
-        "pane_output_generation",
-        "pane_command_running",
     ];
     let all = |w: &World, args: &[&str]| {
         let mut r = w.run(args);

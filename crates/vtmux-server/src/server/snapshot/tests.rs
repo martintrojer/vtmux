@@ -228,6 +228,7 @@ const VARIABLES: &[&str] = &[
     "pane_dead_signal",
     "pane_dead_time",
     "pane_output_generation",
+    "pane_last_output_time",
     "pane_last_prompt_time",
     "pane_command_start_time",
     "pane_command_end_time",
@@ -623,6 +624,7 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
         .get_mut(&vtmux_core::ids::PaneId(6))
         .unwrap();
     pane.output_generation = 5;
+    pane.last_output_time = Some(1_790_000_099);
     pane.shell_commands = crate::model::ShellCommands {
         last_prompt: Some(1_790_000_100),
         started: Some(1_790_000_101),
@@ -1322,6 +1324,12 @@ fn an_ordinary_attached_client_requires_no_feature() {
         b"\x1b]8;;http://x\x1b\\L\x1b]8;;\x1b\\",
         false,
     );
+    // Its program's output (`#{pane_last_output_time}`) is ordinary too.
+    a.model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(0))
+        .unwrap()
+        .last_output_time = Some(1_790_000_099);
     // A kitty keyboard grant (D29) with the process group that pushed it.
     ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[>1u", false);

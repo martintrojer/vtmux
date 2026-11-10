@@ -158,6 +158,7 @@ fn a_mode_2048_grant_round_trips_under_its_feature() {
 fn a_panes_shell_commands_round_trip() {
     let mut s = sample();
     s.panes[0].output_generation = 42;
+    s.panes[0].last_output_time = Some(1_790_000_099);
     s.panes[0].last_prompt_time = Some(1_790_000_100);
     s.panes[0].command_start_time = Some(1_790_000_101);
     s.panes[0].command_end_time = Some(1_790_000_104);
@@ -167,6 +168,7 @@ fn a_panes_shell_commands_round_trip() {
     assert_eq!(decode(&encode(&s)).unwrap(), s);
     let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
     assert!(golden.panes.iter().all(|p| p.output_generation == 0
+        && p.last_output_time.is_none()
         && p.last_prompt_time.is_none()
         && p.command_start_time.is_none()
         && p.command_end_time.is_none()

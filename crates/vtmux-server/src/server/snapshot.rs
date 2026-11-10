@@ -1213,6 +1213,7 @@ impl Server {
                     status: p.status.map(status_out),
                     dead_time: p.dead_time,
                     output_generation: p.output_generation,
+                    last_output_time: p.last_output_time,
                     kitty_owner_primary: p.kitty_owner[0],
                     kitty_owner_alternate: p.kitty_owner[1],
                     last_prompt_time: p.shell_commands.last_prompt,
@@ -1921,6 +1922,7 @@ impl Server {
             close_on_cancel: x.close_on_cancel,
             requests: crate::term_queries::PaneRequests::default(),
             output_generation: x.output_generation,
+            last_output_time: x.last_output_time,
             kitty_owner: [x.kitty_owner_primary, x.kitty_owner_alternate],
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,

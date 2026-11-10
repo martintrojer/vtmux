@@ -792,6 +792,7 @@ impl<'a> Ctx<'a> {
             "pane_output_generation" => p.output_generation.to_string(),
             // format_cb_pane_last_prompt_time and the pane_command_*
             // callbacks (format.c:2342-2426): nothing until OSC 133 says.
+            "pane_last_output_time" => p.last_output_time?.to_string(),
             "pane_last_prompt_time" => p.shell_commands.last_prompt?.to_string(),
             "pane_command_start_time" => p.shell_commands.started?.to_string(),
             "pane_command_end_time" => p.shell_commands.ended?.to_string(),
@@ -1276,6 +1277,7 @@ impl FormatContext for Ctx<'_> {
             "session_last_attached" => self.session().and_then(|s| s.last_attached),
             "window_activity" => self.window().map(|w| w.activity_secs),
             "pane_dead_time" => self.pane().and_then(|p| p.dead_time),
+            "pane_last_output_time" => self.pane().and_then(|p| p.last_output_time),
             "pane_last_prompt_time" => self.pane().and_then(|p| p.shell_commands.last_prompt),
             "pane_command_start_time" => self.pane().and_then(|p| p.shell_commands.started),
             "pane_command_end_time" => self.pane().and_then(|p| p.shell_commands.ended),

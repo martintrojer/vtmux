@@ -51,7 +51,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-043](#d-043) | `capture-pane -e` keeps a link that runs on from the line above | tmux bug | open |
 | [D-044](#d-044) | Emoji joined in the last column don't scroll the screen or cover borders | tmux bug | open |
 | [D-045](#d-045) | Nine emoji such as ☝ and ✌ are one column, as programs and terminals count them | tmux bug | open |
-| [D-046](#d-046) | Some history and OSC 133 formats are empty; `display -v` shows only the result | Deferred | deferred |
+| [D-046](#d-046) | The history counters are empty; `display -v` shows only the result | Deferred | deferred |
 | [D-047](#d-047) | Text partly under a floating pane keeps its visible end | tmux bug | open |
 | [D-048](#d-048) | A control client closing stdin with output queued can't crash the server | tmux bug | open |
 | [D-049](#d-049) | Copying a line wrapped before a wide character has no extra space | Deferred | deferred |
@@ -900,20 +900,17 @@ Closed (vtmux now matches tmux):
   - Before this, vtmux's grid took tmux's two (patch 0027), and vim on such a file in that split drew the border at column 32 on its rows.
 
 <a id="d-046"></a>
-### D-046: format variables tmux 3.8 tracks that vtmux does not yet, and `display-message -v`
+### D-046: the history counters tmux 3.8 tracks that vtmux does not yet, and `display-message -v`
 
 - **Category:** Deferred.
   - The counters need history bookkeeping beside Ghostty's (D-001's model).
-  - The OSC 133 state comes with tmux 3.8's pane events (`pane-command-started`, `pane-shell-prompt`, which vtmux has not got either) and a snapshot field each.
   - `-v` needs a trace through the format engine.
 - **Test:** cli `display_message_all` leaves these names out of both sides; everything else `display-message -a` lists is compared.
 - **tmux:**
   - `#{history_added}`, `#{history_collected}` and `#{history_generation}` count the lines scrolled into history, the lines the limit collected (a tenth of `history-limit` at a time, grid.c `grid_collect_history`), and the clears and reflows (`scroll_added`, `scroll_collected`, `scroll_generation`, grid.c:455-521, 1609).
-  - `#{pane_output_generation}` counts the reads parsed (input.c:1052), and `#{pane_last_output_time}` is the last one's time (input.c:1037).
-  - `#{pane_command_running}` is set by OSC 133 `C` and cleared by `D`. `#{pane_command_start_time}`, `#{pane_command_end_time}`, `#{pane_command_duration}` and `#{pane_command_status}` are their times and `D`'s status, and `#{pane_last_prompt_time}` is OSC 133 `A`'s time (input.c:3288-3326).
   - `display-message -v` writes each step of the expansion before the result (`format_log`, `FORMAT_VERBOSE`).
 - **vtmux:** these variables are empty (so `display-message -a` does not list them), and `-v` prints only the result. `#{window_cell_width}` and `#{window_cell_height}` are D-014.
-- **Evidence:** `new -d -s a cat -; display -p '#{history_added}|#{pane_output_generation}|#{pane_command_running}'`: tmux `0|0|0`, vtmux `||`. `display -pv '#{session_name}'`: tmux five `# ...` lines then `a`, vtmux `a`.
+- **Evidence:** `new -d -s a cat -; display -p '#{history_added}|#{history_collected}'`: tmux `0|0`, vtmux `|`. `display -pv '#{session_name}'`: tmux five `# ...` lines then `a`, vtmux `a`.
 
 <a id="d-047"></a>
 ### D-047: text `format_draw` writes into a pane half under a floating pane keeps its visible end

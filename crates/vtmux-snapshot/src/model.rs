@@ -662,6 +662,9 @@ record! {
         /// grants settled on import.
         43 => opt kitty_owner_primary: Option<i32>,
         44 => opt kitty_owner_alternate: Option<i32>,
+        /// `#{pane_last_output_time}`: epoch seconds of the program's last
+        /// output. Ignorable: an older reader leaves it empty.
+        45 => opt last_output_time: Option<i64>,
     }
 }
 
@@ -1399,6 +1402,7 @@ pub(crate) mod tests {
             scrollbar_hide_in_ms: None,
             // Added within v1 too (a_panes_shell_commands_round_trip).
             output_generation: 0,
+            last_output_time: None,
             last_prompt_time: None,
             command_start_time: None,
             command_end_time: None,
