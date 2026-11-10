@@ -36,7 +36,7 @@ pub fn exec(
     // session_select returning 1).
     let mut changed = true;
     // -T on the current window moves the queue's current state only when
-    // it was in this session (cmd-select-window.c:133-134).
+    // it was in this session (cmd-select-window.c:136-137).
     let mut moves_current = true;
     if which == Which::Next || args.flag('n') {
         model

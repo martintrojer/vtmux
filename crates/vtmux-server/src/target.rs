@@ -24,7 +24,7 @@ pub struct Found {
     /// target asked for (`fs->idx`), which may be free; `None` when it named
     /// no index (no target, or only a session). `index` is then still the
     /// session's current window (cmd-find.c:375-379), except for a free
-    /// numeric index, where it is `None` (cmd-find.c:450-459).
+    /// numeric index, where it is `None` (cmd-find.c:448-461).
     pub new_index: Option<u32>,
 }
 
@@ -149,7 +149,7 @@ fn best_with_window(model: &Model, w: WindowId, prefer: Prefer<'_>) -> Option<Fo
     best_winlink(model, best_session(model, Some(w), prefer)?, w)
 }
 
-/// `cmd_find_best_winlink_with_window` (cmd-find.c:225-246): window `w` in
+/// `cmd_find_best_winlink_with_window` (cmd-find.c:225-247): window `w` in
 /// session `s` at the session's current index if it is there, else at its
 /// lowest.
 fn best_winlink(model: &Model, s: SessionId, w: WindowId) -> Option<Found> {
@@ -170,7 +170,7 @@ fn best_winlink(model: &Model, s: SessionId, w: WindowId) -> Option<Found> {
 
 /// Where the command runs from: the client's attached session, the pane
 /// it was started in (`$TMUX_PANE`), or the best session
-/// (`cmd_find_from_client`, cmd-find.c:879-937).
+/// (`cmd_find_from_client`, cmd-find.c:879-936).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Origin {
     pub attached: Option<SessionId>,
@@ -215,7 +215,7 @@ pub fn current_preferring(model: &Model, origin: Origin, prefer: Prefer<'_>) -> 
     best_session(model, None, prefer).map(|s| Found::from_session(model, s))
 }
 
-/// `cmd_find_get_session` (cmd-find.c:263-310): an ID, a session name,
+/// `cmd_find_get_session` (cmd-find.c:264-324): an ID, a session name,
 /// an attached client's name or tty (its session), then a prefix or a
 /// pattern.
 fn find_session(model: &Model, part: &Part) -> Option<SessionId> {
@@ -258,7 +258,7 @@ fn find_session(model: &Model, part: &Part) -> Option<SessionId> {
     unique(&|n| fnmatch(name, n, false))
 }
 
-/// `cmd_find_get_window_with_session` (cmd-find.c:499-640).
+/// `cmd_find_get_window_with_session` (cmd-find.c:364-514).
 fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     let session = model.sessions.get(&s)?;
     let window = part.text.as_str();
@@ -300,7 +300,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             _ => {}
         }
     }
-    // cmd-find.c:425: not for a leading sign, which strtonum would take
+    // cmd-find.c:448: not for a leading sign, which strtonum would take
     // (an exact `=+1` is a name).
     if !window.starts_with(['+', '-'])
         && let Ok(idx) = strtonum(window, 0, i64::from(i32::MAX))
@@ -341,7 +341,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     None
 }
 
-/// `cmd_find_get_window` (cmd-find.c:469-497).
+/// `cmd_find_get_window` (cmd-find.c:328-357).
 fn find_window(
     model: &Model,
     current: Found,
@@ -365,7 +365,7 @@ fn find_window(
     None
 }
 
-/// A window part tried as a session (cmd-find.c:347-348, 487-493): a
+/// A window part tried as a session (cmd-find.c:347-348, 1124-1127): a
 /// leading `=` set `CMD_FIND_EXACT_WINDOW`, not `CMD_FIND_EXACT_SESSION`,
 /// so the session is found by prefix and pattern too.
 fn as_session(part: &Part) -> Part {
@@ -375,7 +375,7 @@ fn as_session(part: &Part) -> Part {
     }
 }
 
-/// `cmd_find_get_pane_with_window` (cmd-find.c:579-660).
+/// `cmd_find_get_pane_with_window` (cmd-find.c:582-660).
 fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
     let window = model.windows.get(&w)?;
     if part.starts_with('%') {
@@ -425,7 +425,7 @@ fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
     model.pane_at_position(w, part)
 }
 
-/// `cmd_find_get_pane` (cmd-find.c:643-676).
+/// `cmd_find_get_pane` (cmd-find.c:518-548).
 fn find_pane(
     model: &Model,
     current: Found,
@@ -501,7 +501,7 @@ pub fn resolve_preferring(
 }
 
 /// What a failed `CANFAIL` lookup leaves behind: `cmd_find_target` returns
-/// success without clearing the state it filled in (cmd-find.c:1237-1243),
+/// success without clearing the state it filled in (cmd-find.c:1244-1251),
 /// and `format_defaults` completes it from the session. A session that was
 /// found stays, with the window if that was found too; a lookup that ended
 /// by trying the text as a session name (and failed) leaves nothing.
@@ -522,7 +522,7 @@ fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: Targe
             return Found::default();
         };
         // A pane ID whose window is not in the session: the state keeps
-        // the pane (cmd-find.c:568-572), so formats show it in the
+        // the pane (cmd-find.c:560-564), so formats show it in the
         // session's current window.
         if parts.window.is_none()
             && let Some(id) = parts
@@ -635,7 +635,7 @@ fn find_index_parts(
     if let Some(s) = session {
         return find_index_in(model, s, wp).ok_or_else(|| no_window(wp));
     }
-    // cmd_find_get_window (cmd-find.c:469-497).
+    // cmd_find_get_window (cmd-find.c:328-357).
     if wp.text.starts_with('@') {
         return find_window(model, current, wp, true, prefer)
             .map(|f| Found {
@@ -658,7 +658,7 @@ fn find_index_parts(
 }
 
 /// `cmd_find_get_window_with_session` with `CMD_FIND_WINDOW_INDEX`
-/// (cmd-find.c:389-461): offsets are plain arithmetic on the current index
+/// (cmd-find.c:398-409, 457-460): offsets are plain arithmetic on the current index
 /// and a free index is accepted; otherwise the usual window lookup.
 fn find_index_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     let text = part.text.as_str();
@@ -691,7 +691,7 @@ fn find_index_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             .windows
             .contains_key(&u32::try_from(idx).ok()?)
     {
-        // cmd-find.c:450-459: `fs->wl` is overwritten with the (absent)
+        // cmd-find.c:451-460: `fs->wl` is overwritten with the (absent)
         // winlink at the index, so the target names no window.
         return at_current(idx).map(|f| Found { index: None, ..f });
     }
@@ -715,7 +715,7 @@ fn find_parts(
         return match (&parts.window, &parts.pane) {
             (None, None) => Ok(Found::from_session(model, s)),
             (Some(wp), None) => find_window_in(model, s, wp).ok_or_else(|| no_window(wp)),
-            // cmd_find_get_pane_with_session (cmd-find.c:555-577): a pane
+            // cmd_find_get_pane_with_session (cmd-find.c:555-575): a pane
             // ID is looked up anywhere, then its window in this session.
             (None, Some(pp)) if pp.text.starts_with('%') => {
                 let id: PaneId = pp.text.parse().map_err(|_| no_pane(pp))?;

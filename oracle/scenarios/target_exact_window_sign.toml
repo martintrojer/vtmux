@@ -1,6 +1,6 @@
 name = "target_exact_window_sign"
 # An exact window part with a leading `+` or `-` is not an offset and is
-# not tried as an index (cmd-find.c:425): only as a name. Under
+# not tried as an index (cmd-find.c:448): only as a name. Under
 # CMD_FIND_CANFAIL (display-message) a failed lookup shows the current
 # window.
 steps = [
