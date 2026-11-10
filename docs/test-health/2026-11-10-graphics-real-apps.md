@@ -36,6 +36,26 @@ problems (popups, pane edges). This is D28 rule 3 at work (`TMUX` and
 XTVERSION stay tmux's); a program that sends bare commands is what D33
 draws.
 
+## Off costs nothing
+
+`scripts/bench.py throughput throughput_attached render`, release builds:
+`base` is the parent of the D33 branch (a83b239), `vtmux` the branch
+(762abd8) with `vtmux-graphics` at its default. `NO_BUILD=1
+THROUGHPUT_MB=50`, under `flock /tmp/vtmux-stress.lock`, load 16-20 (the
+host is shared), so a few percent is noise. Server CPU, median:
+
+| | base | D33, off | runs |
+|---|---|---|---|
+| 50 MB plain, no client | 0.46 s | 0.46 s | 7 |
+| 50 MB 19% SGR, no client | 0.82 s | 0.84 s | 7 |
+| one client, plain, sync off / on | 0.63 / 0.63 s | 0.64 / 0.64 s | 3 |
+| one client, SGR, sync off / on | 0.96 / 0.96 s | 1.05 / 1.01 s | 3 |
+| `render`, sync off / on | 0.25 / 0.23 s | 0.24 / 0.26 s | 3 |
+
+Peak RSS is 0.1-0.4 MB higher (the PNG and zlib code). Off, a pane read
+does one option lookup more, and a frame nothing: no pane was ever
+granted, so no turn reads placements and no client is a graphics client.
+
 ## The emitter
 
 ```python
