@@ -1,0 +1,26 @@
+# A string past input-buffer-size (1 MiB by default) is discarded whole
+# (input.c input_input sets INPUT_DISCARD; input_exit_osc, input_exit_apc
+# and input_osc_52 then do nothing), and what follows works: a 1.1 MB APC
+# and a 1.1 MB OSC 2 leave the title as it was, a 1.1 MB OSC 52 makes no
+# paste buffer, a short APC, OSC 2 and OSC 52 after them do. vtmux holds
+# no more of such a string than tmux does (crates/vtmux-vt/tests/string_memory.rs).
+name = "string_past_input_buffer"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "tmux wait-for go; big() { head -c 1100000 /dev/zero | tr '\\0' \"$1\"; }; printf '\\033_one\\033\\\\'; printf '\\033_'; big x; printf '\\033\\\\'; printf '\\033]52;c;'; big A; printf '\\007'; printf '\\033]2;'; big y; printf '\\007\\033]2;mid\\007'; tmux wait-for go2; printf '\\033]52;c;aGk=\\007\\033_two\\033\\\\\\033]2;end\\007'; exec cat -"] },
+  { run = ["set", "-s", "set-clipboard", "on"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @log '[#{hook_new_title}]'"] },
+  { run = ["set-hook", "-g", "pane-title-changed[1]", "if -F '#{==:#{hook_new_title},end}' 'wait-for -S done'"] },
+  { run = ["set-hook", "-g", "pane-title-changed[2]", "if -F '#{==:#{hook_new_title},mid}' 'wait-for -S mid'"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "mid" },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_title}]"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["list-buffers"] },
+  { run = ["wait-for", "-S", "go2"] },
+  { wait_for = "done" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["list-buffers", "-F", "#{buffer_sample}"] },
+  { run = ["kill-server"] },
+]

@@ -53,6 +53,8 @@ Fresh history costs up to 1.6x tmux's until the pass finishes: about 15 s after 
 | 5 | 315 MB | 59 MB | 0.19x |
 | 20 | 1.25 GB | 217 MB | 0.17x |
 
+A string a program never ends is held up to `input-buffer-size`, as tmux holds it, then skipped: 12 panes with 8 MiB of an open OSC 52 each cost 49 MB in all (11 MB idle; tmux 165 MB).
+
 vtmux also spent less server CPU on those runs (66.9 s against 76.2 s over 12 minutes at 20 panes). Ten agent panes over 30 minutes: neither server grows (vtmux 21.9 to 22.1 MB, tmux 6.5 MB).
 
 ## CPU and rendering

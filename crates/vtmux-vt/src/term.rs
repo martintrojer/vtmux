@@ -259,6 +259,10 @@ const PENDING_MAX: usize = dcs::DEFAULT_BUFFER_SIZE;
 /// room to spare.
 const PENDING_SLACK: usize = 128;
 
+/// An OSC Ghostty rejects at its first byte (`osc.Parser`'s `invalid`
+/// state): it keeps none of the string and dispatches nothing at its end.
+const OSC_REJECTED: &[u8] = b"\x1b];";
+
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -937,6 +941,16 @@ impl PaneTerm {
                     // fresh line, and its prompt rows are erased on resize
                     // and change ED 2.
                     ScanEvent::Osc133 => self.cancel_string(bytes[i]),
+                    // tmux discards an OSC past `input-buffer-size`
+                    // (`input_input`, `INPUT_DISCARD`). Ghostty drops
+                    // what it holds (CAN, which frees nothing until the
+                    // next OSC starts) and starts one it rejects at
+                    // its first byte, which it skips without keeping
+                    // anything through the BEL or ST.
+                    ScanEvent::OscOver => {
+                        self.term.vt_write(b"\x18");
+                        self.term.vt_write(OSC_REJECTED);
+                    }
                     // An OSC 0 or 2 is tmux's alone (`input_exit_osc`):
                     // Ghostty never keeps a title of its own.
                     // D33: a graphics command (`APC G`) is Ghostty's while
@@ -2147,8 +2161,9 @@ impl PaneTerm {
         let state = self.scan.state;
         match state {
             ScanState::Ground | ScanState::Dcs | ScanState::Rename => return Vec::new(),
+            ScanState::Str if self.scan.osc_over => return OSC_REJECTED.to_vec(),
             ScanState::Str | ScanState::Apc if self.pending.len() > self.pending_max() => {
-                return b"\x1b];".to_vec();
+                return OSC_REJECTED.to_vec();
             }
             _ => {}
         }
@@ -3234,6 +3249,11 @@ struct AltModeScanner {
     palette_osc: Option<Vec<u8>>,
     palette_discard: bool,
     osc_cap: usize,
+    /// Bytes `input_input` has collected (0x20-0xff) of the OSC in
+    /// progress, and whether that passed `osc_cap` (tmux sets
+    /// `INPUT_DISCARD`: the string does nothing).
+    osc_len: usize,
+    osc_over: bool,
     /// tmux's palette, to tell which palette OSCs redraw the pane and to
     /// answer the colour queries.
     palette: Palette,
@@ -3932,6 +3952,10 @@ enum ScanEvent {
     /// The sequence just ended asks something back
     /// ([`AltModeScanner::answers`]).
     Answer,
+    /// The OSC in progress passed `input-buffer-size`: tmux discards it
+    /// whole. Ghostty, which would buffer up to 8 MiB of it, gets CAN and
+    /// an OSC it rejects at its first byte ([`PaneTerm::feed`]).
+    OscOver,
     /// An SM or RM with modes tmux does not know: Ghostty gets CAN and
     /// [`AltModeScanner::rewrite`] before the final byte.
     Rewrite,
@@ -3999,7 +4023,15 @@ impl AltModeScanner {
         if matches!(self.state, ScanState::Str | ScanState::Apc) {
             self.push_title(b);
         }
+        let was_over = self.osc_over;
+        if self.state == ScanState::Str && b >= 0x20 {
+            self.osc_len = self.osc_len.saturating_add(1);
+            self.osc_over |= self.osc_len > self.osc_cap;
+        }
         let event = self.push_state(b);
+        if event.is_none() && self.osc_over && !was_over && self.state == ScanState::Str {
+            return Some(ScanEvent::OscOver);
+        }
         if event.is_none() && self.title_done.is_some() {
             return Some(ScanEvent::Title);
         }
@@ -4201,6 +4233,8 @@ impl AltModeScanner {
             }
             (ScanState::Esc, b']') => {
                 self.state = ScanState::Str;
+                self.osc_len = 0;
+                self.osc_over = false;
                 self.palette_osc = Some(Vec::new());
                 self.palette_discard = false;
                 self.osc = Some(Vec::new());
@@ -6406,6 +6440,49 @@ mod tests {
         assert!(shown.starts_with(b"ab\n"), "{shown:?}");
     }
 
+    /// An OSC past `input-buffer-size` does nothing (`input_input` sets
+    /// `INPUT_DISCARD`), and Ghostty does not keep what follows the limit:
+    /// the notification it would have reported is not one, the title stays,
+    /// and what comes after the string works, whether the string ended or
+    /// a resize came in the middle of it.
+    #[test]
+    fn an_osc_past_the_input_buffer_is_discarded_whole() {
+        let n = |body: &str| Notification {
+            title: Vec::new(),
+            body: body.as_bytes().to_vec(),
+        };
+        let cap = dcs::capacity(1);
+        let long = "a".repeat(cap + 100);
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_input_buffer_size(1);
+        t.feed(format!("\x1b]2;kept\x07\x1b]777;notify;;{long}\x07").as_bytes());
+        t.feed(b"\x1b]777;notify;;short\x1b\\\x1b]777;notify;;");
+        t.feed(long.as_bytes());
+        t.feed(b"\x1b\\\x1b]2;after\x07X");
+        let got: Vec<Notification> = t
+            .take_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                TermEvent::Notification(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got, [n("short")]);
+        assert_eq!(t.title(), "after");
+        assert_eq!(t.row(t.history_size()).text(), "X");
+        // A resize in the middle of one hands Ghostty the string's start
+        // again: it must be the rejected one, not the string up to the
+        // limit and more.
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_input_buffer_size(1);
+        t.feed(format!("\x1b]777;notify;;{long}").as_bytes());
+        assert_eq!(t.ghostty_partial(), b"\x1b];");
+        t.resize(20, 4);
+        t.feed(b"b\x07X");
+        assert_eq!(t.take_events(), []);
+        assert_eq!(t.row(t.history_size()).text(), "X");
+    }
+
     #[test]
     fn an_osc_9_past_the_input_buffer_is_dropped() {
         // Leading zeros keep the number 50 and make the payload 48 bytes:
@@ -6690,6 +6767,7 @@ mod tests {
                     | ScanEvent::EraseScreen
                     | ScanEvent::EraseAbove
                     | ScanEvent::EraseChars
+                    | ScanEvent::OscOver
                     | ScanEvent::Drop
                     | ScanEvent::Utf8
                     | ScanEvent::Utf8Stop
