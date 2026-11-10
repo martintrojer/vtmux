@@ -54,6 +54,11 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
+- `libghostty-vt/src/osc.rs`: window titles read the `const char **`
+  output specified by `osc.h`, then borrow and validate the parser-owned
+  C string. The generic getter previously fabricated a Rust `&str` with
+  a zero length. Tests cover ASCII, empty and UTF-8 titles.
+
 - `patches/0038-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
   coordinates against the page before any native reader dereferences a
   cell. `GridRef::with_x` remains safe; out-of-range readers return

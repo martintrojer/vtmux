@@ -1,6 +1,6 @@
 //! Handling OSC (Operating System Command) escape sequences.
 
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{ffi::CStr, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -112,13 +112,12 @@ impl<'p> Command<'p, '_> {
     }
 
     fn command_type_inner(&self) -> Option<CommandType<'p>> {
-        use ffi::OscCommandData as Data;
         use ffi::OscCommandType as Type;
 
         let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner.as_raw()) };
         Some(match raw_type {
             Type::CHANGE_WINDOW_TITLE => CommandType::ChangeWindowTitle {
-                title: self.get(Data::CHANGE_WINDOW_TITLE_STR)?,
+                title: self.window_title()?,
             },
             Type::CHANGE_WINDOW_ICON => CommandType::ChangeWindowIcon,
             Type::SEMANTIC_PROMPT => CommandType::SemanticPrompt,
@@ -148,17 +147,44 @@ impl<'p> Command<'p, '_> {
         })
     }
 
-    fn get<T>(&self, tag: ffi::OscCommandData::Type) -> Option<T> {
-        let mut value = MaybeUninit::<T>::zeroed();
+    fn window_title(&self) -> Option<&'p str> {
+        let mut value = MaybeUninit::<*const std::ffi::c_char>::uninit();
         let result = unsafe {
-            ffi::ghostty_osc_command_data(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
+            ffi::ghostty_osc_command_data(
+                self.inner.as_raw(),
+                ffi::OscCommandData::CHANGE_WINDOW_TITLE_STR,
+                value.as_mut_ptr().cast(),
+            )
         };
+        if !result {
+            return None;
+        }
+        // SAFETY: osc.h specifies const char **, a NUL-terminated string
+        // owned by the parser and valid for our exclusive parser borrow 'p.
+        let ptr = unsafe { value.assume_init() };
+        if ptr.is_null() {
+            return None;
+        }
+        unsafe { CStr::from_ptr(ptr) }.to_str().ok()
+    }
+}
 
-        if result {
-            // SAFETY: Value should be initialized after successful call.
-            Some(unsafe { value.assume_init() })
-        } else {
-            None
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_title_is_read_as_a_c_string() {
+        let mut parser = Parser::new().unwrap();
+        for title in ["hello", "", "界 café"] {
+            parser.reset();
+            for byte in format!("2;{title}").bytes() {
+                parser.next_byte(byte);
+            }
+            match parser.end(0x07).command_type() {
+                CommandType::ChangeWindowTitle { title: actual } => assert_eq!(actual, title),
+                other => panic!("unexpected command: {other:?}"),
+            }
         }
     }
 }
