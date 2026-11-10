@@ -147,20 +147,20 @@ fn chain(
             active,
         });
     }
+    // `loop_flags` is shared by O and V: the last O or V with exactly one
+    // argument (format.c:6248-6257).
+    let loop_flags = list
+        .iter()
+        .rfind(|m| (m.name == "O" || m.name == "V") && m.args.len() == 1)
+        .map(|m| arg(&m.args[0], inner, deferred));
     if has("O") {
-        // `loop_flags` is shared with V: the last O or V with exactly one argument.
-        let flags = list
-            .iter()
-            .rfind(|m| (m.name == "O" || m.name == "V") && m.args.len() == 1)
-            .map(|m| arg(&m.args[0], inner, deferred));
         return Some(Value::Options {
-            flags,
+            flags: loop_flags,
             body: sub!(body),
         });
     }
-    if let Some(v) = list.iter().rfind(|m| m.name == "V") {
-        // `argc == 1` only; with more arguments the flags stay empty.
-        let flags = (v.args.len() == 1).then(|| arg(&v.args[0], inner, deferred));
+    if has("V") {
+        let flags = loop_flags;
         return Some(Value::Environ {
             flags,
             body: template(body, inner, deferred),

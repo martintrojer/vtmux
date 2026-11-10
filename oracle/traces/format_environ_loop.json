@@ -110,6 +110,24 @@
           "a",
           "#{V:#{session_name}}"
         ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V/g;V:#{environ_name},}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{V/g;V/s:#{environ_name},}"
+        ]
       }
     ]
   },
@@ -209,6 +227,24 @@
       "observation": {
         "kind": "cli",
         "stdout": "aaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "GLOB,HOME,LC_ALL,PATH,PS1,PWD,SHELL,TERM,TMUX_TMPDIR,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "DISPLAY,FOO,GONE,HID,KRB5CCNAME,MSYSTEM,SSH_AGENT_PID,SSH_ASKPASS,SSH_AUTH_SOCK,SSH_CONNECTION,WAYLAND_DISPLAY,WINDOWID,XAUTHORITY,XDG_CURRENT_DESKTOP,XDG_SESSION_DESKTOP,XDG_SESSION_TYPE,\n",
         "stderr": "",
         "exit": 0
       }

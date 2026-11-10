@@ -3,7 +3,8 @@
 # client's (`c`); each entry sets environ_name, environ_value,
 # environ_hidden, environ_removed, loop_index and loop_last_flag. The
 # session's holds update-environment's names the client lacks, removed.
-# Another flag loops over nothing.
+# Another flag loops over nothing. The flags are the last O or V
+# modifier's that has exactly one argument (format.c:6248-6257).
 name = "format_environ_loop"
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
@@ -17,4 +18,6 @@ steps = [
   { run = ["display", "-p", "-t", "a", "#{V/c:#{?#{==:#{environ_name},PS1},[#{environ_value}],}}"] },
   { run = ["display", "-p", "-t", "a", "[#{V/x:#{environ_name},}]"] },
   { run = ["display", "-p", "-t", "a", "#{V:#{session_name}}"] },
+  { run = ["display", "-p", "-t", "a", "#{V/g;V:#{environ_name},}"] },
+  { run = ["display", "-p", "-t", "a", "#{V/g;V/s:#{environ_name},}"] },
 ]
