@@ -1246,6 +1246,8 @@ impl Server {
                     last_output_time: p.last_output_time,
                     kitty_owner_primary: p.kitty_owner[0],
                     kitty_owner_alternate: p.kitty_owner[1],
+                    graphics_owner_primary: p.graphics.owner[0],
+                    graphics_owner_alternate: p.graphics.owner[1],
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -1331,6 +1333,14 @@ impl Server {
         let inband = snap::INBAND_RESIZE_FEATURE.to_string();
         if !meta.requires.contains(&inband) && terms().any(|t| t.inband_resize) {
             meta.requires.push(inband);
+        }
+        // A program granted kitty graphics (D33) sends them on: a build
+        // without D33 would take them as titles (`snap::GRAPHICS_GRANT_FEATURE`).
+        let graphics = snap::GRAPHICS_GRANT_FEATURE.to_string();
+        if !meta.requires.contains(&graphics)
+            && terms().any(|t| t.graphics_primary || t.graphics_alternate)
+        {
+            meta.requires.push(graphics);
         }
         let bar = snap::SCROLLBAR_FEATURE.to_string();
         if !meta.requires.contains(&bar)
@@ -1870,9 +1880,12 @@ impl Server {
             }
         }
         server.status_timer_start_all();
+        // D33: a granted pane came over (its images did not).
+        server.model.graphics_used = server.model.panes.values().any(|p| p.graphics.held);
         Ok(server)
     }
 
+    #[expect(clippy::too_many_lines, reason = "one pane record, field by field")]
     fn pane_in(
         &mut self,
         x: &snap::Pane,
@@ -1968,10 +1981,10 @@ impl Server {
             output_generation: x.output_generation,
             last_output_time: x.last_output_time,
             kitty_owner: [x.kitty_owner_primary, x.kitty_owner_alternate],
-            graphics: false,
-            graphics_owner: [None; 2],
-            graphics_bytes: [0; 2],
-            graphics_loaded: [None; 2],
+            graphics: crate::model::PaneGraphics::owned([
+                x.graphics_owner_primary,
+                x.graphics_owner_alternate,
+            ]),
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,
@@ -1986,6 +1999,7 @@ impl Server {
             pane.compress.restored(&pane.term, now);
         }
         pane.settle_imported_kitty_grants();
+        pane.settle_imported_graphics_grants();
         Ok(pane)
     }
 

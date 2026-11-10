@@ -1392,6 +1392,64 @@ fn a_clients_view_is_kept() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D33: a kitty graphics grant survives a live upgrade, required while its
+/// program runs, with its owner; the images do not (the snapshot is
+/// image-free): the program's next command is answered, its placements are
+/// gone. A grant whose process group is gone ends on import. A checkpoint
+/// drops the grant: a restored pane is dead.
+#[test]
+fn a_graphics_grant_survives_a_rebuild_and_its_images_do_not() {
+    use crate::pane_kitty::fake;
+    let dir = temp_dir("graphics");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["split-window", "-t", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
+    let (p0, p1) = (vtmux_core::ids::PaneId(0), vtmux_core::ids::PaneId(1));
+    let (alive, dead) = (fake::FAKE_BASE + 21, fake::FAKE_BASE + 22);
+    fake::set_foreground(p0, alive);
+    fake::set_foreground(p1, dead);
+    let image = b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;/wAA\x1b\\";
+    a.pane_input(p0, image, false);
+    a.pane_input(p1, image, false);
+    let s = a.to_snapshot(snap::Meta::default());
+    assert_eq!(s.meta.requires, [snap::GRAPHICS_GRANT_FEATURE]);
+    assert_eq!(s.panes[0].graphics_owner_primary, Some(alive));
+    assert!(s.panes[0].term.as_ref().unwrap().graphics_primary);
+    fake::kill(dead);
+    let mut b = rebuild(&a, &dir, "b");
+    let pane = &b.model.panes[&p0];
+    assert_eq!(pane.term.graphics_grants(), [true, false]);
+    assert_eq!(pane.graphics.owner, [Some(alive), None]);
+    assert_eq!(pane.term.graphics_storage(false).0, 0, "no images");
+    assert_eq!(pane.term.graphics_placements(), []);
+    assert_eq!(
+        b.model.panes[&p1].term.graphics_grants(),
+        [false; 2],
+        "its group is gone"
+    );
+    assert!(b.model.graphics_used);
+    // Still granted with the option off: the next image loads.
+    ok(&mut b, &dir, &["set", "-s", "vtmux-graphics", "off"]);
+    b.pane_input(p0, image, false);
+    assert_eq!(b.model.panes[&p0].term.graphics_storage(false).0, 3);
+    // A checkpoint keeps no grant.
+    let saved = b.checkpoint_snapshot(crate::server::persist::Mode::Full);
+    assert!(saved.panes.iter().all(|p| {
+        let t = p.term.as_ref().unwrap();
+        !t.graphics_primary && !t.graphics_alternate && p.graphics_owner_primary.is_none()
+    }));
+    assert!(
+        !saved
+            .meta
+            .requires
+            .contains(&snap::GRAPHICS_GRANT_FEATURE.to_string())
+    );
+    fake::clear();
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A downgrade to the build before works with an ordinary attached client
 /// (decision 6 refuses a newer format, not a feature a fix adds): nothing
 /// such a client produces, its terminal's answered queries and a title set
@@ -1445,6 +1503,16 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .get_mut(&vtmux_core::ids::PaneId(0))
         .unwrap()
         .last_output_time = Some(1_790_000_099);
+    // Kitty graphics (D33): a command while `vtmux-graphics` is off is a
+    // title, and the option turned on grants nothing before the next one
+    // (a grant is required,
+    // `a_graphics_grant_survives_a_rebuild_and_its_images_do_not`).
+    a.pane_input(
+        vtmux_core::ids::PaneId(0),
+        b"\x1b_Ga=q,i=1,s=1,v=1,f=24;AAAA\x1b\\",
+        false,
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
     // A kitty keyboard grant (D29) with the process group that pushed it.
     ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[>1u", false);

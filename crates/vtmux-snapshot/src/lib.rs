@@ -123,6 +123,7 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 /// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
     CURSOR_VERY_VISIBLE_FEATURE,
+    GRAPHICS_GRANT_FEATURE,
     INBAND_RESIZE_FEATURE,
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
@@ -133,6 +134,15 @@ pub const KNOWN_FEATURES: &[&str] = &[
 /// ([`term::CursorStyle::very_visible`]), listed when some terminal's is
 /// set.
 pub const CURSOR_VERY_VISIBLE_FEATURE: &str = "cursor-very-visible";
+
+/// The [`Meta::requires`] name of a kitty graphics grant (D33,
+/// [`TermState::graphics_primary`], [`TermState::graphics_alternate`]),
+/// listed when some terminal's program holds one. Required: a build
+/// without D33 would take the granted program's next graphics command as
+/// a title and answer none of them. An ordinary session can't produce it
+/// (`vtmux-graphics` is off by default), so a downgrade is refused only
+/// while a granted program runs.
+pub const GRAPHICS_GRANT_FEATURE: &str = "graphics-grant";
 
 /// The [`Meta::requires`] name of a mode 2048 grant (D31,
 /// [`TermState::inband_resize`]), listed when some terminal's program

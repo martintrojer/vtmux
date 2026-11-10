@@ -143,7 +143,7 @@ impl Tick {
     pub fn build(model: &Model, ids: &mut Ids) -> Self {
         let mut tick = Self::default();
         let mut seen = BTreeSet::new();
-        for (&pane, p) in model.panes.iter().filter(|(_, p)| p.graphics) {
+        for (&pane, p) in model.panes.iter().filter(|(_, p)| p.graphics.held) {
             let alternate = p.term.alternate_on();
             let mut pg = PaneGraphics::default();
             let mut placements = p.term.graphics_placements();

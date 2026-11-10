@@ -389,6 +389,9 @@ pub struct PaneState {
     pub links: PenLinkState,
     /// The program holds mode 2048, in-band resize (D31).
     pub inband_resize: bool,
+    /// Each screen's kitty graphics grant (D33), primary then alternate;
+    /// the images themselves are never exported.
+    pub graphics: [bool; 2],
     /// The links cells were drawn with, by Ghostty's URI and id, and their
     /// external ids' numbers ([`crate::link::Links`]).
     pub drawn_links: Vec<(String, crate::link::LinkKeyId, u64)>,
@@ -1300,6 +1303,7 @@ impl PaneTerm {
             }),
             links: self.scan.links.state(),
             inband_resize: self.inband_resize_granted(),
+            graphics: self.graphics_grants(),
             drawn_links: self.links.borrow().export(),
         }
     }
@@ -1421,6 +1425,11 @@ impl PaneTerm {
         self.scan.palette.restore(&p.palette);
         self.scan.progress = p.progress_bar;
         self.set_inband_granted(p.inband_resize);
+        for (alternate, granted) in [(false, p.graphics[0]), (true, p.graphics[1])] {
+            if granted {
+                self.set_graphics_grant(alternate, true);
+            }
+        }
         {
             let titles = &mut self.titles;
             titles.server.clone_from(&p.title);

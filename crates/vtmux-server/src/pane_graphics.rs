@@ -31,12 +31,12 @@ impl Pane {
     /// End the graphics grant of each screen whose process group is gone.
     pub fn end_dead_graphics_grants(&mut self) {
         for screen in 0..2 {
-            let Some(group) = self.graphics_owner[screen] else {
+            let Some(group) = self.graphics.owner[screen] else {
                 continue;
             };
             if !crate::pane_kitty::group_alive(group) {
                 self.term.set_graphics_grant(screen == 1, false);
-                self.graphics_owner[screen] = None;
+                self.graphics.owner[screen] = None;
             }
         }
     }
@@ -49,17 +49,40 @@ impl Pane {
             return false;
         }
         let group = self.foreground_pgid();
-        for (owner, _) in self.graphics_owner.iter_mut().zip(granted).filter(|x| x.1) {
+        for (owner, _) in self.graphics.owner.iter_mut().zip(granted).filter(|x| x.1) {
             *owner = group;
         }
-        self.graphics = true;
+        self.graphics.held = true;
         true
+    }
+
+    /// A pane imported from a snapshot (its images are gone): a grant whose
+    /// owner is gone ends, and one with no owner recorded is the
+    /// foreground group's; a pane with no process has none.
+    pub fn settle_imported_graphics_grants(&mut self) {
+        let grants = self.term.graphics_grants();
+        if grants == [false; 2] {
+            self.graphics.owner = [None; 2];
+            return;
+        }
+        if self.io.is_none() {
+            self.reset_graphics();
+            return;
+        }
+        let group = self.foreground_pgid();
+        for (owner, _) in self.graphics.owner.iter_mut().zip(grants).filter(|x| x.1) {
+            if owner.is_none() {
+                *owner = group;
+            }
+        }
+        self.end_dead_graphics_grants();
+        self.graphics.held = true;
     }
 
     /// A respawn: the old program's grants end and its images go.
     pub fn reset_graphics(&mut self) {
         self.term.reset_graphics();
-        self.graphics_owner = [None; 2];
+        self.graphics.owner = [None; 2];
     }
 }
 
@@ -84,6 +107,13 @@ impl Model {
     /// screen granted by this output starts with what the others leave.
     pub fn prepare_graphics(&mut self, p: PaneId) {
         let on = self.graphics_on();
+        if !on && !self.graphics_used {
+            // Off and never used: tmux's APC, and nothing to count.
+            if let Some(pane) = self.panes.get_mut(&p) {
+                pane.term.set_graphics(false);
+            }
+            return;
+        }
         let cap = self.graphics_cap();
         let used = if self.graphics_used {
             self.graphics_bytes()
@@ -97,7 +127,7 @@ impl Model {
         pane.end_dead_graphics_grants();
         pane.term
             .set_graphics_share(cap.saturating_sub(used).max(1));
-        if pane.graphics {
+        if pane.graphics.held {
             let alternate = pane.term.alternate_on();
             if pane.term.graphics_grants()[usize::from(alternate)] {
                 pane.term.set_graphics_limit(alternate, cap.max(1));
@@ -112,7 +142,7 @@ impl Model {
             return;
         };
         self.graphics_used |= pane.note_graphics_grants();
-        if pane.graphics {
+        if pane.graphics.held {
             self.balance_graphics(Some(p), now);
         }
     }
@@ -121,7 +151,7 @@ impl Model {
     fn graphics_bytes(&self) -> u64 {
         self.panes
             .values()
-            .filter(|p| p.graphics)
+            .filter(|p| p.graphics.held)
             .flat_map(|p| {
                 [
                     p.term.graphics_storage(false).0,
@@ -145,18 +175,18 @@ impl Model {
         // (pane, alternate, bytes, granted), with the time each last grew.
         let mut screens: Vec<(PaneId, bool, u64, bool, Option<Instant>)> = Vec::new();
         for (&id, pane) in &mut self.panes {
-            if !pane.graphics {
+            if !pane.graphics.held {
                 continue;
             }
             let grants = pane.term.graphics_grants();
             for alternate in [false, true] {
                 let (bytes, _) = pane.term.graphics_storage(alternate);
                 let i = usize::from(alternate);
-                if bytes > pane.graphics_bytes[i] {
-                    pane.graphics_loaded[i] = Some(now);
+                if bytes > pane.graphics.bytes[i] {
+                    pane.graphics.loaded[i] = Some(now);
                 }
-                pane.graphics_bytes[i] = bytes;
-                screens.push((id, alternate, bytes, grants[i], pane.graphics_loaded[i]));
+                pane.graphics.bytes[i] = bytes;
+                screens.push((id, alternate, bytes, grants[i], pane.graphics.loaded[i]));
             }
         }
         let mut total: u64 = screens.iter().map(|s| s.2).sum();
@@ -178,7 +208,7 @@ impl Model {
                 let (bytes, _) = pane.term.graphics_storage(s.1);
                 total = total - s.2 + bytes;
                 s.2 = bytes;
-                pane.graphics_bytes[usize::from(s.1)] = bytes;
+                pane.graphics.bytes[usize::from(s.1)] = bytes;
             }
         }
         for &(id, alternate, bytes, granted, _) in &screens {
@@ -196,12 +226,12 @@ impl Model {
                 pane.term.set_graphics_limit(alternate, limit);
             }
         }
-        for pane in self.panes.values_mut().filter(|p| p.graphics) {
-            if pane.term.graphics_grants() == [false; 2] && pane.graphics_bytes == [0; 2] {
-                pane.graphics = false;
+        for pane in self.panes.values_mut().filter(|p| p.graphics.held) {
+            if pane.term.graphics_grants() == [false; 2] && pane.graphics.bytes == [0; 2] {
+                pane.graphics.held = false;
             }
         }
-        self.graphics_used = self.panes.values().any(|p| p.graphics);
+        self.graphics_used = self.panes.values().any(|p| p.graphics.held);
     }
 }
 
@@ -239,12 +269,12 @@ mod tests {
         let group = fake::FAKE_BASE + 11;
         fake::set_foreground(p, group);
         a.pane_input(p, &image(1, 2, 2), false);
-        assert_eq!(a.model.panes[&p].graphics_owner, [None; 2], "off");
+        assert_eq!(a.model.panes[&p].graphics.owner, [None; 2], "off");
         assert!(!a.model.graphics_used);
         ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
         a.pane_input(p, &image(1, 2, 2), false);
         let pane = &a.model.panes[&p];
-        assert_eq!(pane.graphics_owner, [Some(group), None]);
+        assert_eq!(pane.graphics.owner, [Some(group), None]);
         assert_eq!(pane.term.graphics_storage(false).0, 12);
         assert!(a.model.graphics_used);
         ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "off"]);
@@ -252,7 +282,7 @@ mod tests {
         a.pane_input(p, b"x", false);
         let pane = &a.model.panes[&p];
         assert_eq!(pane.term.graphics_grants(), [false; 2]);
-        assert_eq!(pane.graphics_owner, [None; 2]);
+        assert_eq!(pane.graphics.owner, [None; 2]);
         assert_eq!(pane.term.graphics_storage(false).0, 12, "the image stays");
         fake::clear();
         drop(a);

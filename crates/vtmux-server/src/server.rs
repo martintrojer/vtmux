@@ -5578,10 +5578,7 @@ impl Server {
             last_output_time: None,
             shell_commands: crate::model::ShellCommands::default(),
             kitty_owner: [None; 2],
-            graphics: false,
-            graphics_owner: [None; 2],
-            graphics_bytes: [0; 2],
-            graphics_loaded: [None; 2],
+            graphics: crate::model::PaneGraphics::default(),
         })
     }
 

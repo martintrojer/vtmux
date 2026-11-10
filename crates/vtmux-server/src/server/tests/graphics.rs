@@ -299,7 +299,10 @@ fn off_a_ghostty_client_gets_nothing_of_graphics() {
 /// another cell size shares none, and gets the same upload and placement,
 /// which its terminal fits to the same cells.
 #[test]
-#[expect(clippy::many_single_char_names, reason = "three clients, a pane, a session")]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "three clients, a pane, a session"
+)]
 fn frames_are_shared_only_within_one_cell_size() {
     let (mut server, p, s, dir) = share_server("gfx-share");
     // What a shared drawing needs (the render::share tests): nothing in

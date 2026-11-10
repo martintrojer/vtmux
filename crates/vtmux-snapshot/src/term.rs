@@ -545,6 +545,13 @@ record! {
         42 => one inband_resize: bool,
         /// The links the pane's cells were drawn with.
         43 => many drawn_links: Vec<DrawnLink>,
+        /// Each screen is granted kitty graphics (D33), primary then
+        /// alternate. Written under [`crate::GRAPHICS_GRANT_FEATURE`] when
+        /// set: a reader that skipped them would take a granted program's
+        /// next image as a title. The images are never written: a resumed
+        /// screen has none until its program sends them again.
+        44 => one graphics_primary: bool,
+        45 => one graphics_alternate: bool,
     }
 }
 

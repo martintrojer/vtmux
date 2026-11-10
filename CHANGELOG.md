@@ -52,6 +52,8 @@ First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
 **In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Live upgrades keep the grant, and a downgrade that would drop it is refused.
 
+**Kitty graphics (opt-in).** `set -s vtmux-graphics on`: programs that send kitty graphics unwrapped get them shown on Ghostty clients without `allow-passthrough`, drawn as unicode placeholder cells, so pane edges, popups, zoom, window switches and copy mode treat them as text. Each client gets its own uploads, freed when nothing shows them; every pane's images share one cap (`vtmux-graphics-limit`, 256 MB). Other terminals and control clients see tmux. Apps that wrap for tmux (yazi) still use passthrough. Live upgrades keep the grant and drop the images.
+
 Every opt-in is tmux 3.8, byte for byte, while off.
 
 **Built for speed.** Whole-program LTO: 7-18% less server CPU on render-bound work, key echo 12% faster, a 9.8 MB stripped binary (was 10.7).

@@ -685,6 +685,12 @@ record! {
         /// it has not read). Ignorable: a reader before drops it, as
         /// every build did.
         47 => one input_queued: Vec<u8>,
+        /// The process groups whose kitty graphics grants (D33) the
+        /// primary and the alternate screen hold, whose end ends them.
+        /// Ignorable: a grant with no recorded owner is the foreground
+        /// group's on import.
+        48 => opt graphics_owner_primary: Option<i32>,
+        49 => opt graphics_owner_alternate: Option<i32>,
     }
 }
 
@@ -1449,6 +1455,8 @@ pub(crate) mod tests {
             cwd_bytes: None,
             // Added within v1 too (input_not_yet_written_round_trips).
             input_queued: Vec::new(),
+            graphics_owner_primary: None,
+            graphics_owner_alternate: None,
         }
     }
 

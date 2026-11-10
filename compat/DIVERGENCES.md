@@ -76,6 +76,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-069](#d-069) | A dead pane keeps its exit status when its old pid comes back for another process | tmux bug | open |
 | [D-070](#d-070) | A failed `-t` with no session part and no client keeps the session in formats | Deferred | deferred |
 | [D-071](#d-071) | Keys typed at a background `attach` stay with the foreground job | Spec decision | open |
+| [D-072](#d-072) | Kitty graphics drawn as unicode placeholders for Ghostty clients (`vtmux-graphics`) | Extension | extension |
 
 Closed (vtmux now matches tmux):
 
@@ -1217,6 +1218,24 @@ Closed (vtmux now matches tmux):
 - **tmux:** the client passes its terminal to the server, which reads it from outside the session (tty.c `tty_read_callback`), so keys typed at a background `tmux attach &` reach the pane while the shell competes for them.
 - **vtmux:** the client reads the terminal itself, with SIGTTIN ignored as tmux ignores it (proc.c `proc_set_signals`). In the background the read fails (EIO) and the keys stay for the foreground job; once the client is put in the foreground (`fg`, SIGCONT) it reads what is left.
 - **Evidence:** reference tmux 3.8: `sh -c 'set -m; tmux attach -t a & wait'` under a PTY draws the session, and typed keys reach the pane's `cat`. vtmux draws it, and the keys stay unread until the client is in the foreground.
+
+<a id="d-072"></a>
+### D-072: kitty graphics under `vtmux-graphics`
+
+- **Category:** Extension (D28): D33, options `vtmux-graphics` (server, default off) and `vtmux-graphics-limit` (server, MB, default 256).
+- **Test:**
+  - None fails. Off: oracle `graphics_off` pins tmux's behaviour (a transmit, a query and a placement each set the title, nothing answers, the screen shows no image).
+  - On: vtmux-vt `graphics::tests` (the grant, Ghostty's answers honouring `q`, rule 5, RIS, PNG); vtmux-server `pane_graphics::tests` (the grant's process group, the shared limit evicting across panes), `server::tests::graphics` (a recording Ghostty client: the range freed at attach, the upload before the frame, the virtual placement, placeholder cells and their ids, clipped at a pane edge, zoomed, under a popup, at a window switch, in copy mode, a program's own placeholder cells, frames shared within one cell size only, nothing for another terminal), `a_graphics_grant_survives_a_rebuild_and_its_images_do_not`.
+- **tmux:** no graphics. Any APC is a title (`input_exit_apc`, input.c:2794-2809), so `ESC _ G ... ESC \` sets the pane title and is never answered; images reach the outer terminal only through `allow-passthrough`.
+- **vtmux:** with `set -s vtmux-graphics on`:
+  - A pane screen is granted at its first `APC G`. Its images and placements live in the pane's Ghostty (direct, file, temporary file and shared memory media; PNG decoded by vtmux), and Ghostty's answers reach the program. Popups get tmux's behaviour.
+  - A client whose terminal is Ghostty (XTVERSION) gets each image its frame shows as its own upload (zlib, chunked, `q=2`) with a virtual placement, and the image's cells as unicode placeholders (U+10EEEE). A program's own placeholder cells carry vtmux's ids; a direct placement is drawn as placeholder cells over its cells, in whole cells (sub-cell offsets dropped; a placement under the text shows only in cells with no text). Pane edges, zoom, popups, window switches and copy mode clip and move them as any cell. An image no frame shows is freed; every attach first frees vtmux's id range.
+  - A client of another terminal and a control client get tmux's cells: no uploads, a program's own placeholder cells as text. `capture-pane`, copy-mode copies and formats see the pane as tmux would.
+  - The images of every pane together are held to `vtmux-graphics-limit`; over it, the screen that loaded least recently loses images first, in Ghostty's order.
+  - The grant outlives the option and ends with the process group that started it, at RIS or at a respawn; the images outlive the grant.
+  - `TMUX` and XTVERSION stay tmux's (D28 rule 3), so an app that wraps its commands for tmux keeps doing so through `allow-passthrough`, unchanged: yazi 26.9 sets `allow-passthrough all` on its pane and wraps every command (`docs/test-health/2026-11-10-graphics-real-apps.md`).
+- **Live upgrade:** the grant is carried (`TermState.graphics_primary`, `graphics_alternate`, required as `graphics-grant` while a granted program runs; its process group ignorable), the images are not: a resumed screen draws nothing until its program sends them again. A checkpoint (`vtmux-persist`) keeps no grant.
+- **Evidence:** Ghostty implements the protocol in the pane (`graphics_exec.zig` `execute`, `graphics_storage.zig`, placeholders `graphics_unicode.zig:16`) and as the outer terminal with placeholders (termio/Termio.zig:294-295, 511-512).
 
 ## Adding an entry
 

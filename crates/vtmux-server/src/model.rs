@@ -331,15 +331,33 @@ pub struct Pane {
     /// on each screen (primary, alternate), whose end ends the grant
     /// ([`crate::pane_kitty`]).
     pub kitty_owner: [Option<i32>; 2],
-    /// D33: a screen of it was granted kitty graphics, or still holds an
-    /// image ([`crate::pane_graphics`]).
-    pub graphics: bool,
-    /// D33: the process group each screen's graphics grant belongs to.
-    pub graphics_owner: [Option<i32>; 2],
-    /// D33: each screen's image bytes when last counted, and when they
-    /// last grew (the eviction order across panes).
-    pub graphics_bytes: [u64; 2],
-    pub graphics_loaded: [Option<std::time::Instant>; 2],
+    /// D33: its kitty graphics as the server keeps them.
+    pub graphics: PaneGraphics,
+}
+
+/// D33: a pane's kitty graphics as the server keeps them
+/// ([`crate::pane_graphics`]).
+#[derive(Debug, Default)]
+pub struct PaneGraphics {
+    /// A screen of it was granted, or still holds an image.
+    pub held: bool,
+    /// The process group each screen's grant belongs to.
+    pub owner: [Option<i32>; 2],
+    /// Each screen's image bytes when last counted, and when they last
+    /// grew (the eviction order across panes).
+    pub bytes: [u64; 2],
+    pub loaded: [Option<std::time::Instant>; 2],
+}
+
+impl PaneGraphics {
+    /// A pane's from a snapshot: only the grants' owners come over.
+    #[must_use]
+    pub fn owned(owner: [Option<i32>; 2]) -> Self {
+        Self {
+            owner,
+            ..Self::default()
+        }
+    }
 }
 
 /// A pane's shell prompts and commands as OSC 133 reported them

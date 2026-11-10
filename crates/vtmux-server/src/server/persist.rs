@@ -538,11 +538,18 @@ impl Server {
             // Nor does it hold a mode 2048 grant (D31): its program is gone.
             if let Some(t) = &mut p.term {
                 t.inband_resize = false;
+                // Nor a kitty graphics grant (D33).
+                t.graphics_primary = false;
+                t.graphics_alternate = false;
             }
+            p.graphics_owner_primary = None;
+            p.graphics_owner_alternate = None;
         }
-        s.meta
-            .requires
-            .retain(|r| r != snap::SCROLLBAR_FEATURE && r != snap::INBAND_RESIZE_FEATURE);
+        s.meta.requires.retain(|r| {
+            r != snap::SCROLLBAR_FEATURE
+                && r != snap::INBAND_RESIZE_FEATURE
+                && r != snap::GRAPHICS_GRANT_FEATURE
+        });
         if mode == Mode::Layout {
             // Copied screen text, and titles programs set.
             s.server.buffers.clear();

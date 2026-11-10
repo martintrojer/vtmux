@@ -1682,6 +1682,8 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             emulator: p.links.emulator.clone(),
         }),
         inband_resize: p.inband_resize,
+        graphics_primary: p.graphics[0],
+        graphics_alternate: p.graphics[1],
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1986,6 +1988,7 @@ pub fn term_from_snapshot_with(
             })
             .unwrap_or_default(),
         inband_resize: t.inband_resize,
+        graphics: [t.graphics_primary, t.graphics_alternate],
         drawn_links: t
             .drawn_links
             .iter()

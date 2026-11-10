@@ -151,6 +151,27 @@ fn a_mode_2048_grant_round_trips_under_its_feature() {
     );
 }
 
+/// A kitty graphics grant (D33), added within v1 under
+/// [`GRAPHICS_GRANT_FEATURE`], round-trips and this build reads it; the
+/// process groups owning it are ignorable; the golden stream has neither.
+#[test]
+fn a_graphics_grant_round_trips_under_its_feature() {
+    let mut s = sample();
+    s.panes[0].graphics_owner_alternate = Some(99);
+    assert_eq!(decode(&encode(&s)).unwrap(), s, "an owner needs no feature");
+    s.meta.requires = vec![GRAPHICS_GRANT_FEATURE.into()];
+    s.panes[0].term.as_mut().unwrap().graphics_alternate = true;
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    assert!(Features::default().understands(GRAPHICS_GRANT_FEATURE));
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.panes.iter().all(|p| {
+        p.graphics_owner_primary.is_none()
+            && p.term
+                .as_ref()
+                .is_none_or(|t| !t.graphics_primary && !t.graphics_alternate)
+    }));
+}
+
 /// A pane's output generation and OSC 133 command state, added within v1
 /// as ignorable fields (an older reader starts them afresh), round-trip;
 /// the golden stream has none.

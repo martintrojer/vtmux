@@ -32,7 +32,7 @@ set -s vtmux-persist full
 | `vtmux-kitty-keys` | server | `off`, `on` | A program that asks for the kitty keyboard protocol gets kitty-encoded keys, typed or sent with `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as before. |
 | `vtmux-notifications` | server | `off`, `on` | A pane's desktop notifications (OSC 9, OSC 777) reach attached Ghostty clients, from any window and from `display-popup -E` programs, at Ghostty's own rate limits. No `allow-passthrough` needed. |
 | `vtmux-inband-resize` | server | `off`, `on` | A program that sets mode 2048 gets each new size of its pane in-band, at once and after every resize, with no `SIGWINCH` race. |
-| `vtmux-graphics` | server | `off`, `on` | Kitty graphics without `allow-passthrough`: `kitten icat`, yazi, chafa and image.nvim images drawn by vtmux for Ghostty clients, clipped at pane edges, under popups, zoomed, in copy mode and across window switches. Images are dropped by a live upgrade or restore. |
+| `vtmux-graphics` | server | `off`, `on` | Kitty graphics without `allow-passthrough`: a program's images drawn by vtmux for Ghostty clients, clipped at pane edges, under popups, zoomed, in copy mode and across window switches. Apps that wrap for tmux (yazi) keep using passthrough. A live upgrade or restore drops the images. |
 | `vtmux-graphics-limit` | server | MB, default 256 | Image memory of every pane together; over it, the images loaded least recently go first. |
 
 A grant (kitty keys, in-band resize, graphics) outlives the option being turned off, and a live upgrade keeps it. Kitty keys and graphics end with the program that asked; in-band resize at `?2048l`, a reset or a respawn.
