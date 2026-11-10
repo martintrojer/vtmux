@@ -55,7 +55,7 @@ use vtmux_core::options::TreeId;
 use vtmux_snapshot as snap;
 
 use super::Server;
-use crate::persist::{Lock, MANIFEST, MANIFEST_PREV, Writer, Written};
+use crate::persist::{Known, Lock, MANIFEST, MANIFEST_PREV, Writer, Written};
 
 /// What a checkpoint holds (`vtmux-persist`; module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,8 +129,9 @@ pub struct Persist {
     due: Option<Instant>,
     /// [`fingerprint`] of the last checkpoint written.
     last: Option<Vec<u8>>,
-    /// The manifest of the last checkpoint written ([`Writer::after`]).
-    on_disk: Option<Vec<u8>>,
+    /// What this process knows of the checkpoint directory: what it
+    /// wrote there, or read back (a restore's read too).
+    pub(super) known: Known,
     /// The shutdown checkpoint is written: nothing after it may replace it
     /// with the emptied server.
     exited: bool,
@@ -160,7 +161,7 @@ impl Default for Persist {
         Self {
             due: None,
             last: None,
-            on_disk: None,
+            known: Known::default(),
             exited: false,
             full_may_be_on_disk: false,
             refusal: None,
@@ -232,12 +233,12 @@ impl Server {
             Ok(false) => {}
             Ok(true) => {
                 if let Some((w, print)) = self.persist.writing.take() {
-                    self.persist.on_disk = Some(w.manifest().to_vec());
+                    self.persist.known = w.into_known();
                     self.persist.last = Some(print);
                 }
             }
             Err(e) => {
-                self.persist.writing = None;
+                self.persist_drop_writer();
                 self.persist_error(&e);
             }
         }
@@ -315,18 +316,28 @@ impl Server {
     /// [`Server::checkpoint_to`]; `prune`: written whether changed or not,
     /// and not keeping the previous checkpoint ([`Writer::replacing_prev`]).
     fn checkpoint_run(&mut self, dir: &Path, mode: Mode, prune: bool) -> Option<Written> {
-        self.persist.writing = None;
+        self.persist_drop_writer();
         let (mut w, print) = self.checkpoint_writer(dir, mode, prune)?;
-        match w.step(None, &mut |_| Ok(())) {
+        let stepped = w.step(None, &mut |_| Ok(()));
+        let written = w.written().clone();
+        self.persist.known = w.into_known();
+        match stepped {
             Ok(_) => {
-                self.persist.on_disk = Some(w.manifest().to_vec());
                 self.persist.last = Some(print);
-                Some(w.written().clone())
+                Some(written)
             }
             Err(e) => {
                 self.persist_error(&e);
                 None
             }
+        }
+    }
+
+    /// Drop the periodic checkpoint being written, keeping what it
+    /// learnt of the directory ([`Writer::into_known`]).
+    fn persist_drop_writer(&mut self) {
+        if let Some((w, _)) = self.persist.writing.take() {
+            self.persist.known = w.into_known();
         }
     }
 
@@ -393,11 +404,8 @@ impl Server {
         if !prune && self.persist.last.as_ref() == Some(&print) {
             return None;
         }
-        match Writer::new(dir, &s) {
-            Ok(w) => {
-                let w = w.after(self.persist.on_disk.clone());
-                Some((if prune { w.replacing_prev() } else { w }, print))
-            }
+        match Writer::new(dir, &s, &self.persist.known) {
+            Ok(w) => Some((if prune { w.replacing_prev() } else { w }, print)),
             Err(e) => {
                 self.persist_error(&e);
                 None
@@ -415,6 +423,8 @@ impl Server {
         self.persist.lock = None;
         match Lock::take(dir) {
             Ok(l) => {
+                // Without the lock another server may have written there.
+                self.persist.known = Known::default();
                 self.persist.lock = Some((dir.to_path_buf(), l));
                 self.persist.refused = false;
                 true

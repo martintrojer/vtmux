@@ -136,6 +136,8 @@ The alternate screen leaves the primary history where it is, and vtmux reads it 
 
 vim up over the history costs about what it costs without (1.6 s and 13.7 s at 1M lines). Onto another pin the stream also carries the history vim hides as the copy an older build reads, so a downgrade keeps it: twice the bytes, not twice the time. A downgrade onto a build from before that change with vim up over 1M lines takes 34 s.
 
+With `vtmux-persist full`, the new image's first checkpoint reads the previous one back a few chunks per loop turn, at most 10 ms a turn at 20 panes x 40k lines (was 330-360 ms in one). Every `full` checkpoint still starts by exporting each pane on the loop: 1.3 s at that size.
+
 ## Binary and build profile
 
 The release profile is fat LTO in one codegen unit, stripped. Against cargo's default:

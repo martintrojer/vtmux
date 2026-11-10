@@ -405,9 +405,15 @@ enum Found {
     Newer(String),
     /// One that can't be restored, and why.
     Refused(String),
-    /// One to import, the file it came from, the directory's lock, and
-    /// what was left out of it ([`files::load_file`]).
-    Ready(Box<snap::Snapshot>, &'static str, Lock, Vec<String>),
+    /// One to import, the file it came from, the directory's lock, what
+    /// was left out of it and what reading it taught ([`files::read_file`]).
+    Ready(
+        Box<snap::Snapshot>,
+        &'static str,
+        Lock,
+        Vec<String>,
+        files::Known,
+    ),
 }
 
 /// Why `dir` holds a newer binary's checkpoint: the first of `manifest`
@@ -464,9 +470,9 @@ fn find(server: &Server, dir: &Path) -> Found {
     };
     let mut errors = Vec::new();
     for name in [MANIFEST, MANIFEST_PREV] {
-        let loaded = std::panic::catch_unwind(|| files::load_file(dir, name))
+        let loaded = std::panic::catch_unwind(|| files::read_file(dir, name))
             .unwrap_or_else(|_| Err(io::Error::other("decoding panicked")));
-        let (s, left_out) = match loaded {
+        let (s, left_out, known) = match loaded {
             Ok(loaded) => loaded,
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => {
@@ -486,7 +492,7 @@ fn find(server: &Server, dir: &Path) -> Found {
         }
         let s = prepare(s, &says, &server.socket, &server.config);
         match check_in_child(&s, &server.socket) {
-            Ok(()) => return Found::Ready(Box::new(s), name, lock, left_out),
+            Ok(()) => return Found::Ready(Box::new(s), name, lock, left_out, known),
             Err(e) => errors.push(format!("{name}: {e}")),
         }
     }
@@ -545,13 +551,16 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
             return Ok(fresh);
         }
         Found::Refused(why) => why,
-        Found::Ready(s, name, lock, left_out) => {
+        Found::Ready(s, name, lock, left_out, known) => {
             // The fresh server's shim goes before the restored one makes
             // its own in the same place.
             drop(fresh);
             match super::resume::guarded(|| rebuild(listener.try_clone()?, config.clone(), &s)) {
                 Ok(mut server) => {
                     server.persist.lock = Some((dir.clone(), lock));
+                    // Its first checkpoint need not read back what this
+                    // did (`crate::persist::Writer`).
+                    server.persist.known = known;
                     server.persist.dir = Some(dir.clone());
                     let without = if left_out.is_empty() {
                         String::new()

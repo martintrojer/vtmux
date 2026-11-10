@@ -320,6 +320,8 @@ fn pages_are_found_everywhere_they_live() {
     // Pane 1's primary (2) and alternate-entry (1) history, its copy mode
     // (1); the popup's terminal (2 + 1).
     assert_eq!(s.pages().len(), 7);
+    // All but the copy mode's: the terminals'.
+    assert_eq!(s.term_pages().len(), 6);
     let mut n = 0;
     sample().pages_mut(&mut |_| n += 1);
     assert_eq!(n, 7);

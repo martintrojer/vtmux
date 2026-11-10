@@ -128,6 +128,7 @@ fn checkpoints_rotate_write_only_new_pages_and_collect_the_rest() {
 #[test]
 fn a_crash_at_any_stage_keeps_the_previous_checkpoint() {
     for (stage, from) in [
+        (Stage::ChunkTmp, MANIFEST),
         (Stage::ChunksWritten, MANIFEST),
         (Stage::ManifestWritten, MANIFEST),
         (Stage::PrevKept, MANIFEST_PREV),
@@ -136,8 +137,15 @@ fn a_crash_at_any_stage_keeps_the_previous_checkpoint() {
         let s1 = snapshot("one", &["alpha", "beta"]);
         let s2 = snapshot("two", &["beta", "epsilon"]);
         write(&dir, &s1, &mut ok()).unwrap();
+        let chunks = dir.join(CHUNKS);
         let mut crash = |at: Stage| {
             if at == stage {
+                // Mid-chunk: what reached the disk of its `.tmp`.
+                for e in fs::read_dir(&chunks).unwrap().flatten() {
+                    if e.path().extension().is_some_and(|x| x == "tmp") {
+                        fs::write(e.path(), b"ha").unwrap();
+                    }
+                }
                 Err(io::Error::other("crash"))
             } else {
                 Ok(())
@@ -166,6 +174,50 @@ fn a_crash_at_any_stage_keeps_the_previous_checkpoint() {
     }
 }
 
+/// A crash once the new `manifest` is in place, before the directory is
+/// synced or while the chunks neither manifest names are deleted, reads
+/// the new checkpoint, the previous one as `manifest.prev`, every chunk
+/// of both there; the next checkpoint deletes what was left.
+#[test]
+fn a_crash_after_the_manifest_is_in_place_keeps_both() {
+    for stop in [
+        (Stage::Renamed, 1),
+        (Stage::Collecting, 1),
+        (Stage::Collecting, 2),
+    ] {
+        let dir = temp_dir(&format!("crash-late-{stop:?}"));
+        let s1 = snapshot("one", &["alpha", "beta", "zeta"]);
+        let s2 = snapshot("two", &["beta", "epsilon"]);
+        let s3 = snapshot("three", &["epsilon", "gamma"]);
+        write(&dir, &s1, &mut ok()).unwrap();
+        write(&dir, &s2, &mut ok()).unwrap();
+        let mut seen = 0;
+        let mut crash = |at: Stage| {
+            if at == stop.0 {
+                seen += 1;
+                if seen == stop.1 {
+                    return Err(io::Error::other("crash"));
+                }
+            }
+            Ok(())
+        };
+        let err = write(&dir, &s3, &mut crash).unwrap_err();
+        assert_eq!(err.to_string(), "crash", "{stop:?}");
+        assert_eq!(load(&dir).unwrap(), (s3.clone(), MANIFEST), "{stop:?}");
+        assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s2, "{stop:?}");
+        // alpha and zeta, named by neither: the crash left stop.1 - 1 deleted.
+        let left = on_disk(&dir).len() - 3;
+        assert_eq!(left, 3 - stop.1, "{stop:?}");
+        let s4 = snapshot("four", &["gamma"]);
+        let w = write(&dir, &s4, &mut ok()).unwrap();
+        assert_eq!(w.chunks_removed, left + 1, "{stop:?}");
+        assert_eq!(load(&dir).unwrap(), (s4.clone(), MANIFEST), "{stop:?}");
+        assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s3, "{stop:?}");
+        let keep: BTreeSet<String> = chunk_names(&s3).union(&chunk_names(&s4)).cloned().collect();
+        assert_eq!(on_disk(&dir), keep, "{stop:?}");
+    }
+}
+
 /// A checkpoint that holds less than its predecessors (`full` set to
 /// `layout`) leaves nothing of them: `manifest.prev` is a copy of it and
 /// their pages are collected; a crash before `manifest` is replaced still
@@ -185,12 +237,16 @@ fn a_replacing_checkpoint_leaves_nothing_of_the_previous_ones() {
             Ok(())
         }
     };
-    let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
+    let mut w = Writer::new(&dir, &layout, &Known::default())
+        .unwrap()
+        .replacing_prev();
     assert_eq!(w.step(None, &mut crash).unwrap_err().to_string(), "crash");
     assert_eq!(load(&dir).unwrap(), (full2.clone(), MANIFEST));
     assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, layout);
 
-    let mut w = Writer::new(&dir, &layout).unwrap().replacing_prev();
+    let mut w = Writer::new(&dir, &layout, &Known::default())
+        .unwrap()
+        .replacing_prev();
     assert!(w.step(None, &mut ok()).unwrap());
     assert_eq!(load_file(&dir, MANIFEST).unwrap().0, layout);
     assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, layout);
@@ -229,7 +285,7 @@ fn a_torn_or_missing_manifest_falls_back_to_the_previous() {
 /// replaces the torn one and keeps `manifest.prev`, the one checkpoint a
 /// crash can fall back to, at every stage; the one after rotates as usual.
 /// Also by a writer that wrote the manifest before it was torn
-/// ([`Writer::after`]): only the same bytes skip the read.
+/// ([`Known::manifest`]): only the same bytes skip the read.
 #[test]
 fn a_torn_manifest_is_replaced_not_kept_over_the_good_previous() {
     let stages = [
@@ -254,9 +310,11 @@ fn a_torn_manifest_is_replaced_not_kept_over_the_good_previous() {
                 Ok(())
             }
         };
-        let mut w = Writer::new(&dir, &s3)
-            .unwrap()
-            .after(known.then(|| bytes.clone()));
+        let known = Known {
+            manifest: known.then(|| bytes.clone()),
+            ..Known::default()
+        };
+        let mut w = Writer::new(&dir, &s3, &known).unwrap();
         assert_eq!(w.step(None, &mut crash).unwrap_err().to_string(), "crash");
         assert_eq!(
             load(&dir).unwrap(),
@@ -350,26 +408,115 @@ fn the_lock_is_held_by_one_at_a_time() {
     drop(again);
 }
 
-/// [`Writer`] a chunk per step at a zero budget; the manifest last.
+/// [`Writer`] at a zero budget does a piece a step, reading at most one
+/// chunk: a chunk on disk it does not know checked, a chunk written,
+/// `chunks/` synced, `manifest` decoded and read through a chunk at a
+/// time; the manifest last. A writer that knows the directory from its
+/// last write reads nothing back.
 #[test]
-fn a_writer_writes_a_chunk_per_step_then_the_manifest() {
+fn a_writer_does_a_piece_per_step_then_the_manifest() {
     let dir = temp_dir("steps");
-    let s1 = snapshot("one", &["alpha"]);
+    let s1 = snapshot("one", &["alpha", "beta"]);
     write(&dir, &s1, &mut ok()).unwrap();
-    let s2 = snapshot("two", &["alpha", "beta", "gamma", "delta"]);
-    let mut w = Writer::new(&dir, &s2).unwrap();
-    assert_eq!((w.chunks_left(), w.written().chunks_kept), (3, 1));
-    for left in [2, 1, 0] {
-        assert!(!w.step(Some(Duration::ZERO), &mut ok()).unwrap() || left == 0);
-        assert_eq!(w.chunks_left(), left);
-        if left > 0 {
-            assert_eq!(load(&dir).unwrap(), (s1.clone(), MANIFEST));
-        }
+    let s2 = snapshot("two", &["alpha", "gamma", "delta"]);
+    let mut w = Writer::new(&dir, &s2, &Known::default()).unwrap();
+    assert_eq!((w.chunks_left(), w.written().chunks_kept), (2, 0));
+    let mut steps = 0;
+    let mut checked = 0;
+    while !w.step(Some(Duration::ZERO), &mut ok()).unwrap() {
+        steps += 1;
+        let now = w.written().chunks_checked;
+        assert!(now - checked <= 1, "step {steps}: {checked} -> {now}");
+        checked = now;
+        assert_eq!(load(&dir).unwrap(), (s1.clone(), MANIFEST));
     }
+    // alpha checked; gamma, delta written; the sync; s1 decoded; beta
+    // checked (alpha is known by then); s1 read through.
+    assert_eq!(steps, 7);
     assert_eq!(load(&dir).unwrap(), (s2.clone(), MANIFEST));
-    let done = w.written();
+    let done = w.written().clone();
     assert_eq!(
-        (done.chunks_new, done.chunks_kept, done.chunks_removed),
-        (3, 1, 0)
+        (
+            done.chunks_new,
+            done.chunks_kept,
+            done.chunks_removed,
+            done.chunks_checked
+        ),
+        (2, 1, 0, 2)
     );
+
+    let known = w.into_known();
+    let s3 = snapshot("three", &["alpha", "gamma", "epsilon"]);
+    let mut w = Writer::new(&dir, &s3, &known).unwrap();
+    assert_eq!((w.chunks_left(), w.written().chunks_kept), (1, 2));
+    assert!(w.step(None, &mut ok()).unwrap());
+    assert_eq!(w.written().chunks_checked, 0);
+    assert_eq!(load(&dir).unwrap(), (s3.clone(), MANIFEST));
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s2);
+}
+
+/// A chunk on disk that does not check (storage lost it) is not named by
+/// a new manifest as it is: a writer that did not write it reads it back
+/// and writes it again from the page, so the manifest reads and, once it
+/// is `manifest.prev`, still does.
+#[test]
+fn a_reused_chunk_that_does_not_check_is_written_again() {
+    let dir = temp_dir("reused");
+    let s1 = snapshot("one", &["alpha", "beta"]);
+    write(&dir, &s1, &mut ok()).unwrap();
+    let alpha = dir.join(CHUNKS).join(snap::hex(&s1.pages()[0].hash));
+    let mut bytes = fs::read(&alpha).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    fs::write(&alpha, &bytes).unwrap();
+    assert!(load(&dir).is_err());
+
+    let s2 = snapshot("two", &["alpha", "gamma"]);
+    let mut w = Writer::new(&dir, &s2, &Known::default()).unwrap();
+    assert!(w.step(None, &mut ok()).unwrap());
+    let done = w.written().clone();
+    assert_eq!((done.chunks_new, done.chunks_kept), (2, 0));
+    assert_eq!(load(&dir).unwrap(), (s2.clone(), MANIFEST));
+    // The next checkpoint trusts what this one wrote, and rotates it.
+    let s3 = snapshot("three", &["gamma", "eta"]);
+    let mut w = Writer::new(&dir, &s3, &w.into_known()).unwrap();
+    assert!(w.step(None, &mut ok()).unwrap());
+    assert_eq!(w.written().chunks_checked, 0);
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s2);
+    // A page with no data and a chunk that does not check: an error, the
+    // checkpoint as it was.
+    fs::write(
+        dir.join(CHUNKS).join(snap::hex(&s3.pages()[1].hash)),
+        b"bad",
+    )
+    .unwrap();
+    let mut empty = snapshot("four", &["eta"]);
+    empty.pages_mut(&mut |p| p.data.clear());
+    let mut w = Writer::new(&dir, &empty, &Known::default()).unwrap();
+    let err = w.step(None, &mut ok()).unwrap_err();
+    assert!(err.to_string().contains("no chunk that checks"), "{err}");
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s2);
+}
+
+/// The previous checkpoint is read through only when this process does
+/// not know it: what a restore read ([`read_file`]) counts.
+#[test]
+fn a_restored_checkpoint_is_not_read_back_at_the_next() {
+    let dir = temp_dir("restored");
+    let pages: Vec<String> = (0..20).map(|n| format!("page {n}")).collect();
+    let pages: Vec<&str> = pages.iter().map(String::as_str).collect();
+    let s1 = snapshot("one", &pages);
+    write(&dir, &s1, &mut ok()).unwrap();
+    let (back, left_out, known) = read_file(&dir, MANIFEST).unwrap();
+    assert_eq!((back, left_out), (s1.clone(), Vec::new()));
+    assert_eq!(known.chunks, chunk_names(&s1));
+    let s2 = snapshot("two", &pages[1..]);
+    let mut w = Writer::new(&dir, &s2, &known).unwrap();
+    assert!(w.step(None, &mut ok()).unwrap());
+    assert_eq!(w.written().chunks_checked, 0);
+    assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s1);
+    // Unknown, the same checkpoint is read back: every chunk once.
+    let mut w = Writer::new(&dir, &s1, &Known::default()).unwrap();
+    assert!(w.step(None, &mut ok()).unwrap());
+    assert_eq!(w.written().chunks_checked, 20);
 }

@@ -23,17 +23,24 @@
 //! that names it, so after the first checkpoint only new pages are written
 //! (decision 16).
 //!
-//! A checkpoint ([`write`], or [`Writer`] a few chunks at a time) is
+//! A checkpoint ([`write`], or [`Writer`] a step at a time) is
 //! crash-safe at every point: it writes each missing chunk as
 //! `chunks/<hash>.tmp`, syncs it and renames it, syncs `chunks/`, then
 //! writes `manifest.tmp`, flushes it to stable storage, renames `manifest`
 //! to `manifest.prev` (unless `manifest` does not read and `manifest.prev`
 //! does: that one stays, the last good checkpoint) and `manifest.tmp` to
-//! `manifest`, and syncs the directory. Only then does it delete the chunks neither manifest names,
-//! and any `.tmp` a crash left. A crash before the last rename leaves
-//! `manifest` (or, after the first rename, `manifest.prev`) the previous
-//! checkpoint, every chunk it names still there; [`load`] reads
-//! `manifest`, else `manifest.prev`.
+//! `manifest`, and syncs the directory. Only then does it delete the
+//! chunks neither manifest names, and any `.tmp` a crash left. A crash
+//! before the last rename leaves `manifest` (or, after the first rename,
+//! `manifest.prev`) the previous checkpoint, every chunk it names still
+//! there; [`load`] reads `manifest`, else `manifest.prev`.
+//!
+//! Nothing on disk is taken on trust: a chunk already there is named by
+//! the new manifest, and `manifest` rotated without reading it through,
+//! only when this process wrote it or read it back and found it to check
+//! ([`Known`]); else it is read back first, a chunk per piece of a step,
+//! so the first checkpoint of a new process (a live upgrade's image) does
+//! not hold the loop either. A restore seeds what it read.
 //!
 //! One flush to stable storage per checkpoint ([`Flush`]): on macOS
 //! `fsync` stops at the drive's cache and `F_FULLFSYNC` costs a
@@ -109,6 +116,9 @@ pub fn path_hash(path: &Path) -> String {
 /// crash would ([`write`]'s `at`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
+    /// A new chunk's `.tmp` is written and synced, not yet renamed: once
+    /// per chunk.
+    ChunkTmp,
     /// Every chunk the manifest names is on disk, the manifest not yet.
     ChunksWritten,
     /// `manifest.tmp` is written and synced, not renamed.
@@ -116,6 +126,11 @@ pub enum Stage {
     /// `manifest` has become `manifest.prev`; `manifest.tmp` is not yet
     /// `manifest`.
     PrevKept,
+    /// `manifest.tmp` is `manifest`; the directory is not yet synced.
+    Renamed,
+    /// About to delete an entry of `chunks/` that neither manifest names:
+    /// once per entry.
+    Collecting,
 }
 
 /// What a [`write`] did.
@@ -127,13 +142,31 @@ pub struct Written {
     pub chunks_kept: usize,
     /// Chunks (and leftover temp files) deleted.
     pub chunks_removed: usize,
+    /// Chunks read back to check them ([`Known`]): reused ones this
+    /// process had not written or checked, and those of the `manifest`
+    /// about to become `manifest.prev`.
+    pub chunks_checked: usize,
     /// Bytes written: new chunks and the manifest.
     pub bytes: u64,
 }
 
-/// Write `snapshot` as the checkpoint in `dir` (above), all at once.
-/// `at` is called at each [`Stage`]; an error from it stops the write
-/// there, as a crash would, and is returned.
+/// What a process knows of its checkpoint directory from its own writes
+/// and reads, so that a checkpoint reads back only what it does not
+/// ([`Writer::new`]). It goes with the process: a new one (a live
+/// upgrade's image too) starts knowing nothing, or what its restore read
+/// ([`read_file`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Known {
+    /// A `manifest` this process wrote or read whole: while `manifest`
+    /// holds these bytes, it reads.
+    pub manifest: Option<Vec<u8>>,
+    /// Chunks this process wrote, or read back and found to check.
+    pub chunks: BTreeSet<String>,
+}
+
+/// Write `snapshot` as the checkpoint in `dir` (above), all at once,
+/// knowing nothing of the directory. `at` is called at each [`Stage`]; an
+/// error from it stops the write there, as a crash would, and is returned.
 ///
 /// # Errors
 /// A directory, file, sync or rename failed, or `at` failed. Whatever
@@ -143,46 +176,75 @@ pub fn write(
     snapshot: &snap::Snapshot,
     at: &mut dyn FnMut(Stage) -> io::Result<()>,
 ) -> io::Result<Written> {
-    let mut w = Writer::new(dir, snapshot)?;
+    let mut w = Writer::new(dir, snapshot, &Known::default())?;
     while !w.step(None, at)? {}
     Ok(w.done)
 }
 
-/// A checkpoint written a few chunks at a time ([`Writer::step`]), so a
-/// first `full` checkpoint (every history page a chunk, each synced:
-/// hundreds of milliseconds at 10 panes x 100k lines) never holds the
+/// A checkpoint written a step at a time ([`Writer::step`]), so a first
+/// `full` checkpoint (every history page a chunk, each synced: hundreds
+/// of milliseconds at 10 panes x 100k lines), or the first of a process
+/// that must read back the chunks it did not write, never holds the
 /// server's loop for long. It owns what it writes: the manifest, encoded
 /// when it starts, and the pages not yet on disk.
+///
+/// Before the manifest names a chunk already on disk that this process
+/// neither wrote nor checked ([`Known`]), the chunk is read back and
+/// checked against its page, a chunk a step, and written again if it does
+/// not check: a manifest never names a chunk only assumed good. Before
+/// `manifest` becomes `manifest.prev`, it is read through the same way
+/// unless it is the [`Known`] one: a `manifest` that does not read, over a
+/// `manifest.prev` that does, is replaced instead, so `manifest.prev`
+/// stays the one checkpoint to fall back to.
 #[derive(Debug)]
 pub struct Writer {
     dir: PathBuf,
     manifest: Vec<u8>,
     /// Every chunk the manifest names.
     names: BTreeSet<String>,
+    /// The chunks on disk the manifest names that this process does not
+    /// know, with their pages, still to check, last first.
+    unchecked: Vec<(String, snap::HistoryPage)>,
     /// The chunks still to write, name and data, last first.
     todo: Vec<(String, Vec<u8>)>,
     done: Written,
     /// `manifest.prev` becomes a copy of this manifest, not the one it
     /// replaces ([`Writer::replacing_prev`]).
     replace_prev: bool,
-    /// What `manifest` holds when it is the checkpoint this process last
-    /// wrote ([`Writer::after`]).
-    known: Option<Vec<u8>>,
+    known: Known,
+    /// `chunks/` is synced: every chunk the manifest names is on disk.
+    synced: bool,
+    rotation: Rotation,
+    /// The manifest is in place.
+    finished: bool,
+}
+
+/// Whether `manifest` becomes `manifest.prev` at a checkpoint: yes,
+/// unless it does not read ([`load_file`]) and `manifest.prev` does.
+#[derive(Debug)]
+enum Rotation {
+    /// Not looked at yet.
+    Unknown,
+    /// Reading through manifest `.0`: its terminals' pages still to check,
+    /// last first.
+    Reading(&'static str, Vec<snap::HistoryPage>),
+    Decided(bool),
 }
 
 impl Writer {
-    /// Start writing `snapshot` into `dir`: make the directories and find
-    /// the pages already there.
+    /// Start writing `snapshot` into `dir`, which this process knows as
+    /// `known`: make the directories and find the pages already there.
     ///
     /// # Errors
     /// A directory can't be made private, or a page not on disk has no
     /// data.
-    pub fn new(dir: &Path, snapshot: &snap::Snapshot) -> io::Result<Self> {
+    pub fn new(dir: &Path, snapshot: &snap::Snapshot, known: &Known) -> io::Result<Self> {
         let chunks = dir.join(CHUNKS);
         private_dir(dir)?;
         private_dir(&chunks)?;
         let mut done = Written::default();
         let mut names = BTreeSet::new();
+        let mut unchecked = Vec::new();
         let mut todo = Vec::new();
         for page in snapshot.pages() {
             let name = snap::hex(&page.hash);
@@ -190,42 +252,33 @@ impl Writer {
                 continue;
             }
             if chunks.join(&name).is_file() {
-                done.chunks_kept += 1;
+                if known.chunks.contains(&name) {
+                    done.chunks_kept += 1;
+                } else {
+                    unchecked.push((name, page.clone()));
+                }
                 continue;
             }
             if page.data.is_empty() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("history page {name} has no data and no chunk"),
-                ));
+                return Err(no_data(&name));
             }
             todo.push((name, page.data.clone()));
         }
         todo.reverse();
+        unchecked.reverse();
         Ok(Self {
             dir: dir.to_path_buf(),
             manifest: snap::encode_manifest(snapshot),
             names,
+            unchecked,
             todo,
             done,
             replace_prev: false,
-            known: None,
+            known: known.clone(),
+            synced: false,
+            rotation: Rotation::Unknown,
+            finished: false,
         })
-    }
-
-    /// `manifest` should hold `bytes` ([`Writer::manifest`] of the last
-    /// checkpoint this process wrote): when it does, it becomes
-    /// `manifest.prev` without being read through first ([`rotates`]).
-    #[must_use]
-    pub fn after(mut self, bytes: Option<Vec<u8>>) -> Self {
-        self.known = bytes;
-        self
-    }
-
-    /// The manifest this writes.
-    #[must_use]
-    pub fn manifest(&self) -> &[u8] {
-        &self.manifest
     }
 
     /// Make `manifest.prev` a copy of this checkpoint instead of keeping
@@ -256,9 +309,22 @@ impl Writer {
         &self.done
     }
 
-    /// Write chunks until `budget` is spent (at least one; `None`: no
-    /// limit). With none left, finish: sync `chunks/`, write the manifest,
-    /// rotate, and collect. `true` once finished.
+    /// What the process knows of the directory now: what it knew, the
+    /// chunks this write wrote or checked (less those it deleted), and
+    /// the manifest once it is in place. Sound whenever the write stopped.
+    #[must_use]
+    pub fn into_known(mut self) -> Known {
+        if self.finished {
+            self.known.manifest = Some(self.manifest);
+        }
+        self.known
+    }
+
+    /// Work until `budget` is spent (at least one piece; `None`: no
+    /// limit). A piece is a chunk checked or written, the sync of
+    /// `chunks/`, the decode of `manifest` (or `manifest.prev`) or one
+    /// of its chunks checked, or the finish: write the manifest, rotate,
+    /// and collect. `true` once finished.
     ///
     /// # Errors
     /// As [`write`]; the previous checkpoint stays readable.
@@ -268,28 +334,152 @@ impl Writer {
         at: &mut dyn FnMut(Stage) -> io::Result<()>,
     ) -> io::Result<bool> {
         let start = Instant::now();
-        let chunks = self.dir.join(CHUNKS);
-        while let Some((name, data)) = self.todo.pop() {
-            replace(
-                &chunks.join(format!("{name}.tmp")),
-                &chunks.join(&name),
-                &data,
-            )?;
-            self.done.chunks_new += 1;
-            self.done.bytes += data.len() as u64;
+        loop {
+            if self.piece(at)? {
+                return Ok(true);
+            }
             if budget.is_some_and(|b| start.elapsed() >= b) {
-                break;
+                return Ok(false);
             }
         }
-        if !self.todo.is_empty() {
-            return Ok(false);
+    }
+
+    /// One piece of [`Writer::step`]; `true` once finished.
+    fn piece(&mut self, at: &mut dyn FnMut(Stage) -> io::Result<()>) -> io::Result<bool> {
+        let chunks = self.dir.join(CHUNKS);
+        if let Some((name, page)) = self.unchecked.pop() {
+            self.check_reused(name, page)?;
+        } else if let Some((name, data)) = self.todo.pop() {
+            let tmp = chunks.join(format!("{name}.tmp"));
+            write_file(&tmp, &data, Flush::Data)?;
+            at(Stage::ChunkTmp)?;
+            fs::rename(tmp, chunks.join(&name))?;
+            self.done.chunks_new += 1;
+            self.done.bytes += data.len() as u64;
+            self.known.chunks.insert(name);
+        } else if !self.synced {
+            // Only renames in `chunks/` need it; the manifest's full flush
+            // orders the chunks' data before it.
+            if self.done.chunks_new > 0 {
+                sync_dir(&chunks)?;
+            }
+            self.synced = true;
+            at(Stage::ChunksWritten)?;
+        } else if !self.replace_prev && !matches!(self.rotation, Rotation::Decided(_)) {
+            self.decide_rotation();
+        } else {
+            self.finish(at)?;
+            return Ok(true);
         }
-        // Only renames in `chunks/` need it; the manifest's full flush
-        // below orders the chunks' data before it.
-        if self.done.chunks_new > 0 {
-            sync_dir(&chunks)?;
+        Ok(false)
+    }
+
+    /// Read back `name`, on disk and named by the manifest, and keep it if
+    /// it checks against `page`; else write it again from `page`'s data.
+    fn check_reused(&mut self, name: String, mut page: snap::HistoryPage) -> io::Result<()> {
+        self.done.chunks_checked += 1;
+        let on_disk = fs::read(self.dir.join(CHUNKS).join(&name)).unwrap_or_default();
+        let good = (!page.data.is_empty() && on_disk == page.data) || {
+            let data = std::mem::replace(&mut page.data, on_disk);
+            let good = page_checks(&page);
+            page.data = data;
+            good
+        };
+        if good {
+            self.done.chunks_kept += 1;
+            self.known.chunks.insert(name);
+        } else if page.data.is_empty() {
+            return Err(no_data(&name));
+        } else {
+            self.todo.push((name, page.data));
         }
-        at(Stage::ChunksWritten)?;
+        Ok(())
+    }
+
+    /// One piece of deciding [`Rotation`] (see [`Writer`]).
+    fn decide_rotation(&mut self) {
+        self.rotation = match std::mem::replace(&mut self.rotation, Rotation::Unknown) {
+            Rotation::Unknown => {
+                let latest = fs::read(self.dir.join(MANIFEST));
+                if self
+                    .known
+                    .manifest
+                    .as_ref()
+                    .is_some_and(|k| latest.as_ref().is_ok_and(|b| b == k))
+                {
+                    Rotation::Decided(true)
+                } else {
+                    self.start_reading(MANIFEST, latest.ok())
+                }
+            }
+            Rotation::Reading(name, mut pages) => match pages.pop() {
+                None => self.read_through(name, true),
+                Some(mut page) => {
+                    let hex = snap::hex(&page.hash);
+                    let inline = !page.data.is_empty();
+                    if !inline {
+                        self.done.chunks_checked += 1;
+                        page.data = fs::read(self.dir.join(CHUNKS).join(&hex)).unwrap_or_default();
+                    }
+                    if page_checks(&page) {
+                        if !inline {
+                            self.known.chunks.insert(hex);
+                        }
+                        Rotation::Reading(name, pages)
+                    } else {
+                        self.read_through(name, false)
+                    }
+                }
+            },
+            decided @ Rotation::Decided(_) => decided,
+        };
+    }
+
+    /// Start reading manifest `name` (`bytes`, if it could be read)
+    /// through: decode it, and list its terminals' pages this process
+    /// does not know (a copy mode's do not count, as for [`load_file`]).
+    fn start_reading(&mut self, name: &'static str, bytes: Option<Vec<u8>>) -> Rotation {
+        let decoded = bytes.and_then(|b| {
+            std::panic::catch_unwind(|| {
+                snap::decode_partial(&b, &snap::Features::default(), |_| None).ok()
+            })
+            .ok()
+            .flatten()
+        });
+        let Some(s) = decoded else {
+            return self.read_through(name, false);
+        };
+        let mut seen = BTreeSet::new();
+        let mut pages: Vec<snap::HistoryPage> = s
+            .term_pages()
+            .into_iter()
+            .filter(|p| !p.is_ghostty())
+            .filter(|p| {
+                let hex = snap::hex(&p.hash);
+                !self.known.chunks.contains(&hex) && seen.insert(hex)
+            })
+            .cloned()
+            .collect();
+        pages.reverse();
+        Rotation::Reading(name, pages)
+    }
+
+    /// Manifest `name` read through: whether it `reads`. `manifest` that
+    /// reads rotates; one that does not leaves it to `manifest.prev`,
+    /// which stays when it reads.
+    fn read_through(&mut self, name: &'static str, reads: bool) -> Rotation {
+        match (name, reads) {
+            (MANIFEST, true) => Rotation::Decided(true),
+            (MANIFEST, false) => {
+                let prev = fs::read(self.dir.join(MANIFEST_PREV)).ok();
+                self.start_reading(MANIFEST_PREV, prev)
+            }
+            (_, reads) => Rotation::Decided(!reads),
+        }
+    }
+
+    /// Write the manifest, rotate, and collect.
+    fn finish(&mut self, at: &mut dyn FnMut(Stage) -> io::Result<()>) -> io::Result<()> {
         let dir = &self.dir;
         let tmp = dir.join(MANIFEST_TMP);
         write_file(&tmp, &self.manifest, Flush::Full)?;
@@ -302,7 +492,7 @@ impl Writer {
                 &dir.join(MANIFEST_PREV),
                 &self.manifest,
             )?;
-        } else if rotates(dir, self.known.as_deref()) {
+        } else if matches!(self.rotation, Rotation::Decided(true)) {
             match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
                 Ok(()) => {}
                 // The first checkpoint, or a crash after the rename below's
@@ -313,56 +503,68 @@ impl Writer {
         }
         at(Stage::PrevKept)?;
         fs::rename(&tmp, &latest)?;
+        self.finished = true;
+        at(Stage::Renamed)?;
         sync_dir(dir)?;
-        self.done.chunks_removed = collect(dir, &self.names);
-        Ok(true)
+        self.done.chunks_removed = collect(dir, &self.names, &mut self.known.chunks, at)?;
+        Ok(())
     }
 }
 
-/// Whether `manifest` is to become `manifest.prev` at a checkpoint: yes,
-/// unless it does not read ([`load_file`]) and `manifest.prev` does. Then
-/// `manifest.prev` is the one checkpoint to fall back to, kept until the
-/// new `manifest` is in place, and the unreadable `manifest` is replaced.
-/// A `manifest` holding `known` (the checkpoint this process last wrote,
-/// synced with its chunks) is not read through: that is a decode of every
-/// chunk, done only at a server's first checkpoint.
-fn rotates(dir: &Path, known: Option<&[u8]>) -> bool {
-    let reads =
-        |name| std::panic::catch_unwind(|| load_file(dir, name)).is_ok_and(|loaded| loaded.is_ok());
-    known.is_some_and(|k| fs::read(dir.join(MANIFEST)).is_ok_and(|b| b == k))
-        || reads(MANIFEST)
-        || !reads(MANIFEST_PREV)
+fn no_data(name: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("history page {name} has no data and no chunk that checks"),
+    )
+}
+
+/// Whether `page`, its data its chunk's, checks as a restore checks it
+/// ([`snap::Snapshot::unreadable`]): decompresses into its rows within the
+/// page limits and matches its name. A panic reading it is a no.
+fn page_checks(page: &snap::HistoryPage) -> bool {
+    std::panic::catch_unwind(|| page.each_row_verified(|_| {}).is_ok()).unwrap_or(false)
 }
 
 /// Delete every entry of `chunks/` that neither manifest names: `names`
-/// (the one just written) and those `manifest.prev` names. Nothing is
-/// deleted when `manifest.prev` exists but can't be listed (unreadable,
-/// newer, or requiring a feature this build lacks): a chunk it names may
-/// be among them. Errors deleting are left for the next checkpoint.
-fn collect(dir: &Path, names: &BTreeSet<String>) -> usize {
+/// (the one just written) and those `manifest.prev` names, and forget it
+/// in `known`. Nothing is deleted when `manifest.prev` exists but can't be
+/// listed (unreadable, newer, or requiring a feature this build lacks): a
+/// chunk it names may be among them. Errors deleting are left for the
+/// next checkpoint; only `at`'s are returned.
+fn collect(
+    dir: &Path,
+    names: &BTreeSet<String>,
+    known: &mut BTreeSet<String>,
+    at: &mut dyn FnMut(Stage) -> io::Result<()>,
+) -> io::Result<usize> {
     let mut keep = names.clone();
     match fs::read(dir.join(MANIFEST_PREV)) {
         Ok(bytes) => match snap::page_refs(&bytes) {
             Ok(refs) => keep.extend(refs.iter().map(snap::hex)),
-            Err(_) => return 0,
+            Err(_) => return Ok(0),
         },
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(_) => return 0,
+        Err(_) => return Ok(0),
     }
     let Ok(entries) = fs::read_dir(dir.join(CHUNKS)) else {
-        return 0;
+        return Ok(0);
     };
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if name.to_str().is_some_and(|n| keep.contains(n)) {
+        let name = name.to_str();
+        if name.is_some_and(|n| keep.contains(n)) {
             continue;
         }
+        at(Stage::Collecting)?;
         if fs::remove_file(entry.path()).is_ok() {
             removed += 1;
+            if let Some(n) = name {
+                known.remove(n);
+            }
         }
     }
-    removed
+    Ok(removed)
 }
 
 /// Read the checkpoint in `dir`: `manifest`, else `manifest.prev`, each
@@ -408,6 +610,15 @@ pub fn load(dir: &Path) -> io::Result<(snap::Snapshot, &'static str)> {
 /// decode (a pane's or popup's page missing from `chunks/` is one way);
 /// else the read's.
 pub fn load_file(dir: &Path, name: &str) -> io::Result<(snap::Snapshot, Vec<String>)> {
+    read_file(dir, name).map(|(s, why, _)| (s, why))
+}
+
+/// [`load_file`], and what reading it taught ([`Known`]): every chunk the
+/// snapshot names checks, and, for [`MANIFEST`], the file reads.
+///
+/// # Errors
+/// As [`load_file`].
+pub fn read_file(dir: &Path, name: &str) -> io::Result<(snap::Snapshot, Vec<String>, Known)> {
     let invalid = |e: snap::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
     let bytes = fs::read(dir.join(name))?;
     let chunks = dir.join(CHUNKS);
@@ -427,7 +638,16 @@ pub fn load_file(dir: &Path, name: &str) -> io::Result<(snap::Snapshot, Vec<Stri
         }
     }
     s.without(&modes);
-    Ok((s, why))
+    let known = Known {
+        manifest: (name == MANIFEST).then_some(bytes),
+        chunks: s
+            .pages()
+            .iter()
+            .filter(|p| !p.is_ghostty())
+            .map(|p| snap::hex(&p.hash))
+            .collect(),
+    };
+    Ok((s, why, known))
 }
 
 /// Make `dir` (and missing parents) mode 0700, and an existing `dir` 0700

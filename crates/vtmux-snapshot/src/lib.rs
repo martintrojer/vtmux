@@ -569,6 +569,19 @@ impl Snapshot {
     /// Ghostty's form ([`HistoryPage::is_ghostty`]) have no chunk.
     #[must_use]
     pub fn pages(&self) -> Vec<&HistoryPage> {
+        self.pages_of(true)
+    }
+
+    /// The pages of every pane's and popup's terminal state:
+    /// [`Snapshot::pages`] without those of copy and view modes, so the
+    /// ones a restore can't do without ([`Snapshot::unreadable`]'s
+    /// [`Part::PaneTerm`] and [`Part::PopupTerm`]).
+    #[must_use]
+    pub fn term_pages(&self) -> Vec<&HistoryPage> {
+        self.pages_of(false)
+    }
+
+    fn pages_of(&self, modes: bool) -> Vec<&HistoryPage> {
         fn term<'a>(t: &'a TermState, out: &mut Vec<&'a HistoryPage>) {
             let sized = t.sized_primary.as_ref().and_then(|p| p.screen.as_ref());
             for screen in std::iter::once(&t.primary).chain(sized).chain(&t.alternate) {
@@ -583,7 +596,7 @@ impl Snapshot {
             if let Some(t) = &p.term {
                 term(t, &mut out);
             }
-            for m in &p.modes {
+            for m in p.modes.iter().filter(|_| modes) {
                 if let PaneMode::Copy(c) | PaneMode::View(c) = m {
                     out.extend(&c.history);
                 }

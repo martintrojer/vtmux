@@ -354,7 +354,9 @@ fn a_periodic_checkpoint_writes_its_chunks_over_several_turns() {
     assert!(server.persist_deadline().is_some_and(|d| d > start));
     let due = start + super::interval();
     server.persist_timers(due);
-    // One chunk per turn at a zero budget; the loop doesn't sleep.
+    // One chunk per turn at a zero budget, then one to sync `chunks/`, one
+    // to find no manifest to read through, and one for the manifest; the
+    // loop doesn't sleep.
     let mut turns = 1;
     while !state.join(MANIFEST).exists() {
         assert!(
@@ -365,12 +367,12 @@ fn a_periodic_checkpoint_writes_its_chunks_over_several_turns() {
         let chunks = std::fs::read_dir(state.join(crate::persist::CHUNKS))
             .unwrap()
             .count();
-        assert_eq!(chunks, turns, "turn {turns}");
+        assert_eq!(chunks, turns.min(pages), "turn {turns}");
         server.persist_timers(due);
         turns += 1;
-        assert!(turns <= pages + 1, "{turns} turns for {pages} pages");
+        assert!(turns <= pages + 3, "{turns} turns for {pages} pages");
     }
-    assert_eq!(turns, pages);
+    assert_eq!(turns, pages + 3);
     let (back, from) = crate::persist::load(&state).unwrap();
     assert_eq!(from, MANIFEST);
     assert_eq!(back.pages().len(), pages);
@@ -723,7 +725,8 @@ fn bench_full(server: &Server, dir: &std::path::Path) {
     // The periodic path: a step per loop turn at the server's budget.
     let stepped = dir.join("stepped");
     let start = Instant::now();
-    let mut w = crate::persist::Writer::new(&stepped, &s).unwrap();
+    let mut w =
+        crate::persist::Writer::new(&stepped, &s, &crate::persist::Known::default()).unwrap();
     let begun = start.elapsed();
     let (mut steps, mut longest) = (0, std::time::Duration::ZERO);
     loop {
@@ -752,4 +755,192 @@ fn bench_full(server: &Server, dir: &std::path::Path) {
         &bench_with_history(server, BENCH_PER_PAGE),
         "one new page per pane",
     );
+}
+
+/// The first periodic checkpoint of a process over the checkpoint of
+/// another (`cargo test --release -p vtmux-server --lib
+/// bench_first_checkpoint -- --ignored --nocapture`): 20 panes x 40k
+/// lines, by a process that knows nothing of the directory (a live
+/// upgrade's image) and by one that restored it. On the real model (the
+/// export at the start is the known cost of every checkpoint; what is
+/// measured is each loop turn after it), then on synthetic pages of 290
+/// rows (2,760 chunks), the history kept or all new (every chunk of the
+/// old `manifest` then read through, decompressed and hashed). `turn`:
+/// a loop turn at the server's budget; `piece`: the longest single piece
+/// of work, at a zero budget.
+#[test]
+#[ignore = "timing, run by hand in release"]
+fn bench_first_checkpoint_of_a_new_process() {
+    use crate::persist::{Known, read_file};
+    const PANES: usize = 20;
+    const LINES: usize = 40_000;
+    let dir = temp_dir("ckpt-first");
+    let (l, socket) = listener(&dir, "s");
+    let mut server = Server::new(l, socket, ServerConfig::default()).unwrap();
+    run(&mut server, &dir, &["set", "-g", "history-limit", "40000"]);
+    run(
+        &mut server,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "200",
+            "-y",
+            "50",
+            "cat",
+            "-",
+        ],
+    );
+    for _ in 1..PANES {
+        run(
+            &mut server,
+            &dir,
+            &["new-window", "-d", "-t", "a", "cat", "-"],
+        );
+    }
+    let mut text = Vec::new();
+    for line in 0..LINES {
+        text.extend_from_slice(format!("{}\r\n", bench_line(line)).as_bytes());
+    }
+    for p in server.model.panes.values_mut() {
+        p.term.feed(&text);
+    }
+    run(&mut server, &dir, &["set", "-s", "vtmux-persist", "full"]);
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    let written = server.checkpoint().unwrap();
+    println!(
+        "real model, {PANES} x {LINES}: {} chunks",
+        written.chunks_new
+    );
+    for n in 0..4 {
+        let restored = n % 2 == 1;
+        server.persist.known = if restored {
+            read_file(&state, MANIFEST).unwrap().2
+        } else {
+            Known::default()
+        };
+        server.persist.step = if n < 2 {
+            super::STEP
+        } else {
+            std::time::Duration::ZERO
+        };
+        run(
+            &mut server,
+            &dir,
+            &["rename-window", "-t", "a:0", &format!("w{n}")],
+        );
+        let start = Instant::now();
+        server.checkpoint_begin();
+        let begun = start.elapsed();
+        let stepping = Instant::now();
+        let (mut turns, mut longest, mut checked) = (0, std::time::Duration::ZERO, 0);
+        while let Some((w, _)) = &server.persist.writing {
+            checked = w.written().chunks_checked;
+            let t = Instant::now();
+            server.persist_step();
+            longest = longest.max(t.elapsed());
+            turns += 1;
+        }
+        println!(
+            "  {} {}: export {begun:?}, then {turns} in {:?}, longest {longest:?}, \
+             {checked}+ chunks read back",
+            if restored { "restored" } else { "new process" },
+            if n < 2 { "turns" } else { "pieces" },
+            stepping.elapsed()
+        );
+    }
+    bench_first_checkpoint_synthetic(&dir, PANES, LINES);
+}
+
+/// [`bench_first_checkpoint_of_a_new_process`] on synthetic pages.
+fn bench_first_checkpoint_synthetic(dir: &std::path::Path, panes: usize, lines: usize) {
+    use crate::persist::{Known, Writer, read_file};
+    let synthetic = |first: usize| {
+        let mut s = snap::Snapshot::default();
+        for p in 0..panes {
+            let mut history = Vec::new();
+            let mut b = snap::PageBuilder::new();
+            for line in 0..lines {
+                let text = bench_line(first + p * lines + line);
+                b.push(&snap::Row {
+                    cells: text
+                        .chars()
+                        .map(|c| snap::Cell {
+                            codepoint: u32::from(c),
+                            ..snap::Cell::default()
+                        })
+                        .collect(),
+                    ..snap::Row::default()
+                });
+                if b.rows() == 290 {
+                    history.push(std::mem::take(&mut b).finish(false));
+                }
+            }
+            history.push(b.finish(false));
+            s.panes.push(snap::Pane {
+                id: u32::try_from(p).unwrap(),
+                term: Some(snap::TermState {
+                    primary: snap::term::Screen {
+                        history,
+                        ..snap::term::Screen::default()
+                    },
+                    ..snap::TermState::default()
+                }),
+                ..snap::Pane::default()
+            });
+        }
+        s
+    };
+    let old = synthetic(0);
+    for (what, s) in [
+        ("kept", synthetic(0)),
+        ("all new", synthetic(panes * lines)),
+    ] {
+        for (restored, budget) in [
+            (false, Some(super::STEP)),
+            (false, Some(std::time::Duration::ZERO)),
+            (true, Some(super::STEP)),
+        ] {
+            let state = dir.join("synthetic");
+            let _ = std::fs::remove_dir_all(&state);
+            crate::persist::write(&state, &old, &mut |_| Ok(())).unwrap();
+            let known = if restored {
+                read_file(&state, MANIFEST).unwrap().2
+            } else {
+                Known::default()
+            };
+            let start = Instant::now();
+            let mut w = Writer::new(&state, &s, &known).unwrap();
+            let begun = start.elapsed();
+            let stepping = Instant::now();
+            let (mut turns, mut longest) = (0, std::time::Duration::ZERO);
+            loop {
+                let t = Instant::now();
+                let done = w.step(budget, &mut |_| Ok(())).unwrap();
+                longest = longest.max(t.elapsed());
+                turns += 1;
+                if done {
+                    break;
+                }
+            }
+            println!(
+                "synthetic {} chunks, {what}, {}, {}: begun {begun:?}, {turns} in {:?}, \
+                 longest {longest:?}, {} chunks read back, {} written",
+                old.pages().len(),
+                if restored { "restored" } else { "new process" },
+                if budget == Some(super::STEP) {
+                    "turns"
+                } else {
+                    "pieces"
+                },
+                stepping.elapsed(),
+                w.written().chunks_checked,
+                w.written().chunks_new,
+            );
+        }
+    }
 }
