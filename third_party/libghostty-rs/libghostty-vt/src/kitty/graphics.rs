@@ -611,7 +611,7 @@ impl<'t, 'alloc> PlacementIteration<'t, 'alloc> {
         from_optional_result_uninit(result, MaybeUninit::new(pos))
     }
 
-    /// vtmux (patch 0038): the placement's top-left cell, its row relative
+    /// vtmux (patch 0040): the placement's top-left cell, its row relative
     /// to the active area's top row (negative: in history), visible or
     /// not. `None` for a virtual placement or a chain rooted at one.
     pub fn vtmux_active_pos(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<ViewportPos>> {

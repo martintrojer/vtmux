@@ -343,8 +343,9 @@ pub struct PaneGraphics {
     pub held: bool,
     /// The process group each screen's grant belongs to.
     pub owner: [Option<i32>; 2],
-    /// Each screen's image bytes when last counted, and when they last
-    /// grew (the eviction order across panes).
+    /// Each screen's image bytes when last counted, its pending load's
+    /// included, and when they last grew (the eviction order across
+    /// panes).
     pub bytes: [u64; 2],
     pub loaded: [Option<std::time::Instant>; 2],
 }

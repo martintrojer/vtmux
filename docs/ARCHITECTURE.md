@@ -129,7 +129,7 @@ vtmux passes through a protocol tmux 3.8 drops only when libghostty-vt implement
 | Kitty keyboard (D29) | `vtmux-kitty-keys` | Ghostty's key encoder via `vtmux_vt::kitty_keys`; grants in `pane_kitty.rs` |
 | Desktop notifications, OSC 9 and 777 (D30) | `vtmux-notifications` | `notify.rs`: to Ghostty clients only, at Ghostty's rate limits |
 | In-band resize, mode 2048 (D31) | `vtmux-inband-resize` | `resize.rs` |
-| Kitty graphics (D33) | `vtmux-graphics`, `vtmux-graphics-limit` | Ghostty's image storage per granted screen, `pane_graphics.rs` (grants, the shared limit); drawn as unicode placeholder cells for Ghostty clients, each with its own uploads, in `render/graphics.rs` |
+| Kitty graphics (D33) | `vtmux-graphics`, `vtmux-graphics-limit` | Ghostty's image storage per granted screen, images sent inline only, `pane_graphics.rs` (grants, the shared limit over images and loads in progress); drawn as unicode placeholder cells for Ghostty clients, each with its own uploads, in `render/graphics.rs` |
 
 ## Ghostty inside
 

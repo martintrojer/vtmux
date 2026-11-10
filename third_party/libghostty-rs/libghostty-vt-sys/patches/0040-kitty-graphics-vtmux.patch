@@ -14,20 +14,20 @@ diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
      uint16_t rows);
  
 +/** Screen `screen`'s (0 primary, 1 alternate) kitty image storage: the
-+ * bytes its images hold and its limit (vtmux patch 0038). */
++ * bytes its images hold and its limit (vtmux patch 0040). */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_storage(GhosttyTerminal terminal,
 +                                                      uint8_t screen,
 +                                                      uint64_t* bytes,
 +                                                      uint64_t* limit);
 +
 +/** Set screen `screen`'s kitty image storage limit alone; lowering it
-+ * evicts as Ghostty does, 0 deletes every image (vtmux patch 0038). */
++ * evicts as Ghostty does, 0 deletes every image (vtmux patch 0040). */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_set_kitty_limit(GhosttyTerminal terminal,
 +                                                        uint8_t screen,
 +                                                        uint64_t limit);
 +
 +/** The current placement's top-left cell, its row relative to the active
-+ * area's top (negative: in history), visible or not (vtmux patch 0038).
++ * area's top (negative: in history), visible or not (vtmux patch 0040).
 + * GHOSTTY_NO_VALUE for a virtual placement. */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_placement_active_pos(
 +    GhosttyKittyGraphicsPlacementIterator iterator,
@@ -58,7 +58,7 @@ diff --git a/src/terminal/c/kitty_graphics.zig b/src/terminal/c/kitty_graphics.z
      return .success;
  }
  
-+/// vtmux patch 0038: the placement's top-left cell, its row relative to
++/// vtmux patch 0040: the placement's top-left cell, its row relative to
 +/// the active area's top row: negative is in history, however far up, as
 +/// `placement_viewport_pos` would give it with no visibility cut (vtmux
 +/// draws history rows itself, in copy mode). GHOSTTY_NO_VALUE for a
@@ -136,7 +136,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
      return .success;
  }
  
-+/// vtmux patch 0038: screen `key`'s (0 primary, 1 alternate) kitty image
++/// vtmux patch 0040: screen `key`'s (0 primary, 1 alternate) kitty image
 +/// storage, the bytes its images hold and its limit. A screen not yet
 +/// initialized holds nothing and has the primary's limit, which it takes
 +/// when it starts (`Terminal.switchScreen`).
@@ -162,7 +162,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
 +    return .success;
 +}
 +
-+/// vtmux patch 0038: set the kitty image storage limit of screen `key`
++/// vtmux patch 0040: set the kitty image storage limit of screen `key`
 +/// alone (`ghostty_terminal_set` sets every screen's). Lowering it evicts
 +/// as Ghostty does (`ImageStorage.setLimit`: unused images first, then the
 +/// oldest); 0 deletes every image. A screen not yet initialized is left:

@@ -963,6 +963,127 @@ mod tests {
         assert_eq!(t.take_replies(), b"", "an APC is a title again");
     }
 
+    /// A private directory for a test's files, removed by the caller.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("vtmux-gfx-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// D33: images arrive only as data in the escape. A file, temporary
+    /// file or shared memory transmission is refused with one answer
+    /// whatever its path names, a readable file of the right size (`S`),
+    /// none, a directory or a FIFO, so no reply says which files exist;
+    /// no path is opened (a FIFO would block the server until a writer
+    /// came), and a temporary file is not deleted.
+    #[test]
+    fn only_direct_media_load_and_no_path_is_opened() {
+        let dir = scratch("media");
+        let file = dir.join("tty-graphics-protocol-red");
+        std::fs::write(&file, [255, 0, 0]).unwrap();
+        let fifo = dir.join("fifo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let missing = dir.join("missing");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let paths = [&file, &missing, &dir, &fifo].map(|p| p.to_str().unwrap().to_owned());
+        std::thread::spawn(move || {
+            let mut t = term_with(true);
+            let mut replies = Vec::new();
+            let mut slowest = std::time::Duration::ZERO;
+            for (n, path) in (1..).zip(&paths) {
+                for medium in ['f', 't', 's'] {
+                    let mut b64 = String::new();
+                    base64(path.as_bytes(), &mut b64);
+                    let start = std::time::Instant::now();
+                    t.feed(
+                        format!("\x1b_Ga=t,t={medium},f=24,s=1,v=1,S=3,i={n};{b64}\x1b\\")
+                            .as_bytes(),
+                    );
+                    slowest = slowest.max(start.elapsed());
+                    let reply = String::from_utf8(t.take_replies()).unwrap();
+                    replies.push(reply.replacen(&format!("i={n};"), "i=N;", 1));
+                }
+            }
+            let _ = tx.send((replies, slowest, t.graphics_storage(false).0));
+        });
+        let (replies, slowest, stored) = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("a FIFO path blocked the pane's parse");
+        assert!(
+            slowest < std::time::Duration::from_millis(100),
+            "{slowest:?}"
+        );
+        assert_eq!(replies.len(), 12);
+        for reply in &replies {
+            assert_eq!(reply, "\x1b_Gi=N;EINVAL: unsupported medium\x1b\\");
+        }
+        assert_eq!(stored, 0);
+        assert!(file.exists(), "a temporary file is never read, nor deleted");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `n` zero bytes of image data, as base64 chunks of kitty's size.
+    fn zero_chunks(n: usize) -> Vec<String> {
+        let mut b64 = String::new();
+        base64(&vec![0; n], &mut b64);
+        b64.as_bytes()
+            .chunks(CHUNK)
+            .map(|c| String::from_utf8(c.to_vec()).unwrap())
+            .collect()
+    }
+
+    /// D33: a pending (chunked, unfinished) load never holds more than its
+    /// screen's limit: at the chunk past it the load lets go of its data,
+    /// its other chunks go unanswered, and its last one fails as Ghostty
+    /// fails an image over the limit (`ENOMEM`, honouring `q`). One command
+    /// longer than the limit could store is dropped unparsed.
+    #[test]
+    fn a_pending_load_is_held_to_the_screens_limit() {
+        let mut t = term_with(true);
+        // 1000x1000 RGB is 3 MB; the limit is 1 MB.
+        let chunks = zero_chunks(3_000_000);
+        t.feed(format!("\x1b_Ga=t,f=24,s=1000,v=1000,i=1,m=1;{}\x1b\\", chunks[0]).as_bytes());
+        let mut most = 0;
+        for chunk in &chunks[1..chunks.len() - 1] {
+            t.feed(format!("\x1b_Gm=1;{chunk}\x1b\\").as_bytes());
+            assert_eq!(t.take_replies(), b"");
+            most = most.max(t.graphics_pending(false));
+            assert!(most <= 1_000_000, "{most}");
+        }
+        assert!(most > 900_000, "it held what fits: {most}");
+        assert_eq!(t.graphics_pending(false), 0, "then let go");
+        t.feed(format!("\x1b_Gm=0;{}\x1b\\", chunks[chunks.len() - 1]).as_bytes());
+        assert_eq!(t.take_replies(), b"\x1b_Gi=1;ENOMEM: out of memory\x1b\\");
+        assert_eq!(
+            (t.graphics_pending(false), t.graphics_storage(false).0),
+            (0, 0)
+        );
+        // A load that fits still loads after.
+        t.feed(format!("\x1b_Ga=t,f=24,s=1,v=1,i=2;{RED}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"\x1b_Gi=2;OK\x1b\\");
+        // One unchunked command of 2 MB: dropped as it is read.
+        let big = zero_chunks(2_000_000).concat();
+        t.feed(format!("\x1b_Ga=t,f=24,s=1000,v=666,i=3;{big}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"");
+        assert_eq!(t.graphics_storage(false).0, 3, "only image 2");
+        // A dropped pending load: the next chunk starts anew.
+        t.feed(
+            format!(
+                "\x1b_Ga=t,f=24,s=10,v=10,i=4,m=1;{}\x1b\\",
+                zero_chunks(150)[0]
+            )
+            .as_bytes(),
+        );
+        assert!(t.graphics_pending(false) >= 150);
+        t.drop_graphics_pending(false);
+        assert_eq!(t.graphics_pending(false), 0);
+    }
+
     /// A PNG (`f=100`) loads through the decoder vtmux installs.
     #[test]
     fn a_png_is_decoded() {

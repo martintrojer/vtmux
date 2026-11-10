@@ -626,6 +626,15 @@ impl PaneTerm {
         // keep their state (and memory) out. Both calls only fail when the
         // feature is compiled out, which is the outcome we want anyway.
         let _ = term.set_kitty_image_storage_limit(0);
+        // D33: images arrive only as data in the escape (`t=d`). File,
+        // temporary-file and shared-memory media are refused for every
+        // pane (Ghostty answers `EINVAL: unsupported medium`, `LoadingImage
+        // .init`), so no pane, nor a program on another host through ssh,
+        // makes the server open a path. Ghostty's default
+        // (`LoadingImage.Limits.direct`), set here to say so.
+        let _ = term.set_kitty_image_from_file_allowed(false);
+        let _ = term.set_kitty_image_temp_dir(None);
+        let _ = term.set_kitty_image_from_shared_mem_allowed(false);
         let _ = term.set_glyph_protocol_enabled(false);
         keep_clustering(&mut term);
         // Modes 47, 1047 and 1049 as tmux switches screens, the primary
@@ -2420,6 +2429,7 @@ impl PaneTerm {
         self.graphics_granted = [false; 2];
         self.graphics_new = [false; 2];
         for screen in 0..2 {
+            let _ = self.term.vtmux_drop_kitty_loading(screen);
             if self.graphics_storage(screen == 1) != (0, 0) {
                 let _ = self.term.vtmux_set_kitty_limit(screen, 0);
             }
@@ -2435,15 +2445,49 @@ impl PaneTerm {
             .unwrap_or((0, 0))
     }
 
+    /// D33: the bytes screen `alternate`'s pending load holds, a chunked
+    /// transmission not finished yet. It is never more than the screen's
+    /// limit: a chunk past it fails (`ENOMEM`) and adds nothing (patch
+    /// 0041).
+    #[must_use]
+    pub fn graphics_pending(&self, alternate: bool) -> u64 {
+        self.term
+            .vtmux_kitty_loading(u8::from(alternate))
+            .unwrap_or(0)
+    }
+
+    /// D33: abandon screen `alternate`'s pending load; its program's next
+    /// chunk starts a new transmission.
+    pub fn drop_graphics_pending(&mut self, alternate: bool) {
+        let _ = self.term.vtmux_drop_kitty_loading(u8::from(alternate));
+    }
+
     /// D33: set screen `alternate`'s storage limit; lowering it evicts as
     /// Ghostty does (unused images first, then the oldest).
     pub fn set_graphics_limit(&mut self, alternate: bool, limit: u64) {
         let _ = self.term.vtmux_set_kitty_limit(u8::from(alternate), limit);
+        self.bound_graphics_command();
     }
 
     /// D33: the storage limit a screen granted from now on starts with.
     pub fn set_graphics_share(&mut self, limit: u64) {
         self.graphics_share = limit;
+        self.bound_graphics_command();
+    }
+
+    /// D33: one graphics command carries at most what the largest limit
+    /// a screen has, or the share a screen granted now starts with, could
+    /// store, in base64 with room for its keys; never more than Ghostty's
+    /// own 65 MiB (`apc.Protocol.defaultMaxBytes`). Ghostty drops a longer
+    /// one unanswered, as it drops one past 65 MiB.
+    fn bound_graphics_command(&mut self) {
+        const GHOSTTY_MAX: u64 = 65 * 1024 * 1024;
+        let limit = self
+            .graphics_share
+            .max(self.graphics_storage(false).1)
+            .max(self.graphics_storage(true).1);
+        let max = (limit.div_ceil(3) * 4 + 4096).min(GHOSTTY_MAX);
+        let _ = self.term.set_apc_max_bytes_kitty(usize::try_from(max).ok());
     }
 
     /// A graphics command on the active screen ends with `end`: the
@@ -2461,9 +2505,8 @@ impl PaneTerm {
         self.graphics_reply.set(false);
     }
 
-    /// A granted screen's storage: a limit if it has none, the PNG
-    /// decoder, and the media Ghostty allows (`allWithTempDir`,
-    /// termio/Termio.zig:295: file, temporary file, shared memory).
+    /// A granted screen's storage: a limit if it has none and the PNG
+    /// decoder. Media stay direct only (see [`Self::new`]).
     fn enable_graphics(&mut self, screen: usize) {
         crate::graphics::install_png_decoder();
         self.push_cell_pixels();
@@ -2472,11 +2515,6 @@ impl PaneTerm {
             let share = self.graphics_share;
             self.set_graphics_limit(alternate, share);
         }
-        let tmp = std::env::temp_dir();
-        let t = &mut self.term;
-        let _ = t.set_kitty_image_from_file_allowed(true);
-        let _ = t.set_kitty_image_from_shared_mem_allowed(true);
-        let _ = t.set_kitty_image_temp_dir(tmp.to_str());
     }
 
     pub(crate) fn set_inband_granted(&mut self, granted: bool) {

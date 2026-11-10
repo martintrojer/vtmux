@@ -39,8 +39,10 @@ draws.
 ## Off costs nothing
 
 `scripts/bench.py throughput throughput_attached render`, release builds:
-`base` is the parent of the D33 branch (a83b239), `vtmux` the branch
-(762abd8) with `vtmux-graphics` at its default. `NO_BUILD=1
+`base` is main when measured (0f38490), `vtmux` the D33 branch on it
+up to `graphics: the grant across a live upgrade, images dropped`
+(b024071 since the branch was rebased onto a later main), with
+`vtmux-graphics` at its default. `NO_BUILD=1
 THROUGHPUT_MB=50`, under `flock /tmp/vtmux-stress.lock`, load 16-20 (the
 host is shared), so a few percent is noise. Server CPU, median:
 

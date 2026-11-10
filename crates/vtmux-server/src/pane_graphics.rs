@@ -9,12 +9,15 @@
 //! and its picture stays, until Ghostty frees the last of them.
 //!
 //! `vtmux-graphics-limit` caps the images of every pane and screen
-//! together. A granted screen's limit in Ghostty is what the others leave
-//! ([`Model::balance_graphics`]); while a granted pane's output is parsed
-//! its active screen may take the whole cap, and the excess is then
-//! evicted across the server, the screen that loaded least recently first,
-//! each by lowering its limit (Ghostty evicts unused images first, then the
-//! oldest: `evictImage`, `graphics_storage.zig:1811`).
+//! together, with their pending (chunked, unfinished) loads. A granted
+//! screen's limit in Ghostty is what the others leave
+//! ([`Model::balance_graphics`]), and a pending load never holds more
+//! than its screen's limit (patch 0041); while a granted pane's output is
+//! parsed its active screen may take the whole cap, and the excess is then
+//! dropped across the server: other screens' pending loads, then images,
+//! the screen that grew least recently first, each by lowering its limit
+//! (Ghostty evicts unused images first, then the oldest: `evictImage`,
+//! `graphics_storage.zig:1811`).
 
 use std::time::Instant;
 
@@ -102,9 +105,9 @@ impl Model {
     }
 
     /// Before pane `p`'s output is parsed: its active screen, if granted,
-    /// may load up to the whole cap (what it takes beyond its share is
-    /// evicted across the server after, [`Self::balance_graphics`]), and a
-    /// screen granted by this output starts with what the others leave.
+    /// may load up to the whole cap, and so may a screen this output
+    /// grants (what it takes beyond its share is evicted across the server
+    /// after, [`Self::balance_graphics`]).
     pub fn prepare_graphics(&mut self, p: PaneId) {
         let on = self.graphics_on();
         if !on && !self.graphics_used {
@@ -115,18 +118,12 @@ impl Model {
             return;
         }
         let cap = self.graphics_cap();
-        let used = if self.graphics_used {
-            self.graphics_bytes()
-        } else {
-            0
-        };
         let Some(pane) = self.panes.get_mut(&p) else {
             return;
         };
         pane.term.set_graphics(on);
         pane.end_dead_graphics_grants();
-        pane.term
-            .set_graphics_share(cap.saturating_sub(used).max(1));
+        pane.term.set_graphics_share(cap.max(1));
         if pane.graphics.held {
             let alternate = pane.term.alternate_on();
             if pane.term.graphics_grants()[usize::from(alternate)] {
@@ -147,83 +144,93 @@ impl Model {
         }
     }
 
-    /// Every pane's image bytes together.
-    fn graphics_bytes(&self) -> u64 {
-        self.panes
-            .values()
-            .filter(|p| p.graphics.held)
-            .flat_map(|p| {
-                [
-                    p.term.graphics_storage(false).0,
-                    p.term.graphics_storage(true).0,
-                ]
-            })
-            .sum()
-    }
-
-    /// Hold the server to `vtmux-graphics-limit`: evict what is over it,
-    /// the screen that loaded least recently first (`loaded` is the pane
-    /// whose output was just parsed, which goes last), then give each
-    /// granted screen what the others leave. A pane whose screens are
-    /// neither granted nor hold an image is let go. Nothing to do while no
-    /// screen was ever granted.
+    /// Hold the server to `vtmux-graphics-limit`, images and pending
+    /// (chunked, unfinished) loads together. Over it, in order: the pending
+    /// loads of screens other than the one just read (`loaded`), the one
+    /// that grew least recently first, as they show nothing; then images,
+    /// the screen that grew least recently first and the one just read
+    /// last, each by lowering its limit (Ghostty's order within it); then
+    /// the pending load of the screen just read. Each granted screen then
+    /// gets what the others leave. A pane whose screens are neither
+    /// granted nor hold anything is let go. Nothing to do while no screen
+    /// was ever granted.
     pub fn balance_graphics(&mut self, loaded: Option<PaneId>, now: Instant) {
         if !self.graphics_used {
             return;
         }
         let cap = self.graphics_cap();
-        // (pane, alternate, bytes, granted), with the time each last grew.
-        let mut screens: Vec<(PaneId, bool, u64, bool, Option<Instant>)> = Vec::new();
+        let mut screens: Vec<Screen> = Vec::new();
         for (&id, pane) in &mut self.panes {
             if !pane.graphics.held {
                 continue;
             }
             let grants = pane.term.graphics_grants();
             for alternate in [false, true] {
-                let (bytes, _) = pane.term.graphics_storage(alternate);
+                let (stored, pending) = screen_bytes(pane, alternate);
                 let i = usize::from(alternate);
-                if bytes > pane.graphics.bytes[i] {
+                if stored + pending > pane.graphics.bytes[i] {
                     pane.graphics.loaded[i] = Some(now);
                 }
-                pane.graphics.bytes[i] = bytes;
-                screens.push((id, alternate, bytes, grants[i], pane.graphics.loaded[i]));
+                pane.graphics.bytes[i] = stored + pending;
+                screens.push(Screen {
+                    pane: id,
+                    alternate,
+                    stored,
+                    pending,
+                    granted: grants[i],
+                    loaded: pane.graphics.loaded[i],
+                    just_read: Some(id) == loaded,
+                });
             }
         }
-        let mut total: u64 = screens.iter().map(|s| s.2).sum();
+        let mut total: u64 = screens.iter().map(|s| s.stored + s.pending).sum();
         if total > cap {
-            // Least recently loaded first; the pane just read last.
-            screens.sort_by_key(|s| (Some(s.0) == loaded, s.4));
-            for s in &mut screens {
-                if total <= cap {
-                    break;
+            // Least recently grown first; the pane just read last.
+            screens.sort_by_key(|s| (s.just_read, s.loaded));
+            for pass in [Evict::StalePending, Evict::Images, Evict::Pending] {
+                for s in &mut screens {
+                    if total <= cap {
+                        break;
+                    }
+                    let Some(pane) = self.panes.get_mut(&s.pane) else {
+                        continue;
+                    };
+                    let drop_pending = match pass {
+                        Evict::StalePending => !s.just_read,
+                        Evict::Images => false,
+                        Evict::Pending => true,
+                    };
+                    if drop_pending && s.pending > 0 {
+                        pane.term.drop_graphics_pending(s.alternate);
+                        total -= s.pending;
+                        s.pending = 0;
+                    } else if pass == Evict::Images && s.stored > 0 {
+                        let keep = s.stored.saturating_sub(total - cap);
+                        pane.term.set_graphics_limit(s.alternate, keep);
+                        let (stored, _) = pane.term.graphics_storage(s.alternate);
+                        total = total - s.stored + stored;
+                        s.stored = stored;
+                    } else {
+                        continue;
+                    }
+                    pane.graphics.bytes[usize::from(s.alternate)] = s.stored + s.pending;
                 }
-                if s.2 == 0 {
-                    continue;
-                }
-                let Some(pane) = self.panes.get_mut(&s.0) else {
-                    continue;
-                };
-                let keep = s.2.saturating_sub(total - cap);
-                pane.term.set_graphics_limit(s.1, keep);
-                let (bytes, _) = pane.term.graphics_storage(s.1);
-                total = total - s.2 + bytes;
-                s.2 = bytes;
-                pane.graphics.bytes[usize::from(s.1)] = bytes;
             }
         }
-        for &(id, alternate, bytes, granted, _) in &screens {
-            let Some(pane) = self.panes.get_mut(&id) else {
+        for s in &screens {
+            let Some(pane) = self.panes.get_mut(&s.pane) else {
                 continue;
             };
-            let limit = if granted {
+            let own = s.stored + s.pending;
+            let limit = if s.granted {
                 // What the others leave, never 0: Ghostty takes 0 as no
                 // graphics and would stop answering the program.
-                cap.saturating_sub(total - bytes).max(bytes).max(1)
+                cap.saturating_sub(total - own).max(s.stored).max(1)
             } else {
-                bytes
+                s.stored
             };
-            if pane.term.graphics_storage(alternate).1 != limit {
-                pane.term.set_graphics_limit(alternate, limit);
+            if pane.term.graphics_storage(s.alternate).1 != limit {
+                pane.term.set_graphics_limit(s.alternate, limit);
             }
         }
         for pane in self.panes.values_mut().filter(|p| p.graphics.held) {
@@ -233,6 +240,38 @@ impl Model {
         }
         self.graphics_used = self.panes.values().any(|p| p.graphics.held);
     }
+}
+
+/// A screen's image bytes and its pending load's.
+fn screen_bytes(pane: &Pane, alternate: bool) -> (u64, u64) {
+    (
+        pane.term.graphics_storage(alternate).0,
+        pane.term.graphics_pending(alternate),
+    )
+}
+
+/// A pane screen as [`Model::balance_graphics`] counts it.
+struct Screen {
+    pane: PaneId,
+    alternate: bool,
+    stored: u64,
+    pending: u64,
+    granted: bool,
+    /// When it last grew.
+    loaded: Option<Instant>,
+    /// Its pane's output was just parsed.
+    just_read: bool,
+}
+
+/// [`Model::balance_graphics`]'s passes over the limit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Evict {
+    /// The pending loads of screens not just read.
+    StalePending,
+    /// Images.
+    Images,
+    /// The pending load of the screen just read.
+    Pending,
 }
 
 #[cfg(test)]
@@ -314,6 +353,102 @@ mod tests {
         ok(&mut a, &dir, &["set", "-s", "vtmux-graphics-limit", "0"]);
         a.model.balance_graphics(None, std::time::Instant::now());
         assert_eq!(bytes(&a, p1), 0, "lowered: evicted at once");
+        drop(a);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A chunked load of `w` x `h` RGB as `id`, `chunks` escapes of 3072
+    /// bytes each, the last with `m=1` (unfinished) unless `last`.
+    fn chunked(id: u32, w: u32, h: u32, chunks: usize, last: bool) -> Vec<u8> {
+        let data = "AAAA".repeat(1024);
+        let mut out = format!("\x1b_Ga=t,f=24,s={w},v={h},i={id},q=2,m=1;{data}\x1b\\");
+        for n in 1..chunks {
+            let m = u8::from(n + 1 < chunks || !last);
+            let _ = write!(out, "\x1b_Gm={m};{data}\x1b\\");
+        }
+        out.into_bytes()
+    }
+
+    /// Every pane's image and pending bytes together.
+    fn held(a: &crate::server::Server) -> u64 {
+        a.model
+            .panes
+            .values()
+            .flat_map(|p| {
+                [false, true]
+                    .map(|alt| p.term.graphics_storage(alt).0 + p.term.graphics_pending(alt))
+            })
+            .sum()
+    }
+
+    /// D33: a chunked load never finished holds no more than
+    /// `vtmux-graphics-limit`, read after read: one of 6 MB under a 1 MB
+    /// limit stays under it, and the server with it.
+    #[test]
+    fn a_chunked_load_past_the_limit_is_bounded() {
+        let dir = temp_dir("graphicspending");
+        let mut a = server(&dir);
+        ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics-limit", "1"]);
+        let p = PaneId(0);
+        // 2000 chunks of 3072 bytes: 6 MB, sent 100 chunks a read.
+        let load = chunked(1, 1000, 2048, 2000, false);
+        for read in load.chunks(load.len() / 20) {
+            a.pane_input(p, read, false);
+            assert!(held(&a) <= 1_000_000, "{}", held(&a));
+        }
+        // Its last chunk ends it, and an image that fits loads.
+        a.pane_input(p, b"\x1b_Gm=0;AAAA\x1b\\", false);
+        assert_eq!(held(&a), 0);
+        a.pane_input(p, &image(2, 400, 300), false);
+        assert_eq!(a.model.panes[&p].term.graphics_storage(false).0, 360_000);
+        drop(a);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// D33: pending loads count against the limit with the images. Over
+    /// it, the pending load of a screen not just read goes first, the
+    /// oldest first, before any image; the pane loading keeps its load.
+    #[test]
+    fn pending_loads_count_and_the_oldest_goes_first() {
+        let dir = temp_dir("graphicsoldest");
+        let mut a = server(&dir);
+        ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["split-window", "-t", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["split-window", "-t", "s", "cat", "-"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics", "on"]);
+        ok(&mut a, &dir, &["set", "-s", "vtmux-graphics-limit", "1"]);
+        let (p0, p1, p2) = (PaneId(0), PaneId(1), PaneId(2));
+        let pending = |a: &crate::server::Server, p| a.model.panes[&p].term.graphics_pending(false);
+        let stored =
+            |a: &crate::server::Server, p| a.model.panes[&p].term.graphics_storage(false).0;
+        // %0 starts a load of 100 chunks (307,200 bytes), %1 one of 2,
+        // and stop; %2 holds an image of 360,000.
+        a.pane_input(p0, &chunked(1, 1000, 1000, 100, false), false);
+        a.pane_input(p1, &chunked(2, 1000, 1000, 2, false), false);
+        a.pane_input(p2, &image(3, 400, 300), false);
+        let (was0, was1) = (pending(&a, p0), pending(&a, p1));
+        assert!(was0 >= 307_200 && was1 >= 6144, "{was0} {was1}");
+        assert_eq!(stored(&a, p2), 360_000);
+        assert_eq!(held(&a), was0 + was1 + 360_000, "under the limit, all kept");
+        // %2 starts another, a chunk a read: once over the limit, %0's
+        // pending load (the oldest) goes, and that is enough: %1's stays,
+        // and so do the image and %2's load.
+        let load = chunked(4, 1000, 1000, 300, false);
+        let start = load.iter().position(|&b| b == b';').unwrap();
+        a.pane_input(p2, &load[..start], false);
+        for chunk in load[start..].split_inclusive(|&b| b == b'\\') {
+            a.pane_input(p2, chunk, false);
+            assert!(held(&a) <= 1_000_000, "{}", held(&a));
+            if pending(&a, p0) == 0 {
+                break;
+            }
+        }
+        assert_eq!(pending(&a, p0), 0);
+        assert_eq!(pending(&a, p1), was1);
+        assert_eq!(stored(&a, p2), 360_000);
+        assert!(pending(&a, p2) > 0);
         drop(a);
         let _ = std::fs::remove_dir_all(dir);
     }

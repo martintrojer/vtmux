@@ -1,0 +1,180 @@
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+--- a/include/ghostty/vt/vtmux_state.h
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -392,6 +392,16 @@ GHOSTTY_API GhosttyResult ghostty_vtmux_set_kitty_limit(GhosttyTerminal terminal
+                                                         uint8_t screen,
+                                                         uint64_t limit);
+ 
++/** The bytes screen `screen`'s pending (chunked, unfinished) kitty load
++ * holds, 0 for none (vtmux patch 0041). */
++GHOSTTY_API GhosttyResult ghostty_vtmux_kitty_loading(GhosttyTerminal terminal,
++                                                      uint8_t screen,
++                                                      uint64_t* bytes);
++
++/** Abandon screen `screen`'s pending kitty load (vtmux patch 0041). */
++GHOSTTY_API GhosttyResult ghostty_vtmux_drop_kitty_loading(GhosttyTerminal terminal,
++                                                           uint8_t screen);
++
+ /** The current placement's top-left cell, its row relative to the active
+  * area's top (negative: in history), visible or not (vtmux patch 0040).
+  * GHOSTTY_NO_VALUE for a virtual placement. */
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -399,6 +399,8 @@ comptime {
+         @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
+         @export(&c.vtmux_kitty_storage, .{ .name = "ghostty_vtmux_kitty_storage" });
+         @export(&c.vtmux_set_kitty_limit, .{ .name = "ghostty_vtmux_set_kitty_limit" });
++        @export(&c.vtmux_kitty_loading, .{ .name = "ghostty_vtmux_kitty_loading" });
++        @export(&c.vtmux_drop_kitty_loading, .{ .name = "ghostty_vtmux_drop_kitty_loading" });
+         @export(&c.vtmux_kitty_placement_active_pos, .{ .name = "ghostty_vtmux_kitty_placement_active_pos" });
+         if (features.snapshot) {
+             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -260,6 +260,8 @@ pub const vtmux_primary_size = vtmux_state.primary_size;
+ pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
+ pub const vtmux_kitty_storage = vtmux_state.kitty_storage;
+ pub const vtmux_set_kitty_limit = vtmux_state.set_kitty_limit;
++pub const vtmux_kitty_loading = vtmux_state.kitty_loading;
++pub const vtmux_drop_kitty_loading = vtmux_state.drop_kitty_loading;
+ pub const vtmux_kitty_placement_active_pos = kitty_graphics.vtmux_placement_active_pos;
+ pub const snapshot_decoder_set = snapshot.decoder_set;
+ pub const snapshot_decoder_get = snapshot.decoder_get;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -1631,6 +1631,45 @@ pub fn set_kitty_limit(
+     return .success;
+ }
+ 
++/// vtmux patch 0041: the bytes screen `key`'s (0 primary, 1 alternate)
++/// pending kitty load holds, a chunked transmission not finished yet
++/// (`ImageStorage.loading`): its buffer's capacity, what it costs. 0 for
++/// none or a screen not initialized.
++pub fn kitty_loading(
++    terminal_: terminal_c.Terminal,
++    key: u8,
++    bytes: ?*u64,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const b = bytes orelse return .invalid_value;
++    if (key > 1) return .invalid_value;
++    b.* = 0;
++    if (comptime !build_options.kitty_graphics) return .success;
++    const screen = wrapper.terminal.screens.get(if (key == 0) .primary else .alternate) orelse
++        return .success;
++    if (screen.kitty_images.loading) |loading| b.* = loading.data.capacity;
++    return .success;
++}
++
++/// vtmux patch 0041: abandon screen `key`'s pending kitty load, as a
++/// delete command does (`graphics_exec.zig` `delete`). Its next chunk
++/// starts a new transmission.
++pub fn drop_kitty_loading(
++    terminal_: terminal_c.Terminal,
++    key: u8,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    if (key > 1) return .invalid_value;
++    if (comptime !build_options.kitty_graphics) return .success;
++    const screen = wrapper.terminal.screens.get(if (key == 0) .primary else .alternate) orelse
++        return .success;
++    if (screen.kitty_images.loading) |loading| {
++        loading.destroy(screen.alloc);
++        screen.kitty_images.loading = null;
++    }
++    return .success;
++}
++
+ test "vtmux state: rows round trip into a fresh terminal" {
+     const testing = std.testing;
+     var a: terminal_c.Terminal = null;
+diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
+--- a/src/terminal/kitty/graphics_exec.zig
++++ b/src/terminal/kitty/graphics_exec.zig
+@@ -476,6 +476,16 @@ fn transmitAnimationFrame(
+         // Not the first frame, so continue loading similar to transmit
+         // but this is for a subsequent frame.
+         var result = loading.response;
++        const reserved = vtmuxReserve(
++            storage,
++            alloc,
++            cmd.data.len,
++            cmd.transmission().?.more_chunks,
++        ) catch |err| {
++            encodeError(&result, err);
++            return result;
++        };
++        if (reserved == .over) return .{};
+         loading.addData(alloc, cmd.data) catch |err| {
+             encodeError(&result, err);
+             return result;
+@@ -1005,6 +1015,43 @@ fn delete(
+     return .{};
+ }
+ 
++/// vtmux patch 0041: a pending (chunked) load holds no more than its
++/// storage's limit, which no image it could complete to may exceed
++/// (`addImage`). The chunk past it frees what the load holds, the chunks
++/// after it are dropped unanswered (`.over`), and the last one ends the
++/// load with `ENOMEM`, as `addImage` answers an image over the limit: one
++/// answer per transmission, at its end. Its buffer grows as `addData`'s
++/// would, capped at the limit, so what it costs is bounded too.
++const VtmuxReserve = enum { fits, over };
++
++fn vtmuxReserve(
++    storage: *ImageStorage,
++    alloc: Allocator,
++    len: usize,
++    more: bool,
++) !VtmuxReserve {
++    const loading = storage.loading.?;
++    if (!loading.vtmux_over) {
++        const need = loading.data.items.len +| len;
++        if (need <= storage.total_limit) {
++            if (need > loading.data.capacity) {
++                const grown = @max(need, loading.data.capacity *| 2);
++                try loading.data.ensureTotalCapacityPrecise(
++                    alloc,
++                    @min(grown, storage.total_limit),
++                );
++            }
++            return .fits;
++        }
++        loading.vtmux_over = true;
++        loading.data.clearAndFree(alloc);
++    }
++    if (more) return .over;
++    loading.destroy(alloc);
++    storage.loading = null;
++    return error.OutOfMemory;
++}
++
+ fn loadAndAddImage(
+     io: std.Io,
+     alloc: Allocator,
+@@ -1022,6 +1069,8 @@ fn loadAndAddImage(
+     var loading: LoadingImage = if (storage.loading) |loading| loading: {
+         // Note: we do NOT want to call "cmd.toOwnedData" here because
+         // we're _copying_ the data. We want the command data to be freed.
++        if (try vtmuxReserve(storage, alloc, cmd.data.len, t.more_chunks) == .over)
++            return .{ .image = loading.image, .more = true };
+         try loading.addData(alloc, cmd.data);
+ 
+         // If we have more then we're done
+diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+--- a/src/terminal/kitty/graphics_image.zig
++++ b/src/terminal/kitty/graphics_image.zig
+@@ -44,6 +44,10 @@ pub const LoadingImage = struct {
+     /// being stored as an image.
+     frame: ?FrameContext = null,
+ 
++    /// vtmux patch 0041: the load went past its storage's limit; its data
++    /// is freed and its chunks are dropped until the last, which fails.
++    vtmux_over: bool = false,
++
+     /// Quiet is the quiet settings for the initial load command. This is
+     /// used if q isn't set on subsequent chunks.
+     quiet: command.Command.Quiet,

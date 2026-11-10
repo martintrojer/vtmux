@@ -80,7 +80,7 @@ set -s vtmux-inband-resize on
 %endif
 ```
 
-Kitty graphics: a program that sends kitty graphics as it would to Ghostty gets its images shown, with no `allow-passthrough`. vtmux draws them as cells, so they clip at pane edges, hide under popups, follow zoom and window switches and scroll into copy mode, which passthrough gets wrong. Apps that spot tmux and wrap their images for passthrough (yazi 26.9 does) keep doing that. All panes' images share 256 MB (`vtmux-graphics-limit`), and a live upgrade drops them until the app redraws.
+Kitty graphics: a program that sends kitty graphics as it would to Ghostty gets its images shown, with no `allow-passthrough`. vtmux draws them as cells, so they clip at pane edges, hide under popups, follow zoom and window switches and scroll into copy mode, which passthrough gets wrong. Apps that spot tmux and wrap their images for passthrough (yazi 26.9 does) keep doing that. Images come only inside the escape: vtmux never opens a file or shared memory a program names, so nothing at the far end of an ssh can make it read your files. All panes' images, half-sent ones included, share 256 MB (`vtmux-graphics-limit`), and a live upgrade drops them until the app redraws.
 
 ```tmux
 %if "#{vtmux_version}"
