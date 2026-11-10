@@ -1304,6 +1304,46 @@ impl PaneTerm {
         }
     }
 
+    /// Feed [`Self::continuation`]'s bytes, but the C0 controls that ran
+    /// when they arrived: in an escape or a CSI the control runs and the
+    /// state stays (input.c `input_c0_dispatch` in
+    /// `input_state_esc_enter_table`, `input_state_csi_enter_table` and
+    /// the others), so fed again a newline would scroll once more and a
+    /// backspace move the cursor again. They stay in the pending input
+    /// (`capture-pane -P` shows them). In a string they were ignored or
+    /// are its text (a DCS's) and are fed; only an ESC takes a string
+    /// to where a control runs. CAN and SUB end any sequence, so none is
+    /// there. Snapshots of every build so far hold them, so the import
+    /// skips them, not the export.
+    fn feed_continuation(&mut self, bytes: &[u8]) {
+        let mut i = 0;
+        while i < bytes.len() {
+            let ran = matches!(
+                self.scan.state,
+                ScanState::Esc | ScanState::EscIntermediate(_) | ScanState::Csi
+            );
+            let end = if ran {
+                let c0 = |b: &u8| *b < 0x20 && *b != 0x1b;
+                if c0(&bytes[i]) {
+                    self.pending.push(bytes[i]);
+                    i += 1;
+                    continue;
+                }
+                bytes[i..]
+                    .iter()
+                    .position(c0)
+                    .map_or(bytes.len(), |n| i + n)
+            } else {
+                bytes[i..]
+                    .iter()
+                    .position(|&b| b == 0x1b)
+                    .map_or(bytes.len(), |n| i + n + 1)
+            };
+            self.feed(&bytes[i..end]);
+            i = end;
+        }
+    }
+
     /// The bytes that put a fresh parser where this one is.
     fn continuation(&self) -> Vec<u8> {
         let mut out = self.pending.clone();
@@ -1614,7 +1654,7 @@ impl StateImport {
                 .map_err(ghostty_err)?;
         }
         // Back where the parser was, with nothing it says kept.
-        pane.feed(&continuation);
+        pane.feed_continuation(&continuation);
         let _ = pane.take_answers();
         let _ = pane.take_events();
         Ok(pane)

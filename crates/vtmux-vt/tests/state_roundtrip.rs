@@ -238,6 +238,37 @@ fn half_parsed_sequences_carry_on() {
     }
 }
 
+/// A C0 control inside an escape or a CSI ran when it arrived and the
+/// sequence went on (input.c `input_c0_dispatch` in
+/// `input_state_esc_enter_table`, `input_state_csi_enter_table` and the
+/// others): the import does not run it again. A newline there scrolled a
+/// pane without history once, not twice; a backspace or a tab moved the
+/// cursor once.
+#[test]
+fn controls_inside_a_half_parsed_sequence_run_once() {
+    for tail in [
+        &b"\x1b[\n"[..],
+        b"\x1b[\x08",
+        b"\x1b[\t",
+        b"\x1b[3\r\n;",
+        b"\x1b[?\x0b",
+        b"\x1b\n",
+        b"\x1b(\x08",
+        b"\x1b[\n\x1b[\n",
+    ] {
+        for limit in [0, 10] {
+            let mut a = pane(10, 3, limit, b"one\r\ntwo\r\nthree");
+            a.feed(tail);
+            round_trip(
+                &mut a,
+                CompressedPages::Rows,
+                b"1mX",
+                &format!("tail {tail:?}, limit {limit}"),
+            );
+        }
+    }
+}
+
 /// REP repeats only a character printed right before it (tmux's
 /// `INPUT_LAST`, input.c `INPUT_CSI_REP`): whether one was is carried,
 /// also with the REP half-parsed at the export.
