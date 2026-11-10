@@ -142,7 +142,10 @@ impl Mix {
         };
         if !c.text.is_empty() {
             s.fg = self.mix(s.fg, self.default_fg, fg_part);
-            // A default underline colour follows the glyph's.
+            // Reverse video does not swap an underline colour: on screen
+            // it is a stroke over the glyph, so it goes toward the `fg=`
+            // target as the shown glyph does (a reversed cell's `bg`). A
+            // default underline colour follows the glyph's.
             if s.underline_color != Color::Default {
                 s.underline_color = self.mix(s.underline_color, self.default_fg, self.fg);
             }
