@@ -3,7 +3,7 @@
 //!
 //! The whole file is one parse (`cmd_parse_from_file`), so `%if` blocks
 //! span lines, assignments apply while the file is read
-//! (cmd-parse.y:224-270), and a command in the file never runs before a
+//! (cmd-parse.y:224-266), and a command in the file never runs before a
 //! later `%if` is decided. Any parse error rejects the file before a
 //! command runs. Each command's errors carry `file:line: `.
 
@@ -429,7 +429,7 @@ fn parse_text(
     };
     let parsed = cmd::parse_file(text, &mut env, parse, Some(&mut collect));
     if opts.verbose {
-        // cmd_parse_print_commands (cmd-parse.y:612-624): groups built
+        // cmd_parse_print_commands (cmd-parse.y:613-625): groups built
         // before an error are printed too.
         for (line, text) in &printed {
             item.print(&format!("{file}:{line}: {text}"));

@@ -802,7 +802,7 @@ impl ConfigEnv for GlobalEnv<'_> {
         self.env.set(name, value, hidden);
     }
 
-    /// `expanded` (cmd-parse.y:197-217): `cmd_find_from_client` for the
+    /// `expanded` (cmd-parse.y:197-219): `cmd_find_from_client` for the
     /// parsing client, then `format_defaults` over that state.
     /// Expanded with `FORMAT_NOJOBS`: `#()` is empty.
     fn expand(&self, template: &str) -> String {

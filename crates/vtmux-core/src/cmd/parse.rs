@@ -2,16 +2,16 @@
 //!
 //! Two inputs, two behaviours (cmd-parse.y):
 //!
-//! - [`parse_argv`] is `cmd_parse_from_arguments` (1065-1136). The shell has
+//! - [`parse_argv`] is `cmd_parse_from_arguments` (1065-1137). The shell has
 //!   already split the words, so nothing is quoted, escaped or commented: a
 //!   word ending in `;` ends the command, a word ending in `\;` becomes a
 //!   word ending in a literal `;`, `;` elsewhere in a word is literal.
 //! - [`parse_config_with`] is the lexer and grammar for config files and
-//!   command strings (`yylex`, 1262-1480, and the `%%` rules above it):
+//!   command strings (`yylex`, 1263-1400, and the `%%` rules above it):
 //!   quotes, backslash escapes, `$VAR` and `~` expansion, `#` comments, `;`
 //!   separators and newlines.
 //!
-//! Both then run `cmd_parse_build_command` (886-940): expand a
+//! Both then run `cmd_parse_build_command` (823-876): expand a
 //! `command-alias` ([`super::table::command_alias`]), find the command,
 //! parse its arguments. Everything is
 //! parsed before anything runs: a bad command anywhere in the text rejects
@@ -19,7 +19,7 @@
 //! shows up here.
 //!
 //! `NAME=value` and `%hidden NAME=value` are applied while parsing, as the
-//! `assignment` rules do (cmd-parse.y:224-270): [`ConfigEnv::set`] is called
+//! `assignment` rules do (cmd-parse.y:224-266): [`ConfigEnv::set`] is called
 //! the moment the assignment is read, so a later `$NAME` in the same text,
 //! even in the same statement, sees it, and assignments made before a later
 //! error stay applied. [`ParseOpts::parse_only`] (`source-file -n`,
@@ -57,16 +57,16 @@ pub trait ConfigEnv {
     /// `$VAR`: `environ_find(global_environ, name)` (cmd-parse.y:1584).
     /// Hidden variables count; an unset one expands to nothing.
     fn var(&self, name: &str) -> Option<String>;
-    /// `~` and `~user` (`yylex_token_tilde`, cmd-parse.y:1640-1690). `None`
+    /// `~` and `~user` (`yylex_token_tilde`, cmd-parse.y:1594-1635). `None`
     /// is a bare `~`: a non-empty `HOME` in the global environment, else the
     /// home of the current uid (`getpwuid`). `Some(user)` is `getpwnam`.
     /// `None` back is a syntax error.
     fn home(&self, user: Option<&str>) -> Option<String>;
     /// `environ_put(global_environ, "NAME=value", hidden)`, called from the
-    /// assignment rule unless the parse is parse-only (cmd-parse.y:224-270).
+    /// assignment rule unless the parse is parse-only (cmd-parse.y:224-266).
     fn set(&mut self, name: &str, value: &str, hidden: bool);
     /// A `%if` or `%elif` condition, expanded as a format at parse time
-    /// (`expanded`, cmd-parse.y:197-217): the parsing client and its
+    /// (`expanded`, cmd-parse.y:197-219): the parsing client and its
     /// current state (`cmd_find_from_client`), `FORMAT_NOJOBS`, so `#()`
     /// is empty.
     fn expand(&self, template: &str) -> String;
@@ -133,7 +133,7 @@ pub struct ParseError {
 }
 
 /// One group of commands as it is built (`cmd_parse_print_commands`,
-/// cmd-parse.y:612-624): what `source-file -v` prints.
+/// cmd-parse.y:613-625): what `source-file -v` prints.
 pub struct Group<'g> {
     /// `pi->line` when the group was finished: what `-v` prints, and the
     /// `file:line:` of the group's runtime errors.
@@ -183,7 +183,7 @@ pub fn parse_argv_bytes(words: &[Vec<u8>]) -> Result<Vec<CommandCall>, CmdError>
     parse_argv_values(&values)
 }
 
-/// `cmd_parse_from_arguments` (cmd-parse.y:1065-1136): the same for values
+/// `cmd_parse_from_arguments` (cmd-parse.y:1065-1137): the same for values
 /// that may already be `{ }` blocks (what `bind-key` passes on).
 pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdError> {
     let mut commands: Vec<RawCommand> = Vec::new();
@@ -197,7 +197,7 @@ pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdErr
                 if word.ends_with(';') {
                     word.pop();
                     if word.ends_with('\\') {
-                        // `\;` is a literal `;` (cmd-parse.y:1108-1110).
+                        // `\;` is a literal `;` (cmd-parse.y:1100-1103).
                         word.pop();
                         word.push(';');
                     } else {
@@ -272,7 +272,7 @@ fn parse_lines(
     })
 }
 
-/// `cmd_parse_from_string` (cmd-parse.y:1010-1027): text as a command
+/// `cmd_parse_from_string` (cmd-parse.y:967-983): text as a command
 /// string, every command in one group (`{ a \n b }` is `a ; b`).
 pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, CmdError> {
     let opts = ParseOpts {
@@ -321,7 +321,7 @@ impl<'p> Build<'p> {
     }
 }
 
-/// `cmd_parse_build_commands` (cmd-parse.y:937-1005): build each command,
+/// `cmd_parse_build_commands` (cmd-parse.y:879-938): build each command,
 /// giving a new group to each run of commands from one line.
 fn build_commands(
     cmds: &[RawCommand],
@@ -359,7 +359,7 @@ fn build_command(
     b: &mut Build<'_>,
 ) -> Result<Vec<CommandCall>, CmdError> {
     if expand_alias {
-        // cmd_parse_expand_alias (cmd-parse.y:767-822): no first word, or a
+        // cmd_parse_expand_alias (cmd-parse.y:768-820): no first word, or a
         // block as first word, is an empty list.
         let first = match cmd.args.first() {
             Some(RawArg::Str(first)) => first.as_str(),
@@ -381,7 +381,7 @@ fn build_command(
             return build_commands(&expanded, false, b);
         }
     }
-    // cmd_parse_build_command (cmd-parse.y:824-878).
+    // cmd_parse_build_command (cmd-parse.y:823-876).
     let mut values = Vec::with_capacity(cmd.args.len());
     for arg in &cmd.args {
         values.push(match arg {
@@ -425,7 +425,7 @@ fn clone_raw(arg: &RawArg) -> RawArg {
 }
 
 // ---------------------------------------------------------------------
-// Lexer: a port of yylex and its helpers (cmd-parse.y:1180-1790).
+// Lexer: a port of yylex and its helpers (cmd-parse.y:1159-1762).
 
 enum Token {
     /// `\n`, or the newline tmux appends at the end of input.
@@ -446,7 +446,7 @@ enum Token {
     Elif,
     Else,
     Endif,
-    /// `#{...}` straight after a `%` directive (`FORMAT`, cmd-parse.y:1325-1333):
+    /// `#{...}` straight after a `%` directive (`FORMAT`, cmd-parse.y:1323-1334):
     /// an unquoted condition that would otherwise be a comment.
     Format(Vec<u8>),
     End,
@@ -483,7 +483,7 @@ fn is_var(ch: u8, first: bool) -> bool {
 type Ch = Option<u8>;
 
 impl Lexer<'_> {
-    /// `yylex_getc1` (cmd-parse.y:1184-1199). From a buffer, `ps->buf` is
+    /// `yylex_getc1` (cmd-parse.y:1185-1198). From a buffer, `ps->buf` is
     /// a (signed, on the reference's x86-64) `char`, so byte 0xff reads as
     /// -1, `EOF`: it is consumed, and whatever is lexing sees the end of
     /// input there, while reading goes on after it.
@@ -536,7 +536,7 @@ impl Lexer<'_> {
         let condition = std::mem::take(&mut self.condition);
         loop {
             let Some(mut ch) = self.getc() else {
-                // Every input ends with a newline (cmd-parse.y:1292-1300).
+                // Every input ends with a newline (cmd-parse.y:1279-1289).
                 if self.eof {
                     return Ok(Token::End);
                 }
@@ -576,14 +576,14 @@ impl Lexer<'_> {
                     }
                     if next == Some(b'\n') {
                         // Unlike a bare newline, this one moves the line
-                        // at once (cmd-parse.y:1330-1338).
+                        // at once (cmd-parse.y:1335-1340).
                         self.line += 1;
                         return Ok(Token::Eol);
                     }
                 }
                 b'%' => {
                     // All `%` or digits is a word; else a directive
-                    // (cmd-parse.y:1350-1390).
+                    // (cmd-parse.y:1344-1379).
                     let word = self.get_word(b'%');
                     if word.iter().all(|c| *c == b'%' || c.is_ascii_digit()) {
                         return Ok(Token::Word {
@@ -603,7 +603,7 @@ impl Lexer<'_> {
                 }
                 _ => {
                     let token = self.token(ch)?;
-                    // cmd-parse.y:1392-1403: NAME=... with a valid NAME.
+                    // cmd-parse.y:1389-1396: NAME=... with a valid NAME.
                     let equals = token.contains(&b'=') && is_var(token[0], true) && {
                         let name_end = token[1..].iter().position(|c| !is_var(*c, false));
                         name_end.is_some_and(|i| token[1 + i] == b'=')
@@ -685,7 +685,7 @@ impl Lexer<'_> {
                 break;
             }
             // Space and comments after a newline inside quotes are removed;
-            // the newline stays (cmd-parse.y:1676-1699).
+            // the newline stays (cmd-parse.y:1682-1700).
             if c == b'\n' {
                 self.line += 1;
                 buf.push(b'\n');
@@ -757,7 +757,7 @@ impl Lexer<'_> {
         Ok(buf)
     }
 
-    /// `yylex_token_escape` (cmd-parse.y:1490-1600).
+    /// `yylex_token_escape` (cmd-parse.y:1443-1539).
     fn escape(&mut self, buf: &mut Vec<u8>) -> Result<(), CmdError> {
         let Some(ch) = self.getc() else {
             return Err(CmdError::Syntax);
@@ -830,7 +830,7 @@ impl Lexer<'_> {
         }
     }
 
-    /// `yylex_token_variable` (cmd-parse.y:1602-1660).
+    /// `yylex_token_variable` (cmd-parse.y:1542-1591).
     fn variable(&mut self, buf: &mut Vec<u8>) -> Result<(), CmdError> {
         let Some(mut ch) = self.getc() else {
             return Err(CmdError::Syntax);
@@ -872,7 +872,7 @@ impl Lexer<'_> {
         Ok(())
     }
 
-    /// `yylex_token_tilde` (cmd-parse.y:1662-1720). An unknown user is a
+    /// `yylex_token_tilde` (cmd-parse.y:1594-1635). An unknown user is a
     /// bare syntax error.
     fn tilde(&mut self, buf: &mut Vec<u8>) -> Result<(), CmdError> {
         let mut name = Vec::new();
@@ -1003,7 +1003,7 @@ impl Parser<'_, '_> {
         self.scope.is_none_or(|f| f)
     }
 
-    /// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer
+    /// `assignment` / `hidden_assignment` (cmd-parse.y:224-266). The lexer
     /// only returns an `EQUALS` token when it holds a valid name before the
     /// first `=`. Bison reduces the rule without reading a lookahead, so the
     /// assignment is applied before the next token is lexed. It applies
@@ -1455,7 +1455,7 @@ mod tests {
         vec![(name, words(pos))]
     }
 
-    // ---- argv path (cmd_parse_from_arguments, cmd-parse.y:1065-1136) ----
+    // ---- argv path (cmd_parse_from_arguments, cmd-parse.y:1065-1137) ----
     // Reference commands: `env -u TMUX -u TMUX_PANE $T -L x -f /dev/null
     // <argv...>` against a server started with `new -d cat`.
 
@@ -1573,7 +1573,7 @@ mod tests {
 
     /// Everything is parsed before anything runs, so an error in the second
     /// command rejects the whole line (`cmd_parse_build_commands` returns the
-    /// first error and frees the list, cmd-parse.y:960-967). Reference:
+    /// first error and frees the list, cmd-parse.y:917-922). Reference:
     /// `display -p first ';' nosuchcmd` prints `unknown command: nosuchcmd`
     /// and not `first`.
     #[test]
@@ -1760,7 +1760,7 @@ mod tests {
         assert!(a.target('s').is_none());
     }
 
-    // ---- config path (yylex, cmd-parse.y:1262-1780) ----
+    // ---- config path (yylex, cmd-parse.y:1263-1762) ----
     // Reference: `$T -f /dev/null start-server \; source-file -v c.conf`.
 
     #[test]
@@ -1832,7 +1832,7 @@ mod tests {
 
     /// Reference: `display -p "a\n  b"` as a real newline inside quotes keeps
     /// the newline and drops the following indentation
-    /// (cmd-parse.y:1676-1699).
+    /// (cmd-parse.y:1682-1700).
     #[test]
     fn config_newline_in_quotes() {
         assert_eq!(
@@ -1853,7 +1853,7 @@ mod tests {
 
     /// Reference: `display -p "a\\n"` -> `a\n` (two chars); `\8` -> `8`;
     /// `\s` space; `\e` ESC; octal `\101`; `\u00e9`; invalid octal and
-    /// `\ud800` errors (cmd-parse.y:1490-1600).
+    /// `\ud800` errors (cmd-parse.y:1443-1539).
     #[test]
     fn config_escapes() {
         assert_eq!(cfg("display -p a\\ b"), one("display-message", &["a b"]));
@@ -1907,7 +1907,7 @@ mod tests {
         assert_eq!(cfg("display -p a\\000b"), one("display-message", &["a"]));
     }
 
-    /// Backslash-newline joins lines (cmd-parse.y:1220-1245). Reference:
+    /// Backslash-newline joins lines (cmd-parse.y:1213-1241). Reference:
     /// `display -p a\<nl> b` is two words (`a`, `b`) -> too many arguments,
     /// while `\<nl> display -p x` is a normal command.
     #[test]
@@ -1939,7 +1939,7 @@ mod tests {
     }
 
     /// `$VAR`, `${VAR}` and `~` expand outside single quotes
-    /// (cmd-parse.y:1602-1720). Reference: `display -p ~` prints the home
+    /// (cmd-parse.y:1542-1635). Reference: `display -p ~` prints the home
     /// directory; `~nonexistentuser` is a `syntax error`;
     /// `${HO` -> `invalid environment variable`.
     #[test]
@@ -2034,7 +2034,7 @@ mod tests {
             (vec!["display-message"], "A=1".into())
         );
         // A bare assignment after `;` drops the commands before it in the
-        // chain, unbuilt (cmd-parse.y:405-415): reference prints nothing.
+        // chain, unbuilt (cmd-parse.y:417-430): reference prints nothing.
         assert_eq!(a("display -p x ; A=1"), (vec![], "A=1".into()));
         assert_eq!(
             cfg("display -p x ; A=1 ; display -p y"),
@@ -2099,7 +2099,7 @@ mod tests {
         )
     }
 
-    /// Assignments take effect while parsing (cmd-parse.y:224-270,
+    /// Assignments take effect while parsing (cmd-parse.y:224-266,
     /// `environ_put(global_environ)` unless `CMD_PARSE_PARSEONLY`), and
     /// `yylex_token_variable` (1584) reads that environment, so a later
     /// `$NAME` in the same text, even the same statement, sees the value.

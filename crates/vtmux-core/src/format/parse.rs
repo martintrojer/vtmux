@@ -88,7 +88,7 @@ pub(super) fn template(s: &str, depth: usize) -> Format {
     let b = s.as_bytes();
     let mut out = Builder::default();
     let mut i = 0;
-    // Position of the `]` closing the last `#[` (format.c:6838): aliases are
+    // Position of the `]` closing the last `#[` (format.c:6822): aliases are
     // not expanded before it.
     let mut style_end: Option<usize> = None;
 
