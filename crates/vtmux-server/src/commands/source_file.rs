@@ -322,7 +322,7 @@ fn glob(pattern: &str) -> Vec<PathBuf> {
                 let mut names: Vec<String> = entries
                     .filter_map(|e| e.ok()?.file_name().into_string().ok())
                     .filter(|n| !n.starts_with('.') || comp.starts_with('.'))
-                    .filter(|n| crate::target::fnmatch(comp, n))
+                    .filter(|n| vtmux_core::fnmatch::matches(comp, n, false))
                     .collect();
                 names.sort();
                 next.extend(names.into_iter().map(|n| dir.join(n)));

@@ -1,0 +1,159 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "target_window_pattern_classes",
+  "inputs": {
+    "name": "target_window_pattern_classes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "s7x",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "s7x:1",
+          "-n",
+          "w5x",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "s7x:2",
+          "-n",
+          "wax",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "s7x:w[[:digit:]]x",
+          ";",
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "s7x:w[![:digit:]]x",
+          ";",
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "s7x:w[\\5]x",
+          ";",
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "s7x:w[[:alnum:]]x"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: w[[:alnum:]]x\n",
+        "exit": 1
+      }
+    }
+  ]
+}

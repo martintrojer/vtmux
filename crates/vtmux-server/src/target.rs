@@ -6,6 +6,7 @@
 use vtmux_core::cmd::target::{Part, Resolved, TargetParts};
 use vtmux_core::cmd::{FindFlags, TargetKind, TargetSpec, strtonum};
 use vtmux_core::error::EdgeError;
+use vtmux_core::fnmatch::matches as fnmatch;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 
 use crate::model::{Model, Side};
@@ -214,51 +215,6 @@ pub fn current_preferring(model: &Model, origin: Origin, prefer: Prefer<'_>) -> 
     best_session(model, None, prefer).map(|s| Found::from_session(model, s))
 }
 
-/// fnmatch(3) with no flags: `*`, `?`, `[...]` (with `!`/`^` negation and
-/// ranges) and backslash escapes.
-#[must_use]
-pub fn fnmatch(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    glob(&p, &t)
-}
-
-fn glob(p: &[char], t: &[char]) -> bool {
-    match p.first() {
-        None => t.is_empty(),
-        Some('*') => (0..=t.len()).any(|i| glob(&p[1..], &t[i..])),
-        Some('?') => !t.is_empty() && glob(&p[1..], &t[1..]),
-        Some('[') => {
-            let Some(&c) = t.first() else { return false };
-            let mut i = 1;
-            let negate = matches!(p.get(1), Some('!' | '^'));
-            if negate {
-                i += 1;
-            }
-            let mut matched = false;
-            let mut first = true;
-            while i < p.len() && (first || p[i] != ']') {
-                first = false;
-                let lo = p[i];
-                if p.get(i + 1) == Some(&'-') && p.get(i + 2).is_some_and(|c| *c != ']') {
-                    matched |= (lo..=p[i + 2]).contains(&c);
-                    i += 3;
-                } else {
-                    matched |= lo == c;
-                    i += 1;
-                }
-            }
-            if i >= p.len() {
-                // No closing bracket: a literal '['.
-                return c == '[' && glob(&p[1..], &t[1..]);
-            }
-            matched != negate && glob(&p[i + 1..], &t[1..])
-        }
-        Some('\\') if p.len() > 1 => t.first() == Some(&p[1]) && glob(&p[2..], &t[1..]),
-        Some(c) => t.first() == Some(c) && glob(&p[1..], &t[1..]),
-    }
-}
-
 /// `cmd_find_get_session` (cmd-find.c:263-310): an ID, a session name,
 /// an attached client's name or tty (its session), then a prefix or a
 /// pattern.
@@ -299,7 +255,7 @@ fn find_session(model: &Model, part: &Part) -> Option<SessionId> {
         [] => {}
         _ => return None,
     }
-    unique(&|n| fnmatch(name, n))
+    unique(&|n| fnmatch(name, n, false))
 }
 
 /// `cmd_find_get_window_with_session` (cmd-find.c:499-640).
@@ -374,7 +330,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     }
     for pred in [
         &(|n: &str| n.starts_with(window)) as &dyn Fn(&str) -> bool,
-        &|n: &str| fnmatch(window, n),
+        &|n: &str| fnmatch(window, n, false),
     ] {
         match named(pred) {
             Ok(Some(f)) => return Some(f),
@@ -802,22 +758,5 @@ fn find_parts(
             find_pane(model, current, pp, parts.pane_only, prefer).ok_or_else(|| no_pane(pp))
         }
         (None, None) => Ok(current),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fnmatch_basics() {
-        assert!(fnmatch("a*", "abc"));
-        assert!(fnmatch("a?c", "abc"));
-        assert!(fnmatch("[ab]c", "bc"));
-        assert!(fnmatch("[!a]c", "bc"));
-        assert!(fnmatch("[a-c]x", "bx"));
-        assert!(!fnmatch("a*d", "abc"));
-        assert!(fnmatch("\\*", "*"));
-        assert!(fnmatch("[", "["));
     }
 }

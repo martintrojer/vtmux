@@ -1,0 +1,12 @@
+name = "target_window_pattern_classes"
+# Window patterns go through fnmatch(3) (cmd-find.c:501): POSIX classes,
+# escapes inside brackets, negated classes.
+steps = [
+  { run = ["new", "-d", "-s", "s7x", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "s7x:1", "-n", "w5x", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "s7x:2", "-n", "wax", "cat", "-"] },
+  { run = ["select-window", "-t", "s7x:w[[:digit:]]x", ";", "display", "-p", "#{window_index}"] },
+  { run = ["select-window", "-t", "s7x:w[![:digit:]]x", ";", "display", "-p", "#{window_index}"] },
+  { run = ["select-window", "-t", "s7x:w[\\5]x", ";", "display", "-p", "#{window_index}"] },
+  { run = ["select-window", "-t", "s7x:w[[:alnum:]]x"] },
+]

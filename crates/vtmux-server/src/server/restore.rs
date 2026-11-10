@@ -243,7 +243,10 @@ fn drop_user_options(entries: &mut Vec<snap::OptionEntry>, globs: &[String]) {
         return;
     }
     entries.retain(|e| {
-        !(e.name.starts_with('@') && globs.iter().any(|g| crate::target::fnmatch(g, &e.name)))
+        !(e.name.starts_with('@')
+            && globs
+                .iter()
+                .any(|g| vtmux_core::fnmatch::matches(g, &e.name, false)))
     });
 }
 
