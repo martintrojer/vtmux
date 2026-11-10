@@ -1,5 +1,78 @@
 //! Unicode terminal-width helpers.
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    #[test]
+    fn width_overrides_can_change_while_readers_and_terminals_run() {
+        // Isolate the process-wide options and contain the pre-fix native crash.
+        const CHILD: &str = "VTMUX_WIDTH_RACE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "unicode::tests::width_overrides_can_change_while_readers_and_terminals_run",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success(), "width race subprocess failed: {status}");
+            return;
+        }
+        let start = Arc::new(Barrier::new(4));
+        let done = Arc::new(AtomicBool::new(false));
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let start = start.clone();
+                let done = done.clone();
+                scope.spawn(move || {
+                    let mut terminal = crate::Terminal::new(crate::TerminalOptions {
+                        cols: 10,
+                        rows: 2,
+                        max_scrollback: 0,
+                    })
+                    .unwrap();
+                    terminal.vt_write(b"\x1b[?2027h");
+                    start.wait();
+                    while !done.load(Ordering::Relaxed) {
+                        assert!((1..=2).contains(&codepoint_width('界')));
+                        let (consumed, width) = grapheme_width(&['界']);
+                        assert_eq!(consumed, 1);
+                        assert!((1..=2).contains(&width));
+                        terminal.vt_write("\x1b[Hé\u{200d}é✌\u{fe0f}界".as_bytes());
+                    }
+                });
+            }
+            let writers: Vec<_> = [1, 2]
+                .into_iter()
+                .map(|width| {
+                    let start = start.clone();
+                    scope.spawn(move || {
+                        start.wait();
+                        for _ in 0..20_000 {
+                            set_width_overrides(&[(0xe9, 0xe9, width), (0x100, 0x10ffff, width)])
+                                .unwrap();
+                            set_tmux_clusters(true, width == 2);
+                            set_width_overrides(&[]).unwrap();
+                            set_tmux_clusters(false, true);
+                        }
+                    })
+                })
+                .collect();
+            for writer in writers {
+                writer.join().unwrap();
+            }
+            done.store(true, Ordering::Relaxed);
+        });
+    }
+}
+
 use crate::ffi;
 
 /// Returns the terminal display width of a Unicode codepoint in terminal grid cells.
@@ -14,7 +87,8 @@ use crate::ffi;
 /// widths, use [`grapheme_width`]. Summing per-character widths is only correct
 /// when mode 2027, grapheme clustering, is disabled.
 ///
-/// This function is pure, allocates nothing, and is thread-safe.
+/// This function allocates nothing and is thread-safe. Concurrent option
+/// updates may make a query observe either configuration.
 #[must_use]
 pub fn codepoint_width(codepoint: char) -> u8 {
     unsafe { ffi::ghostty_unicode_codepoint_width(u32::from(codepoint)) }
@@ -23,7 +97,8 @@ pub fn codepoint_width(codepoint: char) -> u8 {
 /// vtmux: replace the process-wide width overrides that printing (and
 /// [`codepoint_width`]) use ahead of the table: `(first, last, width)`,
 /// inclusive, sorted by `first` and not overlapping, widths 0 to 2. An empty
-/// slice clears them. Cells already printed keep their width.
+/// slice clears them. Cells already printed keep their width. Safe while
+/// other threads print or query widths.
 ///
 /// # Errors
 /// Ranges out of order, overlapping or with a width above 2.
@@ -47,7 +122,7 @@ pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) -> crate::error::Result<()
 /// U+200D, two lone regional indicators and an emoji skin-tone modifier
 /// with one of tmux's bases join into two columns, Hangul jamo join as
 /// tmux's do and U+3164 is dropped. Process-wide; cells already printed
-/// keep their text.
+/// keep their text. Safe while other threads print.
 pub fn set_tmux_clusters(enabled: bool, vs16_wide: bool) {
     // SAFETY: two flags read by printing; no pointers.
     unsafe { ffi::ghostty_unicode_set_tmux_clusters(enabled, vs16_wide) }

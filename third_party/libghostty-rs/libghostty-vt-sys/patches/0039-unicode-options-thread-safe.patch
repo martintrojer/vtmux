@@ -1,0 +1,228 @@
+diff --git a/src/unicode/main.zig b/src/unicode/main.zig
+--- a/src/unicode/main.zig
++++ b/src/unicode/main.zig
+@@ -1,3 +1,5 @@
++const std = @import("std");
++
+ pub const lut = @import("lut.zig");
+ 
+ const grapheme = @import("grapheme.zig");
+@@ -38,19 +40,27 @@
+ 
+ /// vtmux: the width overrides, sorted and not overlapping, process-wide
+ /// like tmux's width cache. Set with `setWidthOverrides`.
+-pub var width_overrides: []const WidthRange = &.{};
++var width_overrides: []const WidthRange = &.{};
++var width_mutex: std.atomic.Mutex = .unlocked;
++var has_width_overrides: bool = false;
+ 
+ /// vtmux: the highest codepoint the printer may take as narrow without
+ /// looking: 0xFF, or 0x7F while an override reaches below 0x100.
+-pub var narrow_max: u21 = 0xFF;
++var narrow_max: u32 = 0xFF;
++
++pub inline fn narrowMax() u21 {
++    return @intCast(@atomicLoad(u32, &narrow_max, .monotonic));
++}
+ 
+ /// vtmux: the overridden width of `cp`, if any.
+ pub inline fn widthOverride(cp: u21) ?u2 {
+-    if (width_overrides.len == 0) return null;
++    if (!@atomicLoad(bool, &has_width_overrides, .acquire)) return null;
+     return widthOverrideSlow(cp);
+ }
+ 
+ fn widthOverrideSlow(cp: u21) ?u2 {
++    while (!width_mutex.tryLock()) std.atomic.spinLoopHint();
++    defer width_mutex.unlock();
+     var lo: usize = 0;
+     var hi: usize = width_overrides.len;
+     while (lo < hi) {
+@@ -68,13 +78,16 @@
+ }
+ 
+ /// vtmux: replace the width overrides with a copy of `ranges` (sorted by
+-/// `first`, not overlapping). Not safe while another thread prints.
++/// `first`, not overlapping). Readers and writers share the slice lock.
+ pub fn setWidthOverrides(ranges: []const WidthRange) !void {
+-    const alloc = @import("std").heap.page_allocator;
++    const alloc = std.heap.page_allocator;
+     const copy = try alloc.dupe(WidthRange, ranges);
++    while (!width_mutex.tryLock()) std.atomic.spinLoopHint();
++    defer width_mutex.unlock();
+     const old = width_overrides;
+     width_overrides = copy;
+-    narrow_max = if (copy.len != 0 and copy[0].first <= 0xFF) 0x7F else 0xFF;
++    @atomicStore(u32, &narrow_max, if (copy.len != 0 and copy[0].first <= 0xFF) 0x7F else 0xFF, .monotonic);
++    @atomicStore(bool, &has_width_overrides, copy.len != 0, .release);
+     if (old.len != 0) alloc.free(old);
+ }
+ 
+@@ -89,17 +102,24 @@
+ /// `screen_write_combine` does (screen-write.c), not by UAX #29: see
+ /// `Terminal.tmuxCombine`. Process-wide like the width overrides; set
+ /// with `setTmuxClusters`.
+-pub var tmux_clusters: bool = false;
++var tmux_clusters: bool = false;
++
++pub inline fn tmuxClusters() bool {
++    return @atomicLoad(bool, &tmux_clusters, .monotonic);
++}
+ 
+ /// vtmux: tmux's `variation-selector-always-wide`: under `tmux_clusters`,
+ /// U+FE0F joined to a one-column cell makes it two columns.
+-pub var tmux_vs16_wide: bool = true;
+-
+-/// vtmux: turn tmux's clustering on or off. Not safe while another
+-/// thread prints.
++var tmux_vs16_wide: bool = true;
++
++pub inline fn tmuxVs16Wide() bool {
++    return @atomicLoad(bool, &tmux_vs16_wide, .monotonic);
++}
++
++/// vtmux: turn tmux's clustering on or off, including during printing.
+ pub fn setTmuxClusters(enabled: bool, vs16_wide: bool) void {
+-    tmux_clusters = enabled;
+-    tmux_vs16_wide = vs16_wide;
++    @atomicStore(bool, &tmux_clusters, enabled, .monotonic);
++    @atomicStore(bool, &tmux_vs16_wide, vs16_wide, .monotonic);
+ }
+ 
+ /// vtmux: tmux's Hangul jamo classes (utf8-combined.c
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -727,11 +727,11 @@
+     const cp0 = cps[0];
+     // vtmux: an override below 0x100 makes 0x80-0xFF go through print(),
+     // and so does a C1 control (zero width there).
+-    if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
++    if (cp0 > unicode.narrowMax() and cp0 <= 0xFF) return 0;
+     if (cp0 >= 0x80 and cp0 <= 0x9F) return 0;
+     // vtmux: with tmux's clustering, 0xA0-0xFF joins a cell that ends
+     // with a ZWJ, and U+3164 is dropped: print() decides those.
+-    if (unicode.tmux_clusters and grapheme_cluster) tmux: {
++    if (unicode.tmuxClusters() and grapheme_cluster) tmux: {
+         if (cp0 == 0x3164) return 0;
+         if (cp0 < 0xA0 or cp0 > 0xFF) break :tmux;
+         if (screen.cursor.pending_wrap) return 0;
+@@ -794,7 +794,7 @@
+         if (prev.hasGrapheme()) return 0;
+ 
+         // vtmux: with tmux's clustering, its rules decide.
+-        if (unicode.tmux_clusters) {
++        if (unicode.tmuxClusters()) {
+             if (unicode.tmuxMayJoin(prev.content.codepoint.data, @intCast(cp0))) return 0;
+             break :gate;
+         }
+@@ -1001,7 +1001,7 @@
+             if (simd.lanes(u32)) |lanes| {
+                 const V = @Vector(lanes, u32);
+                 const lo: V = @splat(0x10);
+-                const hi: V = @splat(@as(u32, @min(unicode.narrow_max, 0x7F)));
++                const hi: V = @splat(@as(u32, @min(unicode.narrowMax(), 0x7F)));
+                 while (idx + lanes <= cps.len) {
+                     const v: V = cps[idx..][0..lanes].*;
+                     // vtmux: stop at 0x80; the scalar loop below takes
+@@ -1020,7 +1020,7 @@
+         while (idx < cps.len) : (idx += 1) {
+             const cp = cps[idx];
+             if (comptime width == .narrow) {
+-                if (cp >= 0x10 and cp <= unicode.narrow_max and !(cp >= 0x80 and cp <= 0x9F)) {
++                if (cp >= 0x10 and cp <= unicode.narrowMax() and !(cp >= 0x80 and cp <= 0x9F)) {
+                     if (cp >= 0x80) run_ascii = false;
+                     continue;
+                 }
+@@ -1031,7 +1031,7 @@
+                     continue;
+                 }
+                 // vtmux: with tmux's clustering, its rules decide.
+-                if (unicode.tmux_clusters) {
++                if (unicode.tmuxClusters()) {
+                     if (!unicode.tmuxMayJoin(@intCast(cps[idx - 1]), @intCast(cp))) {
+                         run_ascii = false;
+                         continue;
+@@ -1382,7 +1382,7 @@
+     // A character that makes no sense on its own: dropped when it
+     // cannot join.
+     const zero_width = c == 0x200D or c == 0xFE0F or width == 0;
+-    var force_wide = c == 0xFE0F and unicode.tmux_vs16_wide;
++    var force_wide = c == 0xFE0F and unicode.tmuxVs16Wide();
+     const alone: TmuxCombine = if (zero_width) .dropped else .own;
+ 
+     const base: u21 = prev.content.codepoint.data;
+@@ -1463,7 +1463,7 @@
+ 
+     // vtmux: tmux drops U+3164 HANGUL FILLER wherever it comes
+     // (screen_write_combine).
+-    if (unicode.tmux_clusters and c == 0x3164) return;
++    if (unicode.tmuxClusters() and c == 0x3164) return;
+ 
+     // Perform grapheme clustering if grapheme support is enabled (mode 2027).
+     // This is MUCH slower than the normal path so the conditional below is
+@@ -1471,7 +1471,7 @@
+     // as quickly as possible.
+     // vtmux: with tmux's clustering, 0x80-0xFF can join a cell too (one
+     // that ends with a ZWJ).
+-    if ((c > 255 or (unicode.tmux_clusters and c >= 0x80)) and
++    if ((c > 255 or (unicode.tmuxClusters() and c >= 0x80)) and
+         self.modes.get(.grapheme_cluster) and
+         self.screens.active.cursor.x > 0)
+     grapheme: {
+@@ -1519,7 +1519,7 @@
+         // cell becomes two columns. A cell in the last column stays one
+         // column: tmux makes it two with its padding past the edge
+         // (screen_write_combine), where Ghostty has no cell.
+-        const tmux_effect: ?unicode.GraphemeWidthEffect = if (unicode.tmux_clusters)
++        const tmux_effect: ?unicode.GraphemeWidthEffect = if (unicode.tmuxClusters())
+             switch (self.tmuxCombine(prev.cell, c)) {
+                 .own => break :grapheme,
+                 .dropped => return,
+diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
+--- a/src/terminal/c/unicode.zig
++++ b/src/terminal/c/unicode.zig
+@@ -36,7 +36,7 @@
+     try testing.expectEqual(2, codepoint_width(0x3B3));
+     try testing.expectEqual(1, codepoint_width(0x3B4));
+     try testing.expectEqual(1, codepoint_width(0x1F600));
+-    try testing.expectEqual(0x7F, unicode_pkg.narrow_max);
++    try testing.expectEqual(0x7F, unicode_pkg.narrowMax());
+     const bad = [_]unicode_pkg.WidthRange{
+         .{ .first = 5, .last = 9, .width = 1 },
+         .{ .first = 9, .last = 10, .width = 1 },
+@@ -44,7 +44,7 @@
+     try testing.expectEqual(Result.invalid_value, set_width_overrides(&bad, bad.len));
+     try testing.expectEqual(Result.success, set_width_overrides(null, 0));
+     try testing.expectEqual(2, codepoint_width(0x1F600));
+-    try testing.expectEqual(0xFF, unicode_pkg.narrow_max);
++    try testing.expectEqual(0xFF, unicode_pkg.narrowMax());
+ }
+ 
+ /// vtmux: tmux's clustering for mode 2027 (see `unicode.setTmuxClusters`).
+diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
+--- a/include/ghostty/vt/unicode.h
++++ b/include/ghostty/vt/unicode.h
+@@ -160,8 +160,9 @@
+  * `codepoint-widths`): text printed from now on, and
+  * ghostty_unicode_codepoint_width(), take these widths over the table's.
+  * Ranges must be sorted by first and not overlap, widths 0 to 2; len 0
+- * clears them. Cells already printed keep their width. Not safe while
+- * another thread prints.
++ * clears them. Cells already printed keep their width. Safe while
++ * other threads print or query widths; a concurrent call may observe either
++ * configuration.
+  *
+  * @return GHOSTTY_SUCCESS, GHOSTTY_INVALID_VALUE for bad ranges, or
+  *         GHOSTTY_OUT_OF_MEMORY
+@@ -179,8 +180,8 @@
+  * with U+200D; two lone regional indicators, and an emoji skin-tone
+  * modifier with one of tmux's bases (either order), join into two
+  * columns; Hangul jamo join as tmux's do and U+3164 is dropped.
+- * Process-wide; cells already printed keep their text. Not safe while
+- * another thread prints.
++ * Process-wide; cells already printed keep their text. Safe while
++ * other threads print; a concurrent call may observe either configuration.
+  */
+ GHOSTTY_API void ghostty_unicode_set_tmux_clusters(bool enabled, bool vs16_wide);
+ 

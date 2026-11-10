@@ -54,6 +54,16 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
+- `patches/0039-unicode-options-thread-safe.patch`: width-override readers
+  and writers hold one native slice lock through lookup, replacement and
+  freeing; the empty-override fast path and printer/clustering flags are
+  atomic. This covers printing as well as both width queries, so the Rust
+  setters (including vtmux-vt's) remain safe. The server sets them from its
+  single-threaded `set_option` (`codepoint-widths`, tmux `utf8.c`
+  `utf8_update_width_cache`; clustering, `screen-write.c`
+  `screen_write_combine`). A subprocess test runs two writers and two
+  readers, including terminal printing; before the patch it segfaulted.
+
 - `libghostty-vt/src/alloc.rs` (`allocator_api`): `From<&A>` borrows the
   original allocator for the adapter lifetime; `From<A>` kept a pointer
   to its destroyed parameter. Tests check the callback context, allocate,

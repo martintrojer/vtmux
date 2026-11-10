@@ -137,7 +137,8 @@ libghostty-vt runs inside the server, once per pane: the "grid follows Ghostty" 
 It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, with 36 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
 
 - **tmux's grid shape:** wrap and pending-wrap bookkeeping, cells used, reflow as tmux does it, the alternate screen, clusters and widths, hyperlink ids, line flags, DECAWM, DECALN.
-- **Memory:** bounded, resumable page compression and resize without faulting blank pages.
+- **Memory:** bounded, resumable page compression and resize without faulting blank pages; grid-reference bounds checked before native reads.
+- **Library safety:** process-wide Unicode options use a native lock for width slices and atomic printer flags, including when another thread prints.
 - **Live upgrade:** whole-state export and import, page by page.
 - **Speed:** cloning a screen and whole pages as memory, stepping row to row instead of walking the page list, reading the primary history in place while the alternate screen is up.
 
