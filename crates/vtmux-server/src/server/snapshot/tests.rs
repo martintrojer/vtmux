@@ -1357,6 +1357,10 @@ fn a_clients_view_is_kept() {
 /// may be required: a shown auto-hide scrollbar, or history in Ghostty's
 /// form onto a binary of the same patch stack.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one session with every ordinary piece of state set"
+)]
 fn an_ordinary_attached_client_requires_no_feature() {
     let dir = temp_dir("ordinary");
     let mut a = server(&dir);
