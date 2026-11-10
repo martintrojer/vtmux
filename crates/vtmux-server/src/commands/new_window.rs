@@ -1,8 +1,6 @@
 //! `new-window` (cmd-new-window.c:53-187, spawn.c `spawn_window`); `-E` or
 //! a single empty command makes its pane empty (no process).
 
-use std::path::PathBuf;
-
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 
@@ -70,18 +68,9 @@ pub fn exec(
             // spawn.c:270-283: expanded against the target session,
             // relative to the client's directory.
             let c = expand(server, session_only, c);
-            if c.starts_with('/') {
-                PathBuf::from(c)
-            } else {
-                let mut base = item.cwd.clone().into_os_string();
-                if !c.is_empty() {
-                    base.push("/");
-                    base.push(&c);
-                }
-                PathBuf::from(base)
-            }
+            super::start_path(&server.client_cwd(item.client, Some(s)), &c)
         }
-        None => item.cwd.clone(),
+        None => server.client_cwd(item.client, Some(s)),
     };
     let extra_env: Vec<String> = args.values('e').map(str::to_owned).collect();
     let index = server

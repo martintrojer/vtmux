@@ -3,8 +3,6 @@
 //! attach hook; `-t` makes the session part of a session group
 //! ([`crate::groups`]).
 
-use std::path::PathBuf;
-
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::options::TreeId;
@@ -122,7 +120,7 @@ pub fn exec(
             if let Some(cwd) = args.value('c') {
                 let cwd = expand(server, found, cwd);
                 if let Some(x) = server.model.sessions.get_mut(&s) {
-                    x.cwd = cwd.into();
+                    x.cwd = vtmux_core::rawstr::to_os_string(&cwd).into();
                 }
             }
             if let (Some(c), Some(flags)) = (item.client, args.value('f')) {
@@ -154,19 +152,10 @@ pub fn exec(
     let cwd = match args.value('c') {
         Some(c) => {
             let c = expand_as(server, found, Kind::Unknown, c);
-            if c.starts_with('/') {
-                PathBuf::from(c)
-            } else {
-                // spawn.c:295-301: relative to the client's directory.
-                let mut base = item.cwd.clone().into_os_string();
-                if !c.is_empty() {
-                    base.push("/");
-                    base.push(&c);
-                }
-                PathBuf::from(base)
-            }
+            // spawn.c:295-301: relative to the client's directory.
+            super::start_path(&server.client_cwd(item.client, None), &c)
         }
-        None => item.cwd.clone(),
+        None => server.client_cwd(item.client, None),
     };
     // A control client is attached without a terminal and sized like a
     // detached session (cmd-new-session.c:165-168, 250-266).

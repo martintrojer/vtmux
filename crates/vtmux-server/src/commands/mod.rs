@@ -712,7 +712,7 @@ fn dispatch(
             if let Some(cwd) = args.value('c') {
                 let cwd = expand(server, found, cwd);
                 if let Some(s) = server.model.sessions.get_mut(&session) {
-                    s.cwd = cwd.into();
+                    s.cwd = vtmux_core::rawstr::to_os_string(&cwd).into();
                 }
             }
             // cmd-attach-session.c:112-121: -f, then -r, before the client
@@ -944,6 +944,22 @@ pub fn expand_from_target(
 ) -> String {
     let ctx = server.format_ctx(found, tc);
     format::expand_str(template, &ctx)
+}
+
+/// A `-c` directory (expanded text, which holds any byte tmux's C string
+/// can: [`vtmux_core::rawstr`]): as it is if absolute, else under `base`,
+/// the client's directory (spawn.c `spawn_window`, `spawn_pane`).
+pub(super) fn start_path(base: &std::path::Path, c: &str) -> PathBuf {
+    let c = vtmux_core::rawstr::to_os_string(c);
+    if c.as_encoded_bytes().starts_with(b"/") {
+        return PathBuf::from(c);
+    }
+    let mut dir = base.as_os_str().to_owned();
+    if !c.is_empty() {
+        dir.push("/");
+        dir.push(&c);
+    }
+    PathBuf::from(dir)
 }
 
 /// [`expand`] for a tree that describes `kind` whatever `found` holds

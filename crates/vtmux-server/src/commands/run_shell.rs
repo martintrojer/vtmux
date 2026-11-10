@@ -203,7 +203,10 @@ pub fn exec(
     let to_pane = found.pane.filter(|_| args.target('t').is_some());
     let session = found.session;
     let cwd = match args.value('c') {
-        Some(c) => std::path::PathBuf::from(super::expand_from_target(server, found, tc, c)),
+        Some(c) => {
+            vtmux_core::rawstr::to_os_string(&super::expand_from_target(server, found, tc, c))
+                .into()
+        }
         None => server.client_cwd(item.client, session),
     };
     let now = Instant::now();

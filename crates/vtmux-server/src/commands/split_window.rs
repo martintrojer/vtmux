@@ -11,8 +11,6 @@
 //! `-K` taking every key, `-C` closed by a click outside it and `-D` by
 //! Escape or C-c.
 
-use std::path::PathBuf;
-
 use vtmux_core::cmd::{Args, CmdError, NumError, strtonum};
 use vtmux_core::error::EdgeError;
 use vtmux_core::layout::{AddFlags, PANE_MAXIMUM, SplitRequest};
@@ -257,18 +255,9 @@ pub fn exec(
                 ..Found::default()
             };
             let c = expand(server, session_only, c);
-            if c.starts_with('/') {
-                PathBuf::from(c)
-            } else {
-                let mut base = item.cwd.clone().into_os_string();
-                if !c.is_empty() {
-                    base.push("/");
-                    base.push(&c);
-                }
-                PathBuf::from(base)
-            }
+            super::start_path(&server.client_cwd(item.client, Some(s)), &c)
         }
-        None => item.cwd.clone(),
+        None => server.client_cwd(item.client, Some(s)),
     };
     let extra_env: Vec<String> = args.values('e').map(str::to_owned).collect();
     let session_env = server.model.sessions[&s].env.clone();

@@ -5653,6 +5653,78 @@ fn non_utf8_names_are_rejected() {
     });
 }
 
+/// A start directory is bytes (spawn.c `spawn_window` takes `-c` and the
+/// session's directory as C strings): a directory named with a byte 0xff is
+/// entered by `new-window -c`, `split-window -c`, `new-session -c` and by a
+/// window a control client opens in that session, whose directory is the
+/// session's (`server_client_get_cwd`: a client with a session has its
+/// session's, not its own). `#{session_path}` prints the bytes. Each pane
+/// writes its `pwd` to a file the test reads. (Before: `new-window -c` failed
+/// with `fork failed: invalid input parameter`, and the control client's
+/// window started in the client's own directory.)
+#[test]
+fn start_directories_not_named_in_utf8_are_entered() {
+    use std::os::unix::ffi::OsStrExt;
+    compare("start_directories_not_named_in_utf8_are_entered", |w| {
+        let bad = w.dir().join(std::ffi::OsStr::from_bytes(b"d\xffx"));
+        // A file system that refuses the name (APFS: EILSEQ) has no such
+        // directory to test.
+        if std::fs::create_dir(&bad).is_err() {
+            return Vec::new();
+        }
+        let out = w.dir().join("pwds");
+        std::fs::create_dir(&out).unwrap();
+        let pwd = |name: &str| format!("pwd > {}/{name}; exec cat", out.display());
+        let bad = bad.as_os_str().as_bytes();
+        let arg = |words: &[&[u8]]| -> Vec<Vec<u8>> { words.iter().map(|w| w.to_vec()).collect() };
+        let run = |words: Vec<Vec<u8>>| {
+            let refs: Vec<&[u8]> = words.iter().map(Vec::as_slice).collect();
+            w.run_bytes(&refs)
+        };
+        let mut steps = vec![w.run(&["new", "-d", "-s", "s", "-n", "w", "cat"])];
+        for (name, words) in [
+            ("nw", arg(&[b"new-window", b"-d", b"-c", bad])),
+            (
+                "sp",
+                arg(&[b"split-window", b"-d", b"-t", b"s:w", b"-c", bad]),
+            ),
+            ("ns", arg(&[b"new-session", b"-d", b"-s", b"t", b"-c", bad])),
+        ] {
+            let mut words = words;
+            words.push(pwd(name).into_bytes());
+            steps.push(run(words));
+        }
+        steps.push(w.run(&["display", "-p", "-t", "t", "#{session_path}"]));
+        // The control client's own output holds racy notifications (a
+        // window's automatic rename); what counts is where its window
+        // started.
+        let ctl = w.run_io(
+            &[b"-C", b"attach", b"-t", b"t"],
+            Some(format!("new-window -d '{}'\n", pwd("ctl")).as_bytes()),
+        );
+        steps.push(Run {
+            stdout: String::new(),
+            ..ctl
+        });
+        for name in ["nw", "sp", "ns", "ctl"] {
+            let file = out.join(name);
+            let mut text = Vec::new();
+            let end = Instant::now() + Duration::from_secs(20);
+            while !text.ends_with(b"\n") && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+                text = std::fs::read(&file).unwrap_or_default();
+            }
+            assert!(text.ends_with(b"\n"), "{name}: no pwd in {text:?}");
+            steps.push(Run {
+                stdout: w.normalise(&text.escape_ascii().to_string()),
+                stderr: String::new(),
+                code: 0,
+            });
+        }
+        steps
+    });
+}
+
 /// Valid UTF-8 in plane 16 (U+10FF80..=U+10FFFF, private use) is an ordinary
 /// character: names take it, `show` and `source -v` print it, `.` and `?`
 /// match it, `w`, `=N` and `p` count it, `\U0010FFFF` makes it (reviewer-52,

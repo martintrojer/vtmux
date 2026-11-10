@@ -111,15 +111,6 @@ pub(super) fn start_dir(
             ..Found::default()
         };
         let c = expand(server, session_only, c);
-        if c.starts_with('/') {
-            PathBuf::from(c)
-        } else {
-            let mut base = item.cwd.clone().into_os_string();
-            if !c.is_empty() {
-                base.push("/");
-                base.push(&c);
-            }
-            PathBuf::from(base)
-        }
+        super::start_path(&server.client_cwd(item.client, Some(s)), &c)
     })
 }

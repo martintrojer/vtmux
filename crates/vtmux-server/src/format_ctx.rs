@@ -491,7 +491,7 @@ impl<'a> Ctx<'a> {
             "session_silence_flag" => {
                 flag(s.link_alerts.values().any(|f| f & alerts::SILENCE != 0))
             }
-            "session_path" => s.cwd.to_string_lossy().into_owned(),
+            "session_path" => vtmux_core::rawstr::from_os_str(s.cwd.as_os_str()),
             _ => return None,
         })
     }
@@ -833,7 +833,7 @@ impl<'a> Ctx<'a> {
             // format_cb_start_path (format.c:943-955).
             // format_cb_pane_path: what OSC 7 set, else empty.
             "pane_path" => p.term.pwd(),
-            "pane_start_path" => p.cwd.to_string_lossy().into_owned(),
+            "pane_start_path" => vtmux_core::rawstr::from_os_str(p.cwd.as_os_str()),
             "pane_tty" => p.tty.clone(),
             "pane_current_command" => {
                 // format_cb_current_command (format.c:958-978).
@@ -853,7 +853,7 @@ impl<'a> Ctx<'a> {
                 .model
                 .live
                 .foreground_cwd(p)
-                .map(|d| d.to_string_lossy().into_owned())
+                .map(|d| vtmux_core::rawstr::from_os_str(d.as_os_str()))
                 .unwrap_or_default(),
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),

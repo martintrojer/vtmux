@@ -201,6 +201,21 @@ pub fn to_bytes(s: &str) -> Cow<'_, [u8]> {
     Cow::Owned(out)
 }
 
+/// The text for a path or other OS string, its bytes as [`from_bytes`]
+/// reads them (a directory named with a byte 0xff keeps it).
+#[must_use]
+pub fn from_os_str(s: &std::ffi::OsStr) -> String {
+    use std::os::unix::ffi::OsStrExt as _;
+    from_bytes(s.as_bytes())
+}
+
+/// The OS string `s` stands for ([`to_bytes`] as a path component).
+#[must_use]
+pub fn to_os_string(s: &str) -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt as _;
+    std::ffi::OsString::from_vec(to_bytes(s).into_owned())
+}
+
 /// `strlen`: how many bytes `s` stands for.
 #[must_use]
 pub fn byte_len(s: &str) -> usize {
