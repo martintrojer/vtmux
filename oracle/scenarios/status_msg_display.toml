@@ -27,9 +27,9 @@ steps = [
   { screen = {} },
   { settle = { quiet_ms = 2500 } },
   { run = ["set", "-g", "message-format", "<#{message}> #{session_name}"] },
-  { run = ["display-message", "-d", "300", "-t", "a", "fmt"] },
-  { settle = { react = true } },
+  { run = ["display-message", "-d", "1500", "-t", "a", "fmt"] },
+  { wait_screen = { has = ["fmt"] } },
   { screen = {} },
-  { settle = { quiet_ms = 1500 } },
+  { wait_screen = { lacks = ["fmt"] } },
   { screen = {} },
 ]

@@ -2,7 +2,10 @@
 # shows over the prompt and after it goes (server-client.c:2220-2222:
 # status_prompt_cursor whenever c->prompt is set; TTY_NOCURSOR stays,
 # status.c:401-402), across resizes; status off, status 2 with
-# message-line 1, status-position top.
+# message-line 1, status-position top. The timed message is up for 1.5 s and
+# the scenario waits for the screen to show it, then to lose it: a 200 ms one
+# expired about when the screen was taken on a loaded host (the README's
+# *Races under load*).
 name = "prompt_hidden_cursor"
 size = [40, 6]
 steps = [
@@ -45,10 +48,10 @@ steps = [
   { screen = {} },
   { keys = "d" },
   { screen = {} },
-  { run = ["display", "-d", "200", "short"] },
-  { settle = { react = true } },
+  { run = ["display", "-d", "1500", "short"] },
+  { wait_screen = { has = ["short"] } },
   { screen = {} },
-  { settle = { quiet_ms = 500 } },
+  { wait_screen = { lacks = ["short"] } },
   { screen = {} },
   { resize = [30, 6] },
   { screen = {} },

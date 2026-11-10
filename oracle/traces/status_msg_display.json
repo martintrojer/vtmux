@@ -169,23 +169,27 @@
         "run": [
           "display-message",
           "-d",
-          "300",
+          "1500",
           "-t",
           "a",
           "fmt"
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "fmt"
+          ]
         }
       },
       {
         "screen": {}
       },
       {
-        "settle": {
-          "quiet_ms": 1500
+        "wait_screen": {
+          "lacks": [
+            "fmt"
+          ]
         }
       },
       {

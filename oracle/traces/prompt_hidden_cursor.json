@@ -182,21 +182,25 @@
         "run": [
           "display",
           "-d",
-          "200",
+          "1500",
           "short"
         ]
       },
       {
-        "settle": {
-          "react": true
+        "wait_screen": {
+          "has": [
+            "short"
+          ]
         }
       },
       {
         "screen": {}
       },
       {
-        "settle": {
-          "quiet_ms": 500
+        "wait_screen": {
+          "lacks": [
+            "short"
+          ]
         }
       },
       {

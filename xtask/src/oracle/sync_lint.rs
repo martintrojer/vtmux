@@ -21,6 +21,12 @@
 //!   `wait_for` a signal from it, `wait_pane` or `wait_screen` for its
 //!   output, or a `settle` that reacts to it.
 //!
+//! A fourth race is a message that goes by itself: `display-message -d N`
+//! with N under a second (`SHORT_MESSAGE_MS`) expires about when a `screen`
+//! after it settles (150 ms of quiet, plus the load), so the screen shows the
+//! message or what it covered, by luck. Show it for a second or more and
+//! `wait_screen` for it to be gone.
+//!
 //! A `run` that only reads state (`display -p`, `show-*`, `list-*`,
 //! `capture-pane -p`, `has-session`) changes nothing to race.
 
@@ -129,6 +135,25 @@ fn is_capture(argv: &[String]) -> bool {
     commands(argv).any(|cmd| matches!(cmd[0].as_str(), "capture-pane" | "capturep"))
 }
 
+/// A timed message shorter than this goes while a `screen` settles.
+const SHORT_MESSAGE_MS: u64 = 1000;
+
+/// Whether a `run` shows a message (`display-message`, `display`) that
+/// expires on its own within `SHORT_MESSAGE_MS` (`-d` takes milliseconds;
+/// 0 is no timeout; cmd-display-message.c).
+fn is_short_message(argv: &[String]) -> bool {
+    commands(argv).any(|cmd| {
+        matches!(cmd[0].as_str(), "display-message" | "display")
+            && !flags(&cmd[1..], "cdtF").contains(&'p')
+            && cmd[1..].windows(2).any(|w| {
+                w[0] == "-d"
+                    && w[1]
+                        .parse::<u64>()
+                        .is_ok_and(|ms| (1..SHORT_MESSAGE_MS).contains(&ms))
+            })
+    })
+}
+
 /// What the steps so far leave unwaited for, as the step numbers that did it.
 #[derive(Default)]
 struct Pending {
@@ -142,6 +167,8 @@ struct Pending {
     keys: Option<usize>,
     /// Input to a pane's program nothing has waited for yet.
     pane: Option<usize>,
+    /// The last short timed message nothing has waited to be gone.
+    message: Option<usize>,
 }
 
 impl Pending {
@@ -190,6 +217,9 @@ pub fn races(sc: &Scenario) -> Vec<String> {
                 if !is_query(argv) {
                     p.run = Some(n);
                 }
+                if is_short_message(argv) {
+                    p.message = Some(n);
+                }
                 if is_pane_input(argv) {
                     p.pane = Some(n);
                 }
@@ -213,6 +243,7 @@ pub fn races(sc: &Scenario) -> Vec<String> {
             Step::ControlWait(_) => p.settle(false),
             Step::WaitScreen(_) => {
                 p.run = None;
+                p.message = None;
                 p.keys = None;
                 p.pane = None;
             }
@@ -224,6 +255,13 @@ pub fn races(sc: &Scenario) -> Vec<String> {
                 p.pane = None;
             }
             Step::Screen(_) | Step::Title(_) | Step::Progress(_) => {
+                if let Some(m) = p.message.take() {
+                    out.push(format!(
+                        "step {n}: the message of step {m} expires within a second, about when \
+                         this observation settles: show it for {SHORT_MESSAGE_MS} ms or more \
+                         and put a wait_screen for it to be gone before the next observation"
+                    ));
+                }
                 if let Some(r) = p.run
                     && p.input.is_none_or(|k| k <= r)
                 {
@@ -360,6 +398,43 @@ mod tests {
                 "##
             ),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_short_timed_message_races_the_screen() {
+        assert!(is_short_message(&argv(&["display", "-d", "200", "x"])));
+        assert!(is_short_message(&argv(&[
+            "display-message",
+            "-t",
+            "a",
+            "-d",
+            "999",
+            "x"
+        ])));
+        assert!(!is_short_message(&argv(&["display", "-d", "0", "x"])));
+        assert!(!is_short_message(&argv(&["display", "-d", "1500", "x"])));
+        assert!(!is_short_message(&argv(&[
+            "display", "-p", "-d", "200", "x"
+        ])));
+        assert_eq!(
+            flagged(
+                r#"
+                { attach = { session = "a" } },
+                { run = ["display", "-d", "200", "short"] },
+                { settle = { react = true } },
+                { screen = {} },
+                { run = ["display", "-d", "1500", "long"] },
+                { settle = { react = true } },
+                { screen = {} },
+                { run = ["display", "-d", "200", "short"] },
+                { wait_screen = { has = ["short"] } },
+                { screen = {} },
+                { wait_screen = { lacks = ["short"] } },
+                { screen = {} }
+                "#
+            ),
+            ["step 4"]
         );
     }
 
