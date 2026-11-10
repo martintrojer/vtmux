@@ -54,6 +54,12 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
+- `libghostty-vt/src/alloc.rs` (`allocator_api`): `From<&A>` borrows the
+  original allocator for the adapter lifetime; `From<A>` kept a pointer
+  to its destroyed parameter. Tests check the callback context, allocate,
+  free, grow and shrink, and reject owned or too-short-lived allocators
+  at compile time. vtmux does not enable this optional feature.
+
 - `libghostty-vt/src/osc.rs`: window titles read the `const char **`
   output specified by `osc.h`, then borrow and validate the parser-owned
   C string. The generic getter previously fabricated a Rust `&str` with

@@ -251,13 +251,30 @@ unsafe extern "C" fn _global_remap(
 // Allocator API
 //------------------------------------
 
-/// Adapt a Rust Allocator into a libghostty Allocator.
+/// Adapt a borrowed Rust allocator into a libghostty allocator.
+/// The source must outlive the adapter and everything allocated through it.
+///
+/// ```compile_fail
+/// use allocator_api2::alloc::Global;
+/// use libghostty_vt::alloc::Allocator;
+/// let adapter = Allocator::from(Global);
+/// ```
+///
+/// ```compile_fail
+/// use allocator_api2::alloc::Global;
+/// use libghostty_vt::alloc::{Allocator, Bytes};
+/// let adapter = {
+///     let source = Global;
+///     Allocator::from(&source)
+/// };
+/// let bytes = Bytes::new_with_alloc(&adapter, 16).unwrap();
+/// ```
 #[cfg(feature = "allocator_api")]
-impl<'ctx, A: alloc::Allocator + 'ctx> From<A> for Allocator<'ctx> {
-    fn from(value: A) -> Self {
+impl<'ctx, A: alloc::Allocator + 'ctx> From<&'ctx A> for Allocator<'ctx> {
+    fn from(value: &'ctx A) -> Self {
         Self {
             inner: ffi::Allocator {
-                ctx: std::ptr::from_ref(value.by_ref()) as *mut std::ffi::c_void,
+                ctx: std::ptr::from_ref(value) as *mut std::ffi::c_void,
                 vtable: &ffi::AllocatorVtable {
                     alloc: Some(_alloc::<A>),
                     free: Some(_free::<A>),
@@ -267,6 +284,69 @@ impl<'ctx, A: alloc::Allocator + 'ctx> From<A> for Allocator<'ctx> {
             },
             _phan: PhantomData,
         }
+    }
+}
+
+#[cfg(all(test, feature = "allocator_api"))]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct CountingAllocator {
+        allocations: Cell<usize>,
+        frees: Cell<usize>,
+    }
+
+    unsafe impl alloc::Allocator for CountingAllocator {
+        fn allocate(
+            &self,
+            layout: alloc::Layout,
+        ) -> std::result::Result<NonNull<[u8]>, alloc::AllocError> {
+            self.allocations.set(self.allocations.get() + 1);
+            alloc::Global.allocate(layout)
+        }
+
+        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: alloc::Layout) {
+            self.frees.set(self.frees.get() + 1);
+            unsafe { alloc::Global.deallocate(ptr, layout) }
+        }
+    }
+
+    #[test]
+    fn adapter_borrows_the_original_allocator_for_its_callbacks() {
+        let source = CountingAllocator {
+            allocations: Cell::new(0),
+            frees: Cell::new(0),
+        };
+        let adapter = Allocator::from(&source);
+        // Check the context before invoking a callback, so the old dangling
+        // pointer fails deterministically rather than running undefined behavior.
+        assert_eq!(
+            adapter.inner.ctx.cast_const(),
+            std::ptr::from_ref(&source).cast()
+        );
+        let mut bytes = Bytes::new_with_alloc(&adapter, 16).unwrap();
+        bytes.fill(0x42);
+        assert_eq!(&*bytes, &[0x42; 16]);
+        drop(bytes);
+        assert_eq!(source.allocations.get(), 1);
+        assert_eq!(source.frees.get(), 1);
+
+        // Exercise relocation too: the same borrowed context backs all callbacks.
+        unsafe {
+            let vtable = &*adapter.inner.vtable;
+            let ptr = vtable.alloc.unwrap()(adapter.inner.ctx, 16, 0, 0);
+            assert!(!ptr.is_null());
+            ptr.cast::<u8>().write(0x42);
+            let grown = vtable.remap.unwrap()(adapter.inner.ctx, ptr, 16, 0, 32, 0);
+            assert!(!grown.is_null());
+            assert_eq!(grown.cast::<u8>().read(), 0x42);
+            let shrunk = vtable.remap.unwrap()(adapter.inner.ctx, grown, 32, 0, 8, 0);
+            assert!(!shrunk.is_null());
+            assert_eq!(shrunk.cast::<u8>().read(), 0x42);
+            vtable.free.unwrap()(adapter.inner.ctx, shrunk, 8, 0, 0);
+        }
+        assert_eq!(source.allocations.get(), source.frees.get());
     }
 }
 
