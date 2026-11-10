@@ -60,3 +60,41 @@ Full gate exclusions: 6 workspace ignores (three prior-binary upgrade tests, two
 The macOS cross-target check was skipped: the target is not installed, and `rustup target add aarch64-apple-darwin` failed DNS resolution for static.rust-lang.org. Dash was unavailable and its source download also failed DNS; the additional shell run used actual `/bin/sh` in a private namespace with POSIX-like zsh, not dash and not a change to the shared host's shell. No performance benchmark or macOS execution was claimed.
 
 The harness owned every server socket directory. No ad-hoc server was started. Socket guard passed; stress subprocesses exited and the shared flock was released. No mu database operation, stash or push.
+
+## Round 2: lock-free width table
+
+Review of `79056e8` found patch 0039's spin lock on the print hot path (every non-ASCII lookup, since vtmux's built-in overrides keep the table non-empty), the old slice freed under that lock, and the test module at the top of `unicode.rs`.
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| Lock on the print path, readers serialized | FIXED | The overrides are one `std.atomic.Value(*const WidthTable)` to an immutable table (ranges plus the narrow bound); the clustering flags one atomic byte. No lock anywhere. `printSliceFast`, `printSliceFill` and `print` read them once per call, except the narrow bound in the fill's scalar loop (below). |
+| `munmap` under the lock | FIXED | A replaced table is never freed. `setWidthOverrides` reuses an identical table from a lock-free CAS list of every table published, so memory is one table per distinct set: the race test's 40,000 sets keep 2 tables. |
+| Test module above the code | FIXED | Moved to the bottom of `libghostty-vt/src/unicode.rs`. |
+
+Soundness: the race test still passes (Debug and ReleaseFast); a mutated setter that frees the old table (`swap` then `free`) makes it SIGSEGV again in 1.2 s, so the test still guards the use-after-free.
+
+### Speed
+
+Pinned parser test: a release binary (fat LTO, ReleaseFast Ghostty) sets vtmux's built-in width ranges (`grid_width_ranges`) and tmux clustering, enables mode 2027, and writes 64 MB of 70-column lines in 64 KB chunks to a 200x50 `Terminal`, no scrollback (ASCII words, or UTF-8 words mixing Latin-1, Greek, CJK and an emoji). `taskset -c 77`, 5 timed runs per process, median per process. Builds: `main` (`0f384907`), `r0` (this branch without 0039), `r1` (round 1, spin lock), `r2` (this round). Each binary was built at 4 code offsets (a 0/16/32/48-byte pad before Ghostty's code) and run twice, interleaved: 8 values each. The host is shared (load 15-50), so single values swing ±10%; medians and bests:
+
+| MB/s | main | r0 | r1 | r2 |
+|---|---|---|---|---|
+| ASCII median / best | 543 / 566 | 562 / 568 | 560 / 568 | 539 / 565 |
+| UTF-8 median / best | 123.4 / 125.8 | 122.8 / 126.4 | 119.2 / 121.3 | 124.4 / 126.8 |
+
+`PaneTerm` (vtmux-vt, 2000 lines history), 4 offsets: ASCII 363 / 379 / 376 MB/s median (main / r1 / r2), UTF-8 78.4 / 76.3 / 78.5.
+
+Finding the last 5%: the first lock-free version was still 5% slower on UTF-8 at every offset, and so was the same Terminal.zig over plain globals (no atomics), so the cost was the reads' placement, not atomicity. One build per change isolated it: holding the narrow bound in a register for `printSliceFill`'s scalar loop costs 5% (UTF-8 median 117.2 vs 124.5); the per-call clustering flag, the per-call table for lookups, `printSliceFast` and `print` cost nothing. The bound is loaded from the table per character there. The SIMD scan's upper bound is the constant 0x7F (the bound is 0x7F or 0xFF), which `main`'s compiler had folded from the global.
+
+Server, `scripts/bench.py throughput` (100 MB, RUNS=5, five runs alternating which binary is `base`), server CPU s median of the five medians: plain 1.05 branch vs 1.01 main (per-run 0.86-1.35 both, wall quantized by the 0.2 s poll), sgr 1.64 vs 1.67.
+
+### Round 2 gate record
+
+| GATE: commit / command / scope | RESULT: exit / duration / counts / skips | CONDITIONS |
+|---|---|---|
+| round 2 tree: `RF V --features allocator_api`, then Debug `V --features allocator_api` | 0 / 85 s, 80 s / 18 unit + 20 doctests each / 3 ignored | Rebuilt native patch |
+| Mutation (setter frees the old table): `RF V --features allocator_api --lib width_overrides` | 101 / 1.2 s test / child SIGSEGV / no skips | Separate copy of the vendor tree, own target dir |
+| round 2 tree: `muzzle run --class high --rule vtmux-check --run-timeout 3000 -- timeout -k 5 3000 mise exec -- env GHOSTTY_SOURCE_TARBALL=/tmp/panel-g3-ghostty.tar.gz bash scripts/check.sh` | 0 / 419 s / all suites pass; oracle 417/417, upgrade-3 417/417 (3356 upgrades), upgrade-1 9/9 | 96 CPUs, suites at once; Linux, Rust 1.99.1, Zig 0.17.0 |
+| Stress: 5x `RF V --features allocator_api` under 48 busy loops in `flock /tmp/vtmux-stress.lock`, then once with `/bin/sh` -> zsh sh emulation | 0 / 5 runs + 1 / each 18 unit + 20 doctests, 3 ignored | Overlay of `/usr/bin` in a private user/mount namespace (no dash on the host); busy loops killed by trap |
+
+Same exclusions as round 1 (ignores, expected `wait-for-client-lost.sh` failure, upgrade-insertion omissions). macOS cross-check still skipped: target not installed (DNS). `git diff --check` flags the patch's blank context lines (` `), as in every patch in that directory. The benchmarks' servers ran under bench.py's private sockets; the parser test starts none.
