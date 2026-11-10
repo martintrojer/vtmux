@@ -1062,7 +1062,11 @@ impl Server {
         c.mouse = crate::mouse::ClientMouse::default();
         c.title = None;
         c.path = None;
+        // What was queued for the old connection is dropped, as for any
+        // client re-attaching (`render_skips`); a notification's offset is
+        // into the passthrough, so the two go together.
         c.passthrough.clear();
+        c.notifications.clear();
         c.pasting = false;
         c.window_cache = crate::render::WindowCache::default();
         c.compositor.invalidate();

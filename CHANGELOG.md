@@ -12,7 +12,7 @@ Next is `3.8-beta2`.
 
 **Formats.** `#{pane_last_output_time}`, the second of the pane's last output, as tmux sets it.
 
-**Fixes.** A split or respawned pane's window is named after its command, as a new window's is, not after the process caught before it execs (the server binary, `vtmux-<sha>`, on macOS).
+**Fixes.** A split or respawned pane's window is named after its command, as a new window's is, not after the process caught before it execs (the server binary, `vtmux-<sha>`, on macOS). With `vtmux-notifications on`, a client re-attaching after a live upgrade while a pane sent a notification no longer crashes the server.
 
 **vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s). A live upgrade with it up costs what one without does, and moving back onto an older build keeps the history it hides.
 

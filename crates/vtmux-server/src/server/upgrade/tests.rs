@@ -1508,3 +1508,85 @@ fn a_requester_gone_during_the_dry_run_kills_it() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// D30 with decision 21: a Ghostty client with notifications and
+/// passthrough queued when it re-attaches (the pane's output and its
+/// `Hello` read in the same loop turn) loses both, as a re-attaching
+/// client is drawn nothing; the next frame neither panics on the
+/// notification's offset into the cleared passthrough nor sends it. Both
+/// ways a client re-attaches: to the same image (the exec returned), and
+/// to the image a live upgrade restored.
+#[test]
+fn a_re_attach_drops_the_notifications_queued_for_its_old_connection() {
+    for rebuilt in [false, true] {
+        let (mut server, dir) = setup(if rebuilt { "notify-up" } else { "notify-same" });
+        let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+        server
+            .on_client_input(f, b"\x1bP>|ghostty 1.2.3\x1b\\")
+            .unwrap();
+        for words in [
+            &["set", "-s", "vtmux-notifications", "on"][..],
+            &["set", "-g", "allow-passthrough", "all"],
+        ] {
+            st::ok(&mut server, &dir, words);
+        }
+        server.render_clients();
+        let _ = st::messages(&mut server, f, &mut f_peer);
+        let pane = *server.model.panes.keys().next().unwrap();
+        server.upgrade_tokens();
+        let token = server.clients[&f].reattach.unwrap().text();
+        let mut restored = rebuilt.then(|| st::rebuild(&server, &dir, "b"));
+        let new = if let Some(new) = restored.as_mut() {
+            new
+        } else {
+            server.upgrade_notify(&dir.join("new"));
+            assert_eq!(notices(&mut server, f, &mut f_peer).pop().unwrap().1, token);
+            &mut server
+        };
+        drop(f_peer);
+        gone(new, f);
+        // A payload, then a notification after it (at its end).
+        new.pane_input(pane, b"\x1bPtmux;\x1b\x1b]1337;a\x07\x1b\\", false);
+        new.pane_input(pane, b"\x1b]9;n\x07", false);
+        let queued = &new.clients[&f];
+        assert!(
+            !queued.passthrough.is_empty() && !queued.notifications.is_empty(),
+            "rebuilt {rebuilt}: queued"
+        );
+        let mut h = st::hello(
+            &[],
+            &dir,
+            Some(vtmux_core::protocol::TtyInfo {
+                name: "/dev/f".into(),
+                term: "xterm-256color".into(),
+                cols: 80,
+                rows: 24,
+                features: Vec::new(),
+            }),
+            ControlMode::None,
+        );
+        h.ext.follows_upgrade = true;
+        h.ext.reattach = Some(token);
+        let (_, mut peer) = st::connect(new, h);
+        assert!(new.clients[&f].reattach.is_none(), "rebuilt {rebuilt}");
+        new.render_clients();
+        let sent: Vec<u8> = st::messages(new, f, &mut peer)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::Frame(b) => Some(b),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        for text in [&b"]9;n"[..], b"1337;a"] {
+            assert!(
+                !sent.windows(text.len()).any(|w| w == text),
+                "rebuilt {rebuilt}: {:?}",
+                String::from_utf8_lossy(&sent)
+            );
+        }
+        drop(restored);
+        drop(server);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

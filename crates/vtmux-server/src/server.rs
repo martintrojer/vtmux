@@ -3663,6 +3663,9 @@ impl Server {
         let mut shown = Vec::new();
         let mut from = 0;
         for (at, n) in std::mem::take(&mut client.notifications) {
+            // An offset past the passthrough (cleared under it) puts the
+            // notification after what there is: a frame never panics.
+            let at = at.clamp(from, raw.len());
             if client.notified.admit(now, &n.title, &n.body) {
                 shown.extend_from_slice(&raw[from..at]);
                 shown.extend_from_slice(&n.osc());
@@ -7025,6 +7028,33 @@ mod tests {
         assert!(
             at("1337;a") < at("]9;n") && at("]9;n") < at("1337;b"),
             "{sent:?}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// D30: a notification whose offset is past its client's passthrough
+    /// (cleared under it) costs the frame nothing: it goes after what
+    /// passthrough there is, and the server serves on.
+    #[test]
+    fn a_stale_notification_offset_does_not_break_the_frame() {
+        let (mut server, p, (id, mut peer), dir) = notify_server("notify-stale");
+        crate::server::snapshot::tests::ok(
+            &mut server,
+            &dir,
+            &["set", "-g", "allow-passthrough", "all"],
+        );
+        server.pane_input(p, b"\x1bPtmux;\x1b\x1b]1337;a\x07\x1b\\", false);
+        server.pane_input(p, b"\x1b]9;n\x07", false);
+        let client = server.clients.get_mut(&id).unwrap();
+        assert!(matches!(client.notifications.as_slice(), [(at, _)] if *at > 0));
+        client.passthrough.clear();
+        server.render_clients();
+        let sent = frames(&mut server, id, &mut peer);
+        let osc = b"\x1b]9;n\x1b\\";
+        assert!(
+            sent.windows(osc.len()).any(|w| w == osc),
+            "{:?}",
+            String::from_utf8_lossy(&sent)
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
