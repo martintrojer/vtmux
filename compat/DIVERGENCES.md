@@ -74,6 +74,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-067](#d-067) | In-band resize reports, mode 2048 (`vtmux-inband-resize`) | Extension | extension |
 | [D-068](#d-068) | Link ids (`tmuxN`) are numbered when first drawn, not when parsed | Deferred | deferred |
 | [D-069](#d-069) | A dead pane keeps its exit status when its old pid comes back for another process | tmux bug | open |
+| [D-070](#d-070) | A failed `-t` with no session part and no client keeps the session in formats | Deferred | deferred |
 
 Closed (vtmux now matches tmux):
 
@@ -1197,6 +1198,15 @@ Closed (vtmux now matches tmux):
 - **tmux:** `server_child_exited` (server.c:491-515) gives a reaped child's status to every pane with that pid, a dead `remain-on-exit` pane included, whose pid the OS may have reused. That pane takes the new process's status, and with `remain-on-exit failed` and an exit of 0, `server_destroy_pane` (server-fn.c:382-399) removes it.
 - **vtmux:** the status goes to every pane with that pid whose process has not exited yet; a dead pane keeps its own.
 - **Evidence:** source reading: a pid can't be made to come back on demand, so no oracle scenario can show it. Most likely on macOS (pid_max 99999) with frequent `#()` jobs.
+
+<a id="d-070"></a>
+### D-070: a failed `-t` window lookup without a session part keeps the session
+
+- **Category:** Deferred: vtmux's target is a winlink of a session, and tmux's half-filled state here has a winlink but no session.
+- **Test:** oracle `target_canfail_ambiguous` (the cases tmux and vtmux agree on, every one with a client or a session part).
+- **tmux:** `display -p -t w.%0` (CMD_FIND_CANFAIL) with a window name `w` that two windows match: `cmd_find_get_window` leaves the first window, then tries `w` as a session, which sets `fs->s` to NULL (cmd-find.c `cmd_find_get_session`). `format_defaults` takes the session from the target client, and with no client attached `#{session_name}` is empty.
+- **vtmux:** the window and pane are tmux's; the session is the current one, as it is in tmux whenever a client is attached to it.
+- **Evidence:** reference tmux 3.8, no client attached: `display -p -t w.%0 '#{window_index} [#{session_name}]'` prints `0 []`, vtmux `0 [foo]`.
 
 ## Adding an entry
 

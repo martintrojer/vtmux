@@ -1,0 +1,22 @@
+# display-message's -t is CMD_FIND_CANFAIL: a target that does not
+# resolve leaves what cmd_find_target had filled in (cmd-find.c). A window
+# name two windows match leaves the first of them
+# (cmd_find_get_window_with_session), and a %N pane outside the window
+# found stays the pane (cmd_find_get_pane_with_window sets fs->wp before
+# it checks the window).
+name = "target_canfail_ambiguous"
+steps = [
+  { run = ["new", "-d", "-s", "foo", "-n", "win", "cat", "-"] },
+  { run = ["neww", "-t", "foo", "-n", "w.x", "cat", "-"] },
+  { run = ["splitw", "-t", "foo:1", "cat", "-"] },
+  { run = ["selectw", "-t", "foo:1"] },
+  { run = ["display", "-p", "-t", "foo:w", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:1.%0", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:1.%9", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:w.x.%0", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:=w", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:*", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "foo:nosuch", "#{window_index} #{pane_id} #{session_name}"] },
+  { run = ["display", "-p", "-t", "w.%0", "#{window_index} #{pane_id}"] },
+  { run = ["display", "-p", "-t", ":w", "#{window_index} #{pane_id}"] },
+]

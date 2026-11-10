@@ -341,6 +341,35 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     None
 }
 
+/// The window a failed name lookup in session `s` leaves in `fs->wl`
+/// (`cmd_find_get_window_with_session`): the exact names, then (unless
+/// `=`) the prefixes and the patterns are tried in turn, and the first of
+/// two matches stays when the second makes the lookup fail.
+fn ambiguous_window(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
+    let session = model.sessions.get(&s)?;
+    let window = part.text.as_str();
+    let exact = |n: &str| n == window;
+    let prefix = |n: &str| n.starts_with(window);
+    let pattern = |n: &str| fnmatch(window, n);
+    let preds: &[&dyn Fn(&str) -> bool] = if part.exact {
+        &[&exact]
+    } else {
+        &[&exact, &prefix, &pattern]
+    };
+    for pred in preds {
+        let mut hits = session
+            .windows
+            .iter()
+            .filter(|(_, w)| model.windows.get(w).is_some_and(|x| pred(&x.name)));
+        match (hits.next(), hits.next()) {
+            (Some((&index, _)), Some(_)) => return Some(Found::from_winlink(model, s, index)),
+            (Some(_), None) => return None,
+            (None, _) => {}
+        }
+    }
+    None
+}
+
 /// `cmd_find_get_window` (cmd-find.c:328-357).
 fn find_window(
     model: &Model,
@@ -505,6 +534,12 @@ pub fn resolve_preferring(
 /// and `format_defaults` completes it from the session. A session that was
 /// found stays, with the window if that was found too; a lookup that ended
 /// by trying the text as a session name (and failed) leaves nothing.
+///
+/// Two tmux quirks are kept: a window name that matches more than one
+/// window leaves the first ([`ambiguous_window`]), and a `%N` pane that is
+/// not in the window found stays as the pane (`cmd_find_get_pane_with_window`
+/// sets `fs->wp` before it checks the window), so `-t s:1.%0` describes
+/// window 1 and pane `%0` wherever that is.
 fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: TargetKind) -> Found {
     let (Some(current), Some(spec)) = (current(model, origin), spec) else {
         return Found::default();
@@ -516,7 +551,17 @@ fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: Targe
         session: s,
         ..Found::default()
     };
-    let window_found = |f: Found| Found { pane: None, ..f };
+    // A `%N` pane part leaves that pane, a failed other one none.
+    let stray = parts
+        .pane
+        .as_ref()
+        .filter(|pp| pp.text.starts_with('%'))
+        .and_then(|pp| pp.text.parse::<PaneId>().ok())
+        .filter(|p| model.panes.contains_key(p));
+    let window_found = |f: Found| Found { pane: stray, ..f };
+    let in_session = |s: SessionId, wp: &Part| {
+        find_window_in(model, s, wp).or_else(|| ambiguous_window(model, s, wp))
+    };
     if let Some(sp) = &parts.session {
         let Some(s) = find_session(model, sp) else {
             return Found::default();
@@ -540,14 +585,22 @@ fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: Targe
         return parts
             .window
             .as_ref()
-            .and_then(|wp| find_window_in(model, s, wp))
+            .and_then(|wp| in_session(s, wp))
             .map_or_else(|| session_only(Some(s)), window_found);
     }
     match (&parts.window, &parts.pane) {
         (Some(wp), _) => match find_window(model, current, wp, parts.window_only, None) {
             Some(f) => window_found(f),
-            None if parts.window_only => session_only(current.session),
-            None => Found::default(),
+            // cmd_find_get_window: an ambiguous name leaves its first
+            // window. Trying the text as a session then clears `fs->s`,
+            // which `format_defaults` takes from the client: the session
+            // stays here, as a winlink has one (with no client, tmux's
+            // session formats are empty).
+            None => match current.session.and_then(|s| ambiguous_window(model, s, wp)) {
+                Some(f) => window_found(f),
+                None if parts.window_only => session_only(current.session),
+                None => Found::default(),
+            },
         },
         (None, Some(pp)) if parts.pane_only && !pp.text.starts_with('%') => Found {
             pane: None,
