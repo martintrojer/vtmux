@@ -30,7 +30,8 @@ enum Mode {
 }
 
 /// `format_strip` (format.c:4800): remove the escaping `#` of `#,` `##` `#{` `#}` `#:`
-/// outside braces, keeping it inside.
+/// outside braces, keeping it inside. A `#` that ends the string is an escape too
+/// (`strchr` finds the terminating NUL).
 fn strip(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -41,7 +42,7 @@ fn strip(s: &str) -> String {
         if b[i] == b'#' && next == Some(b'{') {
             brackets += 1;
         }
-        if b[i] == b'#' && next.is_some_and(|n| b",#{}:".contains(&n)) {
+        if b[i] == b'#' && next.is_none_or(|n| b",#{}:".contains(&n)) {
             if brackets != 0 {
                 out.push(b[i]);
             }
@@ -227,6 +228,9 @@ mod tests {
         assert_eq!(strip("%H#:%M"), "%H:%M");
         assert_eq!(strip("a##b#,c"), "a#b,c");
         assert_eq!(strip("#{a#,b}"), "#{a#,b}");
+        // strchr(",#{}:", s[1]) finds the string's NUL too: a last `#` goes.
+        assert_eq!(strip("x#"), "x");
+        assert_eq!(strip("x##"), "x");
     }
 }
 

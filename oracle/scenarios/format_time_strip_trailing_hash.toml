@@ -1,0 +1,13 @@
+# The strftime format of t/f goes through format_strip (format.c:4800),
+# whose strchr(",#{}:", s[1]) also finds the string's terminating NUL: a
+# `#` that ends the format is dropped like an escape.
+name = "format_time_strip_trailing_hash"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "@v", "x#"] },
+  { run = ["display", "-p", "#{t/f/#{@v}:session_created}|"] },
+  { run = ["set", "-g", "@v", "x##"] },
+  { run = ["display", "-p", "#{t/f/#{@v}:session_created}|"] },
+  { run = ["set", "-g", "@v", "x#y"] },
+  { run = ["display", "-p", "#{t/f/#{@v}:session_created}|"] },
+]

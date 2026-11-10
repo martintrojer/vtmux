@@ -1,0 +1,136 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_time_strip_trailing_hash",
+  "inputs": {
+    "name": "format_time_strip_trailing_hash",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@v",
+          "x#"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{t/f/#{@v}:session_created}|"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@v",
+          "x##"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{t/f/#{@v}:session_created}|"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@v",
+          "x#y"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{t/f/#{@v}:session_created}|"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x#y|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
