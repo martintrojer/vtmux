@@ -1018,13 +1018,20 @@ fn outer_text(cell: &vtmux_vt::Cell) -> std::borrow::Cow<'_, str> {
 /// comes between frames, passthrough or a detach's message, is in none)
 /// and move the cursor. A column past the last one is the terminal's
 /// pending wrap after the row's last cell, which `tty_cursor` leaves alone
-/// (tty.c:2468); writing that cell again puts the terminal there.
+/// (tty.c:2468); writing that cell again puts the terminal there. A
+/// terminal without `am` never has the bottom-right cell written
+/// (`tty_cell`), so there `tty_cursor` clamps to the last column.
 fn place_cursor(out: &mut String, style: &mut Pen, screen: &Snapshot, caps: Caps) {
     let end = |out: &mut String, style: &mut Pen| {
         set_link(out, style, None, caps);
         out.push_str("\x1b[0m");
     };
+    let bottom_right = |y: u16| caps.no_am && y + 1 == screen.rows;
     match screen.cursor {
+        Some((x, y)) if x >= screen.cols && bottom_right(y) => {
+            end(out, style);
+            let _ = write!(out, "\x1b[{};{}H", y + 1, screen.cols);
+        }
         Some((x, y)) if x >= screen.cols => {
             let last = (0..screen.cols)
                 .rev()
@@ -1593,6 +1600,26 @@ mod tests {
         // The pending wrap is put back by writing the last cell again.
         assert!(
             frame.ends_with("\x1b[1;4H \x1b[0m\x1b[?25h\x1b[?2026l"),
+            "{frame:?}"
+        );
+    }
+
+    /// A terminal without `am` never has its bottom-right cell written
+    /// (`tty_cell`, tty.c:2259), not even to put the cursor in the pending
+    /// wrap there: `tty_cursor` clamps it to the last column.
+    #[test]
+    fn a_terminal_without_am_never_gets_the_bottom_right_cell() {
+        let caps = Caps {
+            no_am: true,
+            ..test_caps()
+        };
+        let mut screen = erased(4);
+        screen.cells[3].text = "z".into();
+        screen.cursor = Some((4, 0));
+        let frame = String::from_utf8(Compositor::default().frame(screen, caps)).unwrap();
+        assert!(!frame.contains('z'), "{frame:?}");
+        assert!(
+            frame.ends_with("\x1b[0m\x1b[1;4H\x1b[?25h\x1b[?2026l"),
             "{frame:?}"
         );
     }
