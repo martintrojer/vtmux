@@ -1157,6 +1157,7 @@ impl Server {
                         .map(|(key, red)| snap::RbNode { key, red })
                         .collect(),
                     lock_in_ms: self.lock_timers.get(&s.id).map(|&t| until(now, t)),
+                    control_chars: s.control_chars.clone(),
                 }
             })
             .collect();
@@ -1748,6 +1749,7 @@ impl Server {
                 )
                 .unwrap_or_default(),
                 last_attached: x.last_attached,
+                control_chars: x.control_chars.clone(),
             };
             server.model.by_name.insert(session.name.clone(), id);
             server.model.sessions.insert(id, session);

@@ -314,6 +314,7 @@ impl Server {
             rows: jy.max(1),
             // job_run sets no pixels (job.c:114-115).
             pixels: (0, 0),
+            chars: sys::pty::PaneChars::default(),
         }) else {
             return false;
         };

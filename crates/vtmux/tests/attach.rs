@@ -757,7 +757,7 @@ fn sigtstp_from_outside_leaves_the_client_running() {
 /// the background draws, where the default SIGTTOU would stop it at its
 /// first `tcsetattr`. What is typed meanwhile is the foreground's: vtmux's
 /// client can't read it (EIO) and leaves it, where tmux's server, outside
-/// the session, reads it for the pane (D-069).
+/// the session, reads it for the pane (D-071).
 #[test]
 fn a_background_attach_draws() {
     par::each(&bins(), |bin| {
@@ -1051,6 +1051,55 @@ fn pasted_bytes_reach_the_pane_as_sent() {
         a.keys(b"\x1b[200~q\x1b[201~q,");
         let got = read_until(b",");
         assert_eq!(got, b"a\xe6b\xf0\x9f\x98\x80c\x1b[A.,", "{}", bin.display());
+    });
+}
+
+/// A session keeps the control characters of the terminal that made it
+/// (cmd-new-session.c:191-202, `s->tio`) and every pane of it starts with
+/// them (spawn.c:526-527), but for VERASE, which is the `backspace` key
+/// when that is below 0x7f, else `^?` (spawn.c:528-532).
+#[test]
+fn panes_take_the_session_terminal_control_characters() {
+    par::each(&bins(), |bin| {
+        let w = World::new(bin.clone());
+        let dir = w.home.path();
+        let stty = |name: &str| {
+            format!(
+                "stty -a > {}/{name}.tmp && mv {}/{name}.tmp {}/{name}; exec cat",
+                dir.display(),
+                dir.display(),
+                dir.display()
+            )
+        };
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args([
+            "-c",
+            r#"stty intr '^X' werase '^B' erase '^H'; exec "$0" -L "$1" -f /dev/null new -s a sh -c "$2""#,
+            w.bin.to_str().unwrap(),
+            &w.label,
+            &stty("first"),
+        ]);
+        let mut a = w.spawn_attached(cmd, 40, 10, &[]);
+        let read = |name: &str| {
+            let path = dir.join(name);
+            common::wait(name, || path.exists());
+            std::fs::read_to_string(path).unwrap()
+        };
+        let first = read("first");
+        assert!(first.contains("intr = ^X"), "{first}");
+        assert!(first.contains("werase = ^B"), "{first}");
+        assert!(first.contains("erase = ^?"), "{first}");
+        assert!(w.cli(&["set", "-s", "backspace", "Tab"]).status.success());
+        assert!(
+            w.cli(&["neww", "-d", "sh", "-c", &stty("second")])
+                .status
+                .success()
+        );
+        let second = read("second");
+        assert!(second.contains("intr = ^X"), "{second}");
+        assert!(second.contains("erase = ^I"), "{second}");
+        assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
+        a.exited(0);
     });
 }
 

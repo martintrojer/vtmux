@@ -928,6 +928,19 @@ fn window_cell_pixels_round_trip_and_default_to_zero() {
     );
 }
 
+/// A session's control characters came within v1: they round trip, and a
+/// stream without them (the golden file's) has none, so its panes start
+/// with the terminal's defaults as before.
+#[test]
+fn session_control_chars_round_trip_and_default_to_none() {
+    let mut s = sample();
+    s.sessions[0].control_chars = Some(vec![3, 28, 127, 21]);
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back.sessions[0].control_chars, Some(vec![3, 28, 127, 21]));
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.sessions.iter().all(|x| x.control_chars.is_none()));
+}
+
 /// `Server::start_binary` came within v1, so the golden sample leaves it
 /// empty: it gets its own round trip, and a stream without it decodes
 /// with it empty.

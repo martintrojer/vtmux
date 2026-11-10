@@ -1419,6 +1419,13 @@ fn an_ordinary_attached_client_requires_no_feature() {
     if let Some(bad) = non_utf8_dir(&dir) {
         ok(&mut a, &bad, &["new-window", "-d", "-t", "s", "cat", "-"]);
     }
+    // A session made by an attaching client keeps its terminal's control
+    // characters for its panes (`s->tio`).
+    a.model
+        .sessions
+        .get_mut(&vtmux_core::ids::SessionId(0))
+        .unwrap()
+        .control_chars = Some(vec![3, 28, 127, 21]);
     // A window sized by a client whose terminal gave its cell size in
     // pixels (D-014).
     a.clients.get_mut(&client).unwrap().cell_pixels = (10, 20);
@@ -1459,6 +1466,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert!(!s.panes[0].term.as_ref().unwrap().inband_resize);
     let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
     assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
+    assert_eq!(s.sessions[0].control_chars, Some(vec![3, 28, 127, 21]));
     assert_eq!(s.meta.requires, Vec::<String>::new());
     let rows = a.to_snapshot_with(
         snap::Meta {
@@ -1475,7 +1483,12 @@ fn an_ordinary_attached_client_requires_no_feature() {
         "{copied}"
     );
     assert_eq!(rows.meta.requires, Vec::<String>::new());
-    drop(a);
+    let rebuilt = rebuild(&a, &dir, "b");
+    assert_eq!(
+        rebuilt.model.sessions[&vtmux_core::ids::SessionId(0)].control_chars,
+        Some(vec![3, 28, 127, 21])
+    );
+    drop((a, rebuilt));
     let _ = std::fs::remove_dir_all(dir);
 }
 

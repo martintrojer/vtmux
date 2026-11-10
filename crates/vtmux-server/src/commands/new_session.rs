@@ -230,6 +230,11 @@ pub fn exec(
             .then(|| (x.unwrap_or(cols), y.unwrap_or(rows))),
         cell_pixels: server.new_session_pixels(item.client.filter(|_| !detached)),
         group,
+        // cmd-new-session.c:191-202: the termios of a client that attaches
+        // and has no session yet, read with the nesting check.
+        control_chars: (!detached && !control && !already_attached && tty.is_some())
+            .then(|| server.client_control_chars(item.client?))
+            .flatten(),
     };
     let s = server
         .create_session(spec)

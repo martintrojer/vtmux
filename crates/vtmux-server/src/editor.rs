@@ -126,11 +126,13 @@ impl Server {
         let window_rect = Geometry::new(window.sx(), window.sy(), 0, 0);
         let rect = window.layout.pane_rect(new).unwrap_or(window_rect);
         let session_env = self.model.sessions[&s].env.clone();
+        let session_chars = self.model.sessions[&s].control_chars.clone();
         let spawned = self.spawn_pane(&PaneSpawn {
             pane: new,
             window: w,
             session: s,
             session_env: &session_env,
+            control_chars: session_chars.as_deref(),
             extra_env: &[],
             client_path: None,
             argv: vec![format!("{editor} {}", path.display())],

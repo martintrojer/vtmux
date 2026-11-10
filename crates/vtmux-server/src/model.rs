@@ -61,6 +61,11 @@ pub struct Session {
     /// (`#{session_last_attached}`): set when a client attaches or
     /// switches to it (server-client.c:470); `None` until then.
     pub last_attached: Option<i64>,
+    /// The control characters (`c_cc`) of the terminal of the client that
+    /// made it attached (`s->tio`, cmd-new-session.c:191-202), which every
+    /// pane of it starts with (spawn.c:526-527); `None` for a session made
+    /// detached, by a control client or by an attached one.
+    pub control_chars: Option<Vec<u8>>,
 }
 
 impl Session {

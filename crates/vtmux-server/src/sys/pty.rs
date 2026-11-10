@@ -14,7 +14,7 @@ use rustix::process::Pid;
 pub enum Program {
     /// A pane's command words: empty runs a login shell, one word runs
     /// `<shell> -c <word>`, more are `execvp`ed directly (spawn.c:547-574).
-    /// The terminal gets tmux's erase character and `IUTF8`.
+    /// The terminal gets [`SpawnSpec::chars`] and `IUTF8`.
     Pane(Vec<String>),
     /// A job's shell command: `<shell> -c <command>`, argv[0] the shell's
     /// basename (job.c:204-208). The terminal is as `forkpty` made it.
@@ -40,6 +40,39 @@ pub struct SpawnSpec {
     /// its window's cell size (spawn.c:451-452), 0 for a popup (job.c:
     /// 114-115).
     pub pixels: (u16, u16),
+    /// A pane terminal's control characters; a job's are `forkpty`'s.
+    pub chars: PaneChars,
+}
+
+/// A pane terminal's control characters (spawn.c:520-532).
+#[derive(Clone, Debug)]
+pub struct PaneChars {
+    /// The session's (`s->tio`): the `c_cc` of the terminal that made it
+    /// ([`control_chars`]), used when it is this platform's size.
+    pub session: Option<Vec<u8>>,
+    /// VERASE: the `backspace` key when it is below 0x7f, else `^?`.
+    pub erase: u8,
+}
+
+impl Default for PaneChars {
+    fn default() -> Self {
+        Self {
+            session: None,
+            erase: 0o177,
+        }
+    }
+}
+
+/// The control characters (`c_cc`) of the terminal on `fd`, as the
+/// platform lays them out; `None` when it is not a terminal.
+pub fn control_chars(fd: impl std::os::fd::AsFd) -> Option<Vec<u8>> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: tcgetattr writes a termios into the zeroed local, which is
+    // a plain C struct; the descriptor is borrowed for the call.
+    unsafe {
+        let mut tio: libc::termios = std::mem::zeroed();
+        (libc::tcgetattr(fd.as_fd().as_raw_fd(), &raw mut tio) == 0).then(|| tio.c_cc.to_vec())
+    }
 }
 
 /// A running pane process.
@@ -191,6 +224,13 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
                 sh_argv: &mut sh_argv,
                 direct,
                 pane,
+                chars: (
+                    spec.chars
+                        .session
+                        .as_deref()
+                        .filter(|cc| cc.len() == libc::NCCS),
+                    spec.chars.erase,
+                ),
                 fd_limit,
             })
         }
@@ -296,6 +336,8 @@ struct Child<'a> {
     /// A pane's terminal settings (spawn.c:524-538); a job keeps
     /// `forkpty`'s.
     pane: bool,
+    /// The session's `c_cc`, of this platform's size, and VERASE.
+    chars: (Option<&'a [u8]>, u8),
     fd_limit: libc::c_int,
 }
 
@@ -316,13 +358,18 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
                 break;
             }
         }
-        // VERASE is tmux's backspace (\177) and IUTF8 is on (spawn.c:524-538).
+        // The session's control characters, VERASE the backspace key, and
+        // IUTF8 on (spawn.c:520-538).
         if c.pane {
             let mut tio: libc::termios = std::mem::zeroed();
             if libc::tcgetattr(0, &raw mut tio) != 0 {
                 libc::_exit(1);
             }
-            tio.c_cc[libc::VERASE] = 0o177;
+            let (session, erase) = c.chars;
+            if let Some(cc) = session {
+                tio.c_cc.copy_from_slice(cc);
+            }
+            tio.c_cc[libc::VERASE] = erase;
             tio.c_iflag |= libc::IUTF8;
             if libc::tcsetattr(0, libc::TCSANOW, &raw const tio) != 0 {
                 libc::_exit(1);
@@ -646,6 +693,7 @@ mod tests {
             cols: 18,
             rows: 4,
             pixels: (0, 0),
+            chars: PaneChars::default(),
         };
         let out = output(&spec(Program::Command("echo $0; stty size; pwd".into())));
         assert_eq!(out, "sh\r\n4 18\r\n/\r\n");
@@ -672,6 +720,7 @@ mod tests {
             cols: 18,
             rows: 4,
             pixels: (180, 80),
+            chars: PaneChars::default(),
         })
         .expect("spawn");
         let size = || {
@@ -704,6 +753,7 @@ mod tests {
             cols: 20,
             rows: 4,
             pixels: (0, 0),
+            chars: PaneChars::default(),
         };
         let spawned = spawn(&spec).expect("spawn");
         let flags = rustix::io::fcntl_getfd(&spawned.master).unwrap();

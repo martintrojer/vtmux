@@ -64,8 +64,11 @@
 //!   `pixels`: the terminal's `ws_xpixel` and `ws_ypixel`, u32 each,
 //!   written only when not both 0; from protocol 11, `upgrade` bit 1:
 //!   the client asks for the shell to run `-c` with (tmux's `MSG_SHELL`),
-//!   answered with an [`ServerMsg::Exec`] whose `command` is empty. A `Hello`
-//!   whose fields are all unset has an empty `ext`, as before them.
+//!   answered with an [`ServerMsg::Exec`] whose `command` is empty; then
+//!   `control_chars` bytes: the terminal's `c_cc` array as the platform
+//!   lays it out, written only when not empty, and `pixels` before it then
+//!   even when both 0. A `Hello` whose fields are all unset has an empty
+//!   `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
 //!   path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own, with the
@@ -232,6 +235,10 @@ pub struct HelloExt {
     /// server answers with the shell to run it with
     /// (`server_client_dispatch_shell`).
     pub shell: bool,
+    /// The terminal's control characters (`c_cc` of its termios, in the
+    /// platform's layout), empty without one: a session made by an attaching
+    /// client keeps them for its panes (cmd-new-session.c:191-202).
+    pub control_chars: Vec<u8>,
 }
 
 impl HelloExt {
@@ -240,8 +247,18 @@ impl HelloExt {
             0
         } else {
             1 + option_len(self.reattach.as_ref(), |t| 4 + t.len())
-                + if self.pixels == (0, 0) { 0 } else { 8 }
+                + if self.writes_pixels() { 8 } else { 0 }
+                + if self.control_chars.is_empty() {
+                    0
+                } else {
+                    4 + self.control_chars.len()
+                }
         }
+    }
+
+    /// `pixels` is written when set, and before a field after it.
+    fn writes_pixels(&self) -> bool {
+        self.pixels != (0, 0) || !self.control_chars.is_empty()
     }
 
     fn write(&self, out: &mut Vec<u8>) {
@@ -252,9 +269,12 @@ impl HelloExt {
         put_option(out, self.reattach.as_ref(), |o, t| {
             put_bytes(o, t.as_bytes());
         });
-        if self.pixels != (0, 0) {
+        if self.writes_pixels() {
             put_u32(out, self.pixels.0);
             put_u32(out, self.pixels.1);
+        }
+        if !self.control_chars.is_empty() {
+            put_bytes(out, &self.control_chars);
         }
     }
 
@@ -282,11 +302,17 @@ impl HelloExt {
         } else {
             (r.u32()?, r.u32()?)
         };
+        let control_chars = if r.buf.is_empty() {
+            Vec::new()
+        } else {
+            r.bytes()?
+        };
         Ok(Self {
             follows_upgrade,
             reattach,
             pixels,
             shell,
+            control_chars,
         })
     }
 }
@@ -342,6 +368,7 @@ impl Hello {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // one Hello a connection, matched by value
 pub enum ClientMsg {
     Hello(Hello),
     /// Terminal input bytes from an attached client.
@@ -1807,7 +1834,7 @@ mod tests {
         let frame = hello_golden_with(
             9,
             0,
-            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00later fields",
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00later fields",
             b"",
         );
         assert_eq!(
@@ -1824,9 +1851,11 @@ mod tests {
             reattach: Some("a1B2c3D4e5F6g7H8".into()),
             pixels: (800, 480),
             shell: true,
+            control_chars: b"\x03\x1c".to_vec(),
         };
         let mut ext = b"\x07\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
         ext.extend_from_slice(b"\x20\x03\x00\x00\xe0\x01\x00\x00");
+        ext.extend_from_slice(b"\x02\x00\x00\x00\x03\x1c");
         ext.extend_from_slice(b"later");
         let frame = hello_golden_with(9, 0, &ext, b"");
         assert_eq!(
@@ -1862,6 +1891,7 @@ mod tests {
                     reattach: None,
                     pixels: (0, 0),
                     shell: false,
+                    control_chars: Vec::new(),
                 },
                 b"\x01\x00",
             ),
@@ -1871,6 +1901,7 @@ mod tests {
                     reattach: Some("0123456789abcdef".into()),
                     pixels: (0, 0),
                     shell: false,
+                    control_chars: Vec::new(),
                 },
                 b"\x01\x01\x10\x00\x00\x000123456789abcdef",
             ),
@@ -1880,6 +1911,7 @@ mod tests {
                     reattach: None,
                     pixels: (800, 480),
                     shell: false,
+                    control_chars: Vec::new(),
                 },
                 b"\x00\x00\x20\x03\x00\x00\xe0\x01\x00\x00",
             ),
@@ -1889,8 +1921,19 @@ mod tests {
                     reattach: None,
                     pixels: (0, 0),
                     shell: true,
+                    control_chars: Vec::new(),
                 },
                 b"\x02\x00",
+            ),
+            (
+                HelloExt {
+                    follows_upgrade: false,
+                    reattach: None,
+                    pixels: (0, 0),
+                    shell: false,
+                    control_chars: b"\x03\x7f".to_vec(),
+                },
+                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x03\x7f",
             ),
         ] {
             let m = with(ext);

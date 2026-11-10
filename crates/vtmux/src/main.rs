@@ -131,6 +131,13 @@ fn tty_pixels() -> (u32, u32) {
         .map_or((0, 0), |w| (u32::from(w.ws_xpixel), u32::from(w.ws_ypixel)))
 }
 
+/// The terminal's control characters (`c_cc`), empty when there is no
+/// terminal: tmux's server reads them itself (cmd-new-session.c:200,
+/// `tcgetattr(c->fd)`).
+fn tty_control_chars() -> Vec<u8> {
+    vtmux_server::sys::pty::control_chars(io::stdin()).unwrap_or_default()
+}
+
 /// The environment as UTF-8 pairs; others are skipped.
 fn client_env() -> Vec<(String, String)> {
     std::env::vars_os()
@@ -389,6 +396,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             reattach: None,
             pixels: tty_pixels(),
             shell: cli.shell_command.is_some(),
+            control_chars: tty_control_chars(),
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
@@ -465,6 +473,7 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
             reattach: Some(token.to_owned()),
             pixels: tty_pixels(),
             shell: false,
+            control_chars: tty_control_chars(),
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {

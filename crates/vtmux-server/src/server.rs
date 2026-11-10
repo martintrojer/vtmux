@@ -440,6 +440,8 @@ pub struct PaneSpawn<'a> {
     /// The session whose environment, options and ID the pane gets.
     pub session: SessionId,
     pub session_env: &'a Environ,
+    /// The session's control characters ([`Session::control_chars`]).
+    pub control_chars: Option<&'a [u8]>,
     /// `-e NAME=value` for this pane only (split-window).
     pub extra_env: &'a [String],
     /// The command client's `PATH` (spawn.c:418-424).
@@ -524,6 +526,9 @@ pub struct NewSession {
     pub cell_pixels: (u32, u32),
     /// `-t`: the session group to join.
     pub group: Option<NewGroup>,
+    /// The attaching client's terminal control characters
+    /// ([`Session::control_chars`]).
+    pub control_chars: Option<Vec<u8>>,
 }
 
 /// The group a new session joins (cmd-new-session.c:143-160, 313-327).
@@ -4826,26 +4831,29 @@ impl Server {
             )
     }
 
+    /// `session_create` (session.c:135-147): a given name keeps one ID;
+    /// otherwise the ID, after the group's name and a dash, with a new ID
+    /// for each name already taken.
+    fn new_session_id(&mut self, spec: &NewSession) -> (SessionId, String) {
+        let prefix = spec.group.as_ref().map(|g| g.name.as_str());
+        if let Some(n) = spec.name.clone() {
+            return (self.model.session_ids.allocate(), n);
+        }
+        loop {
+            let id = self.model.session_ids.allocate();
+            let name = match prefix {
+                Some(p) => format!("{p}-{}", id.0),
+                None => id.0.to_string(),
+            };
+            if self.model.session_named(&name).is_none() {
+                return (id, name);
+            }
+        }
+    }
+
     /// Create a session with one window and one pane.
     pub fn create_session(&mut self, spec: NewSession) -> io::Result<SessionId> {
-        let prefix = spec.group.as_ref().map(|g| g.name.as_str());
-        // session_create (session.c:135-147): a given name keeps one ID;
-        // otherwise the ID, after the group's name and a dash, with a new
-        // ID for each name already taken.
-        let (id, name) = if let Some(n) = spec.name.clone() {
-            (self.model.session_ids.allocate(), n)
-        } else {
-            loop {
-                let id = self.model.session_ids.allocate();
-                let name = match prefix {
-                    Some(p) => format!("{p}-{}", id.0),
-                    None => id.0.to_string(),
-                };
-                if self.model.session_named(&name).is_none() {
-                    break (id, name);
-                }
-            }
-        };
+        let (id, name) = self.new_session_id(&spec);
         // cmd-new-session.c:282-283: update-environment from the global
         // session options, then `-e`.
         let mut env = Environ::default();
@@ -4870,6 +4878,7 @@ impl Server {
             window: window_id,
             session: id,
             session_env: &env,
+            control_chars: spec.control_chars.as_deref(),
             extra_env: &[],
             client_path: client_path(&spec.client_env),
             argv: spec.argv,
@@ -4914,6 +4923,7 @@ impl Server {
                 t
             },
             last_attached: None,
+            control_chars: spec.control_chars,
         });
         if let Some((x, y)) = spec.default_size {
             // cmd-new-session.c:274-280: -x/-y become the session's
@@ -5095,12 +5105,14 @@ impl Server {
         let window_id = self.model.window_ids.allocate();
         let pane_id = self.model.pane_ids.allocate();
         let session_env = self.model.sessions[&s].env.clone();
+        let session_chars = self.model.sessions[&s].control_chars.clone();
         let pane = self
             .spawn_pane(&PaneSpawn {
                 pane: pane_id,
                 window: window_id,
                 session: s,
                 session_env: &session_env,
+                control_chars: session_chars.as_deref(),
                 extra_env: nw.extra_env,
                 client_path: nw.client_path,
                 argv: nw.argv.clone(),
@@ -5207,6 +5219,31 @@ impl Server {
         term
     }
 
+    /// The control characters of client `c`'s terminal (`tcgetattr` on
+    /// its descriptor), as its `Hello` gave them.
+    pub(crate) fn client_control_chars(&self, c: ClientId) -> Option<Vec<u8>> {
+        let hello = self.clients.get(&c)?.hello.as_ref()?;
+        Some(hello.ext.control_chars.clone()).filter(|cc| !cc.is_empty())
+    }
+
+    /// A pane terminal's VERASE (spawn.c:528-532): the server's `backspace`
+    /// key when it is below 0x7f (a character key without modifiers), else
+    /// `^?`.
+    fn erase_char(&self) -> u8 {
+        match self
+            .model
+            .options
+            .get(TreeId::Server, "backspace")
+            .map(|e| &e.value)
+        {
+            Some(OptionValue::Single(Value::Key(k))) => {
+                u8::try_from(k.code()).ok().filter(|&b| b < 0x7f)
+            }
+            _ => None,
+        }
+        .unwrap_or(0o177)
+    }
+
     /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
     /// (`environ_for_session` plus the spawn additions), the shell from
     /// `default-shell`, the PTY sized to `rect` (in pixels too), and a terminal whose title
@@ -5252,6 +5289,10 @@ impl Server {
                 cols,
                 rows,
                 pixels: crate::model::pty_pixels((cols, rows), ps.cell_pixels),
+                chars: sys::pty::PaneChars {
+                    session: ps.control_chars.map(<[u8]>::to_vec),
+                    erase: self.erase_char(),
+                },
             })?)
         };
         let history_limit =
@@ -7226,6 +7267,7 @@ mod tests {
                 default_size: None,
                 cell_pixels: (0, 0),
                 group: None,
+                control_chars: None,
             })
             .unwrap();
         let p = server.model.current_of(s).unwrap().2;

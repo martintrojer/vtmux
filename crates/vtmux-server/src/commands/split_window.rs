@@ -272,11 +272,13 @@ pub fn exec(
     };
     let extra_env: Vec<String> = args.values('e').map(str::to_owned).collect();
     let session_env = server.model.sessions[&s].env.clone();
+    let session_chars = server.model.sessions[&s].control_chars.clone();
     let spawned = server.spawn_pane(&PaneSpawn {
         pane: new,
         window: w,
         session: s,
         session_env: &session_env,
+        control_chars: session_chars.as_deref(),
         extra_env: &extra_env,
         client_path: item.client.and(client_path(&item.env)),
         argv: args

@@ -348,6 +348,10 @@ record! {
         /// `cwd`'s bytes when it is not UTF-8 (`cwd` has it lossily, as a
         /// reader before this field takes it). Ignorable.
         16 => opt cwd_bytes: Option<Vec<u8>>,
+        /// The `c_cc` of the terminal that made it, which its panes start
+        /// with (`s->tio`), in the platform's layout. Ignorable: a reader
+        /// before drops it, and its panes start with the defaults.
+        17 => opt control_chars: Option<Vec<u8>>,
     }
 }
 
@@ -1220,6 +1224,7 @@ pub(crate) mod tests {
             // Added within v1: out of the golden sample
             // (a_path_that_is_not_utf8_round_trips).
             cwd_bytes: None,
+            control_chars: None,
         }
     }
 

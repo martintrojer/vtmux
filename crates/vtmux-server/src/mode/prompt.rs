@@ -191,6 +191,7 @@ pub(crate) mod tests {
                 default_size: None,
                 cell_pixels: (0, 0),
                 group: None,
+                control_chars: None,
             })
             .unwrap();
         let p = server.model.current_of(s).unwrap().2;

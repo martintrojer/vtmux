@@ -206,16 +206,16 @@ fn a_hello_of_another_version_that_does_not_decode_gets_the_mismatch() {
 
 /// A later version's Hello fields go in the extension area after the
 /// ones this build knows (none set here: `upgrade` 0, no `reattach`, no
-/// `pixels`), and this server skips them: such a control client is
-/// served, and so is a command client of this version.
+/// `pixels`, no `control_chars`), and this server skips them: such a
+/// control client is served, and so is a command client of this version.
 #[test]
 fn a_hello_with_a_later_extension_area_is_served() {
     let server = Server::start();
     let with_ext = |msg: &ClientMsg| {
         reframe(&protocol::encode(msg).unwrap(), |p| {
             p.truncate(p.len() - 4);
-            p.extend_from_slice(&15u32.to_le_bytes());
-            p.extend_from_slice(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00later");
+            p.extend_from_slice(&19u32.to_le_bytes());
+            p.extend_from_slice(b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00later");
         })
     };
     let mut stream = server.connect();
