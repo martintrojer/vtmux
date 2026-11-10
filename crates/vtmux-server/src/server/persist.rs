@@ -500,6 +500,8 @@ impl Server {
             p.pipe = None;
             p.search = None;
             p.environment.clear();
+            // Typed text, for a program that is gone.
+            p.input_queued.clear();
             // A restored pane is dead, its scrollbar hidden.
             p.scrollbar_visible = false;
             p.scrollbar_hover = false;

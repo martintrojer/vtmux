@@ -1229,6 +1229,11 @@ impl Server {
                     shell: p.shell.to_string_lossy().into_owned(),
                     cwd: p.cwd.to_string_lossy().into_owned(),
                     cwd_bytes: path_bytes(&p.cwd),
+                    input_queued: p
+                        .io
+                        .as_ref()
+                        .map(|io| io.queued().to_vec())
+                        .unwrap_or_default(),
                     environment: Vec::new(),
                     empty: p.empty,
                     exited: p.exited,
@@ -1874,7 +1879,8 @@ impl Server {
         let id = PaneId(x.id);
         let io = match fds(&snap::Role::PanePty(x.id)) {
             Some(fd) => {
-                let io = PaneIo::new(fd);
+                let mut io = PaneIo::new(fd);
+                io.queue(&x.input_queued);
                 io.register(self.poll.registry(), Token(PANE_BASE + id.0 as usize))?;
                 Some(io)
             }
@@ -2163,7 +2169,8 @@ impl Server {
         if let Some(p) = &x.popup {
             let io = match popup_fd {
                 Some(fd) => {
-                    let io = PaneIo::new(fd);
+                    let mut io = PaneIo::new(fd);
+                    io.queue(&p.input_queued);
                     io.register(
                         self.poll.registry(),
                         Token(crate::popup::POPUP_BASE + x.id as usize),

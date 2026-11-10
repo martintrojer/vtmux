@@ -678,6 +678,10 @@ record! {
         45 => opt last_output_time: Option<i64>,
         /// `cwd`'s bytes when it is not UTF-8, as for [`Session`].
         46 => opt cwd_bytes: Option<Vec<u8>>,
+        /// Input for the program its PTY has not taken yet (keys, a paste
+        /// it has not read). Ignorable: a reader before drops it, as
+        /// every build did.
+        47 => one input_queued: Vec<u8>,
     }
 }
 
@@ -793,6 +797,8 @@ record! {
         19 => one status_code: i32,
         /// The client whose command opened it.
         20 => opt caller: Option<u32>,
+        /// Input its PTY has not taken yet, as for [`Pane`].
+        21 => one input_queued: Vec<u8>,
     }
 }
 
@@ -1433,6 +1439,8 @@ pub(crate) mod tests {
             kitty_owner_alternate: None,
             // Added within v1 too (a_path_that_is_not_utf8_round_trips).
             cwd_bytes: None,
+            // Added within v1 too (input_not_yet_written_round_trips).
+            input_queued: Vec::new(),
         }
     }
 
@@ -1548,6 +1556,9 @@ pub(crate) mod tests {
                 any_key: true,
                 status_code: 129,
                 caller: Some(7),
+                // Added within v1: out of the golden sample
+                // (input_not_yet_written_round_trips).
+                input_queued: Vec::new(),
             }),
             token: 0xdead_beef,
             fg: Some(Rgb { r: 1, g: 2, b: 3 }),

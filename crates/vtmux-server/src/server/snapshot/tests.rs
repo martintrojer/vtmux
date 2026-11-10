@@ -1397,10 +1397,20 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // rows form also carries the copy the build before shows there.
     a.pane_input(vtmux_core::ids::PaneId(0), &b"line\r\n".repeat(200), false);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?1049hvim", false);
+    // Keys its program has not read yet (`input_queued`).
+    a.model
+        .panes
+        .get_mut(&PaneId(0))
+        .unwrap()
+        .io
+        .as_mut()
+        .unwrap()
+        .queue(b"typed ahead");
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
     });
+    assert_eq!(s.panes[0].input_queued, b"typed ahead");
     let [c] = &s.clients[..] else {
         panic!("{:?}", s.clients)
     };

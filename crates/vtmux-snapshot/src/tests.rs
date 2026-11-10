@@ -284,6 +284,25 @@ fn a_path_that_is_not_utf8_round_trips() {
     assert!(golden.clients.iter().all(|x| x.cwd_bytes.is_none()));
 }
 
+/// A pane's and a popup's input their PTY has not taken yet round-trip;
+/// the golden stream has none.
+#[test]
+fn input_not_yet_written_round_trips() {
+    let mut s = sample();
+    s.panes[0].input_queued = b"a paste not read yet".to_vec();
+    s.clients[0].popup.as_mut().unwrap().input_queued = b"keys".to_vec();
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.panes.iter().all(|p| p.input_queued.is_empty()));
+    assert!(
+        golden
+            .clients
+            .iter()
+            .filter_map(|c| c.popup.as_ref())
+            .all(|p| p.input_queued.is_empty())
+    );
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();

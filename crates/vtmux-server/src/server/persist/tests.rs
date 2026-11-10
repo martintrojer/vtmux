@@ -76,8 +76,8 @@ fn shows_secret(s: &snap::Snapshot) -> bool {
 
 /// Plant typed text everywhere a snapshot keeps it, each its own word:
 /// the environment (global and session), the message log (every command
-/// line), prompt history (command and search), the pane's last search
-/// and a title a program set.
+/// line), prompt history (command and search), the pane's last search,
+/// a title a program set and keys its program has not read yet.
 fn plant_typed(server: &mut Server, dir: &std::path::Path) {
     for words in [
         &["set-environment", "-g", "MY_API_TOKEN", "ENVSECRET"][..],
@@ -107,6 +107,9 @@ fn plant_typed(server: &mut Server, dir: &std::path::Path) {
     let pane = server.model.panes.get_mut(&PaneId(1)).unwrap();
     pane.search = Some(("SEARCHSECRET".into(), false));
     pane.term.feed(b"\x1b]2;TITLESECRET\x07");
+    if let Some(io) = pane.io.as_mut() {
+        io.queue(b"QUEUEDSECRET");
+    }
 }
 
 /// Every string field of `s`, via its encoding: whether `word` is in it.
@@ -133,6 +136,7 @@ fn a_layout_checkpoint_holds_no_screen_and_nothing_of_the_process() {
         "SEARCHHISTSECRET",
         "SEARCHSECRET",
         "TITLESECRET",
+        "QUEUEDSECRET",
         "a buffer",
     ];
     for word in typed {

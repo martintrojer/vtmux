@@ -52,11 +52,12 @@ impl PaneIo {
     }
 
     pub fn register(&self, registry: &Registry, token: Token) -> io::Result<()> {
-        registry.register(
-            &mut SourceFd(&self.master.as_raw_fd()),
-            token,
-            Interest::READABLE,
-        )?;
+        let interest = if self.out.is_empty() {
+            Interest::READABLE
+        } else {
+            Interest::READABLE | Interest::WRITABLE
+        };
+        registry.register(&mut SourceFd(&self.master.as_raw_fd()), token, interest)?;
         self.registered.set(true);
         Ok(())
     }
@@ -113,6 +114,19 @@ impl PaneIo {
                 Err(_) => return ReadResult::Closed,
             }
         }
+    }
+
+    /// Bytes queued that the PTY has not taken yet (keys, a paste the
+    /// program has not read): a live upgrade carries them.
+    #[must_use]
+    pub fn queued(&self) -> &[u8] {
+        &self.out
+    }
+
+    /// Queue bytes to write once the PTY takes them, without trying now
+    /// (a live upgrade's carried queue, written from the loop).
+    pub fn queue(&mut self, data: &[u8]) {
+        self.out.extend_from_slice(data);
     }
 
     /// Queue bytes and try to write them now.

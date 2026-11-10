@@ -8,7 +8,7 @@
 //! (a listing, a line, bytes on a terminal), never a fixed sleep.
 mod common;
 
-use common::wait;
+use common::{wait, wait_for};
 
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
@@ -686,6 +686,39 @@ fn a_server_execs_itself_and_everything_carries_on() {
     control.send("display -p '#{session_name}'");
     wait("a command over control mode", || control.has("b"));
     world.echo("a:w2.1", "split");
+}
+
+/// Input a pane's program has not read yet, which vtmux holds once the
+/// PTY takes no more (a 200,000-byte paste into a raw-mode program that
+/// reads nothing until told), reaches it after an upgrade, every byte.
+/// The program waits for a file, not `tmux wait-for`: a client in flight
+/// holds an upgrade.
+#[test]
+fn input_a_pane_has_not_read_yet_survives_an_upgrade() {
+    let world = World::new();
+    let home = world.home.path();
+    let (go, got, paste) = (home.join("go"), home.join("got"), home.join("paste"));
+    let script = format!(
+        "stty raw -echo; tmux wait-for -S ready; while [ ! -e '{}' ]; do sleep 1; done; \
+         exec head -c 200000 > '{}'",
+        go.display(),
+        got.display()
+    );
+    world.run(&[
+        "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", &script,
+    ]);
+    world.run(&["new", "-d", "-s", "b", "-n", "w", "cat", "-"]);
+    world.run(&["wait-for", "ready"]);
+    std::fs::write(&paste, vec![b'x'; 200_000]).unwrap();
+    world.run(&["load-buffer", paste.to_str().unwrap()]);
+    world.run(&["paste-buffer", "-t", "a:w"]);
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+    std::fs::write(&go, b"").unwrap();
+    wait_for(
+        "every byte of the paste",
+        || std::fs::metadata(&got).map_or(0, |m| m.len()),
+        |&n| n == 200_000,
+    );
 }
 
 /// D29, live upgrade (spec, *Protocol extensions (D28)*): a pane granted

@@ -162,6 +162,11 @@ impl Popup {
             any_key: self.rules.any_key,
             status_code: self.status,
             caller: self.caller.map(|c| u32::try_from(c.0).unwrap_or(u32::MAX)),
+            input_queued: self
+                .io
+                .as_ref()
+                .map(|io| io.queued().to_vec())
+                .unwrap_or_default(),
         })
     }
 
