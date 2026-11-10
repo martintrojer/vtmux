@@ -2574,6 +2574,32 @@ mod tests {
         LOOKUPS.with(std::cell::Cell::get)
     }
 
+    /// `capture-pane -a` once the alternate screen has gone: tmux frees
+    /// `saved_grid` as it leaves (screen.c `screen_alternate_off`), so
+    /// there is nothing to capture (cmd-capture-pane.c
+    /// `cmd_capture_pane_history`: "no alternate screen"), with history
+    /// or without. Through a state export too.
+    #[test]
+    fn the_saved_screen_goes_with_the_alternate_screen() {
+        for limit in [0, 100] {
+            for import in [false, true] {
+                let mut t = PaneTerm::new(20, 4, limit);
+                t.feed(b"primary\x1b[?1049hALT");
+                if import {
+                    t = PaneTerm::import_state(&t.export_state()).expect("import");
+                }
+                assert!(capture_alternate(&t, CaptureOpts::default()).is_some());
+                t.feed(b"\x1b[?1049lchanged");
+                assert!(!t.alternate_on());
+                assert_eq!(
+                    capture_alternate(&t, CaptureOpts::default()),
+                    None,
+                    "limit {limit}, import {import}"
+                );
+            }
+        }
+    }
+
     /// A pane whose history spans many Ghostty pages, with a line of each
     /// kind a row read has to get right every so often: styles, a wide
     /// character, a cluster, a hyperlink, a tab, a coloured erase, a line

@@ -1,0 +1,228 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "alt_screen_saved_no_history",
+  "inputs": {
+    "name": "alt_screen_saved_no_history",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "init",
+          "-n",
+          "w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "history-limit",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "nh",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'primary\\015\\012'; printf '\\033[?1049hALT'; tmux wait-for -S nh-p0; tmux wait-for nh-go1; printf '\\033[?1049lchanged'; tmux wait-for -S nh-p1; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "nh-p0"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "nh:",
+          "#{history_size} #{alternate_on}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-t",
+          "nh:"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "nh-go1"
+        ]
+      },
+      {
+        "wait_for": "nh-p1"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "nh:",
+          "#{history_size} #{alternate_on}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-t",
+          "nh:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-q",
+          "-t",
+          "nh:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "nh:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "primary\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no alternate screen\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "primary\nchanged\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
