@@ -200,9 +200,10 @@ impl Compositor {
     /// this terminal shows what `leader`'s showed before that frame and the
     /// frame would force the same cells: this compositor's frame of that
     /// screen is then `leader`'s, as a frame is a function of the screen
-    /// the terminal shows, the new one, the forced cells and the caps.
+    /// the terminal shows, the new one, the forced cells, the caps and the
+    /// codes it hides and shows the cursor with.
     fn after<'a>(&self, (leader, forced, frame): Shown<'a>) -> Option<(&'a Snapshot, &'a [u64])> {
-        if self.forced != forced || self.blocked {
+        if self.forced != forced || self.blocked || self.cursor_codes != leader.cursor_codes {
             return None;
         }
         // frame_tagged keeps an unchanged screen as the spare, a changed
@@ -357,5 +358,27 @@ mod tests {
         );
         let mut own = fresh.clone();
         assert_ne!(own.frame(screen, caps()), b"", "its own is whole");
+    }
+
+    /// A frame hides and shows the cursor with its terminal's `civis` and
+    /// `cnorm`, which caps do not carry: a terminal with other codes (the
+    /// Linux console's, or a `terminal-overrides` entry's) never takes
+    /// another's frame, whatever its caps.
+    #[test]
+    fn a_frame_is_shared_only_with_the_same_cursor_codes() {
+        let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
+        pane.feed(b"abc");
+        let screen = vtmux_vt::snapshot(&pane);
+        let tags = vec![0; 2];
+        let mut leader = Compositor::default();
+        let frame = leader.frame(screen.clone(), caps());
+        let same = Compositor::default();
+        let shown = (&leader, &[][..], &frame[..]);
+        assert!(same.writes_as(shown, &screen, &tags));
+        let console = vtmux_core::term_features::Term::open("linux", &[], None, &[], &[]).unwrap();
+        let mut other = Compositor::default();
+        other.set_cursor_codes(super::super::CursorCodes::from_term(&console));
+        assert!(!other.writes_as(shown, &screen, &tags));
+        assert_ne!(other.frame(screen, caps()), frame, "its own hides with ?1c");
     }
 }
