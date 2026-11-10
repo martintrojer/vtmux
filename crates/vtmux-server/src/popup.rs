@@ -585,6 +585,13 @@ impl Server {
         }
     }
 
+    /// Whether `pid` is an open popup's process.
+    pub(crate) fn is_popup(&self, pid: i32) -> bool {
+        self.clients
+            .values()
+            .any(|c| c.popup.as_ref().is_some_and(|p| p.pid == Some(pid)))
+    }
+
     /// `job_check_died` for a popup's process: `true` when `pid` was one
     /// (an open popup's, or a closed one's not yet reaped).
     pub(crate) fn popup_died(&mut self, pid: i32, status: JobStatus) -> bool {

@@ -1,0 +1,16 @@
+# server_child_stopped (server.c:519-536): a pane's process stopped by a
+# signal (here it stops itself) is sent SIGCONT, so it goes on; so is a
+# popup's (job_check_died, job.c:368-373: a PTY job leads its process
+# group), whose `display-popup -E` returns once it has gone on to exit.
+# Before, both stayed stopped until someone sent SIGCONT by hand.
+name = "stopped_child_continued"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "kill -STOP $$; echo resumed; tmux wait-for -S up; exec cat -"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { wait_for = "up" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { attach = { session = "a" } },
+  { run = ["display-popup", "-E", "kill -STOP $$; exit 3"] },
+  { run = ["kill-server"] },
+]

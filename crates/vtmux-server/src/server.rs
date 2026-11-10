@@ -6090,20 +6090,14 @@ impl Server {
         }
     }
 
-    /// `server_child_signal`: reap every exited child; a pane whose process
-    /// is gone and whose PTY is drained is destroyed.
+    /// `server_child_signal`: reap every exited child, and continue every
+    /// stopped one; a pane whose process is gone and whose PTY is drained
+    /// is destroyed.
     fn reap_children(&mut self) {
         loop {
             match self.reap_one() {
-                Some((pid, status)) => {
-                    if status.stopped() {
-                        continue;
-                    }
-                    let raw = pid.as_raw_nonzero().get();
-                    let job_status = match (status.exit_status(), status.terminating_signal()) {
-                        (_, Some(sig)) => crate::jobs::JobStatus::Signaled(sig),
-                        (code, None) => crate::jobs::JobStatus::Exited(code.unwrap_or(0)),
-                    };
+                Some((raw, Reaped::Stopped(sig))) => self.child_stopped(raw, sig),
+                Some((raw, Reaped::Ended(job_status))) => {
                     if self.job_died(raw, job_status) || self.popup_died(raw, job_status) {
                         continue;
                     }
@@ -6145,15 +6139,44 @@ impl Server {
         }
     }
 
-    /// One exited child reaped, any but an upgrade's dry run while it
-    /// runs: that one is the dry run's to reap, once it has killed the
-    /// process group the child leads (`sys::upgrade::DryRun`), so it is
-    /// left a zombie here and the dry run told it has ended.
-    fn reap_one(&mut self) -> Option<(rustix::process::Pid, rustix::process::WaitStatus)> {
-        use rustix::process::{Pid, WaitOptions, wait, waitpid};
-        let Some(dry) = self.upgrade_dry_run_pid() else {
-            return wait(WaitOptions::NOHANG).ok().flatten();
+    /// `server_child_stopped` (server.c:519-536) and the stopped case of
+    /// `job_check_died` (job.c:368-373): a pane's or popup's process
+    /// stopped by any signal but SIGTTIN and SIGTTOU is continued, its
+    /// process group (a pane's process alone if that fails). A job's stays
+    /// stopped, as in tmux: its `killpg` fails there, a job without a PTY
+    /// leading no process group (job.c `job_run` forks without `setsid`).
+    fn child_stopped(&self, raw: i32, sig: i32) {
+        use rustix::process::{Pid, Signal, kill_process, kill_process_group};
+        if sig == Signal::TTIN.as_raw() || sig == Signal::TTOU.as_raw() {
+            return;
+        }
+        let Some(pid) = Pid::from_raw(raw) else {
+            return;
         };
+        if self.model.panes.values().any(|p| p.pid == raw)
+            && kill_process_group(pid, Signal::CONT).is_err()
+        {
+            let _ = kill_process(pid, Signal::CONT);
+        }
+        if self.is_popup(raw) {
+            let _ = kill_process_group(pid, Signal::CONT);
+        }
+    }
+
+    /// One child reaped (`waitpid(WNOHANG|WUNTRACED)`), any but an
+    /// upgrade's dry run while it runs: that one is the dry run's to reap,
+    /// once it has killed the process group the child leads
+    /// (`sys::upgrade::DryRun`), so it is left a zombie here and the dry
+    /// run told it has ended.
+    fn reap_one(&mut self) -> Option<(i32, Reaped)> {
+        use rustix::process::{Pid, WaitOptions, wait, waitpid};
+        let opts = WaitOptions::NOHANG | WaitOptions::UNTRACED;
+        let Some(dry) = self.upgrade_dry_run_pid() else {
+            return wait(opts).ok().flatten().map(Reaped::of);
+        };
+        if let Some((pid, sig)) = sys::upgrade::next_stopped() {
+            return Some((pid, Reaped::Stopped(sig)));
+        }
         loop {
             let pid = sys::upgrade::next_exited()?;
             if pid == dry {
@@ -6162,11 +6185,11 @@ impl Server {
                     // Not reaped after all: leave the rest to the next turn.
                     return None;
                 }
-                return wait(WaitOptions::NOHANG).ok().flatten();
+                return wait(opts).ok().flatten().map(Reaped::of);
             }
             let pid = Pid::from_raw(pid)?;
-            if let Ok(Some(reaped)) = waitpid(Some(pid), WaitOptions::NOHANG) {
-                return Some(reaped);
+            if let Ok(Some(reaped)) = waitpid(Some(pid), opts) {
+                return Some(Reaped::of(reaped));
             }
         }
     }
@@ -6343,6 +6366,29 @@ fn open_error(e: &vtmux_core::term_features::OpenError) -> EdgeError {
         vtmux_core::term_features::OpenError::Lacks(_) => {
             EdgeError::OpenTerminalFailed(e.to_string())
         }
+    }
+}
+
+/// What [`Server::reap_one`] found a child had done.
+enum Reaped {
+    /// Stopped by this signal.
+    Stopped(i32),
+    /// Exited or killed.
+    Ended(crate::jobs::JobStatus),
+}
+
+impl Reaped {
+    fn of((pid, status): (rustix::process::Pid, rustix::process::WaitStatus)) -> (i32, Self) {
+        let what = match (
+            status.stopping_signal(),
+            status.terminating_signal(),
+            status.exit_status(),
+        ) {
+            (Some(sig), _, _) => Self::Stopped(sig),
+            (None, Some(sig), _) => Self::Ended(crate::jobs::JobStatus::Signaled(sig)),
+            (None, None, code) => Self::Ended(crate::jobs::JobStatus::Exited(code.unwrap_or(0))),
+        };
+        (pid.as_raw_nonzero().get(), what)
     }
 }
 

@@ -463,6 +463,37 @@ impl Drop for DryRun {
     }
 }
 
+/// A child of this process that a signal has stopped, and the signal;
+/// the stop is taken, a child that has ended is left alone (the server
+/// reaps by [`next_exited`] while a [`DryRun`] is in flight). `None` when
+/// none has stopped.
+#[must_use]
+pub fn next_stopped() -> Option<(i32, i32)> {
+    // SAFETY: an all-zero `siginfo_t` is a valid value for waitid to
+    // fill in.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        // SAFETY: waitid on any child with a valid out pointer.
+        let r = unsafe {
+            libc::waitid(
+                libc::P_ALL,
+                0,
+                &raw mut info,
+                libc::WSTOPPED | libc::WNOHANG,
+            )
+        };
+        if r == 0 {
+            // SAFETY: waitid filled `info` in; si_pid is 0 when no child
+            // has stopped, si_status the stopping signal otherwise.
+            let (pid, sig) = unsafe { (info.si_pid(), info.si_status()) };
+            return (pid != 0).then_some((pid, sig));
+        }
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return None;
+        }
+    }
+}
+
 /// A child of this process that has ended and is not reaped yet, left so
 /// (`WNOWAIT`): the server reaps by it while a [`DryRun`] is in flight,
 /// so it reaps every child but that one, which [`DryRun::poll`] reaps
