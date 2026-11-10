@@ -326,7 +326,16 @@ fn read_stdin(stream: &mut UnixStream) -> io::Result<Option<Leave>> {
             // no MSG_EXITING and so no focus-out. Close the connection, as it
             // would.
             Ok(0) => return Ok(Some(Leave::exit(1, "lost tty"))),
-            Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
+            Ok(n) => {
+                // Once the server has written Exit it closes the socket, so
+                // the send fails (EPIPE, ECONNRESET) with the teardown and
+                // Exit still unread: as for an ack, it is no error. The
+                // input stops, so input that keeps coming can't keep the
+                // client from the socket, read on until Exit or EOF.
+                if send(stream, &ClientMsg::Input(bytes[..n].to_vec())).is_err() {
+                    return Ok(None);
+                }
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
@@ -386,7 +395,7 @@ fn relay(
     let mut socket = Socket::default();
     out.high_water = high_water();
     if sent_size.is_none() || sent_size != size().ok() {
-        send_size(stream)?;
+        send_size(stream);
     }
     loop {
         match poll.poll(&mut events, None) {
@@ -409,7 +418,7 @@ fn relay(
                         match sig {
                             SIGWINCH => {
                                 out.high_water = high_water();
-                                send_size(stream)?;
+                                send_size(stream);
                             }
                             // Closing the terminal raises SIGHUP as well as
                             // EOF on stdin; with the tty already hung up
@@ -504,6 +513,11 @@ impl Socket {
                     break;
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                // A server that closed with input of ours unread resets the
+                // connection: once what it sent is read, that is its EOF.
+                Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
+                    return Ok(Some(Leave::exit(1, "server exited unexpectedly")));
+                }
                 Err(e) => return Err(e),
             }
             // Decode before another read so EOF cannot discard Exit.
@@ -580,9 +594,13 @@ fn size() -> io::Result<(u32, u32)> {
 
 /// `MSG_RESIZE`: the server reads the size itself (tty.c `tty_resize`),
 /// pixels included; vtmux's server has no terminal, so the client sends it.
-fn send_size(stream: &mut UnixStream) -> io::Result<()> {
-    let ws = rustix::termios::tcgetwinsize(io::stdin())?;
-    send(
+/// Advisory, as an Input is: a server that has closed has its Exit on the
+/// socket.
+fn send_size(stream: &mut UnixStream) {
+    let Ok(ws) = rustix::termios::tcgetwinsize(io::stdin()) else {
+        return;
+    };
+    let _ = send(
         stream,
         &ClientMsg::Resize {
             cols: u32::from(ws.ws_col),
@@ -590,7 +608,7 @@ fn send_size(stream: &mut UnixStream) -> io::Result<()> {
             xpixel: u32::from(ws.ws_xpixel),
             ypixel: u32::from(ws.ws_ypixel),
         },
-    )
+    );
 }
 
 #[cfg(test)]

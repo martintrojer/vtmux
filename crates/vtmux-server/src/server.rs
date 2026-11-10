@@ -2753,7 +2753,14 @@ impl Server {
         else {
             return Ok(());
         };
-        self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        // A session killed meanwhile has its clients told to exit once the
+        // command's events are handled, and keys that come before that
+        // go nowhere: tmux has already set `c->session` NULL
+        // (server-fn.c `server_destroy_session`) and
+        // `server_client_handle_key` ignores a client without one.
+        if self.model.current_of(s).is_none() {
+            return Ok(());
+        }
         let escape_time = self.escape_time();
         let c = self
             .clients

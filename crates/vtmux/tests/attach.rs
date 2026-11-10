@@ -554,6 +554,103 @@ fn session_and_server_exit_messages() {
     });
 }
 
+/// Type into an attached client's terminal from a thread of its own until
+/// the returned flag is cleared, `chunk` bytes then `pause` each time; the
+/// counter is the bytes the terminal has taken. Once the client is gone
+/// nobody reads the terminal, which fills up and blocks a write for good:
+/// the typist is left behind, not joined.
+fn typist(a: &mut Attached, chunk: usize, pause: Duration) -> (Arc<AtomicBool>, Arc<AtomicUsize>) {
+    let typing = Arc::new(AtomicBool::new(true));
+    let typed = Arc::new(AtomicUsize::new(0));
+    let mut writer = std::mem::replace(&mut a.writer, Box::new(std::io::sink()));
+    let (go, count) = (Arc::clone(&typing), Arc::clone(&typed));
+    thread::spawn(move || {
+        let bytes = vec![b'x'; chunk];
+        while go.load(Ordering::Relaxed) && writer.write_all(&bytes).is_ok() {
+            count.fetch_add(chunk, Ordering::Relaxed);
+            thread::sleep(pause);
+        }
+    });
+    (typing, typed)
+}
+
+/// Keys that reach the server after `kill-session` and before its clients
+/// are told to exit go nowhere (tmux has set `c->session` NULL,
+/// server-fn.c `server_destroy_session`, and `server_client_handle_key`
+/// ignores such a client): the client still gets the teardown and
+/// `[exited]`.
+#[test]
+fn input_while_the_session_is_killed_still_tears_down() {
+    par::each(&bins(), |bin| {
+        for _ in 0..5 {
+            let w = World::new(bin.clone());
+            let mut a = w.attach(&[
+                "new",
+                "-s",
+                "a",
+                "sh",
+                "-c",
+                "stty raw -echo; exec cat >/dev/null",
+            ]);
+            a.wait(|a| a.text().contains("\x1b[?1049h"));
+            let (typing, _) = typist(&mut a, 64, Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(100));
+            assert!(w.cli(&["kill-session", "-t", "a"]).status.success());
+            a.exited(0);
+            typing.store(false, Ordering::Relaxed);
+            let text = a.text();
+            assert!(text.contains("[exited]"), "{text:?}");
+            assert!(text.contains("\x1b[?1049l"), "{text:?}");
+        }
+    });
+}
+
+/// The server closes the socket once it has written Exit, so an Input the
+/// client is sending then fails (EPIPE, ECONNRESET). The client still
+/// reads the teardown and Exit already on the socket. A server of the
+/// test's own stops reading, so the client blocks in a send, then writes
+/// the teardown and Exit and closes. vtmux only: tmux's server reads the
+/// terminal itself.
+#[test]
+fn input_failing_as_the_server_closes_still_tears_down() {
+    use vtmux_core::protocol::{self, ClientMsg, ServerMsg};
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let path = w.sockets.path().join("s");
+    let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+    let mut cmd = CommandBuilder::new(&w.bin);
+    cmd.args(["-S", path.to_str().unwrap(), "-f", "/dev/null", "attach"]);
+    let mut a = w.spawn_attached(cmd, 40, 10, &[]);
+    let (mut server, _) = listener.accept().unwrap();
+    let hello = protocol::read_msg::<ClientMsg>(&mut server).unwrap();
+    assert!(matches!(hello, Some(ClientMsg::Hello(_))), "{hello:?}");
+    protocol::write_msg(&mut server, &ServerMsg::Ready).unwrap();
+    protocol::write_msg(&mut server, &ServerMsg::Frame(b"\x1b[?1049hUP".to_vec())).unwrap();
+    a.wait(|a| a.text().contains("UP"));
+    // The server reads nothing more: once the socket is full the client
+    // stops reading its terminal, and the typist stalls.
+    let (typing, typed) = typist(&mut a, 4096, Duration::ZERO);
+    let mut last = usize::MAX;
+    while typed.load(Ordering::Relaxed) != last {
+        last = typed.load(Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(300));
+    }
+    protocol::write_msg(&mut server, &ServerMsg::Frame(b"\x1b[?1049lDOWN".to_vec())).unwrap();
+    protocol::write_msg(
+        &mut server,
+        &ServerMsg::Exit {
+            code: 0,
+            message: Some("exited".to_owned()),
+            hup: false,
+        },
+    )
+    .unwrap();
+    drop(server);
+    a.exited(0);
+    typing.store(false, Ordering::Relaxed);
+    let text = a.text();
+    assert!(text.contains("DOWN[exited]"), "{text:?}");
+}
+
 /// tmux buffers frames for a stalled terminal (bufferevents); the vtmux
 /// client shares `O_NONBLOCK` between stdin and stdout and must not die on
 /// EAGAIN.
