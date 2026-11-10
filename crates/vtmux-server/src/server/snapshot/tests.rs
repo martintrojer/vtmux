@@ -1416,10 +1416,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert!(a.client_title(client, session).is_some());
     // A window whose pane started in a directory not named in UTF-8
     // (`cwd_bytes`).
-    {
-        use std::os::unix::ffi::OsStrExt as _;
-        let bad = dir.join(std::ffi::OsStr::from_bytes(b"x\xff"));
-        std::fs::create_dir(&bad).unwrap();
+    if let Some(bad) = non_utf8_dir(&dir) {
         ok(&mut a, &bad, &["new-window", "-d", "-t", "s", "cat", "-"]);
     }
     // A window sized by a client whose terminal gave its cell size in
@@ -1848,16 +1845,30 @@ fn pipe_pane_output_not_yet_written_survives() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A directory in `dir` whose name is not UTF-8 (a byte 0xff), or `None`
+/// where the file system refuses one (APFS: `EILSEQ`).
+fn non_utf8_dir(dir: &Path) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let bad = dir.join(std::ffi::OsStr::from_bytes(b"x\xff"));
+    match std::fs::create_dir(&bad) {
+        Ok(()) => Some(bad),
+        Err(e) if e.raw_os_error() == Some(rustix::io::Errno::ILSEQ.raw_os_error()) => None,
+        Err(e) => panic!("{}: {e}", bad.display()),
+    }
+}
+
 /// A working directory whose name is not UTF-8 (a byte 0xff) is the same
 /// directory after a rebuild: the session's, the pane's (where
 /// `respawn-pane` starts it again) and the client's. Ignorable: a reader
 /// before takes the lossy text, as every build did.
 #[test]
 fn a_working_directory_not_utf8_survives_a_rebuild() {
-    use std::os::unix::ffi::OsStrExt as _;
     let dir = temp_dir("cwd");
-    let bad = dir.join(std::ffi::OsStr::from_bytes(b"x\xff"));
-    std::fs::create_dir(&bad).unwrap();
+    let Some(bad) = non_utf8_dir(&dir) else {
+        eprintln!("SKIP: this file system refuses a directory name that is not UTF-8");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    };
     let mut a = server(&dir);
     ok(&mut a, &bad, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let (client, _peer) = connect(
