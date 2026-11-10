@@ -4,6 +4,7 @@
 //! flags, and an option argument either attached or the next word.
 
 use std::ffi::OsString;
+use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::PathBuf;
 
 use vtmux_core::protocol::ControlMode;
@@ -16,14 +17,14 @@ const OPTSTRING: &str = "2c:CDdf:hlL:NqS:T:uUvV";
 pub struct Cli {
     pub control: ControlMode,
     /// `-c shell-command`.
-    pub shell_command: Option<String>,
+    pub shell_command: Option<OsString>,
     /// `-D`: do not fork the server.
     pub no_fork: bool,
     /// `-l`: `-c` and `detach-client -E` run a login shell.
     pub login: bool,
     /// Every `-f` file, in order (the first `-f` replaces the defaults).
     pub config_files: Vec<PathBuf>,
-    pub label: Option<String>,
+    pub label: Option<OsString>,
     pub socket: Option<PathBuf>,
     pub no_start: bool,
     pub utf8: bool,
@@ -57,23 +58,21 @@ pub fn usage(progname: &str) -> String {
 /// Parse `args` (without argv[0]). `progname` is for getopt's messages.
 pub fn parse(args: &[OsString], progname: &str) -> Result<Cli, Early> {
     let mut cli = Cli::default();
-    let words: Vec<String> = args
-        .iter()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
+    // Option values are bytes, as tmux's argv is: a socket or config path
+    // that is not UTF-8 names that file.
+    let words: Vec<&[u8]> = args.iter().map(|a| a.as_bytes()).collect();
     let mut i = 0;
     let mut f_seen = false;
     'words: while i < words.len() {
-        let word = &words[i];
-        if word == "--" {
+        let bytes = words[i];
+        if bytes == b"--" {
             i += 1;
             break;
         }
-        if !word.starts_with('-') || word.len() == 1 {
+        if !bytes.starts_with(b"-") || bytes.len() == 1 {
             break;
         }
         i += 1;
-        let bytes = word.as_bytes();
         let mut pos = 1;
         while pos < bytes.len() {
             let opt = char::from(bytes[pos]);
@@ -86,10 +85,10 @@ pub fn parse(args: &[OsString], progname: &str) -> Result<Cli, Early> {
             let takes_arg = OPTSTRING.as_bytes().get(at + 1) == Some(&b':');
             let value = if takes_arg {
                 let v = if pos < bytes.len() {
-                    word[pos..].to_owned()
+                    OsString::from_vec(bytes[pos..].to_vec())
                 } else if let Some(next) = words.get(i) {
                     i += 1;
-                    next.clone()
+                    OsString::from_vec(next.to_vec())
                 } else {
                     return Err(Early::Usage(Some(format!(
                         "{progname}: option requires an argument -- {opt}"
@@ -125,7 +124,7 @@ pub fn parse(args: &[OsString], progname: &str) -> Result<Cli, Early> {
                 ('L', Some(v)) => cli.label = Some(v),
                 ('N', _) => cli.no_start = true,
                 ('S', Some(v)) => cli.socket = Some(PathBuf::from(v)),
-                ('T', Some(v)) => cli.features.push(v),
+                ('T', Some(v)) => cli.features.push(v.to_string_lossy().into_owned()),
                 ('u', _) => cli.utf8 = true,
                 // `d` and `U` are in the option string but have no case:
                 // getopt accepts them and the default branch prints usage.
@@ -159,7 +158,7 @@ mod tests {
     #[test]
     fn options_then_command() {
         let cli = p(&["-L", "x", "-f/dev/null", "new", "-d", "-s", "a"]).unwrap();
-        assert_eq!(cli.label.as_deref(), Some("x"));
+        assert_eq!(cli.label.as_deref(), Some(std::ffi::OsStr::new("x")));
         assert_eq!(cli.config_files, vec![PathBuf::from("/dev/null")]);
         assert_eq!(cli.command, [&b"new"[..], b"-d", b"-s", b"a"]);
         // getopt stops at the first non-option: `-V` after `ls` is the
@@ -187,6 +186,27 @@ mod tests {
             cli.command,
             [b"setb".to_vec(), b"a\xc3\xa9\xff\x80".to_vec()]
         );
+    }
+
+    /// `-S`, `-f`, `-L` and `-c` values are bytes, as tmux's argv is: a
+    /// path that is not UTF-8 names that file, not one with U+FFFD in it.
+    #[test]
+    fn option_values_keep_their_bytes() {
+        let raw = |b: &[u8]| OsString::from_vec(b.to_vec());
+        let args = [
+            raw(b"-S"),
+            raw(b"/tmp/s\xff.sock"),
+            raw(b"-f\xfe.conf"),
+            raw(b"-L"),
+            raw(b"l\x80"),
+            raw(b"-c"),
+            raw(b"echo \xc3"),
+        ];
+        let cli = parse(&args, "tmux").unwrap();
+        assert_eq!(cli.socket, Some(PathBuf::from(raw(b"/tmp/s\xff.sock"))));
+        assert_eq!(cli.config_files, [PathBuf::from(raw(b"\xfe.conf"))]);
+        assert_eq!(cli.label, Some(raw(b"l\x80")));
+        assert_eq!(cli.shell_command, Some(raw(b"echo \xc3")));
     }
 
     /// Reference: `tmux -Z` -> `tmux: unknown option -- Z` + usage, exit 1;

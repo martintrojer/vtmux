@@ -905,6 +905,42 @@ fn tmux_vtmux_upgrade_follows_a_relink_of_the_start_path() {
     wait("a command over control mode", || control.has("after b"));
 }
 
+/// A key bound to `vtmux-upgrade`, with another typed right after it (the
+/// same read): the upgrade is not refused for it, and the second key runs
+/// its binding in the image that serves next, once the client re-attached.
+/// (Before: `keys pressed meanwhile after vtmux-upgrade would not run`.)
+#[test]
+fn a_key_typed_right_after_a_bound_upgrade_runs_in_the_new_image() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.run(&[
+        "bind",
+        "-n",
+        "F5",
+        "vtmux-upgrade",
+        "-b",
+        &bin().display().to_string(),
+    ]);
+    world.run(&["bind", "-n", "F6", "set", "-g", "@typed", "after"]);
+    let pid = world.pid();
+    attached.keys("\x1b[15~\x1b[17~");
+    wait("the second key's binding", || {
+        world
+            .command(&["show", "-gv", "@typed"])
+            .output()
+            .is_ok_and(|o| o.stdout == b"after\n")
+    });
+    assert_eq!(world.pid(), pid);
+    let args = world.server_args();
+    assert!(args.contains("--vtmux-resume"), "upgraded: {args}");
+    assert!(
+        !world.run(&["show-messages"]).contains("would not run"),
+        "the upgrade was refused"
+    );
+}
+
 /// `vtmux-upgrade` from a control client (mu, murmur): its guard closes
 /// as for any waiting command, and the line it sent behind it, held while
 /// the upgrade ran, runs in the new image.

@@ -145,9 +145,18 @@ fn client_env() -> Vec<(String, String)> {
         .collect()
 }
 
-/// `connect(2)` the socket, with C's errno semantics for a long path.
+/// `sizeof(sockaddr_un.sun_path)`: 108 on Linux, 104 on macOS and the BSDs.
+const SUN_PATH_LEN: usize = if cfg!(any(target_os = "linux", target_os = "android")) {
+    108
+} else {
+    104
+};
+
+/// `connect(2)` the socket, with C's errno semantics for a long path
+/// (client.c `client_connect`: `strlcpy` into `sun_path` leaving room for
+/// the NUL, else `ENAMETOOLONG`).
 fn connect(path: &Path) -> io::Result<UnixStream> {
-    if path.as_os_str().as_bytes().len() >= 108 {
+    if path.as_os_str().as_bytes().len() >= SUN_PATH_LEN {
         return Err(io::Error::from_raw_os_error(ENAMETOOLONG));
     }
     UnixStream::connect(path)
@@ -806,7 +815,7 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
 /// shell and closes; run `command` with it in place of this process.
 /// Anything else (`access denied`, a lost server) ends as [`relay`] ends
 /// it.
-fn shell_relay(stream: &mut UnixStream, command: &str, how: &Reattach) -> ExitCode {
+fn shell_relay(stream: &mut UnixStream, command: &std::ffi::OsStr, how: &Reattach) -> ExitCode {
     match protocol::read_msg::<ServerMsg>(stream) {
         Ok(Some(ServerMsg::Exec { shell, .. })) => {
             vtmux_server::sys::signal::default_job_control();
@@ -898,4 +907,21 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
 
 fn libc_ebadf() -> i32 {
     rustix::io::Errno::BADF.raw_os_error()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A socket path that leaves no room for the NUL in `sun_path` is
+    /// `ENAMETOOLONG` (client.c `client_connect`: 108 bytes on Linux, 104
+    /// on macOS), not std's `InvalidInput`.
+    #[test]
+    fn a_path_of_sun_path_length_is_too_long_as_in_c() {
+        let path = |len: usize| PathBuf::from(format!("/{}", "s".repeat(len - 1)));
+        let err = connect(&path(SUN_PATH_LEN)).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(ENAMETOOLONG));
+        let err = connect(&path(SUN_PATH_LEN - 1)).unwrap_err();
+        assert_ne!(err.raw_os_error(), Some(ENAMETOOLONG), "{err}");
+    }
 }

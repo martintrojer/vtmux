@@ -45,7 +45,9 @@ impl Invocation {
     /// anything else is [`Invocation::Vtmux`].
     #[must_use]
     pub fn from_argv0(argv0: &OsStr) -> Self {
-        if Path::new(argv0).file_name() == Some(OsStr::new("tmux")) {
+        // A login shell's name is `-tmux` (tmux.c:415-416).
+        let name = Path::new(argv0).file_name().map(OsStr::as_bytes);
+        if name.map(|n| n.strip_prefix(b"-").unwrap_or(n)) == Some(b"tmux") {
             Self::Tmux
         } else {
             Self::Vtmux
@@ -182,7 +184,7 @@ impl std::error::Error for SocketError {}
 /// checked for them. Only the label route touches the filesystem.
 pub fn socket_path(
     inv: Invocation,
-    label: Option<&str>,
+    label: Option<&OsStr>,
     path: Option<&Path>,
     env: &dyn Env,
     fs: &dyn SocketFs,
@@ -195,7 +197,7 @@ pub fn socket_path(
     {
         return Ok(path);
     }
-    make_label(inv, label.unwrap_or("default"), env, fs)
+    make_label(inv, label.unwrap_or(OsStr::new("default")), env, fs)
 }
 
 /// The socket part of `$TMUX` (`socket,pid,session`), if usable
@@ -220,7 +222,7 @@ fn first_candidate(env: &dyn Env, fs: &dyn SocketFs) -> Option<PathBuf> {
 
 fn make_label(
     inv: Invocation,
-    label: &str,
+    label: &OsStr,
     env: &dyn Env,
     fs: &dyn SocketFs,
 ) -> Result<PathBuf, SocketError> {
@@ -404,7 +406,7 @@ mod tests {
         env: &FakeEnv,
         fs: &FakeFs,
     ) -> Result<PathBuf, SocketError> {
-        socket_path(inv, label, path.map(Path::new), env, fs)
+        socket_path(inv, label.map(OsStr::new), path.map(Path::new), env, fs)
     }
 
     #[test]
@@ -412,6 +414,10 @@ mod tests {
         assert_eq!(Invocation::from_argv0("tmux".as_ref()), Tmux);
         assert_eq!(Invocation::from_argv0("/usr/bin/tmux".as_ref()), Tmux);
         assert_eq!(Invocation::from_argv0("vtmux".as_ref()), Vtmux);
+        // A login shell's name (`-tmux`, or after a re-attach of `-l`).
+        assert_eq!(Invocation::from_argv0("-tmux".as_ref()), Tmux);
+        assert_eq!(Invocation::from_argv0("-/usr/bin/tmux".as_ref()), Tmux);
+        assert_eq!(Invocation::from_argv0("-vtmux".as_ref()), Vtmux);
         assert_eq!(
             Invocation::from_argv0("./target/debug/vtmux".as_ref()),
             Vtmux
@@ -634,7 +640,14 @@ mod tests {
             symlink(&real, &link).unwrap();
             let uid = RealEnv.uid();
             for (inv, name) in [(Tmux, "tmux"), (Vtmux, "vtmux")] {
-                let got = socket_path(inv, Some("lab"), None, &env_with(&link), &RealFs).unwrap();
+                let got = socket_path(
+                    inv,
+                    Some(OsStr::new("lab")),
+                    None,
+                    &env_with(&link),
+                    &RealFs,
+                )
+                .unwrap();
                 assert_eq!(got, real.join(format!("{name}-{uid}")).join("lab"));
                 let mode = std::fs::metadata(got.parent().unwrap())
                     .unwrap()
@@ -659,9 +672,9 @@ mod tests {
             let set = |m| std::fs::set_permissions(&dir, PermissionsExt::from_mode(m)).unwrap();
 
             set(0o750);
-            assert!(socket_path(Tmux, Some("q"), None, &env, &RealFs).is_ok());
+            assert!(socket_path(Tmux, Some(OsStr::new("q")), None, &env, &RealFs).is_ok());
             set(0o701);
-            let err = socket_path(Tmux, Some("q"), None, &env, &RealFs).unwrap_err();
+            let err = socket_path(Tmux, Some(OsStr::new("q")), None, &env, &RealFs).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 format!("directory {} has unsafe permissions", dir.display())
@@ -671,7 +684,7 @@ mod tests {
             let moved = base.join("x");
             std::fs::rename(&dir, &moved).unwrap();
             symlink(&moved, &dir).unwrap();
-            let err = socket_path(Tmux, Some("q"), None, &env, &RealFs).unwrap_err();
+            let err = socket_path(Tmux, Some(OsStr::new("q")), None, &env, &RealFs).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 format!("{} is not a directory", dir.display())

@@ -125,11 +125,12 @@ fn shell_argv0(shell: &Path, login: bool) -> OsString {
 /// process, with `SHELL` set to `shell` and [`shell_argv0`] as `argv[0]`.
 /// Only returns, with the exit status, if the exec fails.
 #[must_use]
-pub fn exec(shell: &Path, command: &str, login: bool) -> i32 {
+pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> i32 {
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new(shell)
         .arg0(shell_argv0(shell, login))
-        .args(["-c", command])
+        .arg("-c")
+        .arg(command)
         .env("SHELL", shell)
         .exec();
     eprintln!("{}: {err}", shell.display());
