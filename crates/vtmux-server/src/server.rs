@@ -8148,4 +8148,317 @@ mod tests {
         assert!(!link.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    /// xorshift64: the same steps for a seed on every host.
+    struct Steps(u64);
+
+    impl Steps {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            usize::try_from(self.0 % u64::try_from(n.max(1)).unwrap()).unwrap()
+        }
+    }
+
+    /// One client of [`every_client_shows_what_a_full_redraw_shows`]: its
+    /// socket, the terminal that reads its frames and how many more turns
+    /// it leaves them unread.
+    struct Watched {
+        id: super::ClientId,
+        peer: mio::net::UnixStream,
+        term: vtmux_vt::PaneTerm,
+        lag: usize,
+    }
+
+    /// One loop turn's drawing part ([`super::Server::run`]).
+    fn draw_turn(server: &mut super::Server) {
+        server.check_window_resizes();
+        server.drain_events();
+        server.cmdq_process();
+        server.apply_redraws();
+        server.switch_resizes();
+        server.render_and_exit();
+        server.send_pane_resizes();
+    }
+
+    /// What an agent TUI (`scripts/agent_tui.py`, pi's renderer) writes to
+    /// a `cols` x `rows` pane: changed rows rewritten under synchronized
+    /// output (`?2026h` ... `?2026l`, now and then never ended), and now
+    /// and then the whole screen after `ESC[2J` outside it, as after a
+    /// SIGWINCH.
+    fn agent_frame(steps: &mut Steps, n: &mut usize, (cols, rows): (u16, u16)) -> Vec<u8> {
+        use std::fmt::Write as _;
+        let mut b = String::new();
+        let full = steps.below(6) == 0;
+        if full {
+            b.push_str("\x1b[?1049h\x1b[?7l\x1b[2J\x1b[H\x1b[?25l");
+        }
+        let sync = steps.below(5) != 0;
+        if sync {
+            b.push_str("\x1b[?2026h");
+        }
+        let lines: Vec<usize> = if full {
+            (1..=usize::from(rows)).collect()
+        } else {
+            (0..=steps.below(3))
+                .map(|_| 1 + steps.below(usize::from(rows)))
+                .collect()
+        };
+        for y in lines {
+            *n += 1;
+            let text = format!("r{y} n{n} {}", "x".repeat(steps.below(usize::from(cols))));
+            let text: String = text.chars().take(usize::from(cols) - 1).collect();
+            let _ = write!(
+                b,
+                "\x1b[{y};1H\x1b[2K\x1b[38;2;205;214;220m{text}\x1b[0m\x1b]8;;\x07"
+            );
+        }
+        if sync && steps.below(6) != 0 {
+            let _ = write!(b, "\x1b[{};3H\x1b[?25l\x1b[?2026l", rows.max(2) - 1);
+        }
+        b.into_bytes()
+    }
+
+    /// Two or three clients (alike, of other sizes, attached late, some
+    /// leaving) on busy agent TUIs in four panes, on sessions that show
+    /// one window through a group and a link, with window switches,
+    /// resizes, zoom, copy mode, messages, terminal replies, option
+    /// changes, synchronized output that ends, times out or is cut across
+    /// reads, hidden panes' views released, and clients that fall behind
+    /// (their frames unread for turns, so deferred and blocked): every
+    /// client's terminal, which takes only diffs and frames shared with
+    /// other clients ([`crate::render::share`]), ends up showing what a full
+    /// redraw of it (`refresh-client`) shows. The status row is left out:
+    /// tmux too leaves another window's flags there stale until the next
+    /// status redraw (`server_redraw_window`, server-fn.c:119-129, redraws
+    /// only the clients whose current window it is).
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "one random script")]
+    fn every_client_shows_what_a_full_redraw_shows() {
+        use std::time::{Duration, Instant};
+        let sizes = [(40, 12), (40, 12), (40, 12), (30, 9), (50, 14)];
+        let sessions = ["a", "a", "a", "b", "g"];
+        // More for a deeper look: VTMUX_FULL_REDRAW_SEEDS=3000 (release).
+        let seeds: u64 = std::env::var("VTMUX_FULL_REDRAW_SEEDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(32);
+        for seed in 0..seeds {
+            let mut steps = Steps(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+            let (mut server, _, s, dir) = share_server(&format!("full{seed}"));
+            let top = seed % 2 == 1;
+            let mut setup: Vec<&[&str]> = vec![
+                &["set", "-g", "status-right", "R"],
+                &["splitw", "-t", "a:w", "cat", "-"],
+                &["splitw", "-t", "a:w", "cat", "-"],
+                &["splitw", "-t", "a:w", "cat", "-"],
+                &["select-layout", "-t", "a:w", "tiled"],
+                &["neww", "-d", "-t", "a:", "-n", "two", "cat", "-"],
+                &["splitw", "-t", "a:two", "cat", "-"],
+                &["new", "-d", "-s", "b", "-n", "bw", "cat", "-"],
+                &["link-window", "-s", "a:two", "-t", "b:"],
+                &["new", "-d", "-t", "a", "-s", "g"],
+                &["bind", "-n", "F12", "select-pane"],
+            ];
+            if top {
+                setup.extend([
+                    &["set", "-g", "status-position", "top"][..],
+                    &["set", "-g", "pane-border-status", "top"],
+                    &["setw", "-g", "aggressive-resize", "on"],
+                ]);
+            }
+            for words in setup {
+                run_words(&mut server, &dir, words);
+            }
+            let attach = |server: &mut super::Server, (cols, rows): (u16, u16), name: &str| {
+                let target = server
+                    .model
+                    .sessions
+                    .iter()
+                    .find(|(_, x)| x.name == name)
+                    .map_or(s, |(id, _)| *id);
+                let size = (u32::from(cols), u32::from(rows));
+                let (id, peer) = attach_as(server, target, &dir, "xterm-256color", size);
+                Watched {
+                    id,
+                    peer,
+                    term: vtmux_vt::PaneTerm::new(cols, rows, 0),
+                    lag: 0,
+                }
+            };
+            let mut clients = vec![attach(&mut server, (40, 12), "a")];
+            let mut answered: Vec<&[u8]> = Vec::new();
+            let mut written = 0;
+            // The rest of a frame a pane read cut in two.
+            let mut unread: Vec<(super::PaneId, Vec<u8>)> = Vec::new();
+            for _ in 0..150 {
+                if steps.below(2) == 0 {
+                    for (p, rest) in std::mem::take(&mut unread) {
+                        server.pane_input(p, &rest, false);
+                    }
+                }
+                let panes: Vec<super::PaneId> = server.model.panes.keys().copied().collect();
+                let c = steps.below(clients.len());
+                let id = clients[c].id;
+                let session = sessions[steps.below(sessions.len())];
+                match steps.below(24) {
+                    0..=5 => {
+                        let p = panes[steps.below(panes.len())];
+                        let t = &server.model.panes[&p].term;
+                        let bytes = agent_frame(&mut steps, &mut written, (t.cols(), t.rows()));
+                        let flood = steps.below(3) == 0;
+                        if steps.below(2) == 0 {
+                            let cut = steps.below(bytes.len());
+                            unread.push((p, bytes[cut..].to_vec()));
+                            server.pane_input(p, &bytes[..cut], flood);
+                        } else {
+                            server.pane_input(p, &bytes, flood);
+                        }
+                    }
+                    6 => run_words(&mut server, &dir, &["next-window", "-t", session]),
+                    7 if clients.len() < 3 => {
+                        let size = sizes[steps.below(sizes.len())];
+                        clients.push(attach(&mut server, size, session));
+                        let id = clients[clients.len() - 1].id;
+                        for reply in &answered {
+                            let _ = server.on_client_input(id, reply);
+                        }
+                    }
+                    8 => {
+                        let (cols, rows) = sizes[steps.below(sizes.len())];
+                        server.resize_client(id, u32::from(cols), u32::from(rows));
+                        clients[c].term.resize(cols, rows);
+                    }
+                    9 if c > 0 => {
+                        server.detach_client(id, false);
+                        clients.remove(c);
+                    }
+                    10 => run_words(&mut server, &dir, &["select-pane", "-t", "a:.+"]),
+                    11 => run_words(&mut server, &dir, &["resize-pane", "-Z", "-t", session]),
+                    12 => server.sync_timers(Instant::now() + Duration::from_secs(2)),
+                    13 => server.release_hidden_screens(Instant::now() + Duration::from_secs(2)),
+                    14 => {
+                        let replies: [&[u8]; 7] = [
+                            b"\x1b[?2026;2$y",
+                            b"\x1b[?62;22c",
+                            b"\x1b[>1;10;0c",
+                            b"\x1bP>|ghostty 1.2.0\x1b\\",
+                            b"\x1b]11;rgb:0000/0000/0000\x1b\\",
+                            b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+                            b"\x1b[?997;1n",
+                        ];
+                        // Every client's terminal is of one kind: each answers
+                        // alike, a client attached later as soon as it can.
+                        let reply = replies[steps.below(replies.len())];
+                        answered.push(reply);
+                        for w in &clients {
+                            let _ = server.on_client_input(w.id, reply);
+                        }
+                    }
+                    15 => {
+                        let _ = server.on_client_input(id, b"\x1b[24~");
+                    }
+                    16 => {
+                        let value = steps.below(1000).to_string();
+                        run_words(&mut server, &dir, &["set", "-g", "@x", &value]);
+                    }
+                    17 => server.status_redraw_client(id),
+                    18 => {
+                        let flags = crate::render::status::MessageFlags::default();
+                        server.status_message(id, "m".into(), Some(0), flags);
+                    }
+                    19 => server.clients.get_mut(&id).unwrap().status.clear_message(),
+                    // Copy mode's position indicator is drawn for its
+                    // client: a window in it shares no drawing.
+                    20 if steps.below(4) == 0 => {
+                        run_words(&mut server, &dir, &["copy-mode", "-t", session]);
+                    }
+                    20 | 21 => {
+                        run_words(&mut server, &dir, &["send", "-X", "-t", session, "cancel"]);
+                    }
+                    _ => {}
+                }
+                draw_turn(&mut server);
+                for w in &mut clients {
+                    if w.lag > 0 {
+                        w.lag -= 1;
+                    } else if steps.below(20) == 0 {
+                        w.lag = steps.below(12);
+                    } else {
+                        w.term.feed(&frames(&mut server, w.id, &mut w.peer));
+                    }
+                }
+            }
+            // Every pane's output read and its update ended, every message
+            // gone, every client caught up.
+            for (p, rest) in std::mem::take(&mut unread) {
+                server.pane_input(p, &rest, false);
+            }
+            for p in server.model.panes.keys().copied().collect::<Vec<_>>() {
+                server.pane_input(p, b"\x1b[?2026l", false);
+            }
+            for w in &clients {
+                server
+                    .clients
+                    .get_mut(&w.id)
+                    .unwrap()
+                    .status
+                    .clear_message();
+            }
+            for _ in 0..3 {
+                draw_turn(&mut server);
+                for w in &mut clients {
+                    w.term.feed(&frames(&mut server, w.id, &mut w.peer));
+                }
+            }
+            let rows = |t: &vtmux_vt::PaneTerm| {
+                let s = vtmux_vt::snapshot(t);
+                let mut rows: Vec<String> = s
+                    .cells
+                    .chunks(usize::from(s.cols))
+                    // An erased cell looks as a space does.
+                    .map(|r| {
+                        r.iter()
+                            .map(|c| {
+                                if c.text.is_empty() {
+                                    " "
+                                } else {
+                                    c.text.as_str()
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+                if top {
+                    rows.remove(0);
+                } else {
+                    rows.pop();
+                }
+                rows
+            };
+            for (i, w) in clients.iter_mut().enumerate() {
+                let shown = rows(&w.term);
+                // refresh-client (commands/refresh_client.rs): the terminal
+                // is drawn whole, from nothing.
+                server
+                    .clients
+                    .get_mut(&w.id)
+                    .unwrap()
+                    .compositor
+                    .invalidate();
+                server.redraw_client(w.id);
+                draw_turn(&mut server);
+                let (cols, height) = (w.term.cols(), w.term.rows());
+                let mut fresh = vtmux_vt::PaneTerm::new(cols, height, 0);
+                // On the alternate screen, as attach left it (`smcup`).
+                fresh.feed(b"\x1b[?1049h");
+                let full = frames(&mut server, w.id, &mut w.peer);
+                fresh.feed(&full);
+                w.term.feed(&full);
+                assert_eq!(shown, rows(&fresh), "seed {seed}, client {i}");
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
 }
