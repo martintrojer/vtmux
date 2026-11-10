@@ -54,6 +54,13 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
+- `patches/0038-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
+  coordinates against the page before any native reader dereferences a
+  cell. `GridRef::with_x` remains safe; out-of-range readers return
+  `InvalidValue` even in ReleaseFast. Both vtmux capture call sites take
+  columns from `row_cells`, already within the page. The Rust test checks
+  the last valid column, the first invalid one and `u16::MAX`.
+
 - `libghostty-vt/src/key.rs`, `mouse.rs`: growable encoders reserve the
   required output length relative to the vector length, not its remaining
   capacity. Tests cover empty and prefixed buffers one byte short.

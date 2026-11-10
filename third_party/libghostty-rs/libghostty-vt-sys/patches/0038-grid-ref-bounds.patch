@@ -1,0 +1,29 @@
+diff --git a/src/terminal/c/grid_ref.zig b/src/terminal/c/grid_ref.zig
+--- a/src/terminal/c/grid_ref.zig
++++ b/src/terminal/c/grid_ref.zig
+@@ -32,8 +32,12 @@ pub const CGridRef = extern struct {
+     }
+ 
+     pub fn toPin(self: CGridRef) ?PageList.Pin {
++        const node = self.node orelse return null;
++        const p = node.page();
++        // C callers may change x/y; ReleaseFast removes the page assertions.
++        if (self.x >= p.size.cols or self.y >= p.size.rows) return null;
+         return .{
+-            .node = self.node orelse return null,
++            .node = node,
+             .x = self.x,
+             .y = self.y,
+         };
+@@ -67,7 +71,10 @@ pub fn grid_ref_row_cells(
+     buf_len: usize,
+     out_len: *usize,
+ ) callconv(lib.calling_conv) Result {
+-    const p = ref.toPin() orelse return .invalid_value;
++    // This row-only API ignores x, as documented.
++    var row_ref = ref.*;
++    row_ref.x = 0;
++    const p = row_ref.toPin() orelse return .invalid_value;
+     const terminal_page = p.node.page();
+     const row = terminal_page.getRow(p.y);
+     const cells = terminal_page.getCells(row);

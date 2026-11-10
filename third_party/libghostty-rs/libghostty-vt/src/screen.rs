@@ -72,8 +72,8 @@ impl GridRef<'_> {
         Ok(Cell(v))
     }
     /// The same row at column `x`: no page-list walk, unlike
-    /// [`Terminal::grid_ref`]. `x` must be below the row's cell count
-    /// ([`GridRef::row_cells`]). (vtmux.)
+    /// [`Terminal::grid_ref`]. An `x` at or beyond the page's cell count
+    /// makes the reference invalid: its readers return `InvalidValue`. (vtmux.)
     #[must_use]
     pub fn with_x(&self, x: u16) -> Self {
         let mut inner = self.inner;
@@ -228,6 +228,50 @@ impl GridRef<'_> {
                 ffi::Result::OUT_OF_SPACE if len > buf.len() => buf.resize(len, 0),
                 other => return from_result(other).map(|()| HyperlinkId::None),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TerminalOptions;
+
+    #[test]
+    fn grid_ref_readers_reject_columns_outside_the_page() {
+        let mut terminal = Terminal::new(TerminalOptions {
+            cols: 5,
+            rows: 2,
+            max_scrollback: 0,
+        })
+        .unwrap();
+        terminal.vt_write(b"abcde");
+        let origin = terminal
+            .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .unwrap();
+        assert_eq!(
+            origin.with_x(4).cell().unwrap().codepoint().unwrap(),
+            u32::from('e')
+        );
+        for x in [5, u16::MAX] {
+            let invalid = origin.with_x(x);
+            assert!(matches!(invalid.cell(), Err(Error::InvalidValue)));
+            assert!(matches!(invalid.row(), Err(Error::InvalidValue)));
+            assert!(matches!(invalid.style(), Err(Error::InvalidValue)));
+            assert!(matches!(
+                invalid.graphemes(&mut ['\0'; 8]),
+                Err(Error::InvalidValue)
+            ));
+            assert!(matches!(
+                invalid.hyperlink_uri(&mut [0; 8]),
+                Err(Error::InvalidValue)
+            ));
+            assert!(matches!(invalid.hyperlink_id(), Err(Error::InvalidValue)));
+            assert!(matches!(invalid.down(0), Err(Error::InvalidValue)));
+            assert!(matches!(invalid.up(0), Err(Error::InvalidValue)));
+            let mut cells = Vec::new();
+            invalid.row_cells(&mut cells).unwrap();
+            assert_eq!(cells.len(), 5, "row_cells ignores x");
         }
     }
 }
