@@ -21,6 +21,8 @@ Next is `3.8-beta2`.
 - `TZ` names under `posix/` and `right/` give their zone (and leap seconds), and `TZ=:` is UTC.
 - A combining mark in the prompt's completion list takes no column; keys `0x110000`-`0x13FFFF` list as their bytes; a `t/f` format ending in `#` drops it; a `display -t` that does not resolve describes what tmux's does.
 
+**Signals and terminals, as tmux.** Typing while a session is killed no longer leaves your terminal on the alternate screen. An attached client survives `SIGUSR1`, `SIGUSR2` and an outside `SIGTSTP`, and `tmux attach &` draws instead of stopping; `SIGTERM` ends `wait-for` or a `-C` client with status 0 (and `%exit`), `SIGINT` and `SIGQUIT` don't. Panes start with the control characters of the terminal that made the session (`stty intr`, `werase`), `VERASE` from the `backspace` option. `-l` survives a live upgrade.
+
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
