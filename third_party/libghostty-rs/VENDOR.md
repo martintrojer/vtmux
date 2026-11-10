@@ -54,15 +54,22 @@ the pin is bumped here.
 
 Recorded per commit in git history; the list is kept current:
 
-- `patches/0039-unicode-options-thread-safe.patch`: width-override readers
-  and writers hold one native slice lock through lookup, replacement and
-  freeing; the empty-override fast path and printer/clustering flags are
-  atomic. This covers printing as well as both width queries, so the Rust
-  setters (including vtmux-vt's) remain safe. The server sets them from its
-  single-threaded `set_option` (`codepoint-widths`, tmux `utf8.c`
+- `patches/0039-unicode-options-thread-safe.patch`: the width overrides
+  are one atomic pointer to an immutable table (ranges and the printer's
+  narrow bound), never freed: setting the same ranges again reuses their
+  table, so the memory kept is one table per distinct set. The clustering
+  flags are one atomic byte. No lock anywhere; `printSliceFast`,
+  `printSliceFill` and `print` read the table and flags once per call,
+  except the narrow bound in `printSliceFill`'s scalar loop, read per
+  character: holding it in a register cost that loop 5% on UTF-8 text.
+  Printing speed matches the build without this patch. This covers
+  printing as well as both width queries, so the Rust setters (including
+  vtmux-vt's) remain safe. The server sets them from its single-threaded
+  `set_option` (`codepoint-widths`, tmux `utf8.c`
   `utf8_update_width_cache`; clustering, `screen-write.c`
   `screen_write_combine`). A subprocess test runs two writers and two
-  readers, including terminal printing; before the patch it segfaulted.
+  readers, including terminal printing; it segfaulted before the patch and
+  segfaults with a setter that frees the old table.
 
 - `libghostty-vt/src/alloc.rs` (`allocator_api`): `From<&A>` borrows the
   original allocator for the adapter lifetime; `From<A>` kept a pointer

@@ -7,182 +7,375 @@ diff --git a/src/unicode/main.zig b/src/unicode/main.zig
  pub const lut = @import("lut.zig");
  
  const grapheme = @import("grapheme.zig");
-@@ -38,19 +40,27 @@
+@@ -36,26 +38,82 @@ pub const WidthRange = extern struct {
+     width: u8,
+ };
  
- /// vtmux: the width overrides, sorted and not overlapping, process-wide
- /// like tmux's width cache. Set with `setWidthOverrides`.
+-/// vtmux: the width overrides, sorted and not overlapping, process-wide
+-/// like tmux's width cache. Set with `setWidthOverrides`.
 -pub var width_overrides: []const WidthRange = &.{};
-+var width_overrides: []const WidthRange = &.{};
-+var width_mutex: std.atomic.Mutex = .unlocked;
-+var has_width_overrides: bool = false;
- 
- /// vtmux: the highest codepoint the printer may take as narrow without
- /// looking: 0xFF, or 0x7F while an override reaches below 0x100.
--pub var narrow_max: u21 = 0xFF;
-+var narrow_max: u32 = 0xFF;
++/// vtmux: the width overrides in use, sorted and not overlapping,
++/// process-wide like tmux's width cache, with what the printer derives
++/// from them. A value: the printer reads it once per call (`widths`), so
++/// the lookups work from registers.
++pub const Widths = struct {
++    ranges: []const WidthRange,
++    /// The highest codepoint the printer may take as narrow without
++    /// looking: 0xFF, or 0x7F while an override reaches below 0x100.
++    narrow_max: u8,
 +
++    /// The overridden width of `cp`, if any.
++    pub inline fn override(self: Widths, cp: u21) ?u2 {
++        if (self.ranges.len == 0) return null;
++        return widthOverrideSlow(self.ranges, cp);
++    }
++
++    /// The width the printer gives `cp`: an override, else 1 for a
++    /// codepoint up to 0xFF, else the table.
++    pub inline fn printWidth(self: Widths, cp: u21) u2 {
++        if (self.override(cp)) |w| return w;
++        return if (cp <= 0xFF) 1 else table.get(cp).width;
++    }
++};
++
++/// vtmux: a published `Widths`. Immutable once published and never freed:
++/// a reader that loaded it may use it to the end of its call while another
++/// thread publishes a new one, with no lock. Setting the same overrides
++/// again reuses their table, so the memory kept is one table per distinct
++/// set (`codepoint-widths` values).
++const WidthTable = struct {
++    widths: Widths,
++    /// The table published before this one (every table ever published).
++    next: ?*const WidthTable,
++
++    fn eql(self: *const WidthTable, ranges: []const WidthRange) bool {
++        if (self.widths.ranges.len != ranges.len) return false;
++        for (self.widths.ranges, ranges) |a, b| {
++            if (a.first != b.first or a.last != b.last or a.width != b.width) return false;
++        }
++        return true;
++    }
++};
++
++const no_overrides: WidthTable = .{
++    .widths = .{ .ranges = &.{}, .narrow_max = 0xFF },
++    .next = null,
++};
++
++/// vtmux: the table in use. Set with `setWidthOverrides`.
++var width_table: std.atomic.Value(*const WidthTable) = .init(&no_overrides);
+ 
+-/// vtmux: the highest codepoint the printer may take as narrow without
+-/// looking: 0xFF, or 0x7F while an override reaches below 0x100.
+-pub var narrow_max: u21 = 0xFF;
++/// vtmux: every table ever published, newest first.
++var width_tables: std.atomic.Value(?*const WidthTable) = .init(null);
++
++/// vtmux: the width overrides in use. The print path reads them once per
++/// call.
++pub inline fn widths() Widths {
++    return width_table.load(.acquire).widths;
++}
++
++/// vtmux: the printer's narrow bound (`Widths.narrow_max`).
 +pub inline fn narrowMax() u21 {
-+    return @intCast(@atomicLoad(u32, &narrow_max, .monotonic));
++    return widths().narrow_max;
 +}
  
  /// vtmux: the overridden width of `cp`, if any.
  pub inline fn widthOverride(cp: u21) ?u2 {
 -    if (width_overrides.len == 0) return null;
-+    if (!@atomicLoad(bool, &has_width_overrides, .acquire)) return null;
-     return widthOverrideSlow(cp);
+-    return widthOverrideSlow(cp);
++    return widths().override(cp);
  }
  
- fn widthOverrideSlow(cp: u21) ?u2 {
-+    while (!width_mutex.tryLock()) std.atomic.spinLoopHint();
-+    defer width_mutex.unlock();
+-fn widthOverrideSlow(cp: u21) ?u2 {
++fn widthOverrideSlow(ranges: []const WidthRange, cp: u21) ?u2 {
      var lo: usize = 0;
-     var hi: usize = width_overrides.len;
+-    var hi: usize = width_overrides.len;
++    var hi: usize = ranges.len;
      while (lo < hi) {
-@@ -68,13 +78,16 @@
+         const mid = lo + (hi - lo) / 2;
+-        const r = width_overrides[mid];
++        const r = ranges[mid];
+         if (cp < r.first) {
+             hi = mid;
+         } else if (cp > r.last) {
+@@ -68,38 +126,72 @@ fn widthOverrideSlow(cp: u21) ?u2 {
  }
  
  /// vtmux: replace the width overrides with a copy of `ranges` (sorted by
 -/// `first`, not overlapping). Not safe while another thread prints.
-+/// `first`, not overlapping). Readers and writers share the slice lock.
++/// `first`, not overlapping). Safe while other threads print or query
++/// widths: they see the old table or the new one. No lock: the old table
++/// stays allocated (see `WidthTable`).
  pub fn setWidthOverrides(ranges: []const WidthRange) !void {
 -    const alloc = @import("std").heap.page_allocator;
++    if (ranges.len == 0) {
++        width_table.store(&no_overrides, .release);
++        return;
++    }
++    var head = width_tables.load(.acquire);
++    var it = head;
++    while (it) |t| : (it = t.next) {
++        if (t.eql(ranges)) {
++            width_table.store(t, .release);
++            return;
++        }
++    }
 +    const alloc = std.heap.page_allocator;
      const copy = try alloc.dupe(WidthRange, ranges);
-+    while (!width_mutex.tryLock()) std.atomic.spinLoopHint();
-+    defer width_mutex.unlock();
-     const old = width_overrides;
-     width_overrides = copy;
+-    const old = width_overrides;
+-    width_overrides = copy;
 -    narrow_max = if (copy.len != 0 and copy[0].first <= 0xFF) 0x7F else 0xFF;
-+    @atomicStore(u32, &narrow_max, if (copy.len != 0 and copy[0].first <= 0xFF) 0x7F else 0xFF, .monotonic);
-+    @atomicStore(bool, &has_width_overrides, copy.len != 0, .release);
-     if (old.len != 0) alloc.free(old);
+-    if (old.len != 0) alloc.free(old);
++    errdefer alloc.free(copy);
++    const t = try alloc.create(WidthTable);
++    t.* = .{
++        .widths = .{
++            .ranges = copy,
++            .narrow_max = if (copy[0].first <= 0xFF) 0x7F else 0xFF,
++        },
++        .next = head,
++    };
++    // Two threads setting the same new ranges at once may each push a
++    // table: harmless, and only that once.
++    while (width_tables.cmpxchgWeak(head, t, .release, .acquire)) |newer| {
++        head = newer;
++        t.next = newer;
++    }
++    width_table.store(t, .release);
  }
  
-@@ -89,17 +102,24 @@
- /// `screen_write_combine` does (screen-write.c), not by UAX #29: see
- /// `Terminal.tmuxCombine`. Process-wide like the width overrides; set
- /// with `setTmuxClusters`.
+-/// vtmux: the width the printer gives `cp`: an override, else 1 for a
+-/// codepoint up to 0xFF, else the table.
++/// vtmux: the width the printer gives `cp` (`Widths.printWidth`).
+ pub inline fn printWidth(cp: u21) u2 {
+-    if (widthOverride(cp)) |w| return w;
+-    return if (cp <= 0xFF) 1 else table.get(cp).width;
++    return widths().printWidth(cp);
+ }
+ 
+-/// vtmux: mode 2027 joins characters into a cell as tmux's
+-/// `screen_write_combine` does (screen-write.c), not by UAX #29: see
+-/// `Terminal.tmuxCombine`. Process-wide like the width overrides; set
+-/// with `setTmuxClusters`.
 -pub var tmux_clusters: bool = false;
-+var tmux_clusters: bool = false;
++/// vtmux: tmux's clustering options, read together (see `setTmuxClusters`).
++pub const TmuxClusters = packed struct(u8) {
++    /// Mode 2027 joins characters into a cell as tmux's
++    /// `screen_write_combine` does (screen-write.c), not by UAX #29: see
++    /// `Terminal.tmuxCombine`.
++    enabled: bool = false,
++    /// tmux's `variation-selector-always-wide`: under `enabled`, U+FE0F
++    /// joined to a one-column cell makes it two columns.
++    vs16_wide: bool = true,
++    _: u6 = 0,
++};
 +
-+pub inline fn tmuxClusters() bool {
-+    return @atomicLoad(bool, &tmux_clusters, .monotonic);
++/// vtmux: process-wide like the width overrides.
++var tmux_clusters: std.atomic.Value(u8) = .init(@bitCast(TmuxClusters{}));
+ 
+-/// vtmux: tmux's `variation-selector-always-wide`: under `tmux_clusters`,
+-/// U+FE0F joined to a one-column cell makes it two columns.
+-pub var tmux_vs16_wide: bool = true;
++/// vtmux: tmux's clustering options in use. Hot paths load them once per
++/// call.
++pub inline fn tmuxClusters() TmuxClusters {
++    return @bitCast(tmux_clusters.load(.monotonic));
 +}
  
- /// vtmux: tmux's `variation-selector-always-wide`: under `tmux_clusters`,
- /// U+FE0F joined to a one-column cell makes it two columns.
--pub var tmux_vs16_wide: bool = true;
--
 -/// vtmux: turn tmux's clustering on or off. Not safe while another
 -/// thread prints.
-+var tmux_vs16_wide: bool = true;
-+
-+pub inline fn tmuxVs16Wide() bool {
-+    return @atomicLoad(bool, &tmux_vs16_wide, .monotonic);
-+}
-+
-+/// vtmux: turn tmux's clustering on or off, including during printing.
++/// vtmux: turn tmux's clustering on or off, including while other threads
++/// print: a call sees the old options or the new ones.
  pub fn setTmuxClusters(enabled: bool, vs16_wide: bool) void {
 -    tmux_clusters = enabled;
 -    tmux_vs16_wide = vs16_wide;
-+    @atomicStore(bool, &tmux_clusters, enabled, .monotonic);
-+    @atomicStore(bool, &tmux_vs16_wide, vs16_wide, .monotonic);
++    tmux_clusters.store(@bitCast(TmuxClusters{ .enabled = enabled, .vs16_wide = vs16_wide }), .monotonic);
  }
  
  /// vtmux: tmux's Hangul jamo classes (utf8-combined.c
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -727,11 +727,11 @@
+@@ -725,13 +725,17 @@ fn printSliceFast(
+     // immediately eligible for the narrow fill with no further
+     // checks.
      const cp0 = cps[0];
++    // vtmux: the process-wide options, read once: another thread may set
++    // them while this call prints.
++    const widths = unicode.widths();
++    const tmux_clusters = unicode.tmuxClusters().enabled;
      // vtmux: an override below 0x100 makes 0x80-0xFF go through print(),
      // and so does a C1 control (zero width there).
 -    if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
-+    if (cp0 > unicode.narrowMax() and cp0 <= 0xFF) return 0;
++    if (cp0 > widths.narrow_max and cp0 <= 0xFF) return 0;
      if (cp0 >= 0x80 and cp0 <= 0x9F) return 0;
      // vtmux: with tmux's clustering, 0xA0-0xFF joins a cell that ends
      // with a ZWJ, and U+3164 is dropped: print() decides those.
 -    if (unicode.tmux_clusters and grapheme_cluster) tmux: {
-+    if (unicode.tmuxClusters() and grapheme_cluster) tmux: {
++    if (tmux_clusters and grapheme_cluster) tmux: {
          if (cp0 == 0x3164) return 0;
          if (cp0 < 0xA0 or cp0 > 0xFF) break :tmux;
          if (screen.cursor.pending_wrap) return 0;
-@@ -794,7 +794,7 @@
+@@ -794,7 +798,7 @@ fn printSliceFast(
          if (prev.hasGrapheme()) return 0;
  
          // vtmux: with tmux's clustering, its rules decide.
 -        if (unicode.tmux_clusters) {
-+        if (unicode.tmuxClusters()) {
++        if (tmux_clusters) {
              if (unicode.tmuxMayJoin(prev.content.codepoint.data, @intCast(cp0))) return 0;
              break :gate;
          }
-@@ -1001,7 +1001,7 @@
+@@ -815,7 +819,7 @@ fn printSliceFast(
+     // specialized at comptime by width class, so this switch selects
+     // between the two instantiations rather than passing the width
+     // through as an argument.
+-    return switch (unicode.printWidth(@intCast(cp0))) {
++    return switch (widths.printWidth(@intCast(cp0))) {
+         1 => self.printSliceFill(
+             .narrow,
+             cps,
+@@ -851,13 +855,17 @@ const PrintSliceWidth = enum(u1) {
+ 
+ /// Whether a codepoint above 0xFF is eligible for the batched print
+ /// fast path with the given width class.
+-inline fn printSliceEligible(cp: u32, comptime width: PrintSliceWidth) bool {
++inline fn printSliceEligible(
++    cp: u32,
++    comptime width: PrintSliceWidth,
++    widths: unicode.Widths,
++) bool {
+     assert(cp > 0xFF);
+     if (comptime build_options.kitty_graphics) {
+         if (cp == kitty.graphics.unicode.placeholder) return false;
+     }
+ 
+-    return unicode.printWidth(@intCast(cp)) == comptime @as(u2, switch (width) {
++    return widths.printWidth(@intCast(cp)) == comptime @as(u2, switch (width) {
+         .narrow => 1,
+         .wide => 2,
+     });
+@@ -959,6 +967,10 @@ fn printSliceFill(
+     allow_unicode: bool,
+ ) !usize {
+     const screen: *Screen = self.screens.active;
++    // vtmux: the process-wide options, read once: another thread may set
++    // them while this call prints.
++    const widths = unicode.widths();
++    const tmux_clusters = unicode.tmuxClusters().enabled;
+     const charset_table: ?[]const u16 = switch (screen.charset.charsets.get(screen.charset.gl)) {
+         .utf8, .ascii => null,
+         else => |set| charsets.table(set),
+@@ -1001,7 +1013,9 @@ fn printSliceFill(
              if (simd.lanes(u32)) |lanes| {
                  const V = @Vector(lanes, u32);
                  const lo: V = @splat(0x10);
 -                const hi: V = @splat(@as(u32, @min(unicode.narrow_max, 0x7F)));
-+                const hi: V = @splat(@as(u32, @min(unicode.narrowMax(), 0x7F)));
++                // vtmux: 0x7F, the narrow bound's least (narrow_max is 0x7F
++                // or 0xFF), so the scan needs no load.
++                const hi: V = @splat(0x7F);
                  while (idx + lanes <= cps.len) {
                      const v: V = cps[idx..][0..lanes].*;
                      // vtmux: stop at 0x80; the scalar loop below takes
-@@ -1020,7 +1020,7 @@
+@@ -1020,18 +1034,22 @@ fn printSliceFill(
          while (idx < cps.len) : (idx += 1) {
              const cp = cps[idx];
              if (comptime width == .narrow) {
 -                if (cp >= 0x10 and cp <= unicode.narrow_max and !(cp >= 0x80 and cp <= 0x9F)) {
++                // vtmux: the narrow bound is loaded here, not held from the
++                // call's `widths`: a register for it costs this loop 5% on
++                // UTF-8 text. A racing set may change it mid-run; any
++                // table it reads stays valid.
 +                if (cp >= 0x10 and cp <= unicode.narrowMax() and !(cp >= 0x80 and cp <= 0x9F)) {
                      if (cp >= 0x80) run_ascii = false;
                      continue;
                  }
-@@ -1031,7 +1031,7 @@
+             }
+-            if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
++            if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width, widths)) {
+                 if (!grapheme_cluster) {
+                     run_ascii = false;
                      continue;
                  }
                  // vtmux: with tmux's clustering, its rules decide.
 -                if (unicode.tmux_clusters) {
-+                if (unicode.tmuxClusters()) {
++                if (tmux_clusters) {
                      if (!unicode.tmuxMayJoin(@intCast(cps[idx - 1]), @intCast(cp))) {
                          run_ascii = false;
                          continue;
-@@ -1382,7 +1382,7 @@
+@@ -1377,12 +1395,18 @@ const TmuxCombine = enum {
+     joined_wide,
+ };
+ 
+-fn tmuxCombine(self: *Terminal, prev: *const Cell, c: u21) TmuxCombine {
+-    const width: u2 = if (c >= 0x80 and c <= 0x9F) 0 else unicode.printWidth(c);
++fn tmuxCombine(
++    self: *Terminal,
++    prev: *const Cell,
++    c: u21,
++    widths: unicode.Widths,
++    vs16_wide: bool,
++) TmuxCombine {
++    const width: u2 = if (c >= 0x80 and c <= 0x9F) 0 else widths.printWidth(c);
      // A character that makes no sense on its own: dropped when it
      // cannot join.
      const zero_width = c == 0x200D or c == 0xFE0F or width == 0;
 -    var force_wide = c == 0xFE0F and unicode.tmux_vs16_wide;
-+    var force_wide = c == 0xFE0F and unicode.tmuxVs16Wide();
++    var force_wide = c == 0xFE0F and vs16_wide;
      const alone: TmuxCombine = if (zero_width) .dropped else .own;
  
      const base: u21 = prev.content.codepoint.data;
-@@ -1463,7 +1463,7 @@
+@@ -1461,9 +1485,14 @@ pub fn print(self: *Terminal, c: u21) !void {
+     else
+         self.scrolling_region.right + 1;
  
++    // vtmux: the process-wide options, read once: another thread may set
++    // them while this call prints.
++    const widths = unicode.widths();
++    const tmux = unicode.tmuxClusters();
++
      // vtmux: tmux drops U+3164 HANGUL FILLER wherever it comes
      // (screen_write_combine).
 -    if (unicode.tmux_clusters and c == 0x3164) return;
-+    if (unicode.tmuxClusters() and c == 0x3164) return;
++    if (tmux.enabled and c == 0x3164) return;
  
      // Perform grapheme clustering if grapheme support is enabled (mode 2027).
      // This is MUCH slower than the normal path so the conditional below is
-@@ -1471,7 +1471,7 @@
+@@ -1471,7 +1500,7 @@ pub fn print(self: *Terminal, c: u21) !void {
      // as quickly as possible.
      // vtmux: with tmux's clustering, 0x80-0xFF can join a cell too (one
      // that ends with a ZWJ).
 -    if ((c > 255 or (unicode.tmux_clusters and c >= 0x80)) and
-+    if ((c > 255 or (unicode.tmuxClusters() and c >= 0x80)) and
++    if ((c > 255 or (tmux.enabled and c >= 0x80)) and
          self.modes.get(.grapheme_cluster) and
          self.screens.active.cursor.x > 0)
      grapheme: {
-@@ -1519,7 +1519,7 @@
+@@ -1519,8 +1548,8 @@ pub fn print(self: *Terminal, c: u21) !void {
          // cell becomes two columns. A cell in the last column stays one
          // column: tmux makes it two with its padding past the edge
          // (screen_write_combine), where Ghostty has no cell.
 -        const tmux_effect: ?unicode.GraphemeWidthEffect = if (unicode.tmux_clusters)
-+        const tmux_effect: ?unicode.GraphemeWidthEffect = if (unicode.tmuxClusters())
-             switch (self.tmuxCombine(prev.cell, c)) {
+-            switch (self.tmuxCombine(prev.cell, c)) {
++        const tmux_effect: ?unicode.GraphemeWidthEffect = if (tmux.enabled)
++            switch (self.tmuxCombine(prev.cell, c, widths, tmux.vs16_wide)) {
                  .own => break :grapheme,
                  .dropped => return,
+                 .joined => .no_change,
+@@ -1690,7 +1719,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+     const width: usize = if (c >= 0x80 and c <= 0x9F)
+         0
+     else
+-        @intCast(unicode.printWidth(c));
++        @intCast(widths.printWidth(c));
+ 
+     // Note: it is possible to have a width of "3" and a width of "-1" from
+     // uucode.x's wcwidth. We should look into those cases and handle them
 diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
 --- a/src/terminal/c/unicode.zig
 +++ b/src/terminal/c/unicode.zig
-@@ -36,7 +36,7 @@
+@@ -36,7 +36,7 @@ test "set_width_overrides" {
      try testing.expectEqual(2, codepoint_width(0x3B3));
      try testing.expectEqual(1, codepoint_width(0x3B4));
      try testing.expectEqual(1, codepoint_width(0x1F600));
@@ -191,7 +384,7 @@ diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
      const bad = [_]unicode_pkg.WidthRange{
          .{ .first = 5, .last = 9, .width = 1 },
          .{ .first = 9, .last = 10, .width = 1 },
-@@ -44,7 +44,7 @@
+@@ -44,7 +44,7 @@ test "set_width_overrides" {
      try testing.expectEqual(Result.invalid_value, set_width_overrides(&bad, bad.len));
      try testing.expectEqual(Result.success, set_width_overrides(null, 0));
      try testing.expectEqual(2, codepoint_width(0x1F600));
@@ -203,26 +396,26 @@ diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
-@@ -160,8 +160,9 @@
+@@ -160,8 +160,9 @@ typedef struct {
   * `codepoint-widths`): text printed from now on, and
   * ghostty_unicode_codepoint_width(), take these widths over the table's.
   * Ranges must be sorted by first and not overlap, widths 0 to 2; len 0
 - * clears them. Cells already printed keep their width. Not safe while
 - * another thread prints.
 + * clears them. Cells already printed keep their width. Safe while
-+ * other threads print or query widths; a concurrent call may observe either
-+ * configuration.
++ * other threads print or query widths: a call sees the old widths or the
++ * new ones. The old table is kept, not freed (one per distinct set).
   *
   * @return GHOSTTY_SUCCESS, GHOSTTY_INVALID_VALUE for bad ranges, or
   *         GHOSTTY_OUT_OF_MEMORY
-@@ -179,8 +180,8 @@
+@@ -179,8 +180,8 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
   * with U+200D; two lone regional indicators, and an emoji skin-tone
   * modifier with one of tmux's bases (either order), join into two
   * columns; Hangul jamo join as tmux's do and U+3164 is dropped.
 - * Process-wide; cells already printed keep their text. Not safe while
 - * another thread prints.
 + * Process-wide; cells already printed keep their text. Safe while
-+ * other threads print; a concurrent call may observe either configuration.
++ * other threads print: a call sees the old options or the new ones.
   */
  GHOSTTY_API void ghostty_unicode_set_tmux_clusters(bool enabled, bool vs16_wide);
  

@@ -18,7 +18,8 @@ Next is `3.8-beta2`.
 
 **Faster frames.** A key's echo takes 0.30 ms (was 0.38; tmux 0.24). Agent TUIs cost 0.76-0.92x tmux's server CPU at 5-20 panes with one or two clients (was up to 1.25x), and 5 clients on one window 1.4x (was 1.85x). A one-cell change composes one row, a pane's screen is read once per write whatever the number of clients, and a client's frame acknowledgement wakes no render. Frames are byte for byte what they were ([numbers](docs/PERFORMANCE.md)).
 
-**Library safety.** The published Ghostty wrapper now synchronizes Unicode-option updates, rejects out-of-range grid reads and borrows custom allocators instead of keeping dangling callback pointers. Growable key/mouse buffers and OSC window-title strings also return their full output.
+**Library safety.** The published Ghostty wrapper lets another thread change Unicode options while terminals print (lock-free, at full printing speed), rejects out-of-range grid reads and borrows custom allocators instead of keeping dangling callback pointers. Growable key/mouse buffers and OSC window-title strings also return their full output.
+
 
 - The cursor hides under a floating pane, in a shown overlay scrollbar, and in a pending wrap at the window's right edge, as tmux's does; it no longer draws over a floating pane.
 - `#{V:...}` loops over the session, global (`V/g`) and client (`V/c`) environment; it was always empty.
