@@ -1,0 +1,22 @@
+name = "target_session_pane_id"
+# `session:.%N` looks the pane up by ID and takes its window's best
+# winlink in that session (cmd_find_get_pane_with_session,
+# cmd-find.c:555-577), not only the session's current window. A pane
+# whose window is not in the session fails; under CMD_FIND_CANFAIL
+# (display-message) the state keeps the session and the pane.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:1", "-n", "w", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["display", "-p", "-t", "a:.%2", "#{session_name}:#{window_index}.#{pane_id}"] },
+  { run = ["display", "-p", "-t", "a:.%0", "#{session_name}:#{window_index}.#{pane_id}"] },
+  { run = ["select-pane", "-t", "a:.%2", ";", "display", "-p", "#{session_name}:#{window_index}.#{pane_id}"] },
+  { run = ["display", "-p", "-t", "b:.%2", "#{session_name}:#{window_index}.#{pane_id}"] },
+  { run = ["select-pane", "-t", "b:.%2"] },
+  { run = ["select-pane", "-t", "a:.%9"] },
+  { run = ["link-window", "-s", "a:1", "-t", "a:5"] },
+  { run = ["display", "-p", "-t", "a:.%2", "#{window_index}"] },
+  { run = ["select-window", "-t", "a:0"] },
+  { run = ["display", "-p", "-t", "a:.%2", "#{window_index}"] },
+]

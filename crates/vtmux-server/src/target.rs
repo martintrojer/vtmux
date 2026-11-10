@@ -562,6 +562,22 @@ fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: Targe
         let Some(s) = find_session(model, sp) else {
             return Found::default();
         };
+        // A pane ID whose window is not in the session: the state keeps
+        // the pane (cmd-find.c:568-572), so formats show it in the
+        // session's current window.
+        if parts.window.is_none()
+            && let Some(id) = parts
+                .pane
+                .as_ref()
+                .filter(|p| p.text.starts_with('%'))
+                .and_then(|p| p.text.parse::<PaneId>().ok())
+            && model.panes.contains_key(&id)
+        {
+            return Found {
+                pane: Some(id),
+                ..session_only(Some(s))
+            };
+        }
         return parts
             .window
             .as_ref()
@@ -740,6 +756,17 @@ fn find_parts(
         return match (&parts.window, &parts.pane) {
             (None, None) => Ok(Found::from_session(model, s)),
             (Some(wp), None) => find_window_in(model, s, wp).ok_or_else(|| no_window(wp)),
+            // cmd_find_get_pane_with_session (cmd-find.c:555-577): a pane
+            // ID is looked up anywhere, then its window in this session.
+            (None, Some(pp)) if pp.text.starts_with('%') => {
+                let id: PaneId = pp.text.parse().map_err(|_| no_pane(pp))?;
+                let pane = model.panes.get(&id).ok_or_else(|| no_pane(pp))?;
+                let f = best_winlink(model, s, pane.window).ok_or_else(|| no_pane(pp))?;
+                Ok(Found {
+                    pane: Some(id),
+                    ..f
+                })
+            }
             (None, Some(pp)) => {
                 let base = Found::from_session(model, s);
                 let w = base.window.ok_or_else(|| no_pane(pp))?;
