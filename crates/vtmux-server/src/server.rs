@@ -264,6 +264,8 @@ pub(crate) struct Client {
     /// payloads). The write asks `notified` for each: one dropped with the
     /// passthrough, as a blocked client's is, never used a slot.
     pub(crate) notifications: Vec<(usize, vtmux_vt::Notification)>,
+    /// D33: what its terminal holds of vtmux's images.
+    pub(crate) graphics: crate::render::graphics::ClientGraphics,
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
@@ -384,6 +386,7 @@ impl Client {
             passthrough: Vec::new(),
             notified: crate::notify::Limit::default(),
             notifications: Vec::new(),
+            graphics: crate::render::graphics::ClientGraphics::default(),
             reattach: None,
             view: crate::view::View::default(),
             pan: None,
@@ -675,6 +678,10 @@ pub struct Server {
     listener: Option<UnixListener>,
     signals: Signals,
     pub(crate) clients: BTreeMap<ClientId, Client>,
+    /// D33: the numbering of panes' images for the clients, and this
+    /// turn's pane graphics (`None` while no pane has any).
+    graphics_ids: crate::render::graphics::Ids,
+    graphics_tick: Option<Rc<crate::render::graphics::Tick>>,
     /// Tests: every client draws alone ([`crate::render::share`] off).
     #[cfg(test)]
     pub(crate) sharing: crate::render::share::Sharing,
@@ -976,6 +983,8 @@ impl Server {
             listener: Some(listener),
             signals,
             clients: BTreeMap::new(),
+            graphics_ids: crate::render::graphics::Ids::default(),
+            graphics_tick: None,
             #[cfg(test)]
             sharing: crate::render::share::Sharing::On,
             next_client: 0,
@@ -3302,6 +3311,13 @@ impl Server {
         // What the clients before this one drew, for those after it.
         let mut turn = crate::render::share::Turn::default();
         self.update_moved_offsets();
+        // D33: every pane's placements, read once for every client.
+        self.graphics_tick = self.model.graphics_used.then(|| {
+            Rc::new(crate::render::graphics::Tick::build(
+                &self.model,
+                &mut self.graphics_ids,
+            ))
+        });
         // Every client of the turn sees one time and one foreground
         // process per pane (crate::live).
         self.model.live.hold();
@@ -3341,6 +3357,7 @@ impl Server {
         };
         caps.overlay = client.popup.is_some();
         caps.attrs.italics_as_standout = self.italics_as_standout();
+        caps.graphics = self.graphics_client(client, caps);
         let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
         let queued = client.unacked.bytes;
@@ -3454,10 +3471,60 @@ impl Server {
             let ahead = self.redraw_head(id, s);
             frame.splice(0..0, ahead);
         }
+        self.frame_graphics(id, caps, &mut frame);
         if !frame.is_empty() {
             self.send(id, &ServerMsg::Frame(frame));
         }
         self.send_passthrough(id, caps);
+    }
+
+    /// D33: whether client `id` (`client`) draws panes' kitty graphics, and
+    /// with what cell size: while a pane has any, for a terminal that
+    /// identifies as Ghostty (as D30) and writes the RGB colours and
+    /// underline colours placeholder cells name their image with. Never a
+    /// control client (no frames).
+    fn graphics_client(&self, client: &Client, caps: crate::render::Caps) -> Option<(u32, u32)> {
+        let ghostty = client
+            .term
+            .as_ref()
+            .is_some_and(|t| crate::notify::is_ghostty(t.term_type()));
+        (self.graphics_tick.is_some() && ghostty && caps.rgb && caps.attrs.underline_rgb)
+            .then_some(client.cell_pixels)
+    }
+
+    /// D33: client `id`'s uploads before `frame` and frees after it, for
+    /// the screen it now shows ([`crate::render::graphics::ClientGraphics`]).
+    /// A client that stopped drawing graphics frees what it holds.
+    fn frame_graphics(&mut self, id: ClientId, caps: crate::render::Caps, frame: &mut Vec<u8>) {
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let empty = crate::render::graphics::Tick::default();
+        let (tick, screen) = match (&self.graphics_tick, caps.graphics) {
+            (Some(tick), Some(_)) => match client.compositor.last() {
+                Some((screen, _)) => (tick.as_ref(), Some(screen)),
+                None => return,
+            },
+            _ if client.graphics.holds_any() => (&empty, None),
+            _ => return,
+        };
+        let blank = crate::render::blank(None, 1, 1);
+        let panes = &self.model.panes;
+        let (before, after) =
+            client
+                .graphics
+                .frame(screen.unwrap_or(&blank), tick, &self.graphics_ids, |key| {
+                    let term = &panes.get(&key.pane)?.term;
+                    if term.alternate_on() != key.alternate {
+                        return None;
+                    }
+                    let (generation, px) = term.graphics_image(key.image)?;
+                    (generation == key.generation).then_some(px)
+                });
+        if !before.is_empty() {
+            frame.splice(0..0, before);
+        }
+        frame.extend(after);
     }
 
     /// Client `id`'s frame, drawn: its window `drawing`, status lines and
@@ -4674,6 +4741,7 @@ impl Server {
             keys: &self.key_bindings,
             client: None,
             links: &self.link_numbers,
+            graphics: self.graphics_tick.as_deref(),
         }
     }
 
@@ -6668,6 +6736,9 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    /// D33: what a Ghostty client is sent of panes' kitty graphics.
+    mod graphics;
 
     #[test]
     fn passthrough_titles_are_found() {

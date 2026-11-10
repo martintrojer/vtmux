@@ -324,6 +324,11 @@ pub struct CopyMode {
     /// The cursor, scroll offset and selection as of the last
     /// [`Self::moved_since_offset`].
     offset_seen: (usize, usize, usize, bool),
+    /// D33: the pane's direct image placements when the copy was taken,
+    /// with the screen they were on, drawn over the copy's rows
+    /// ([`crate::render::graphics`]); none for another pane's copy, and
+    /// dropped when the copy is reflowed.
+    graphics: (bool, Vec<vtmux_vt::graphics::Placement>),
 }
 
 /// How often a drag held at the top or bottom row scrolls
@@ -739,7 +744,27 @@ impl CopyMode {
             drag_due: None,
             scrolled: false,
             offset_seen: (cx, cy, oy, false),
+            graphics: if trim {
+                (false, Vec::new())
+            } else {
+                let mut placed = source.graphics_placements();
+                placed.retain(|p| !p.is_virtual);
+                (source.alternate_on(), placed)
+            },
         }
+    }
+
+    /// D33: the direct placements of the copy, and the screen they are on.
+    #[must_use]
+    pub fn graphics(&self) -> (bool, &[vtmux_vt::graphics::Placement]) {
+        (self.graphics.0, &self.graphics.1)
+    }
+
+    /// Lines scrolled up into history: the copy's top row is this far
+    /// above the active area's top when it was taken.
+    #[must_use]
+    pub fn scroll_offset(&self) -> usize {
+        self.oy
     }
 
     /// Whether the mode moved its cursor, scrolled or changed its
@@ -766,6 +791,7 @@ impl CopyMode {
         let mut m = Self::new(backing, size, false, (false, false), vi, pane_search);
         m.line_numbers = 0;
         m.foreign = true;
+        m.graphics.1.clear();
         m
     }
 
@@ -788,6 +814,7 @@ impl CopyMode {
     /// to the bottom. The selection is cleared (`window_copy_size_changed`).
     pub fn resize(&mut self, sx: usize, sy: usize) {
         self.position_clip = None;
+        self.graphics.1.clear();
         let (sx, sy) = (sx.max(1), sy.max(1));
         let hsize = self.hsize();
         self.oy = self.oy.min(hsize + self.cy);
@@ -3534,6 +3561,7 @@ impl CopyMode {
             scrolled: r.scrolled,
             // The frames before the snapshot saw every change.
             offset_seen: (r.cx as usize, r.cy as usize, us(r.oy), r.sel.is_some()),
+            graphics: (false, Vec::new()),
         })
     }
 }

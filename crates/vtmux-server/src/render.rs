@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 
 pub mod blend;
 pub mod compose;
+pub mod graphics;
 pub mod menu;
 pub mod palette;
 pub mod panes;
@@ -67,6 +68,11 @@ pub struct Caps {
     pub attrs: Attrs,
     /// `Hls` (the `hyperlinks` feature): cells' OSC 8 links are written.
     pub hyperlinks: bool,
+    /// D33: the client draws panes' kitty graphics, with this cell size
+    /// in pixels (its frames are shared only with clients of the same).
+    /// Not a terminal capability, but per client and part of what its
+    /// drawings depend on.
+    pub graphics: Option<(u32, u32)>,
 }
 
 /// The attribute capabilities `tty_attributes` writes with (tty.c:2727-
@@ -211,6 +217,7 @@ impl Caps {
             isolates: term.feature_present("utf8") && term.has_name("Bidi"),
             attrs: Attrs::from_term(term),
             hyperlinks: term.has_name("Hls"),
+            graphics: None,
         }
     }
 }
@@ -531,7 +538,6 @@ impl Compositor {
                 .is_some_and(|s| (s.cols, s.rows) == (cols, rows))
     }
     /// The last frame sent and its row tags.
-    #[cfg(test)]
     #[must_use]
     pub fn last(&self) -> Option<(&Snapshot, &[u64])> {
         self.last.as_deref().map(|l| (l, self.last_tags.as_slice()))
@@ -1245,6 +1251,7 @@ mod tests {
             isolates: false,
             attrs: Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -1278,6 +1285,7 @@ mod tests {
             isolates: false,
             attrs: Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         }
     }
 
@@ -1772,6 +1780,7 @@ mod tests {
             isolates: false,
             attrs: Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -1813,6 +1822,7 @@ mod tests {
             isolates: false,
             attrs: Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

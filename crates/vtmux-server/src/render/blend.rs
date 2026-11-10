@@ -216,6 +216,7 @@ mod tests {
             isolates: false,
             attrs: crate::render::Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         }
     }
 

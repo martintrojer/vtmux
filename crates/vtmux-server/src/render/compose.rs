@@ -195,6 +195,9 @@ pub struct PaneDraw {
     pub dim: Option<Dim>,
     /// D26: how its content cells are blended, if at all.
     pub blend: Option<PaneBlend>,
+    /// D33: its content has vtmux's placeholder cells, whose colours are
+    /// image ids: no palette, dim, blend or default colour touches them.
+    pub graphics: bool,
 }
 
 /// How a pane's scrollbar draws (`redraw_draw_scrollbar_span`).
@@ -480,6 +483,7 @@ struct PaneKey {
     no_palette: Vec<bool>,
     dim: Option<Dim>,
     blend: Option<PaneBlend>,
+    graphics: bool,
 }
 
 /// Everything in a [`Draw`] but the panes' content, and the theme.
@@ -546,6 +550,7 @@ impl DrawKey {
                     no_palette: p.no_palette.clone(),
                     dim: p.dim,
                     blend: p.blend,
+                    graphics: p.graphics,
                 })
                 .collect(),
             active: d.active,
@@ -736,6 +741,17 @@ fn draw_span(
         _ => None,
     };
     let mut marks = pane.map_or_else(Vec::new, |p| cell_mask(&p.no_palette, p, scene, x, end, y));
+    // D33: placeholder cells keep the colours that name their image.
+    let images: Vec<(usize, vtmux_vt::Style)> = if pane.is_some_and(|p| p.graphics) {
+        cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| vtmux_vt::graphics::is_placeholder(c))
+            .map(|(i, c)| (i, c.style))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let written = draw_pane_span(scene.get(x, y), d, theme, cells, wrapped, &keep, &mut marks);
     if let Some(p) = pane {
         if p.palette.is_some() || p.dim.is_some() {
@@ -743,6 +759,12 @@ fn draw_span(
         }
         if let Some(blend) = p.blend.as_ref() {
             blend.apply(cells);
+        }
+    }
+    for (i, style) in images {
+        if let Some(c) = cells.get_mut(i) {
+            c.style.fg = style.fg;
+            c.style.underline_color = style.underline_color;
         }
     }
     written
@@ -1262,6 +1284,7 @@ mod tests {
                             no_palette: Vec::new(),
                             dim: None,
                             blend: None,
+                            graphics: false,
                         },
                     )
                 })

@@ -111,7 +111,7 @@ impl Server {
 /// Ghostty, the one terminal known to show both forms (its
 /// `#{client_termtype}`, `ghostty 1.2.3`; tmux knows it by the same
 /// prefix, tty-keys.c `tty_keys_extended_device_attributes`).
-fn is_ghostty(term_type: &str) -> bool {
+pub(crate) fn is_ghostty(term_type: &str) -> bool {
     term_type.starts_with("ghostty ")
 }
 

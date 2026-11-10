@@ -327,6 +327,7 @@ mod tests {
             attrs: super::super::Attrs::XTERM,
             isolates: false,
             hyperlinks: false,
+            graphics: None,
         }
     }
 

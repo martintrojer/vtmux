@@ -34,6 +34,8 @@ struct PaneScreen {
     selected: Vec<bool>,
     /// [`PaneDraw::no_palette`].
     no_palette: Vec<bool>,
+    /// [`PaneDraw::graphics`].
+    graphics: bool,
 }
 
 /// A palette as `tty_attributes` reads it (`wp->palette`, `pd->palette`):
@@ -88,6 +90,8 @@ pub struct Source<'a> {
     pub client: Option<DrawnFor<'a>>,
     /// The server's link counter ([`Theme::links`]).
     pub links: &'a vtmux_vt::LinkNumbers,
+    /// D33: this turn's pane graphics, `None` while no pane has any.
+    pub graphics: Option<&'a super::graphics::Tick>,
 }
 
 /// Whether style option text is a format, expanded before it is parsed.
@@ -584,6 +588,7 @@ impl Source<'_> {
                     no_palette: shown.no_palette,
                     dim,
                     blend: None,
+                    graphics: shown.graphics,
                 },
             );
         }
@@ -780,9 +785,58 @@ impl Source<'_> {
         }
     }
 
+    /// What `pane` shows ([`Self::pane_screen_cells`]), with its kitty
+    /// graphics as placeholder cells for a client that draws them (D33,
+    /// [`super::graphics::overlay`]): over its own screen, or copy mode's
+    /// copy of it.
+    fn pane_screen(
+        &self,
+        pane: &crate::model::Pane,
+        tree: TreeId,
+        ctx: &Ctx<'_>,
+        caps: Caps,
+    ) -> PaneScreen {
+        let mut shown = self.pane_screen_cells(pane, tree, ctx, caps);
+        let Some(pg) = caps
+            .graphics
+            .and(self.graphics)
+            .and_then(|t| t.panes.get(&pane.id))
+        else {
+            return shown;
+        };
+        let (direct, top, left) = match pane.modes.first() {
+            None => (&pg.direct[..], 0, 0),
+            Some(m) => match m.as_copy() {
+                Some(c) => {
+                    let wtree = TreeId::Window(pane.window);
+                    let numbers = self.model.number_option(wtree, "copy-mode-line-numbers");
+                    let left = c.text_columns(numbers).start;
+                    let top = i32::try_from(c.scroll_offset()).map_or(i32::MIN, |o| -o);
+                    (&pg.copy[..], top, i32::try_from(left).unwrap_or(0))
+                }
+                _ => return shown,
+            },
+        };
+        let moved: Vec<super::graphics::Direct> = direct
+            .iter()
+            .map(|d| super::graphics::Direct {
+                col: d.col.saturating_add(left),
+                ..*d
+            })
+            .collect();
+        if let Some((content, stamps)) =
+            super::graphics::overlay(&shown.content, &shown.stamps, pg, &moved, top)
+        {
+            shown.content = std::rc::Rc::new(content);
+            shown.stamps = stamps;
+            shown.graphics = true;
+        }
+        shown
+    }
+
     /// What `pane` shows: its shown mode's screen, else its own
     /// ([`PaneScreen`]).
-    fn pane_screen(
+    fn pane_screen_cells(
         &self,
         pane: &crate::model::Pane,
         tree: TreeId,
@@ -794,6 +848,7 @@ impl Source<'_> {
             stamps: Vec::new(),
             selected: Vec::new(),
             no_palette: Vec::new(),
+            graphics: false,
         };
         if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
             let screen = self.clock_screen(pane, m, ctx, caps);
@@ -823,6 +878,7 @@ impl Source<'_> {
                 stamps,
                 selected: Vec::new(),
                 no_palette: Vec::new(),
+                graphics: false,
             };
         }
         let top = pane.modes.first();
@@ -860,6 +916,7 @@ impl Source<'_> {
             stamps: Vec::new(),
             selected,
             no_palette,
+            graphics: false,
         }
     }
 

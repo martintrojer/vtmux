@@ -238,6 +238,7 @@ pub(crate) mod tests {
             isolates: false,
             attrs: crate::render::Attrs::XTERM,
             hyperlinks: false,
+            graphics: None,
         };
         let (_, draw) = source.window(s, 20, 5, (0, 0), caps, None, None).unwrap();
         let content = &draw.panes[&p].content;
