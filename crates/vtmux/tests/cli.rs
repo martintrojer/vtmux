@@ -4,8 +4,8 @@
 //! Isolation: `TMUX` and `TMUX_PANE` cleared, a private `TMUX_TMPDIR` per
 //! scenario, an explicit `-L` per binary, `-f /dev/null`, SHELL=/bin/sh.
 //! The reference is `$VTMUX_REFERENCE_TMUX` or the `cargo xtask ref-tmux`
-//! cache; without it each test prints why and checks vtmux alone against
-//! the recorded expectations embedded below.
+//! cache; comparison tests fail with a setup hint if it is missing, never
+//! pass with an unchecked vtmux transcript.
 
 mod common;
 mod par;
@@ -328,14 +328,10 @@ impl Drop for World {
 /// expectation.
 /// The two binaries run side by side, each in a world of its own.
 fn compare(name: &str, scenario: impl Fn(&World) -> Vec<Run> + Sync) {
+    let reference = reference().unwrap_or_else(|| {
+        panic!("{name}: reference tmux missing (set VTMUX_REFERENCE_TMUX or run `cargo xtask ref-tmux`)")
+    });
     let (_keep, as_tmux) = vtmux_as_tmux();
-    let Some(reference) = reference() else {
-        scenario(&World::new(&as_tmux));
-        eprintln!(
-            "{name}: SKIP reference comparison: no reference tmux (set VTMUX_REFERENCE_TMUX or run `cargo xtask ref-tmux`)"
-        );
-        return;
-    };
     let mut runs = par::map(&[as_tmux, reference], 2, |bin| scenario(&World::new(bin)));
     let theirs = runs.pop().unwrap();
     let ours = runs.pop().unwrap();
@@ -346,6 +342,24 @@ fn compare(name: &str, scenario: impl Fn(&World) -> Vec<Run> + Sync) {
             "{name}: step {i} differs (left vtmux, right tmux 3.8)"
         );
     }
+}
+
+#[test]
+fn missing_reference_is_a_failure_not_an_unchecked_pass() {
+    let cache = tempfile::tempdir().unwrap();
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "ls_without_server", "--nocapture"])
+        .env("XDG_CACHE_HOME", cache.path())
+        .env_remove("VTMUX_REFERENCE_TMUX")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "comparison passed without a reference: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(stderr.contains("reference tmux missing"), "{stderr}");
 }
 
 /// (1) `ls` with no server: no socket file -> error connecting.
