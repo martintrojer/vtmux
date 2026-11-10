@@ -5553,10 +5553,14 @@ fn the_cursor_hides_where_its_cell_does_not_show() {
         ok(&["kill-pane", "-t", "%1"]);
         a.wait_labelled(&what, Duration::from_secs(5), cursor(true, (10, 3)));
         // A full line: the wrap pending at column 80 is outside the window.
+        // tmux's update as the line is written leaves the cursor shown; its
+        // redraw (here asked for, else 5 s after the attach) hides it.
         ok(&["send", "-t", "%0", "Enter"]);
         a.wait_labelled(&what, Duration::from_secs(5), |a| {
-            pane_text(a).contains("0B") && cursor(false, (79, 3))(a)
+            pane_text(a).contains("0B")
         });
+        ok(&["refresh-client"]);
+        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (79, 3)));
         // Copy mode's cursor in the last column, under a modal scrollbar
         // shown by a scroll, and in the first.
         ok(&["set", "-g", "pane-scrollbars", "modal"]);
