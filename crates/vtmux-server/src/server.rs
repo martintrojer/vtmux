@@ -6097,44 +6097,54 @@ impl Server {
         loop {
             match self.reap_one() {
                 Some((raw, Reaped::Stopped(sig))) => self.child_stopped(raw, sig),
-                Some((raw, Reaped::Ended(job_status))) => {
-                    if self.job_died(raw, job_status) || self.popup_died(raw, job_status) {
-                        continue;
-                    }
-                    let found = self
-                        .model
-                        .panes
-                        .values_mut()
-                        .find(|p| p.pid == raw)
-                        .map(|p| {
-                            p.exited = true;
-                            p.status = Some(job_status);
-                            p.id
-                        });
-                    if let Some(p) = found {
-                        // server_child_exited: window_pane_wait_finish,
-                        // spawn_editor_finish.
-                        if let Some(mut pane) = self.model.panes.remove(&p) {
-                            self.pane_wait_finish(&mut pane);
-                            self.model.panes.insert(p, pane);
-                        }
-                        if let Some(pane) = self.model.panes.get_mut(&p) {
-                            let status = pane.status;
-                            if let Some(editor) = pane.editor.take() {
-                                self.editor_finish(editor, status);
-                            }
-                        }
-                        // Drain what is left, then the read side reports
-                        // the close (EIO) and destroys the pane; a pipe
-                        // still writing its output does once it is drained.
-                        let flooding = self.backlog.contains(&p);
-                        self.pane_readable(p, flooding);
-                        if self.pane_destroy_ready(p) {
-                            self.pane_exited(p);
-                        }
-                    }
-                }
+                Some((raw, Reaped::Ended(status))) => self.child_exited(raw, status),
                 None => return,
+            }
+        }
+    }
+
+    /// `server_child_exited` (server.c:491-515): the job, popup or panes
+    /// whose process `raw` was gets `status`. Every pane with that pid is
+    /// credited (tmux's loop breaks per window only) but a dead one: the
+    /// pid of a `remain-on-exit` pane's process, reaped already, may be
+    /// another process's now. tmux would give that pane the other's
+    /// status, and destroy it under `remain-on-exit failed` if it exited
+    /// 0 (server-fn.c `server_destroy_pane`; D-069).
+    fn child_exited(&mut self, raw: i32, status: crate::jobs::JobStatus) {
+        if self.job_died(raw, status) || self.popup_died(raw, status) {
+            return;
+        }
+        let found: Vec<PaneId> = self
+            .model
+            .panes
+            .values_mut()
+            .filter(|p| p.pid == raw && !p.exited)
+            .map(|p| {
+                p.exited = true;
+                p.status = Some(status);
+                p.id
+            })
+            .collect();
+        for p in found {
+            // server_child_exited: window_pane_wait_finish,
+            // spawn_editor_finish.
+            if let Some(mut pane) = self.model.panes.remove(&p) {
+                self.pane_wait_finish(&mut pane);
+                self.model.panes.insert(p, pane);
+            }
+            if let Some(pane) = self.model.panes.get_mut(&p) {
+                let status = pane.status;
+                if let Some(editor) = pane.editor.take() {
+                    self.editor_finish(editor, status);
+                }
+            }
+            // Drain what is left, then the read side reports the close
+            // (EIO) and destroys the pane; a pipe still writing its output
+            // does once it is drained.
+            let flooding = self.backlog.contains(&p);
+            self.pane_readable(p, flooding);
+            if self.pane_destroy_ready(p) {
+                self.pane_exited(p);
             }
         }
     }
@@ -6417,6 +6427,32 @@ mod tests {
         assert_eq!(osc_title(b"\x1b]2;cut"), None);
         assert_eq!(osc_title(b"\x1b]1;icon\x07"), None);
         assert_eq!(osc_title(b"plain"), None);
+    }
+
+    /// A dead `remain-on-exit` pane keeps the pid of its process, which
+    /// the OS may give a new pane's process: when that one exits, the live
+    /// pane is credited, not the dead one that sorts first
+    /// (server.c `server_child_exited` credits every pane with the pid).
+    #[test]
+    fn a_reused_pid_credits_the_live_pane_not_a_dead_one() {
+        use crate::jobs::JobStatus;
+        use vtmux_core::ids::PaneId;
+        let (mut server, p, _, _, dir) = setup();
+        let ok = crate::server::snapshot::tests::ok;
+        ok(&mut server, &dir, &["set", "-g", "remain-on-exit", "on"]);
+        ok(&mut server, &dir, &["splitw", "-d", "cat"]);
+        let q = PaneId(p.0 + 1);
+        let reused = server.model.panes[&q].pid;
+        let dead = server.model.panes.get_mut(&p).unwrap();
+        dead.exited = true;
+        dead.status = Some(JobStatus::Exited(7));
+        dead.pid = reused;
+        server.child_exited(reused, JobStatus::Exited(0));
+        let live = &server.model.panes[&q];
+        assert!(live.exited);
+        assert_eq!(live.status, Some(JobStatus::Exited(0)));
+        assert_eq!(server.model.panes[&p].status, Some(JobStatus::Exited(7)));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Two `wait-for -E -v` waiters on one event, the first one's socket

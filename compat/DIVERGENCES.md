@@ -73,6 +73,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-066](#d-066) | Desktop notifications reach Ghostty clients (`vtmux-notifications`) | Extension | extension |
 | [D-067](#d-067) | In-band resize reports, mode 2048 (`vtmux-inband-resize`) | Extension | extension |
 | [D-068](#d-068) | Link ids (`tmuxN`) are numbered when first drawn, not when parsed | Deferred | deferred |
+| [D-069](#d-069) | A dead pane keeps its exit status when its old pid comes back for another process | tmux bug | open |
 
 Closed (vtmux now matches tmux):
 
@@ -1187,6 +1188,15 @@ Closed (vtmux now matches tmux):
   - Which cells are one link, their URIs, and where links start and end are tmux's.
 - **Live upgrade:** keeps each pane's numbers (`drawn_links` in the snapshot) and the counter (`link_number`, so a link drawn after it never takes a number still on screen). A copy mode restored from one keeps only URIs, so its links take the pane's link of that URI when it has one, else a new one. `link=` URIs are numbered again.
 - **Evidence:** reference tmux 3.8, the scenario's trace: two links without an `id=` and one with one scroll into history before the attach, and a fourth stays on the screen. tmux draws it as `tmux4`, and copy mode the others as `tmux1`-`tmux3`; vtmux draws it as `tmux1`, the others as `tmux2`-`tmux4`.
+
+<a id="d-069"></a>
+### D-069: a dead pane keeps its status when its pid is reused
+
+- **Category:** Do not copy tmux bug: tmux can overwrite a kept dead pane's status, or destroy it.
+- **Test:** `vtmux-server` unit test `server::tests::a_reused_pid_credits_the_live_pane_not_a_dead_one`.
+- **tmux:** `server_child_exited` (server.c:491-515) gives a reaped child's status to every pane with that pid, a dead `remain-on-exit` pane included, whose pid the OS may have reused. That pane takes the new process's status, and with `remain-on-exit failed` and an exit of 0, `server_destroy_pane` (server-fn.c:382-399) removes it.
+- **vtmux:** the status goes to every pane with that pid whose process has not exited yet; a dead pane keeps its own.
+- **Evidence:** source reading: a pid can't be made to come back on demand, so no oracle scenario can show it. Most likely on macOS (pid_max 99999) with frequent `#()` jobs.
 
 ## Adding an entry
 
