@@ -186,14 +186,7 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     )?;
     // O_NONBLOCK on the tty is shared by stdin and stdout (one open file
     // description), so frames are buffered and written on writability, as
-    // tmux's bufferevents do. A regular-file stdout cannot be registered and
-    // never blocks.
-    let stdout = io::stdout();
-    let _ = poll.registry().register(
-        &mut SourceFd(&stdout.as_raw_fd()),
-        STDOUT,
-        Interest::WRITABLE,
-    );
+    // tmux's bufferevents do ([`Output::arm`]).
     stream.set_nonblocking(true)?;
     let mut out = Output::default();
     let result = relay(
@@ -215,11 +208,11 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
 }
 
 fn send(stream: &mut UnixStream, msg: &ClientMsg) -> io::Result<()> {
-    // Small input messages; blocking only for the duration of this write.
-    stream.set_nonblocking(false)?;
-    let result = protocol::write_msg(stream, msg).map_err(io::Error::other);
-    stream.set_nonblocking(true)?;
-    result
+    // Small input messages: written at once, waiting for the socket only
+    // if it is full (no switch to blocking and back, two syscalls a
+    // message on the key-to-echo path).
+    let bytes = protocol::encode(msg).map_err(io::Error::other)?;
+    write_all_waiting(stream.as_fd(), &bytes)
 }
 
 /// Pending terminal output, written without blocking, and the frames the
@@ -238,6 +231,8 @@ struct Output {
     high_water: usize,
     /// Stream offset at which the last frame received starts.
     last_frame: u64,
+    /// Stdout is in the poll set ([`Self::arm`]).
+    armed: bool,
 }
 
 impl Output {
@@ -292,6 +287,26 @@ impl Output {
         self.stdout.drain(..unwritten);
         self.written += unwritten as u64;
         self.frame_ends.clear();
+    }
+
+    /// Poll for stdout's writability only while output waits for the
+    /// terminal. Kept in the poll set, each frame the terminal took in full
+    /// woke the client once more for nothing. A regular-file stdout cannot
+    /// be registered and never blocks.
+    fn arm(&mut self, registry: &mio::Registry) {
+        let want = !self.stdout.is_empty();
+        if want == self.armed {
+            return;
+        }
+        let fd = io::stdout().as_raw_fd();
+        if want {
+            self.armed = registry
+                .register(&mut SourceFd(&fd), STDOUT, Interest::WRITABLE)
+                .is_ok();
+        } else {
+            let _ = registry.deregister(&mut SourceFd(&fd));
+            self.armed = false;
+        }
     }
 
     fn full(&self) -> bool {
@@ -540,6 +555,7 @@ fn relay(
             }
         }
         out.ack(stream);
+        out.arm(poll.registry());
     }
 }
 

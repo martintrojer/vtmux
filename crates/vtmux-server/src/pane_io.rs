@@ -16,10 +16,15 @@ pub struct PaneIo {
     /// attached client is a control client that is behind
     /// (server-client.c `server_client_check_pane_buffer`).
     reading: Cell<bool>,
-    /// The master is in the poll set: it leaves it while neither read
-    /// nor written.
-    registered: Cell<bool>,
+    /// The interest the master is in the poll set with: it leaves it
+    /// while neither read nor written.
+    armed: Cell<Option<Interest>>,
+    /// What [`Self::read`] reads into, kept between reads.
+    buf: Vec<u8>,
 }
+
+/// The most [`PaneIo::read`] takes at once.
+const READ_SIZE: usize = 64 * 1024;
 
 /// What a read produced.
 pub enum ReadResult {
@@ -37,7 +42,8 @@ impl PaneIo {
             master: std::fs::File::from(master),
             out: Vec::new(),
             reading: Cell::new(true),
-            registered: Cell::new(false),
+            armed: Cell::new(None),
+            buf: Vec::new(),
         }
     }
 
@@ -58,12 +64,12 @@ impl PaneIo {
             Interest::READABLE | Interest::WRITABLE
         };
         registry.register(&mut SourceFd(&self.master.as_raw_fd()), token, interest)?;
-        self.registered.set(true);
+        self.armed.set(Some(interest));
         Ok(())
     }
 
     pub fn deregister(&self, registry: &Registry) {
-        if self.registered.replace(false) {
+        if self.armed.replace(None).is_some() {
             let _ = registry.deregister(&mut SourceFd(&self.master.as_raw_fd()));
         }
     }
@@ -80,8 +86,16 @@ impl PaneIo {
                 return Ok(());
             }
         };
+        // The same interest with nothing left to write is left alone: the
+        // master is read until WouldBlock or put in the backlog, so
+        // re-arming it after every read and key (epoll_ctl) did nothing.
+        // Output left to write re-arms, as WRITABLE must fire again.
+        let armed = self.armed.replace(Some(interest));
+        if armed == Some(interest) && self.out.is_empty() {
+            return Ok(());
+        }
         let fd = &mut SourceFd(&self.master.as_raw_fd());
-        if self.registered.replace(true) {
+        if armed.is_some() {
             registry.reregister(fd, token, interest)
         } else {
             registry.register(fd, token, interest)
@@ -101,14 +115,13 @@ impl PaneIo {
     }
 
     pub fn read(&mut self) -> ReadResult {
-        let mut buf = vec![0u8; 64 * 1024];
+        // Zeroed once, not per read: a key's echo read 64 KB of fresh
+        // memory twice (the data, then WouldBlock).
+        self.buf.resize(READ_SIZE, 0);
         loop {
-            match self.master.read(&mut buf) {
+            match self.master.read(&mut self.buf) {
                 Ok(0) => return ReadResult::Closed,
-                Ok(n) => {
-                    buf.truncate(n);
-                    return ReadResult::Data(buf);
-                }
+                Ok(n) => return ReadResult::Data(self.buf[..n].to_vec()),
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return ReadResult::WouldBlock,
                 Err(_) => return ReadResult::Closed,

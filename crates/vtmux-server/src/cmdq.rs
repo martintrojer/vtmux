@@ -560,6 +560,10 @@ impl Server {
             for q in queues {
                 progressed |= self.cmdq_next(q);
             }
+            if progressed {
+                // A command may change anything a frame shows.
+                self.turn_work += 1;
+            }
             if !progressed && !self.cmdq.dirty {
                 break;
             }

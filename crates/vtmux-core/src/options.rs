@@ -200,12 +200,12 @@ pub struct OptionsStore {
     server: Options,
     global_session: Options,
     global_window: Options,
-    sessions: HashMap<SessionId, Options>,
-    windows: HashMap<WindowId, Options>,
-    panes: HashMap<PaneId, Options>,
+    sessions: HashMap<SessionId, Options, IdHash>,
+    windows: HashMap<WindowId, Options, IdHash>,
+    panes: HashMap<PaneId, Options, IdHash>,
     /// A pane's parent tree is its window's (`options_set_parent` when a
     /// pane moves, cmd-join-pane.c:506).
-    pane_window: HashMap<PaneId, WindowId>,
+    pane_window: HashMap<PaneId, WindowId, IdHash>,
     /// User options set with `set-hook` (`hooks_add_event`), which
     /// `show-options` hides without `-H`.
     hook_events: BTreeSet<String>,
@@ -222,6 +222,40 @@ pub struct OptionsStore {
     /// Bumped by every change to any tree ([`Self::generation`]).
     generation: Generation,
 }
+
+/// Hashes an id (a `u32`) with one multiply: every pane option lookup
+/// hashes the pane, then its window, and `SipHash` was a tenth of a
+/// frame's option lookups. Ids come from the server, not from outside, so the
+/// maps need no flooding defence.
+#[derive(Clone, Copy, Debug, Default)]
+struct IdHasher(u64);
+
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(u64::from(b));
+        }
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(u64::from(n));
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        // FxHash's step: rotate, mix in, multiply by a large odd constant.
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+type IdHash = std::hash::BuildHasherDefault<IdHasher>;
 
 /// A change stamp that is no part of the store's value: two stores with
 /// the same options are equal however they got there. Stamps are unique
@@ -256,10 +290,10 @@ impl OptionsStore {
             server: Options::default(),
             global_session: Options::default(),
             global_window: Options::default(),
-            sessions: HashMap::new(),
-            windows: HashMap::new(),
-            panes: HashMap::new(),
-            pane_window: HashMap::new(),
+            sessions: HashMap::default(),
+            windows: HashMap::default(),
+            panes: HashMap::default(),
+            pane_window: HashMap::default(),
             hook_events: BTreeSet::new(),
             hook_fires: HashMap::new(),
             monitors: HashMap::new(),

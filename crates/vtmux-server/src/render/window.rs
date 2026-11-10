@@ -80,6 +80,8 @@ pub struct Source<'a> {
     pub clients: Clients<'a>,
     /// The last [`Source::theme`], for the option values it came from.
     pub themes: &'a ThemeCache,
+    /// Style options parsed since the options last changed.
+    pub styles: &'a StyleCache,
     /// The key tables (customize-mode's preview).
     pub keys: &'a vtmux_core::keys::KeyBindings,
     /// The client the window is drawn for, if any.
@@ -88,20 +90,35 @@ pub struct Source<'a> {
     pub links: &'a vtmux_vt::LinkNumbers,
 }
 
-/// `options_string_to_style` + `style_apply` of option text `text`, run
-/// through `expand` first when it is a format.
-fn parse_style(text: String, expand: impl FnOnce(&str) -> String) -> Style {
-    let text = if text.contains("#{") {
-        expand(&text)
-    } else {
-        text
-    };
+/// Whether style option text is a format, expanded before it is parsed.
+fn is_format(text: &str) -> bool {
+    text.contains("#{")
+}
+
+/// `options_string_to_style` + `style_apply` of option text (a format
+/// already expanded).
+fn parse_plain_style(text: &str) -> Style {
     let base = CellStyle::default();
     let mut sy = Style::new(&base);
-    if sy.parse(&base, &text).is_err() {
+    if sy.parse(&base, text).is_err() {
         return Style::new(&base);
     }
     sy
+}
+
+/// Style options as parsed while the options stay the same
+/// ([`vtmux_core::options::OptionsStore::generation`]), by tree and name:
+/// a frame reads `window-style` and the border styles of every pane, and
+/// parsing them is most of what building its drawing costs. A format is
+/// kept as its text, expanded at each use: what it reads may change
+/// between frames.
+#[derive(Debug, Default)]
+pub struct StyleCache(std::cell::RefCell<StyleMemo>);
+
+#[derive(Debug, Default)]
+struct StyleMemo {
+    generation: u64,
+    styles: std::collections::HashMap<TreeId, BTreeMap<String, Result<Style, Rc<str>>>>,
 }
 
 /// The client a window is drawn for, as its pane status lines and border
@@ -328,15 +345,48 @@ impl Source<'_> {
     /// Style option `name` parsed whole (`options_string_to_style`); one
     /// that does not parse is the default style.
     fn parsed_style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> Style {
-        parse_style(self.string(tree, name), |text| {
-            vtmux_core::format::expand_str(text, ctx)
-        })
+        self.style_with(tree, name, |text| vtmux_core::format::expand_str(text, ctx))
+    }
+
+    /// Style option `name` in `tree`: from [`Self::styles`] unless it is a
+    /// format, which is expanded with `expand` and parsed ([`parse_style`]).
+    fn style_with(&self, tree: TreeId, name: &str, expand: impl FnOnce(&str) -> String) -> Style {
+        let generation = self.model.options.generation();
+        let format = {
+            let mut memo = self.styles.0.borrow_mut();
+            if memo.generation != generation {
+                memo.styles.clear();
+                memo.generation = generation;
+            }
+            match memo.styles.get(&tree).and_then(|t| t.get(name)) {
+                Some(Ok(style)) => return style.clone(),
+                Some(Err(text)) => Some(Rc::clone(text)),
+                None => None,
+            }
+        };
+        let text = if let Some(text) = format {
+            text
+        } else {
+            let text = self.string(tree, name);
+            let kept = if is_format(&text) {
+                Err(Rc::from(text.as_str()))
+            } else {
+                Ok(parse_plain_style(&text))
+            };
+            let mut memo = self.styles.0.borrow_mut();
+            let entry = memo.styles.entry(tree).or_default();
+            match entry.entry(name.to_owned()).or_insert(kept) {
+                Ok(style) => return style.clone(),
+                Err(text) => Rc::clone(text),
+            }
+        };
+        parse_plain_style(&expand(&text))
     }
 
     /// [`Self::style`] expanded for the client the window is drawn for in
     /// window `found` ([`Self::client_ctx`]), built only for a format.
     fn client_style(&self, tree: TreeId, name: &str, (found, caps): (Found, Caps)) -> CellStyle {
-        parse_style(self.string(tree, name), |text| {
+        self.style_with(tree, name, |text| {
             vtmux_core::format::expand_str(text, &self.client_ctx(found, caps))
         })
         .cell

@@ -47,6 +47,11 @@ const PANE_BASE: usize = 16;
 /// client's.
 const HELD_BASE: usize = 1 << 48;
 
+/// A pane read shorter than this with nothing more waiting ends the
+/// pane's burst ([`Server::pane_readable`]): a quarter of a pty's 4 KB
+/// line discipline buffer, which a flooding program fills.
+const SHORT_READ: usize = 1024;
+
 /// `NAME_INTERVAL` (tmux.h:119): automatic-rename runs at most this often.
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
 /// How long a client told to go may take to read the rest of its output
@@ -95,15 +100,82 @@ pub struct ServerConfig {
     pub binary: Option<PathBuf>,
 }
 
+/// Whether every event of a poll is a client socket that became readable,
+/// nothing else (not writable, not closed): the only events an
+/// acknowledgement-only turn has ([`Server::ack_turn_is_quiet`]).
+fn events_are_client_reads(events: &Events) -> bool {
+    !events.is_empty()
+        && events.iter().all(|e| {
+            matches!(e.token(), Token(t) if (CLIENT_BASE..HELD_BASE).contains(&t))
+                && e.is_readable()
+                && !e.is_writable()
+                && !e.is_read_closed()
+        })
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent client flags (CLIENT_*)"
+)]
+/// The options a pane's output is parsed under ([`Server::pane_input`]).
+#[derive(Clone, Copy)]
+struct PaneInputOptions {
+    /// DECRQSS / DECRQM 12 fall back to the pane's `cursor-style`
+    /// (input.c:1666-1680, 2590-2600).
+    cursor_style: u8,
+    input_buffer: i64,
+    extended_keys: vtmux_vt::ExtendedKeys,
+    kitty_keys: bool,
+    scroll_on_clear: bool,
+    allow_set_title: bool,
+    inband_resize: bool,
+}
+
+/// [`PaneInputOptions`] per pane, read again once any option changed
+/// ([`vtmux_core::options::OptionsStore::generation`]): seven lookups for
+/// every read of a pane were a tenth of an agent pane's server time.
+#[derive(Default)]
+struct PaneInputCache {
+    generation: u64,
+    panes: BTreeMap<PaneId, PaneInputOptions>,
+}
+
+impl PaneInputCache {
+    fn get(&mut self, model: &crate::model::Model, p: PaneId) -> PaneInputOptions {
+        let generation = model.options.generation();
+        if self.generation != generation {
+            self.generation = generation;
+            self.panes.clear();
+        }
+        *self.panes.entry(p).or_insert_with(|| {
+            let pane = TreeId::Pane(p);
+            PaneInputOptions {
+                cursor_style: u8::try_from(model.number_option(pane, "cursor-style")).unwrap_or(0),
+                input_buffer: model.number_option(TreeId::Server, "input-buffer-size"),
+                extended_keys: model.extended_keys(),
+                kitty_keys: model.kitty_keys(),
+                scroll_on_clear: model.number_option(pane, "scroll-on-clear") != 0,
+                allow_set_title: model.number_option(pane, "allow-set-title") != 0,
+                inband_resize: model.number_option(TreeId::Server, "vtmux-inband-resize") != 0,
+            }
+        })
+    }
+}
+
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent per-client states"
 )]
 pub(crate) struct Client {
     stream: UnixStream,
     inbuf: Vec<u8>,
     /// Messages not yet written to the socket, oldest first.
     out: Outbox,
+    /// The socket is in the poll set for WRITABLE too (output is left).
+    writable_armed: bool,
+    /// A frame was held back (unacknowledged frames, pacing, a blocked
+    /// terminal): its acknowledgement must bring a render.
+    frame_owed: bool,
     /// Frames sent but not yet written to the client's terminal.
     unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
@@ -263,6 +335,8 @@ impl Client {
             stream,
             inbuf: Vec::new(),
             out: Outbox::default(),
+            writable_armed: false,
+            frame_owed: false,
             unacked: Unacked::default(),
             closing: false,
             exit_deadline: None,
@@ -570,6 +644,15 @@ pub struct Server {
     pub global_env: Environ,
     /// The theme colours last worked out ([`crate::render::window::Source::theme`]).
     pub(crate) themes: crate::render::window::ThemeCache,
+    /// The options [`Self::pane_input`] reads, per pane.
+    pane_input_options: PaneInputCache,
+    /// Counts what can change a frame: client messages other than
+    /// `FrameAck`, clients dropped, pane output, commands run
+    /// ([`Self::ack_turn_is_quiet`]).
+    pub(crate) turn_work: u64,
+    /// [`Self::turn_work`] when the clients were last rendered.
+    rendered_work: u64,
+    pub(crate) styles: crate::render::window::StyleCache,
     /// The counter of OSC 8 links' external ids (tmux's
     /// `hyperlinks_next_external_id`), shared with every pane and popup
     /// terminal and every theme.
@@ -876,6 +959,10 @@ impl Server {
             info,
             global_env,
             themes: crate::render::window::ThemeCache::default(),
+            pane_input_options: PaneInputCache::default(),
+            turn_work: 0,
+            rendered_work: 0,
+            styles: crate::render::window::StyleCache::default(),
             link_numbers: vtmux_vt::LinkNumbers::default(),
             shutdown: false,
             source_depths: BTreeMap::new(),
@@ -967,8 +1054,14 @@ impl Server {
                 self.compress_turn(now, true);
                 continue;
             }
-            full_turn = now;
             self.dispatch(&events);
+            if now < full_turn + NAME_INTERVAL
+                && events_are_client_reads(&events)
+                && self.ack_turn_is_quiet()
+            {
+                continue;
+            }
+            full_turn = now;
             for p in std::mem::take(&mut self.backlog) {
                 self.pane_readable(p, true);
             }
@@ -1042,6 +1135,31 @@ impl Server {
                 return Ok(());
             }
         }
+    }
+
+    /// Whether a turn whose events were only reads of attached clients'
+    /// sockets would render what every client already shows: since the
+    /// clients were last rendered nothing that can change a frame happened
+    /// ([`Self::turn_work`]: only `FrameAck`s came), nothing is due or
+    /// waiting to be read, no client is owed a frame its acknowledgement
+    /// now lets out, and no redraw is asked for. The loop then waits again
+    /// at once, as after a compression step: about a third of the turns
+    /// of a key's echo, and one per frame of a busy pane
+    /// (`server_client_check_redraw` does nothing for a client with
+    /// nothing to redraw either).
+    pub(crate) fn ack_turn_is_quiet(&self) -> bool {
+        self.turn_work == self.rendered_work
+            && self.backlog.is_empty()
+            && self.held_backlog.is_empty()
+            && self.model.redraw_panes.is_empty()
+            && self.offset_due.is_empty()
+            && self.burst_started.is_empty()
+            && self.mode_drawn.is_empty()
+            && !self
+                .clients
+                .values()
+                .any(|c| c.frame_owed || c.status.redraw_pending())
+            && !self.timers_due()
     }
 
     /// One poll's events, each to what owns its token.
@@ -1498,6 +1616,7 @@ impl Server {
             Some(c) if !c.dead => c.dead = true,
             _ => return,
         }
+        self.turn_work += 1;
         // server_client_lost (server-client.c:508-514): client-detached for
         // an attached client, client-closed for a control or terminal one,
         // while the client is still there to name.
@@ -1751,15 +1870,21 @@ impl Server {
                 c.closing = true;
             }
         }
-        let interest = if c.out.is_empty() {
-            Interest::READABLE
-        } else {
-            Interest::READABLE | Interest::WRITABLE
-        };
-        let _ = self
-            .poll
-            .registry()
-            .reregister(&mut c.stream, Token(CLIENT_BASE + id.0), interest);
+        // Re-armed only while output is left, or to drop WRITABLE: the
+        // socket is read until WouldBlock, so re-arming READABLE alone
+        // after each frame was an epoll_ctl per frame for nothing.
+        if !c.out.is_empty() || c.writable_armed {
+            c.writable_armed = !c.out.is_empty();
+            let interest = if c.writable_armed {
+                Interest::READABLE | Interest::WRITABLE
+            } else {
+                Interest::READABLE
+            };
+            let _ =
+                self.poll
+                    .registry()
+                    .reregister(&mut c.stream, Token(CLIENT_BASE + id.0), interest);
+        }
         if c.closing && c.out.is_empty() {
             self.drop_client(id);
         } else if c.closing {
@@ -1804,6 +1929,9 @@ impl Server {
     }
 
     fn on_message(&mut self, id: ClientId, msg: ClientMsg) {
+        if !matches!(msg, ClientMsg::FrameAck { .. }) {
+            self.turn_work += 1;
+        }
         match msg {
             ClientMsg::Hello(hello) => self.on_hello(id, hello),
             ClientMsg::Input(bytes) => {
@@ -3144,6 +3272,9 @@ impl Server {
 
     #[allow(clippy::too_many_lines)] // one render per client, step by step
     fn render_clients(&mut self) {
+        // Work from here on (during the render or after it) is drawn by
+        // the next render, so it is not "since the last render".
+        self.rendered_work = self.turn_work;
         let attached: Vec<_> = self
             .clients
             .iter()
@@ -3200,6 +3331,7 @@ impl Server {
         let queued = client.unacked.bytes;
         let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
         let client = self.clients.get_mut(&id).expect("client");
+        client.frame_owed = true;
         if !client.compositor.ready(queued, cols, rows) {
             // tty_add drops what comes while the client is blocked.
             client.passthrough.clear();
@@ -3214,6 +3346,9 @@ impl Server {
             // (tty_add) instead of piling up here.
             self.send_passthrough(id, caps);
             return;
+        }
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.frame_owed = false;
         }
         if self.redraw_stops_sync(id, s) {
             // The drawings so far showed the panes still held.
@@ -4520,6 +4655,7 @@ impl Server {
             env: &self.global_env,
             clients: crate::render::window::Clients::new(|| self.client_views()),
             themes: &self.themes,
+            styles: &self.styles,
             keys: &self.key_bindings,
             client: None,
             links: &self.link_numbers,
@@ -5713,21 +5849,16 @@ impl Server {
         if bytes.is_empty() {
             return;
         }
-        // DECRQSS / DECRQM 12 fall back to the pane's `cursor-style`
-        // (input.c:1666-1680, 2590-2600).
-        let cursor_style =
-            u8::try_from(self.model.number_option(TreeId::Pane(p), "cursor-style")).unwrap_or(0);
-        let input_buffer = self
-            .model
-            .number_option(TreeId::Server, "input-buffer-size");
-        let extended_keys = self.model.extended_keys();
-        let kitty_keys = self.model.kitty_keys();
-        let scroll_on_clear = self.model.number_option(TreeId::Pane(p), "scroll-on-clear") != 0;
-        let allow_set_title = self.model.number_option(TreeId::Pane(p), "allow-set-title") != 0;
-        let inband_resize = self
-            .model
-            .number_option(TreeId::Server, "vtmux-inband-resize")
-            != 0;
+        self.turn_work += 1;
+        let PaneInputOptions {
+            cursor_style,
+            input_buffer,
+            extended_keys,
+            kitty_keys,
+            scroll_on_clear,
+            allow_set_title,
+            inband_resize,
+        } = self.pane_input_options.get(&self.model, p);
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let cell = self.model.cell_pixels_of(p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
@@ -6010,6 +6141,23 @@ impl Server {
                         pane.last_output_time = Some(crate::model::now_epoch());
                     }
                     self.pane_input(p, &bytes, flooding);
+                    // A short burst (a key's echo, a prompt) with nothing
+                    // more waiting is no flood: the next output raises the
+                    // poll again, so the pane needs no turn of its own
+                    // just to read WouldBlock. A pane already flooding, or
+                    // a read that came near full, goes on in the backlog
+                    // and its frames stay paced.
+                    if !flooding
+                        && bytes.len() < SHORT_READ
+                        && self
+                            .model
+                            .panes
+                            .get(&p)
+                            .and_then(|x| x.io.as_ref())
+                            .is_some_and(|io| io.readable_bytes() == 0)
+                    {
+                        break;
+                    }
                 }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
@@ -7783,6 +7931,69 @@ mod tests {
     /// are copied again only where the composed row changed since, and the
     /// diff skips rows tagged alike. Rows changed one and two frames back
     /// must still reach the screen, and each frame draws only its change.
+    /// A turn that only takes `FrameAck`s renders nothing new, so it is
+    /// quiet (the loop skips the rest of it); one with another message, or
+    /// whose acknowledgement lets out a frame held back, is not.
+    #[test]
+    fn an_acknowledgement_alone_is_a_quiet_turn() {
+        use vtmux_core::protocol::ClientMsg;
+        let (mut server, p, s, _, dir) = setup();
+        server.reset_mode(p);
+        let (id, mut peer) = attach_with(&mut server, s, &dir, "xterm-256color", (40, 10), &[]);
+        for _ in 0..4 {
+            server.render_and_exit();
+            frames(&mut server, id, &mut peer);
+        }
+        server.on_message(id, ClientMsg::FrameAck { seq: 1 });
+        assert!(server.ack_turn_is_quiet(), "an ack alone");
+
+        server.on_message(
+            id,
+            ClientMsg::Resize {
+                cols: 40,
+                rows: 10,
+                xpixel: 0,
+                ypixel: 0,
+            },
+        );
+        assert!(!server.ack_turn_is_quiet(), "another message");
+
+        // A frame held back while one is unacknowledged is owed: its ack
+        // must bring a render.
+        server.render_and_exit();
+        frames(&mut server, id, &mut peer);
+        server.clients.get_mut(&id).unwrap().unacked.sent(1 << 20);
+        server.model.panes.get_mut(&p).unwrap().term.feed(b"new");
+        server.render_and_exit();
+        server.on_message(id, ClientMsg::FrameAck { seq: u64::MAX });
+        assert!(!server.ack_turn_is_quiet(), "a frame owed");
+        server.render_and_exit();
+        assert!(
+            drawn_text(&String::from_utf8(frames(&mut server, id, &mut peer)).unwrap())
+                .contains("new")
+        );
+        server.on_message(id, ClientMsg::FrameAck { seq: u64::MAX });
+        assert!(server.ack_turn_is_quiet(), "drawn: nothing owed");
+
+        // What changed after the render, without a message: pane output,
+        // a redraw asked for.
+        server.pane_input(p, b"more", false);
+        assert!(!server.ack_turn_is_quiet(), "pane output since");
+        server.render_and_exit();
+        frames(&mut server, id, &mut peer);
+        server
+            .clients
+            .get_mut(&id)
+            .unwrap()
+            .status
+            .request_full_redraw();
+        assert!(!server.ack_turn_is_quiet(), "a redraw asked for");
+        server.render_and_exit();
+        frames(&mut server, id, &mut peer);
+        assert!(server.ack_turn_is_quiet());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn plain_frames_copy_and_diff_only_changed_rows() {
         use vtmux_core::options::{TreeId, Value};
