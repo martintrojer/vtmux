@@ -9,7 +9,7 @@ tmux 3.8, reimplemented in Rust on [libghostty-vt](https://github.com/ghostty-or
 vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them. Run as `tmux`, `tmux -V` prints `tmux 3.8`, so plugins' version checks pass.
 
 - **tmux's own test suite:** 173 of its 174 regress tests pass (1 expected failure, recorded).
-- **A behaviour oracle:** 420 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, also with a live upgrade inserted between steps.
+- **A behaviour oracle:** 429 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, also with a live upgrade inserted between steps.
 - **Your terminal:** most `TERM`s of ncurses 6.6's database (2,663 names in vtmux's table: `wezterm`, `contour`, `foot`, `rio`, `ghostty`, `xterm-direct`, `ansi`...) attach with the features, colours and capabilities tmux 3.8 gives it (each checked against tmux); 163 8-bit ones (`vt220-8bit`) are refused where tmux takes them. `TERM=wezterm tmux new` works on a host with no wezterm terminfo.
 - **Your setup:** a real `.tmux.conf` with TPM plugins gives the same options, key bindings, hooks and screens as tmux 3.8 on macOS and Linux.
 - **Where it differs on purpose:** real tmux bugs (data loss, hangs) are fixed and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md); everything else vtmux adds is opt-in.
