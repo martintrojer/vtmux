@@ -2,6 +2,9 @@
 //! `t/r` (relative), `t/d` (difference in seconds) and `t/f/<fmt>` (strftime), and the
 //! strftime pass of `format_expand1` (format.c:6728-6741) that `T` and the time-aware
 //! expansion of `display-message` run over text.
+//!
+//! The C locale only, and `t/f` output too long for tmux's 512-byte buffer is empty
+//! (compat/DIVERGENCES.md D-004).
 
 use super::{Eval, Format, num};
 use crate::time::Tm;
@@ -161,7 +164,9 @@ impl Eval<'_> {
                     _ => String::new(),
                 }
             }
-            // A failed strftime leaves the buffer unspecified; empty is the sane reading.
+            // A failed strftime (output of 512 bytes or more) leaves the buffer
+            // unspecified and tmux prints it; empty is the sane reading
+            // (compat/DIVERGENCES.md D-004).
             Mode::Strftime(fmt) => self
                 .wall
                 .local_time(t)?

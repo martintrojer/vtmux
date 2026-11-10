@@ -10,6 +10,10 @@
 //! Every child is a fresh context: like tmux's `format_create` plus `format_defaults`
 //! for the item, it does not see the parent's extra variables (an outer
 //! `loop_index`, `line`).
+//!
+//! Each loop sorts its own list. tmux's sort.c refills one static array per kind, so
+//! a nested loop of the same kind reorders the list the outer one walks, which then
+//! skips and repeats items; vtmux does not copy that (compat/DIVERGENCES.md D-005).
 
 use std::cmp::Ordering;
 

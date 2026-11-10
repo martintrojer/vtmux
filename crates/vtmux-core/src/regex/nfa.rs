@@ -449,6 +449,9 @@ impl Nfa {
             return true;
         };
         match a {
+            // POSIX: `^` matches only at the start, in every iteration
+            // of a repeated group; glibc's DFA ignores it in later ones
+            // (compat/DIVERGENCES.md D-003).
             Assert::Start => return pos == 0 && !not_bol,
             Assert::End => return pos == text.len(),
             _ => {}

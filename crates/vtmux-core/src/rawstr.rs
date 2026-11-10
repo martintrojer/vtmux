@@ -13,6 +13,10 @@
 //! control-mode lines), [`to_bytes`] on the way out (stdout, stderr, the
 //! environment and argv of a spawned program, a lexer reading text). Code
 //! that cares what a byte is walks [`Unit`]s ([`unit_at`], [`units`]).
+//!
+//! A byte sequence that is not UTF-8 is separate bytes here even where glibc's
+//! `mbtowc` reads it as one character (past U+10FFFF, surrogates): regexes,
+//! widths and names see bytes (compat/DIVERGENCES.md D-013).
 
 use std::borrow::Cow;
 
