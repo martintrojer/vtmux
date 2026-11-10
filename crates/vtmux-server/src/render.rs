@@ -619,42 +619,52 @@ impl Compositor {
         }
         true
     }
-    /// Per row of `screen`, whether it differs from what the terminal shows
-    /// (`links`: the terminal is given links, so a cell's link is part of
-    /// what it shows, [`cells_differ`])
-    /// (every row when the size changed); `None` when nothing does, the
-    /// cursor included.
-    /// Rows tagged alike in both are equal without a look (see
-    /// `last_tags`).
+    /// Per row of `screen`, the columns `first..end` from the first to the
+    /// last cell that differs from what the terminal shows (`links`: the
+    /// terminal is given links, so a cell's link is part of what it shows,
+    /// [`cells_differ`]), `None` for a row that does not; every column of
+    /// every row when the size changed, and of a row with forced cells.
+    /// `None` when nothing differs, the cursor included. Rows tagged alike
+    /// in both are equal without a look (see `last_tags`).
     fn changed_rows(
         &self,
         screen: &Snapshot,
         tags: &[u64],
         same_size: bool,
         links: bool,
-    ) -> Option<Vec<bool>> {
+    ) -> Option<Vec<Option<(u16, u16)>>> {
+        let whole = Some((0, screen.cols));
         let Some(last) = self.last.as_ref().filter(|_| same_size) else {
-            return Some(vec![true; usize::from(screen.rows)]);
+            return Some(vec![whole; usize::from(screen.rows)]);
         };
         let width = usize::from(screen.cols).max(1);
-        let mut rows: Vec<bool> = screen
+        let mut rows: Vec<Option<(u16, u16)>> = screen
             .cells
             .chunks(width)
             .zip(last.cells.chunks(width))
             .enumerate()
-            .map(|(y, (a, b))| {
+            .map(|(y, (new, shown))| {
                 let tag = tags.get(y).copied().unwrap_or(0);
-                !(tag != 0 && self.last_tags.get(y) == Some(&tag)) && rows_differ(a, b, links)
+                if tag != 0 && self.last_tags.get(y) == Some(&tag) {
+                    return None;
+                }
+                let differs = |(shown, new): (&vtmux_vt::Cell, &vtmux_vt::Cell)| {
+                    cells_differ(shown, new, links)
+                };
+                let first = shown.iter().zip(new).position(differs)?;
+                let end = width - shown.iter().zip(new).rev().position(differs)?;
+                let col = |i: usize| u16::try_from(i).unwrap_or(u16::MAX);
+                Some((col(first), col(end)))
             })
             .collect();
         for &(y, _, _) in &self.forced {
             if let Some(r) = rows.get_mut(usize::from(y)) {
-                *r = true;
+                *r = whole;
             }
         }
         let same = (last.cursor, last.cursor_visible, &last.wrapped)
             == (screen.cursor, screen.cursor_visible, &screen.wrapped);
-        (rows.contains(&true) || !same).then_some(rows)
+        (rows.iter().any(Option::is_some) || !same).then_some(rows)
     }
     /// One frame per tick. The caller supplies a fully composed screen;
     /// therefore changes behind opaque overlays cannot escape into a frame.
@@ -693,14 +703,21 @@ impl Compositor {
         // after the last column (the pending wrap) and after an erase.
         let mut at: Option<(u16, u16)> = None;
         for y in 0..screen.rows {
-            if !changed_rows[usize::from(y)] {
+            let Some((first, end)) = changed_rows[usize::from(y)] else {
                 continue;
-            }
-            let mut x = 0;
+            };
+            // Cells before `first` and from `end` on are what the terminal
+            // shows, so only a lone regional indicator just before `first`
+            // (written with the changed cell after it) and the cell a
+            // regional indicator forces are written outside them.
+            let mut x = first.saturating_sub(1);
             // The cell after a lone regional indicator, written whatever
             // the last frame showed there.
             let mut after_regional = None;
             while x < screen.cols {
+                if x >= end && after_regional.is_none_or(|a| a < x) {
+                    break;
+                }
                 let cell = screen.cell(x, y).expect("screen cell");
                 let changed_at = |x: u16| {
                     !same_size
@@ -835,16 +852,6 @@ fn cells_differ(shown: &vtmux_vt::Cell, new: &vtmux_vt::Cell, links: bool) -> bo
         && (links
             || (&shown.text, shown.width, &shown.style, shown.acs, shown.tab)
                 != (&new.text, new.width, &new.style, new.acs, new.tab))
-}
-
-/// [`cells_differ`] for any cell of two rows.
-fn rows_differ(shown: &[vtmux_vt::Cell], new: &[vtmux_vt::Cell], links: bool) -> bool {
-    shown != new
-        && (links
-            || shown
-                .iter()
-                .zip(new)
-                .any(|(shown, new)| cells_differ(shown, new, false)))
 }
 
 /// A two-column cell whose first character a terminal draws one column
