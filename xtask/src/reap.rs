@@ -19,11 +19,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::FileTypeExt;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::Duration;
+
+use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with};
 
 fn signal(sig: &str, pids: &[u32]) {
     let _ = Command::new("kill")
@@ -351,8 +352,14 @@ pub fn sweep_sockets(dirs: &[PathBuf], also: impl Fn(&str) -> bool, dry: bool) -
                 && p.symlink_metadata()
                     .is_ok_and(|m| m.file_type().is_socket())
                 && matches!(
-                    UnixStream::connect(p),
-                    Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionRefused
+                    socket_with(
+                        AddressFamily::UNIX,
+                        SocketType::STREAM,
+                        SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+                        None,
+                    )
+                    .and_then(|s| connect(&s, &SocketAddrUnix::new(p)?)),
+                    Err(rustix::io::Errno::CONNREFUSED)
                 )
         })
         .filter(|p| dry || std::fs::remove_file(p).is_ok())
@@ -737,6 +744,32 @@ mod tests {
             ]
         );
         drop(live);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sweep_leaves_a_full_listen_queue_alone_without_blocking() {
+        let s = Scratch::new("full-queue");
+        let socket = s.0.join("rvfull");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        rustix::net::listen(&listener, 1).unwrap();
+        let mut clients = Vec::new();
+        for _ in 0..2 {
+            clients.push(std::os::unix::net::UnixStream::connect(&socket).unwrap());
+        }
+        let dir = s.0.clone();
+        let (send, recv) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            send.send(sweep_sockets(&[dir], |_| true, false)).unwrap();
+        });
+        let result = recv.recv_timeout(Duration::from_secs(2));
+        // Unblock the old implementation before asserting, so even a red
+        // test leaves no worker or socket behind.
+        drop(listener);
+        worker.join().unwrap();
+        assert!(result.is_ok(), "socket sweep blocked on a full queue");
+        assert_eq!(result.unwrap(), [] as [PathBuf; 0]);
+        assert!(socket.exists(), "live socket was removed");
     }
 
     #[test]
