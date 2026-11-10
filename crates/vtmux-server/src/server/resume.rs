@@ -966,7 +966,9 @@ fn same_pin(binary: &Path) -> bool {
 
 /// Rows of history a dry run of `s` decodes and imports: history pages in
 /// the vtmux row format (pages in Ghostty's form are only checked, by
-/// checksum and layout), copy mode's frozen grids among them.
+/// checksum and layout), copy mode's frozen grids among them, and the copy
+/// of the history an alternate screen hides, which a build from before
+/// Ghostty patch 0038 imports too.
 fn rows_to_import(s: &snap::Snapshot) -> u64 {
     let copies: u64 = s
         .panes
@@ -985,8 +987,12 @@ fn rows_to_import(s: &snap::Snapshot) -> u64 {
             .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
     );
     terms
-        .flat_map(|t| std::iter::once(&t.primary).chain(&t.alternate))
-        .flat_map(|screen| &screen.history)
+        .flat_map(|t| {
+            std::iter::once(&t.primary)
+                .chain(&t.alternate)
+                .flat_map(|screen| &screen.history)
+                .chain(t.alt_entry.iter().flat_map(|a| &a.history))
+        })
         .map(|page| u64::from(page.rows))
         .sum::<u64>()
         + copies
@@ -1048,7 +1054,8 @@ mod tests {
 
     /// The dry run's limit grows with the history it imports as rows, a
     /// second per 100k rows over the 3 s, so no upgrade is refused for its
-    /// size; pages in Ghostty's form, only checked, add nothing.
+    /// size (a downgrade's copy of the history under an alternate screen
+    /// among them); pages in Ghostty's form, only checked, add nothing.
     #[test]
     fn the_dry_run_limit_grows_with_the_rows_it_imports() {
         let page = |rows: u32, ghostty: bool| snap::HistoryPage {
@@ -1094,6 +1101,19 @@ mod tests {
         assert_eq!(
             dry_run_limit(&s),
             sys::DRY_RUN_LIMIT + std::time::Duration::from_secs(12)
+        );
+        // The copy of the history an alternate screen hides, which a build
+        // from before Ghostty patch 0038 imports: 300k rows over three.
+        for p in &mut s.panes[..3] {
+            p.term.as_mut().unwrap().alt_entry = Some(snap::term::AltEntry {
+                history: vec![page(1000, false); 100],
+                has_history: true,
+                ..snap::term::AltEntry::default()
+            });
+        }
+        assert_eq!(
+            dry_run_limit(&s),
+            sys::DRY_RUN_LIMIT + std::time::Duration::from_secs(15)
         );
     }
 

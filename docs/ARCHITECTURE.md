@@ -114,7 +114,7 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
 
 - **Frozen frames.** A few protocol frames never change (`Hello`, `Stdin`, `Stdout`, `Stderr`, `Exit`, `Exec`, `Flags`, and `UpgradeRequest`/`UpgradeResult`/`UpgradeNotice`), so control clients of any version from protocol 9 on stay served and a newer client can ask an older server to upgrade. Every other frame may change with a protocol bump.
 - **Failure never loses panes.** A failed dry run leaves the server as it was. A resume that fails switches back to the old image on the same descriptors (Linux: `fexecve` of the executable it kept open). Failing that, it serves without the parts that don't read, then without terminal state, then with no sessions while it holds every pty open. Exit status: 0 upgraded, 1 not, 2 upgraded short of a part.
-- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
+- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. Across stacks an alternate screen's hidden history also goes as the copy a build from before Ghostty patch 0038 reads, mostly the primary's own pages, which the dry run reads once. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
 
 ## Persistence
 
@@ -164,7 +164,7 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 ```
 
 - **Regress:** tmux's test suite from the 3.8 tag, unchanged, scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
-- **Oracle:** 417 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
+- **Oracle:** 418 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 
 `scripts/check.sh` runs all of it on Linux and macOS in CI. Numbers against tmux: [PERFORMANCE.md](PERFORMANCE.md).

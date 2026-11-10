@@ -1390,14 +1390,27 @@ fn primary_of(
     )
 }
 
-/// What a reader from before [`snap::TermState::sized_primary`] and
-/// [`snap::TermState::alternate_saved`] (a downgrade, or an older binary
-/// restoring a checkpoint) needs where it reads: the primary screen at the
-/// terminal's size, as its emulator kept it, and `?1049h`'s save in the
-/// primary screen's DECSC slot, where its `?1049l` restores from. Only for
-/// [`Form::Rows`]: [`Form::SamePin`] goes to a binary of this patch stack,
-/// which has both fields (an older one has another stack).
+/// What a reader from before [`snap::TermState::sized_primary`],
+/// [`snap::TermState::alternate_saved`] and Ghostty patch 0038 (a
+/// downgrade, or an older binary restoring a checkpoint) needs where it
+/// reads: the copy of tmux's history it shows under the alternate screen,
+/// the primary screen at the terminal's size, as its emulator kept it, and
+/// `?1049h`'s save in the primary screen's DECSC slot, where its `?1049l`
+/// restores from. Only for [`Form::Rows`]: [`Form::SamePin`] goes to a
+/// binary of this patch stack, which reads all three where they are (an
+/// older one has another stack), so `?1049h` and a same-binary upgrade
+/// never pay for the copy.
 fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap::TermState) {
+    // A reader from before Ghostty patch 0038 shows, under the alternate
+    // screen, the copy of tmux's history it took on `?1049h`: the newest
+    // `hsize` rows of the primary screen as it was left (not reflowed).
+    if t.active == snap::term::ActiveScreen::Alternate
+        && let Some(alt) = t.alt_entry.as_mut()
+    {
+        let hsize = usize::try_from(t.history.hsize).unwrap_or(usize::MAX);
+        alt.history = history_tail(&t.primary.history, hsize);
+        alt.has_history = true;
+    }
     if let Some(sized) = t.sized_primary.as_mut() {
         let copy = term
             .with_primary_resized()
@@ -1443,6 +1456,38 @@ fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap:
     }
 }
 
+/// The newest `n` rows of `pages`, as pages: whole pages are the same
+/// pages (a checkpoint stores their chunk once), the one the cut falls in
+/// is encoded again from its cut.
+fn history_tail(pages: &[snap::HistoryPage], n: usize) -> Vec<snap::HistoryPage> {
+    let mut left = n;
+    let mut from = pages.len();
+    while let Some(rows) = from.checked_sub(1).map(|i| pages[i].rows as usize)
+        && rows <= left
+    {
+        from -= 1;
+        left -= rows;
+    }
+    let mut out = Vec::with_capacity(pages.len() - from + 1);
+    if left > 0
+        && let Some(cut) = from.checked_sub(1).map(|i| &pages[i])
+    {
+        let skip = cut.rows as usize - left;
+        let mut b = PageBuilder::new();
+        let mut i = 0;
+        cut.each_row(|row| {
+            if i >= skip {
+                b.push(row);
+            }
+            i += 1;
+        })
+        .expect("a page this export encoded");
+        out.push(b.finish(false));
+    }
+    out.extend_from_slice(&pages[from..]);
+    out
+}
+
 /// Export `term` as a snapshot record, one page at a time (see the module
 /// docs). The server's per-turn events must have been drained.
 #[must_use]
@@ -1477,7 +1522,8 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             .map(|rows| rows.iter().map(frozen_out).collect())
             .unwrap_or_default(),
         // The primary screen's own history, in `primary`: the alternate
-        // screen leaves it as it was (Ghostty patch 0038).
+        // screen leaves it as it was (Ghostty patch 0038). A copy for an
+        // older reader goes with rows (`for_older_readers`).
         history: Vec::new(),
         marks: p
             .frozen_marks
@@ -1759,8 +1805,8 @@ pub fn term_from_snapshot_with(
     }
     let h = &t.history;
     let usize_of = |v: u64, what| narrow::<usize>(v, what);
-    // A writer from before Ghostty patch 0038 copied the primary history
-    // into `alt.history`; the primary screen still has it.
+    // `alt.history` is the copy a reader from before Ghostty patch 0038
+    // shows (`for_older_readers`); the primary screen has those rows.
     let hsize = usize_of(h.hsize, "history size")?;
     let saved: Option<Vec<FrozenRowState>> = alt
         .has_saved

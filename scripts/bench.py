@@ -31,7 +31,8 @@ tmux ignores the option), AGENT_PANES ("5 10 20"),
 AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200), UPGRADE_PANES ("1 10"), UPGRADE_LINES ("10000 100000"),
 UPGRADE_IDLE_LIMIT (180 s: the longest `idle` waits for the compressor), UPGRADE_STATES ("fresh idle"; add
 "fresh-rows idle-rows" for an upgrade onto a binary that reports another Ghostty patch stack, so the history
-goes as rows). Run cargo through `mise exec --`.
+goes as rows; a state with "-alt", as "fresh-alt-rows", has an alternate screen up over the history),
+UPGRADE_LIMIT (100000: the panes' history-limit). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -1187,6 +1188,7 @@ UPGRADE_PANES = [int(n) for n in os.environ.get("UPGRADE_PANES", "1 10").split()
 UPGRADE_LINES = [int(n) for n in os.environ.get("UPGRADE_LINES", "10000 100000").split()]
 UPGRADE_IDLE_LIMIT = float(os.environ.get("UPGRADE_IDLE_LIMIT", "180"))
 UPGRADE_STATES = os.environ.get("UPGRADE_STATES", "fresh idle").split()
+UPGRADE_LIMIT = int(os.environ.get("UPGRADE_LIMIT", "100000"))
 RESTARTED = b"\x1b[?996n"  # Caps::restart: a re-attached client's terminal started again
 STATUS_MARK = b"bench"  # pin_terminal's status-right
 
@@ -1299,7 +1301,7 @@ def _wait_rss_settled(pid, secs=3.0, limit=UPGRADE_IDLE_LIMIT):
 
 def scenario_upgrade(env):
     """vtmux-upgrade onto its own binary (live-upgrade spec, decision 13), vtmux only: N panes
-    (one window each, CLIENT_COLS x CLIENT_ROWS, history-limit 100000) that printed L lines of
+    (one window each, CLIENT_COLS x CLIENT_ROWS, history-limit UPGRADE_LIMIT) that printed L lines of
     100 columns (every tenth coloured), one attached client and two control clients. `fresh`:
     as soon as the history is full; `idle`: after the compressor has finished (RSS settled).
     answered = until `vtmux-upgrade -b <same binary>` returns (the new image serves);
@@ -1326,6 +1328,7 @@ def scenario_upgrade(env):
                     sizefile = os.path.join(env.work, f"size-{s.label}")
                     wrapper = os.path.join(env.work, f"wrap-{s.label}")
                     as_rows = state.endswith("-rows")
+                    alt = "-alt" in state
                     with open(wrapper, "w") as f:
                         f.write(f"#!/bin/sh\nif [ \"$1\" = --vtmux-check-snapshot ]; then wc -c </dev/fd/$2 >'{sizefile}'; fi\n"
                                 + ("if [ \"$1\" = --vtmux-patch-stack ]; then echo 0; exit 0; fi\n" if as_rows else "")
@@ -1335,9 +1338,10 @@ def scenario_upgrade(env):
                     target = wrapper if as_rows else s.bin
                     try:
                         pin_terminal(s)
-                        s.run("set", "-g", "history-limit", "100000", ";", "set", "-g", "automatic-rename", "off",
+                        s.run("set", "-g", "history-limit", str(UPGRADE_LIMIT), ";", "set", "-g", "automatic-rename", "off",
                               ";", "set", "-g", "default-size", f"{CLIENT_COLS}x{rows}")
-                        fill = f"cat '{path}'; exec cat"
+                        # `-alt`: an editor up over the history (?1049h), as vim is.
+                        fill = f"cat '{path}'; " + ("printf '\\033[?1049h'; " if alt else "") + "exec cat"
                         s.run("respawn-pane", "-k", "-t", "u:w0", "sh", "-c", fill)
                         for i in range(1, n):
                             s.run("neww", "-d", "-t", "u:", "-n", f"w{i}", "sh", "-c", fill)
@@ -1348,7 +1352,7 @@ def scenario_upgrade(env):
                             if time.monotonic() > deadline:
                                 raise RuntimeError("upgrade: clients did not attach")
                             time.sleep(0.05)
-                        history = _wait_history(s, min(lines, 100000), rows)
+                        history = _wait_history(s, min(lines, UPGRADE_LIMIT), rows)
                         idle_s = _wait_rss_settled(s.pid) if state.startswith("idle") else 0.0
                         quiet(clients)
                         panes = s.run("list-panes", "-a", "-F", "#{pane_pid}")

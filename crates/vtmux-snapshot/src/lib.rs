@@ -54,8 +54,10 @@
 //!   what an older reader takes for it in the fields that reader reads:
 //!   [`TermState::sized_primary`] beside the primary screen at the
 //!   terminal's size, [`TermState::alternate_saved`] beside a copy in the
-//!   primary screen's DECSC slot ([`term::AltSaveLayout`]). The older
-//!   reader restores what its own build would have held.
+//!   primary screen's DECSC slot ([`term::AltSaveLayout`]), and the
+//!   history an alternate screen shows, read in place in `primary`,
+//!   beside the copy [`term::AltEntry::history`] that rows carry. The
+//!   older reader restores what its own build would have held.
 //! - A field under a new tag that carries state (losing it would change a
 //!   format, a screen or a `show-*`/`list-*` output after the restore)
 //!   needs either a new [`FORMAT_VERSION`] or a feature name: the writer
@@ -628,27 +630,41 @@ impl Snapshot {
     /// its rows within the page limits or does not match its name, in
     /// the order [`Snapshot::pages`] goes, each with its first bad page's
     /// error. A page in Ghostty's form is covered by the stream's hash;
-    /// only Ghostty can read further into it.
+    /// only Ghostty can read further into it. A page equal to one already
+    /// read is not read again: the copy of the history an alternate screen
+    /// shows ([`term::AltEntry::history`]) is mostly the primary's pages.
     #[must_use]
     pub fn unreadable(&self) -> Vec<(Part, Error)> {
-        fn first_bad<'a>(pages: impl IntoIterator<Item = &'a HistoryPage>) -> Option<Error> {
-            pages
-                .into_iter()
-                .filter(|p| !p.is_ghostty())
-                .find_map(|p| p.each_row_verified(|_| {}).err())
+        type Read<'a> = std::collections::HashMap<Hash, &'a HistoryPage>;
+        fn first_bad<'a>(
+            read: &mut Read<'a>,
+            pages: impl IntoIterator<Item = &'a HistoryPage>,
+        ) -> Option<Error> {
+            for p in pages {
+                if p.is_ghostty() || read.get(&p.hash).is_some_and(|q| *q == p) {
+                    continue;
+                }
+                if let Err(e) = p.each_row_verified(|_| {}) {
+                    return Some(e);
+                }
+                read.insert(p.hash, p);
+            }
+            None
         }
-        fn term(t: &TermState) -> Option<Error> {
+        fn term<'a>(read: &mut Read<'a>, t: &'a TermState) -> Option<Error> {
             let sized = t.sized_primary.as_ref().and_then(|p| p.screen.as_ref());
             let screens = std::iter::once(&t.primary).chain(sized).chain(&t.alternate);
             first_bad(
+                read,
                 screens
                     .flat_map(|s| &s.history)
                     .chain(t.alt_entry.iter().flat_map(|a| &a.history)),
             )
         }
+        let mut read = Read::new();
         let mut out = Vec::new();
         for p in &self.panes {
-            if let Some(e) = p.term.as_ref().and_then(term) {
+            if let Some(e) = p.term.as_ref().and_then(|t| term(&mut read, t)) {
                 out.push((Part::PaneTerm(p.id), e));
             }
             for (n, m) in p.modes.iter().enumerate() {
@@ -657,7 +673,7 @@ impl Snapshot {
                     PaneMode::View(c) => (c, ModeKind::View),
                     PaneMode::Clock(_) | PaneMode::Closed(()) => continue,
                 };
-                if let Some(e) = first_bad(&c.history) {
+                if let Some(e) = first_bad(&mut read, &c.history) {
                     out.push((Part::PaneMode(p.id, n, kind), e));
                 }
             }
@@ -667,7 +683,7 @@ impl Snapshot {
                 .popup
                 .as_ref()
                 .and_then(|p| p.term.as_ref())
-                .and_then(term)
+                .and_then(|t| term(&mut read, t))
             {
                 out.push((Part::PopupTerm(c.id), e));
             }

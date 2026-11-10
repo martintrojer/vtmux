@@ -129,8 +129,12 @@ The alternate screen leaves the primary history where it is, and vtmux reads it 
 | 1 x 100k | 163 ms | 82 ms | 11.5 MB |
 | 10 x 100k | 751-945 ms | 598-806 ms | 113 MB |
 | 10 x 100k, onto a build of another Ghostty pin | 9.9 s | 10.4 s | 57 MB |
+| 1 x 1M, vim up | 1.8 s | | 111 MB |
+| 1 x 1M, vim up, onto another pin | 14.2 s | | 113 MB |
 
 10 x 100k meets the one-second target. Onto a build with another Ghostty pin, history travels as rows and is decoded twice, about a second per 100k lines; that is the upgrade after a pin bump, not the daily one. RSS after the upgrade is what the compressor would have left (146 MB at 10 x 100k, from 1.57 GB fresh).
+
+vim up over the history costs about what it costs without (1.6 s and 13.7 s at 1M lines). Onto another pin the stream also carries the history vim hides as the copy an older build reads, so a downgrade keeps it: twice the bytes, not twice the time. A downgrade onto a build from before that change with vim up over 1M lines takes 34 s.
 
 ## Binary and build profile
 

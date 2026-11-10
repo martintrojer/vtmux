@@ -315,9 +315,11 @@ record! {
     pub struct AltEntry {
         /// The primary's visible rows then.
         1 / 11 => many saved: Vec<Row>,
-        /// tmux's primary history then, oldest first. Not written since
-        /// the primary screen's own history is read under the alternate
-        /// one (Ghostty patch 0038), and not read: `primary` has it.
+        /// tmux's primary history, oldest first, as a reader from before
+        /// Ghostty patch 0038 shows it under the alternate screen: the
+        /// newest `hsize` rows of `primary`'s history, written with rows
+        /// only (a reader of the same patch stack reads them in place).
+        /// Not read since that patch: `primary` has them.
         2 => many history: Vec<HistoryPage>,
         3 => many marks: Vec<FrozenMark>,
         /// History rows Ghostty kept when the alternate screen came up.
@@ -331,7 +333,8 @@ record! {
         7 => opt entry_row: Option<u64>,
         /// Whether [`AltEntry::saved`] and [`AltEntry::history`] were
         /// taken (the alternate screen came up since the last return to
-        /// the primary one). `has_history` is always written false now.
+        /// the primary one). `has_history` is written only with
+        /// [`AltEntry::history`].
         8 => one has_saved: bool,
         9 => one has_history: bool,
         // 10: the cursor's row in `saved` that the primary screen was

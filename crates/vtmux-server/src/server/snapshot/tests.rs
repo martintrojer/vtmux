@@ -1385,7 +1385,8 @@ fn an_ordinary_attached_client_requires_no_feature() {
         (10, 20)
     );
     // An editor up over history: the primary history it hides is read in
-    // place (Ghostty patch 0038), and only the visible rows are kept.
+    // place (Ghostty patch 0038), and only the visible rows are kept. The
+    // rows form also carries the copy the build before shows there.
     a.pane_input(vtmux_core::ids::PaneId(0), &b"line\r\n".repeat(200), false);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?1049hvim", false);
     let s = a.to_snapshot(snap::Meta {
@@ -1402,6 +1403,21 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
     assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
     assert_eq!(s.meta.requires, Vec::<String>::new());
+    let rows = a.to_snapshot_with(
+        snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        },
+        Some(crate::snapshot_term::Form::Rows),
+    );
+    let term = rows.panes[0].term.as_ref().unwrap();
+    let alt = term.alt_entry.as_ref().expect("the editor's entry");
+    let copied: u64 = alt.history.iter().map(|p| u64::from(p.rows)).sum();
+    assert!(
+        alt.has_history && copied == term.history.hsize && copied > 150,
+        "{copied}"
+    );
+    assert_eq!(rows.meta.requires, Vec::<String>::new());
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
 }

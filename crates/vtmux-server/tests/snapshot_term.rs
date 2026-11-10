@@ -322,7 +322,6 @@ fn an_old_writers_copy_of_the_hidden_history_is_not_read() {
     assert_eq!(want[hsize - 1], "line 295");
     let mut t = term_to_snapshot(&a, Form::Rows);
     let alt = t.alt_entry.as_mut().expect("alternate screen up");
-    assert!(alt.history.is_empty() && !alt.has_history, "not written");
     // What the old writer put there, blank rows standing in for it.
     alt.history = vec![snap::HistoryPage::from_rows(
         &vec![snap::Row::default(); hsize],
@@ -340,6 +339,80 @@ fn an_old_writers_copy_of_the_hidden_history_is_not_read() {
     assert_eq!(b.history_size(), hsize);
     let got: Vec<String> = (0..hsize).map(|y| b.row(y).text()).collect();
     assert_eq!(got, want);
+}
+
+/// The text of a snapshot row, trailing blanks dropped.
+fn row_text(r: &snap::Row) -> String {
+    let text: String = r
+        .cells
+        .iter()
+        .map(|c| {
+            char::from_u32(c.codepoint)
+                .filter(|&c| c != '\0')
+                .unwrap_or(' ')
+        })
+        .collect();
+    text.trim_end().to_owned()
+}
+
+/// Every row of `pages`, as text.
+fn pages_text(pages: &[snap::HistoryPage]) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in pages {
+        p.each_row(|r| out.push(row_text(r))).expect("rows");
+    }
+    out
+}
+
+/// A reader from before Ghostty patch 0038 (a downgrade, an older binary
+/// restoring a checkpoint) shows, under the alternate screen, the copy of
+/// tmux's history it took on `?1049h` (`AltEntry::history`, trimmed from
+/// the oldest end by a history-limit lowered meanwhile). A writer of rows
+/// puts the newest `hsize` primary rows there, at the width the primary
+/// was left at, the primary's own pages where the cut leaves them whole
+/// (a checkpoint stores those chunks once); an upgrade to this patch stack
+/// carries none, as `?1049h` takes none.
+#[test]
+fn an_older_reader_gets_its_copy_of_the_hidden_history() {
+    // 35 wide: a pane narrowed to 30 would wrap them.
+    let line = |i| format!("line {i:04} {}", "x".repeat(25));
+    let text: Vec<u8> = (0..5000)
+        .flat_map(|i| format!("{}\r\n", line(i)).into_bytes())
+        .collect();
+    let mut a = pane(40, 5, 10000, &text);
+    a.feed(b"\x1b[?1049hvim");
+    a.set_history_limit(3000);
+    let hsize = a.history_size();
+    assert_eq!(hsize, 3000);
+    let want: Vec<String> = (0..hsize).map(|y| a.row(y).text()).collect();
+    assert_eq!(want[hsize - 1], line(4995));
+    let t = term_to_snapshot(&a, Form::Rows);
+    let alt = t.alt_entry.as_ref().expect("alternate screen up");
+    assert!(alt.has_history);
+    assert_eq!(pages_text(&alt.history), want);
+    assert!(alt.history.len() > 2, "{}", alt.history.len());
+    assert!(!t.primary.history.contains(&alt.history[0]), "the cut");
+    assert!(
+        alt.history[1..]
+            .iter()
+            .all(|p| t.primary.history.contains(p)),
+        "whole pages are the primary's"
+    );
+    let back = through_stream(t, Form::Rows);
+    assert_eq!(pages_text(&back.alt_entry.unwrap().history), want);
+    let t = term_to_snapshot(&a, Form::SamePin);
+    let alt = t.alt_entry.as_ref().expect("alternate screen up");
+    assert!(alt.history.is_empty() && !alt.has_history, "{alt:?}");
+    // Narrowed under the alternate screen: the primary stays 40 wide, its
+    // rows unwrapped, and so does the history tmux shows; the older
+    // reader's primary is reflowed to the pane (`sized_primary`), its copy
+    // is not, as its `?1049h` took it.
+    a.resize(30, 5);
+    assert_eq!(a.history_size(), hsize);
+    let t = term_to_snapshot(&a, Form::Rows);
+    assert!(t.sized_primary.is_some());
+    let alt = t.alt_entry.as_ref().expect("alternate screen up");
+    assert_eq!(pages_text(&alt.history), want);
 }
 
 /// Each page of the primary screen: rows, width and capacity, or a blob.

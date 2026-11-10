@@ -2656,3 +2656,74 @@ fn a_server_of_the_previous_protocol_moves_onto_this_build() {
     *world.client.lock().unwrap() = bin();
     assert!(attached.exited().is_none());
 }
+
+/// A downgrade under an editor up over a long history, onto
+/// `VTMUX_PRE_0038_BINARY` (a build from before Ghostty patch 0038, which
+/// copied the history on `?1049h`: `git worktree add` main and `cargo
+/// build -p vtmux` there), and back. The build before shows the copy this
+/// build writes beside the primary screen (`AltEntry::history`), so its
+/// `history_size` and capture stay tmux's, and it goes on applying a
+/// history-limit lowered under the alternate screen (options.c
+/// `options_push_changes`, session.c `session_update_history`). The numbers
+/// are the reference tmux 3.8's for the same input at 80x24.
+#[test]
+#[ignore = "needs VTMUX_PRE_0038_BINARY, a build from before Ghostty patch 0038"]
+fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
+    let before = PathBuf::from(
+        std::env::var_os("VTMUX_PRE_0038_BINARY").expect("VTMUX_PRE_0038_BINARY is set"),
+    );
+    let world = World::new();
+    world.populate(&[]);
+    world.run(&["set", "-g", "history-limit", "400000"]);
+    let program = "seq 300000; printf '\\033[?1049hvim'; read x; \
+                   printf '\\033[?1049l'; seq 50; exec cat -";
+    world.run(&["neww", "-d", "-t", "a", "-n", "big", "sh", "-c", program]);
+    world.run(&["select-pane", "-t", "a:big", "-T", "t5"]);
+    let big = |format: &str| {
+        world
+            .run(&["display", "-p", "-t", "a:big", format])
+            .trim()
+            .to_owned()
+    };
+    // The history's first and last lines and its length.
+    let history = || {
+        let text = world.run(&["capture-pane", "-p", "-t", "a:big", "-S", "-", "-E", "-1"]);
+        let lines: Vec<&str> = text.lines().collect();
+        format!(
+            "{} {} {}",
+            lines.first().unwrap_or(&""),
+            lines.last().unwrap_or(&""),
+            lines.len()
+        )
+    };
+    wait("the editor up over the long history", || {
+        big("#{history_size} #{alternate_on}") == "299977 1"
+    });
+    world.run(&["set", "-g", "history-limit", "199999"]);
+    assert_eq!(big("#{history_size}"), "199999");
+    assert_eq!(history(), "99979 299977 199999");
+    let pid = world.pid();
+
+    assert_eq!(
+        world.upgrade(&before),
+        Some(upgraded()),
+        "onto the build before"
+    );
+    assert_eq!(world.pid(), pid);
+    assert_eq!(big("#{history_size} #{alternate_on}"), "199999 1");
+    assert_eq!(history(), "99979 299977 199999");
+    world.run(&["set", "-g", "history-limit", "99999"]);
+    assert_eq!(big("#{history_size}"), "99999");
+    assert_eq!(history(), "199979 299977 99999");
+    world.run(&["send-keys", "-t", "a:big", "go", "Enter"]);
+    wait("the editor gone and the lines out", || {
+        big("#{alternate_on} #{pane_current_command}") == "0 cat"
+    });
+    assert_eq!(big("#{history_size}"), "90050");
+    assert_eq!(history(), "209978 27 90050");
+
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "and back");
+    assert_eq!(world.pid(), pid);
+    assert_eq!(big("#{history_size} #{alternate_on}"), "90050 0");
+    assert_eq!(history(), "209978 27 90050");
+}

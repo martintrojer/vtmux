@@ -392,6 +392,34 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
     assert!(decode_with(&manifest, |_| None).is_err());
 }
 
+/// A page equal to one read already is not read again (the copy of the
+/// history an alternate screen shows is mostly the primary's pages); one
+/// under the same name with other bytes is, and its part is named.
+#[test]
+fn a_page_equal_to_one_read_is_read_once() {
+    let mut s = sample();
+    let page = HistoryPage::from_rows(
+        &std::iter::repeat_n(sample_row(), 5).collect::<Vec<_>>(),
+        false,
+    );
+    let t = s.panes[0].term.as_mut().unwrap();
+    t.primary.history = vec![page.clone()];
+    t.alt_entry.get_or_insert_default().history = vec![page.clone()];
+    let PaneMode::Copy(copy) = &mut s.panes[0].modes[0] else {
+        panic!("the sample's first mode is copy mode");
+    };
+    copy.history = vec![page.clone()];
+    assert_eq!(s.unreadable(), []);
+    let mut other = page;
+    *other.data.last_mut().unwrap() ^= 1;
+    let PaneMode::Copy(copy) = &mut s.panes[0].modes[0] else {
+        unreachable!()
+    };
+    copy.history = vec![other];
+    let parts: Vec<Part> = s.unreadable().into_iter().map(|(p, _)| p).collect();
+    assert_eq!(parts, [Part::PaneMode(1, 0, ModeKind::Copy)]);
+}
+
 #[test]
 fn page_refs_names_a_manifests_pages_without_their_chunks() {
     let s = sample();
