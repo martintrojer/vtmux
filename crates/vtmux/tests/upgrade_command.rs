@@ -8,6 +8,13 @@
 //! explicit `-L`, `-f /dev/null`, pane commands pinned to `cat -`. Every
 //! server is killed when its test ends.
 
+mod socket_env;
+
+#[test]
+fn socket_paths_ignore_long_tmpdir() {
+    socket_env::with_long_tmpdir("a_refused_upgrade_says_why_and_the_server_runs_on");
+}
+
 use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -51,7 +58,7 @@ impl Server {
 
     fn start() -> Self {
         Self::start_as(
-            tempfile::tempdir().expect("tempdir"),
+            tempfile::tempdir_in("/tmp").expect("tempdir"),
             Path::new(VTMUX),
             Vec::new(),
         )
@@ -182,7 +189,7 @@ fn wait(what: &str, mut done: impl FnMut() -> bool) {
 /// first and refused for the job.
 fn upgrade_cut_short(held: bool, stop: impl FnOnce(&Server)) {
     let server = Server::start_as(
-        tempfile::tempdir().expect("tempdir"),
+        tempfile::tempdir_in("/tmp").expect("tempdir"),
         Path::new(VTMUX),
         vec![("VTMUX_TEST_UPGRADE_WAIT", "20")],
     );
@@ -283,7 +290,7 @@ fn sigterm_during_the_preflight_wait_fails_the_upgrade() {
 /// new binary runs the dry run.
 #[test]
 fn without_b_the_relinked_start_path_is_the_binary() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir_in("/tmp").expect("tempdir");
     let bin = dir.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let link = bin.join("vtmux");
@@ -358,7 +365,7 @@ fn client(dir: &Path, socket: &Path, args: &[&str]) -> (String, i32) {
 /// binary"), and prints the result.
 #[test]
 fn a_client_of_another_version_asks_with_the_frozen_request() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir_in("/tmp").expect("tempdir");
     let socket = dir.path().join("s");
     let ok = ServerMsg::UpgradeResult {
         ok: true,

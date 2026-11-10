@@ -6,6 +6,13 @@
 //! Isolation: environment cleared, a private `TMUX_TMPDIR` and `HOME`, an
 //! explicit `-L`, `-f /dev/null`, pane command pinned to `cat -`.
 
+mod socket_env;
+
+#[test]
+fn socket_paths_ignore_long_tmpdir() {
+    socket_env::with_long_tmpdir("an_upgrade_request_is_answered_without_a_hello");
+}
+
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,7 +33,7 @@ impl Server {
     fn start() -> Self {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let server = Self {
-            dir: tempfile::tempdir().expect("tempdir"),
+            dir: tempfile::tempdir_in("/tmp").expect("tempdir"),
             label: format!(
                 "cli{}hs{}",
                 std::process::id(),
@@ -258,7 +265,7 @@ fn a_hello_with_a_later_extension_area_is_served() {
 /// then output and `Exit 0`, which the client prints and exits with.
 #[test]
 fn a_control_client_skips_a_frame_it_does_not_know() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir_in("/tmp").expect("tempdir");
     let path = dir.path().join("fake");
     let listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
     let fake = std::thread::spawn(move || {

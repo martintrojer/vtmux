@@ -7,6 +7,12 @@
 //! explicit `-L`, `-f /dev/null`, pane command pinned to `cat`.
 
 mod common;
+mod socket_env;
+
+#[test]
+fn socket_paths_ignore_long_tmpdir() {
+    socket_env::with_long_tmpdir("unattached_exits_at_once");
+}
 mod par;
 
 use std::collections::HashMap;
@@ -58,7 +64,7 @@ impl World {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         Self {
             bin: bin.to_owned(),
-            dir: tempfile::tempdir().expect("tempdir"),
+            dir: tempfile::tempdir_in("/tmp").expect("tempdir"),
             label: format!(
                 "ctl{}-{}",
                 std::process::id(),

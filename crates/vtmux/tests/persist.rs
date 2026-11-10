@@ -7,6 +7,12 @@
 //! two words at least. Every wait is for a state, never a fixed time.
 
 mod common;
+mod socket_env;
+
+#[test]
+fn socket_paths_ignore_long_tmpdir() {
+    socket_env::with_long_tmpdir("persist_off_writes_nothing");
+}
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -46,7 +52,7 @@ impl World {
         config: Option<&str>,
     ) -> Self {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = tempfile::tempdir_in("/tmp").expect("tempdir");
         let label = format!(
             "cli{}ps{}",
             std::process::id(),
@@ -466,7 +472,7 @@ fn a_polled_idle_server_writes_nothing() {
 /// checkpoint directories, neither overwriting the other.
 #[test]
 fn sockets_of_one_name_keep_separate_checkpoints() {
-    let shared = tempfile::tempdir().unwrap();
+    let shared = tempfile::tempdir_in("/tmp").unwrap();
     let states = shared.path().join("state");
     let worlds: Vec<World> = ["alpha", "beta"]
         .iter()
@@ -507,7 +513,7 @@ fn sockets_of_one_name_keep_separate_checkpoints() {
 /// in its message log and writes nothing; the first's checkpoints stand.
 #[test]
 fn a_second_server_on_a_locked_directory_writes_nothing() {
-    let shared = tempfile::tempdir().unwrap();
+    let shared = tempfile::tempdir_in("/tmp").unwrap();
     let socket = shared.path().join("rvlock");
     let env = [("VTMUX_PERSIST_INTERVAL_MS", "50")];
     let first = World::start_with(&["cat", "-"], &env, Some(&socket), None);
