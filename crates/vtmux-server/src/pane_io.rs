@@ -169,10 +169,12 @@ impl PaneIo {
         crate::sys::pty::resize(&self.master, cols, rows, pixels)
     }
 
-    /// The size the pty has now (`TIOCGWINSZ`): columns and rows.
-    pub fn size(&self) -> io::Result<(u16, u16)> {
+    /// The size the pty has now (`TIOCGWINSZ`): columns and rows, then
+    /// pixels wide and high. The kernel's SIGWINCH compares all four
+    /// (`tty_do_resize`).
+    pub fn size(&self) -> io::Result<((u16, u16), (u16, u16))> {
         let ws = rustix::termios::tcgetwinsize(&self.master)?;
-        Ok((ws.ws_col, ws.ws_row))
+        Ok(((ws.ws_col, ws.ws_row), (ws.ws_xpixel, ws.ws_ypixel)))
     }
 
     /// Bytes waiting to be read (`FIONREAD`, window.c

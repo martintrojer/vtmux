@@ -1137,6 +1137,50 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The kernel sends SIGWINCH for a size that differs in pixels alone
+/// (`tty_do_resize` compares the whole `winsize`), so a program granted
+/// mode 2048 is reported such a size too (a client terminal whose cells
+/// changed size, say). (Before: only a change in cells was reported.)
+#[test]
+fn a_size_that_differs_in_pixels_alone_is_reported_to_a_mode_2048_program() {
+    fn pane(a: &mut Server) -> &mut crate::model::Pane {
+        a.model.panes.get_mut(&vtmux_core::ids::PaneId(0)).unwrap()
+    }
+    let dir = temp_dir("inband-pixels");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-inband-resize", "on"]);
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048h", false);
+    echoed(&mut a, 0, "^[[48;24;80;768;1280t");
+    // The window is the same size in cells; its cells are half as big.
+    pane(&mut a).resizes.push(((80, 24), (80, 24)));
+    assert!(
+        pane(&mut a).flush_resizes((8, 16)),
+        "no report for a pixel change"
+    );
+    echoed(&mut a, 0, "^[[48;24;80;384;640t");
+    // The same again is no change at all.
+    pane(&mut a).resizes.push(((80, 24), (80, 24)));
+    assert!(!pane(&mut a).flush_resizes((8, 16)));
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// `terminal-features` and `terminal-overrides` are read when a client's
 /// terminal opens (`tty_term_create`, tty-term.c:457, 619), never applied
 /// to a client already attached: the rebuilt client keeps the features it

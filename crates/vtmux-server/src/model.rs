@@ -2416,12 +2416,14 @@ impl Pane {
         };
         let size = (clamp16(sx), clamp16(sy));
         self.term.set_cell_pixels(cell);
-        // As SIGWINCH: only a size the pty did not have already.
+        let pixels = pty_pixels(size, cell);
+        // As SIGWINCH (`tty_do_resize`): only a size the pty did not have
+        // already, pixels included.
         let report = self
             .term
             .inband_resize_report(size.0, size.1)
-            .filter(|_| io.size().ok() != Some(size));
-        let _ = io.resize(size.0, size.1, pty_pixels(size, cell));
+            .filter(|_| io.size().ok() != Some((size, pixels)));
+        let _ = io.resize(size.0, size.1, pixels);
         let Some(report) = report else {
             return false;
         };
