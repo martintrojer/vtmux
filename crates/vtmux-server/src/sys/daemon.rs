@@ -3,13 +3,17 @@
 //!
 //! The listening socket is created and bound by the client, before it
 //! forks, so a bind failure is reported to the caller as
-//! `error creating <path> (<strerror>)` and the client exits 1. Only then
-//! does the client fork; the child becomes a daemon (`daemon(1, 0)`: cwd
-//! kept, stdio on /dev/null, new session) and runs the server on the
-//! inherited socket. The client is its first client, on a socketpair made
-//! before the fork, as tmux's is (`proc_fork_and_daemon`), not a later
-//! connection: another client connecting first can't leave the fresh server
-//! empty, so exiting, before the starter's command runs.
+//! `error creating <path> (<strerror>)` and the client exits 1. This differs
+//! from tmux 3.8, where the forked daemon binds (server.c `server_start`,
+//! :220-221) and sends the error to its starting client as its exit message:
+//! the text and the exit status are the same, but here no daemon exists when
+//! the bind fails. Only after the bind does the client fork; the child
+//! becomes a daemon (`daemon(1, 0)`: cwd kept, stdio on /dev/null, new
+//! session) and runs the server on the inherited socket. The client is its
+//! first client, on a socketpair made before the fork, as tmux's is
+//! (`proc_fork_and_daemon`), not a later connection: another client
+//! connecting first can't leave the fresh server empty, so exiting, before
+//! the starter's command runs.
 
 use std::io;
 use std::os::fd::OwnedFd;
@@ -99,12 +103,13 @@ pub fn fork_daemon() -> io::Result<Forked> {
 
 /// In the daemon, before the server starts: close every descriptor but
 /// stdio, the listener, which ends up as fd 3, and the starting client's
-/// end of the socketpair (`proc_fork_and_daemon`), fd 4, both close-on-exec. A starting client can
-/// hold descriptors it never meant to pass on: where `pipe2` is missing
-/// (macOS) a pipe gets `FD_CLOEXEC` only after it is made, so a client
-/// spawned by another thread in that window inherits it, and a server
-/// keeping it open forever leaves the pipe's reader waiting for EOF (cli.rs
-/// `concurrent_starts_share_one_server` hung on macOS). tmux keeps them.
+/// end of the socketpair (`proc_fork_and_daemon`), fd 4, both
+/// close-on-exec. A starting client can hold descriptors it never meant to
+/// pass on: where `pipe2` is missing (macOS) a pipe gets `FD_CLOEXEC` only
+/// after it is made, so a client spawned by another thread in that window
+/// inherits it, and a server keeping it open forever leaves the pipe's
+/// reader waiting for EOF (cli.rs `concurrent_starts_share_one_server` hung
+/// on macOS). tmux keeps them.
 #[must_use]
 pub fn close_inherited(listener: UnixListener, starter: UnixStream) -> (UnixListener, UnixStream) {
     use std::os::fd::{FromRawFd, IntoRawFd};

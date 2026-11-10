@@ -193,6 +193,14 @@ pub fn inherited(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(owned)
 }
 
+/// `nap` as a `poll` timeout, whole seconds included.
+fn timespec(nap: Duration) -> rustix::event::Timespec {
+    rustix::event::Timespec {
+        tv_sec: i64::try_from(nap.as_secs()).unwrap_or(i64::MAX),
+        tv_nsec: i64::from(nap.subsec_nanos()),
+    }
+}
+
 /// `fd`'s close-on-exec cleared; the previous flags, to put back.
 fn inheritable(fd: BorrowedFd<'_>) -> io::Result<FdFlags> {
     let flags = fcntl_getfd(fd)?;
@@ -306,6 +314,9 @@ impl DryRun {
     /// The binary can't be started, as [`dry_run`].
     pub fn start(binary: &Path, snapshot: BorrowedFd<'_>, limit: Duration) -> io::Result<Self> {
         use std::os::unix::process::CommandExt as _;
+        // Before the flag is cleared: an error here must not leave the
+        // snapshot inheritable.
+        let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
         let flags = inheritable(snapshot)?;
         let mut command = Command::new(binary);
         command
@@ -320,7 +331,6 @@ impl DryRun {
         // refuses (ENOEXEC) as a shell script. What that prints and exits
         // with is the shell's (bash: "cannot execute binary file", 126;
         // dash: nothing, 127), so the refusal differed by host.
-        let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
         // `Command` passes the signal mask on, and a switch back runs this
         // with the handled signals blocked (`exec_resume`): the child
         // starts with none blocked, as a pane does (`pty::clear_signals`).
@@ -404,11 +414,7 @@ impl DryRun {
         match &self.err {
             Some(e) => {
                 let mut fds = [rustix::event::PollFd::new(e, rustix::event::PollFlags::IN)];
-                let timeout = rustix::event::Timespec {
-                    tv_sec: 0,
-                    tv_nsec: i64::from(nap.subsec_nanos()),
-                };
-                let _ = rustix::event::poll(&mut fds, Some(&timeout));
+                let _ = rustix::event::poll(&mut fds, Some(&timespec(nap)));
             }
             None => std::thread::sleep(nap),
         }
@@ -1057,6 +1063,26 @@ mod tests {
             words(false, Some("/tmp/vto-1/s")),
             ["tmux", "-S", "/tmp/vto-1/s", RESUME_FLAG, "7"]
         );
+    }
+
+    /// A dry run that fails to start (a NUL in the path) returns before
+    /// anything is spawned, and the snapshot is as close-on-exec as it was.
+    #[test]
+    fn a_dry_run_that_cannot_start_leaves_the_snapshot_close_on_exec() {
+        let d = dir();
+        let snapshot = memfile(&d.0, b"x").unwrap();
+        let bad = Path::new("no\0such");
+        assert!(DryRun::start(bad, snapshot.as_fd(), DRY_RUN_LIMIT).is_err());
+        assert!(fcntl_getfd(&snapshot).unwrap().contains(FdFlags::CLOEXEC));
+    }
+
+    /// A nap of a second or more polls for all of it.
+    #[test]
+    fn a_nap_keeps_its_whole_seconds() {
+        let t = timespec(Duration::from_millis(2500));
+        assert_eq!((t.tv_sec, t.tv_nsec), (2, 500_000_000));
+        let t = timespec(Duration::from_millis(10));
+        assert_eq!((t.tv_sec, t.tv_nsec), (0, 10_000_000));
     }
 
     #[test]

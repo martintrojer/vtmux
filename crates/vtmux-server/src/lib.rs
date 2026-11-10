@@ -1,7 +1,8 @@
-#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
 //! Server: event loop, model, commands, rendering.
 //!
-//! `unsafe` is confined to [`sys`] (D10).
+//! `unsafe` is confined to [`sys`] (D10): the crate denies `unsafe_code`
+//! and `sys` alone allows it.
 
 pub mod acl;
 pub mod alerts;
@@ -46,6 +47,7 @@ pub mod scrollbar;
 pub mod server;
 pub mod shim;
 pub mod snapshot_term;
+#[allow(unsafe_code)]
 pub mod sys;
 pub mod target;
 pub mod term_queries;
