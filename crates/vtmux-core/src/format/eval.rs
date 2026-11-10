@@ -216,14 +216,14 @@ impl Eval<'_> {
                     if new.eq_ignore_ascii_case("none") {
                         String::from("\x1b[0m")
                     } else {
-                        colour::from_string(&new)
+                        crate::colour::Colour::parse(&new)
                             .and_then(|c| colour::to_escape(c, bg))
                             .unwrap_or_default()
                     }
                 } else {
-                    colour::from_string(&new)
-                        .and_then(colour::to_rgb)
-                        .map(|rgb| format!("{:06x}", rgb & 0x00ff_ffff))
+                    crate::colour::Colour::parse(&new)
+                        .and_then(crate::colour::Colour::rgb)
+                        .map(|(r, g, b)| format!("{r:02x}{g:02x}{b:02x}"))
                         .unwrap_or_default()
                 }
             }

@@ -23,7 +23,6 @@
 //! returns nothing. [`expand_nojobs`] is `FORMAT_EXPAND_NOJOBS`: `#()` is always empty.
 
 mod colour;
-mod colour_names;
 mod eval;
 mod fuzzy;
 pub use fuzzy::fuzzy_match;
