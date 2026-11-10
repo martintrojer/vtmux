@@ -585,7 +585,7 @@ Closed (vtmux now matches tmux):
   - a line erased and rewritten shorter (tmux keeps the allocation);
   - a line whose run tmux flushed in two pieces: plain text with an escape sequence in it that changes nothing (`zz ESC[m out`: tmux allocates up to the second piece's end, 5/5 on a 20-column line; vtmux sees one run, 5/10), and likewise a run split by the end of a read;
   - a line whose characters past ASCII were overwritten;
-  - the rows a reflow makes;
+  - the rows a reflow makes; also the line flags after a run of resizes: 1-4 lines in about 550 show `-` where tmux shows `X` (narrow characters only, seeds 1, 2, 3, 5, 7 and 8 of a resize-storm probe, on main and with patch 0038 alike; 2026-11-10 review of `panel_g2_persist`);
   - a once-extended cell erased (`CLEARED` in vtmux);
   - `cellused` after an erase (vtmux counts the cells left);
   - under `-N`, the trailing blanks follow the same model.
