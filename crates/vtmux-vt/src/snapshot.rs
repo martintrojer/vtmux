@@ -246,6 +246,9 @@ pub struct ScreenView {
     snap: Rc<Snapshot>,
     /// Per row: the stamp of the update that last changed it.
     rows: Vec<u64>,
+    /// How many times [`Self::update`] read the terminal.
+    #[cfg(test)]
+    reads: u32,
 }
 
 /// Row stamps are unique across every view, so a row of a pane's new
@@ -276,6 +279,8 @@ impl Default for ScreenView {
                 cursor_visible: true,
             }),
             rows: Vec::new(),
+            #[cfg(test)]
+            reads: 0,
         }
     }
 }
@@ -312,6 +317,10 @@ impl ScreenView {
     /// # Panics
     /// Only if libghostty fails to allocate.
     pub(crate) fn update(&mut self, term: &PaneTerm) -> bool {
+        #[cfg(test)]
+        {
+            self.reads += 1;
+        }
         let stamp = STAMP.fetch_add(1, Ordering::Relaxed);
         let (state, rows, cells) = self.state.get_or_insert_with(|| {
             (
@@ -576,6 +585,28 @@ mod tests {
             !kept.view.borrow_mut().update(&kept),
             "nothing new: no change"
         );
+    }
+
+    /// The screen is read from the terminal once per write, however often
+    /// it is asked for: a frame asks for each pane's more than once.
+    #[test]
+    fn an_unwritten_screen_is_not_read_again() {
+        let mut t = PaneTerm::new(10, 3, 100);
+        t.feed(b"one");
+        let reads = |t: &PaneTerm| t.view.borrow().reads;
+        let first = t.screen().row_stamps().to_vec();
+        let _ = t.screen();
+        let _ = t.cursor();
+        assert_eq!(t.screen().row_stamps(), first);
+        assert_eq!(reads(&t), 1, "read once");
+        t.feed(b"\r\ntwo");
+        assert_ne!(t.screen().row_stamps(), first, "a write is read");
+        assert_eq!(reads(&t), 2);
+        t.resize(8, 3);
+        assert_eq!(t.screen().snapshot().cols, 8, "a resize is read");
+        let resized = reads(&t);
+        let _ = t.screen();
+        assert_eq!(reads(&t), resized);
     }
 
     /// A released view (a hidden pane's) is read again whole: the same

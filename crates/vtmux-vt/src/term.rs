@@ -308,11 +308,50 @@ impl ExtendedKeys {
     }
 }
 
+/// A value that notes each mutable borrow of it: the pane's libghostty
+/// terminal, whose screen is read again only after something could have
+/// written it ([`PaneTerm::screen`]). libghostty-vt takes `&mut` for every
+/// change of a terminal, so a terminal not borrowed mutably is unchanged.
+#[derive(Debug)]
+pub(crate) struct Watched<T> {
+    value: T,
+    touched: StdCell<bool>,
+}
+
+impl<T> Watched<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value,
+            touched: StdCell::new(true),
+        }
+    }
+
+    /// Whether it was borrowed mutably since the last call.
+    fn take_touched(&self) -> bool {
+        self.touched.replace(false)
+    }
+}
+
+impl<T> std::ops::Deref for Watched<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> std::ops::DerefMut for Watched<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.touched.set(true);
+        &mut self.value
+    }
+}
+
 /// One pane's terminal. Owns the libghostty terminal; `'static` for callers.
 #[allow(clippy::struct_excessive_bools)] // independent pane flags
 #[derive(Debug)]
 pub struct PaneTerm {
-    pub(crate) term: Terminal<'static, 'static>,
+    pub(crate) term: Watched<Terminal<'static, 'static>>,
     /// What the program's input asks back, in input order: Ghostty's
     /// replies as tmux words them, and what only the server can answer.
     replies: Rc<RefCell<Vec<Reply>>>,
@@ -579,7 +618,7 @@ impl PaneTerm {
             .expect("libghostty tmux alternate screen");
 
         let mut pane = Self {
-            term,
+            term: Watched::new(term),
             replies,
             events,
             titles: Titles::default(),
@@ -1790,7 +1829,14 @@ impl PaneTerm {
     /// Only if libghostty fails to allocate, or while a returned view is
     /// still held.
     pub fn screen(&self) -> std::cell::Ref<'_, crate::snapshot::ScreenView> {
-        self.view.borrow_mut().update(self);
+        // Read again only once the terminal may have changed: a frame
+        // reads each pane's screen more than once (each client's drawing,
+        // the cursor, a synchronized update), and even with no dirty row
+        // a read costs Ghostty's render state update and a pass over every
+        // row. Unwritten, the read would find nothing dirty.
+        if self.term.take_touched() || !self.view.borrow().is_live() {
+            self.view.borrow_mut().update(self);
+        }
         self.view.borrow()
     }
 
@@ -1882,8 +1928,9 @@ impl PaneTerm {
         if cols.max(1) != self.cols() && on_primary {
             // The height first, as screen_resize_y does before the reflow.
             if rows.max(1) != self.rows() {
+                let cols = self.cols();
                 self.term
-                    .resize(self.cols(), rows.max(1), self.cell_px.0, self.cell_px.1)
+                    .resize(cols, rows.max(1), self.cell_px.0, self.cell_px.1)
                     .expect("libghostty resize");
             }
             let blank = self.trailing_blank_rows();
@@ -2107,8 +2154,9 @@ impl PaneTerm {
         let want = blank.max(short).min(rows);
         let cy = self.cursor().1;
         let resize = |t: &mut Self, r: u16| {
+            let cols = t.cols();
             t.term
-                .resize(t.cols(), r, t.cell_px.0, t.cell_px.1)
+                .resize(cols, r, t.cell_px.0, t.cell_px.1)
                 .expect("libghostty resize");
         };
         // The cursor changes rows only by VPA, which keeps its column and
