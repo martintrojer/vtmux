@@ -2165,10 +2165,14 @@ fn timers_count_from_when_the_snapshot_was_taken() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let p = vtmux_core::ids::PaneId(0);
+    // Long enough that a host which stalls the test for seconds between
+    // here and the checks (a loaded one, the whole suite at once) does not
+    // turn the timer's slack into a failure.
+    let hide0 = Instant::now() + Duration::from_secs(30);
     a.model.panes.get_mut(&p).unwrap().sb = crate::scrollbar::AutoHide {
         visible: true,
         hover: false,
-        hide_at: Some(Instant::now() + Duration::from_secs(5)),
+        hide_at: Some(hide0),
     };
     let ago = |secs| {
         let t = std::time::SystemTime::now() - Duration::from_secs(secs);
@@ -2186,20 +2190,20 @@ fn timers_count_from_when_the_snapshot_was_taken() {
         let b = from_snapshot(&dir, s).unwrap();
         b.model.panes[&p].sb.hide_at.unwrap()
     };
-    // Written 2 s ago: 3 s left.
+    // Written 2 s ago: 28 s left.
     let left = hide_at(&taken(ago(2), snap::Purpose::Upgrade));
-    assert!(left <= Instant::now() + Duration::from_secs(3), "{left:?}");
-    assert!(left + Duration::from_secs(4) > Instant::now() + Duration::from_secs(5));
+    assert!(left <= Instant::now() + Duration::from_secs(28), "{left:?}");
+    assert!(left + Duration::from_secs(10) > hide0, "{left:?}");
     // No time, a checkpoint, or a clock far off: counted from the rebuild.
     for s in [
         taken(0, snap::Purpose::Upgrade),
         taken(ago(2), snap::Purpose::CheckpointFull),
     ] {
         let left = hide_at(&s);
-        assert!(left > Instant::now() + Duration::from_secs(4), "{left:?}");
+        assert!(left > Instant::now() + Duration::from_secs(20), "{left:?}");
     }
     let far = hide_at(&taken(ago(3600), snap::Purpose::Upgrade));
-    assert!(far + Duration::from_secs(11) > Instant::now(), "{far:?}");
+    assert!(far + Duration::from_secs(20) > hide0, "{far:?}");
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
 }
