@@ -2094,7 +2094,8 @@ impl Model {
     /// whose edge touches `p`'s on that side (wrapping round the window),
     /// overlapping it along the edge; the most recently active wins
     /// (`window_pane_choose_best`), by their full size with a reserved
-    /// scrollbar (`window_pane_full_size_offset`).
+    /// scrollbar (`window_pane_full_size_offset`), except the span `p`
+    /// must overlap going down.
     #[must_use]
     pub fn neighbour(&self, p: PaneId, side: Side) -> Option<PaneId> {
         let pane = self.panes.get(&p)?;
@@ -2121,7 +2122,10 @@ impl Model {
                     PaneStatus::Off if edge >= wsy => edge = 0,
                     _ => {}
                 }
-                (edge, r.x, r.x + r.w)
+                // window.c:2320-2321: the span is the pane's own, without
+                // its scrollbar (unlike the other three sides).
+                let own = Rect::of(pane);
+                (edge, own.x, own.x + own.w)
             }
             Side::Left => {
                 let edge = if r.x == 0 { wsx + 1 } else { r.x };

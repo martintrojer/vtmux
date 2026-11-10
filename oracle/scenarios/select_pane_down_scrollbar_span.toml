@@ -1,0 +1,19 @@
+name = "select_pane_down_scrollbar_span"
+# window_pane_find_down measures the panes below by their full size with
+# the scrollbar, but the span they must overlap is the pane's own
+# (window.c:2320-2321): a pane starting just past the upper pane's
+# scrollbar is not below it, however recently it was active.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "81", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "pane-scrollbars", "on"] },
+  { run = ["set", "-g", "pane-scrollbars-style", "width=1,pad=0"] },
+  { run = ["split-window", "-d", "-v", "-t", "a:0.0", "cat", "-"] },
+  { run = ["split-window", "-d", "-h", "-t", "a:0.0", "-l", "40", "cat", "-"] },
+  { run = ["split-window", "-d", "-h", "-t", "a:0.2", "-l", "41", "cat", "-"] },
+  { run = ["lsp", "-t", "a", "-F", "#{pane_index} #{pane_left} #{pane_width} #{pane_top}"] },
+  { run = ["select-pane", "-t", "a:0.3", ";", "select-pane", "-t", "a:0.0"] },
+  { run = ["display", "-p", "-t", "{down-of}", "#{pane_index}"] },
+  { run = ["select-pane", "-D", "-t", "a:0.0", ";", "display", "-p", "-t", "a", "#{pane_index}"] },
+  { run = ["select-pane", "-t", "a:0.1", ";", "display", "-p", "-t", "{down-of}", "#{pane_index}"] },
+  { run = ["select-pane", "-U", "-t", "a:0.3", ";", "display", "-p", "-t", "a", "#{pane_index}"] },
+]
