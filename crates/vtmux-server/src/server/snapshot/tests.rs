@@ -1222,6 +1222,45 @@ fn a_control_client_keeps_its_protocol_version() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A frame the server had read only part of when the snapshot was taken
+/// is completed by the bytes after it: the part read goes with the
+/// client. Without it the rest decodes as a frame of its own (`frame too
+/// large`) and the client is dropped.
+#[test]
+fn a_frame_read_in_part_is_finished_after_a_rebuild() {
+    use std::io::Write as _;
+    use vtmux_core::protocol::{ClientMsg, encode};
+    let dir = temp_dir("inbuf");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (id, mut peer) = connect(
+        &mut a,
+        hello(&["attach", "-t", "s"], &dir, None, ControlMode::Control),
+    );
+    let _ = messages(&mut a, id, &mut peer);
+    let frame = encode(&ClientMsg::Stdin(b"display-message -p carried\n".to_vec())).unwrap();
+    peer.write_all(&frame[..7]).unwrap();
+    a.client_readable(id);
+    assert_eq!(a.clients[&id].inbuf, frame[..7]);
+    let mut b = rebuild(&a, &dir, "b");
+    peer.write_all(&frame[7..]).unwrap();
+    b.client_readable(id);
+    b.cmdq_process();
+    let out: Vec<u8> = messages(&mut b, id, &mut peer)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::Stdout(bytes) => Some(bytes),
+            ServerMsg::Exit { .. } => panic!("the client was dropped: {m:?}"),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let out = String::from_utf8_lossy(&out);
+    assert!(out.contains("\ncarried\n%end "), "{out}");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The title an attached client's terminal shows from its output comes
 /// back with the client.
 #[test]
@@ -1406,11 +1445,14 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .as_mut()
         .unwrap()
         .queue(b"typed ahead");
+    // A frame from the client read in part (`inbuf`).
+    a.clients.get_mut(&client).unwrap().inbuf = vec![0x03, 0x00];
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
     });
     assert_eq!(s.panes[0].input_queued, b"typed ahead");
+    assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
     let [c] = &s.clients[..] else {
         panic!("{:?}", s.clients)
     };

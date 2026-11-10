@@ -1380,6 +1380,7 @@ impl Server {
             argv: hello.argv.clone(),
             cwd: hello.cwd.to_string_lossy().into_owned(),
             cwd_bytes: path_bytes(&hello.cwd),
+            inbuf: c.inbuf.clone(),
             environment: hello.env.clone(),
             term_name: tty.map(|t| t.term.clone()).unwrap_or_default(),
             term_features: tty.map(|t| t.features.clone()).unwrap_or_default(),
@@ -2005,6 +2006,7 @@ impl Server {
             Interest::READABLE,
         )?;
         let mut c = Client::new(stream, x.activity);
+        c.inbuf.clone_from(&x.inbuf);
         let level = x.control.as_ref().map_or(0, |cs| cs.level);
         let hello = Hello {
             version: x.version,

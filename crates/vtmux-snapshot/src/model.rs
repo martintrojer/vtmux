@@ -888,6 +888,10 @@ record! {
         47 => opt view: Option<ClientView>,
         /// `cwd`'s bytes when it is not UTF-8, as for [`Session`].
         48 => opt cwd_bytes: Option<Vec<u8>>,
+        /// The start of a frame read from its socket, the rest not yet
+        /// (vtmux's own protocol): the bytes after it finish it.
+        /// Ignorable: a reader before drops it, as every build did.
+        49 => one inbuf: Vec<u8>,
     }
 }
 
@@ -1608,6 +1612,8 @@ pub(crate) mod tests {
             view: None,
             // Added within v1 too (a_path_that_is_not_utf8_round_trips).
             cwd_bytes: None,
+            // Added within v1 too (a_frame_read_in_part_round_trips).
+            inbuf: Vec::new(),
         }
     }
 

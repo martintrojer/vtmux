@@ -303,6 +303,17 @@ fn input_not_yet_written_round_trips() {
     );
 }
 
+/// The start of a frame a client sent round-trips; the golden stream
+/// has none.
+#[test]
+fn a_frame_read_in_part_round_trips() {
+    let mut s = sample();
+    s.clients[0].inbuf = b"\x03\x00\x00".to_vec();
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| c.inbuf.is_empty()));
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();
