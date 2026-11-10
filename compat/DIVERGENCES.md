@@ -75,6 +75,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-068](#d-068) | Link ids (`tmuxN`) are numbered when first drawn, not when parsed | Deferred | deferred |
 | [D-069](#d-069) | A dead pane keeps its exit status when its old pid comes back for another process | tmux bug | open |
 | [D-070](#d-070) | A failed `-t` with no session part and no client keeps the session in formats | Deferred | deferred |
+| [D-071](#d-071) | Keys typed at a background `attach` stay with the foreground job | Spec decision | open |
 
 Closed (vtmux now matches tmux):
 
@@ -1207,6 +1208,15 @@ Closed (vtmux now matches tmux):
 - **tmux:** `display -p -t w.%0` (CMD_FIND_CANFAIL) with a window name `w` that two windows match: `cmd_find_get_window` leaves the first window, then tries `w` as a session, which sets `fs->s` to NULL (cmd-find.c `cmd_find_get_session`). `format_defaults` takes the session from the target client, and with no client attached `#{session_name}` is empty.
 - **vtmux:** the window and pane are tmux's; the session is the current one, as it is in tmux whenever a client is attached to it.
 - **Evidence:** reference tmux 3.8, no client attached: `display -p -t w.%0 '#{window_index} [#{session_name}]'` prints `0 []`, vtmux `0 [foo]`.
+
+<a id="d-071"></a>
+### D-071: keys typed at a background attach stay with the foreground job
+
+- **Category:** Spec decision: vtmux's client owns the terminal (D14), and the kernel lets a background job draw but not read.
+- **Test:** attach.rs `a_background_attach_draws` (the client draws and keeps running while keys are typed).
+- **tmux:** the client passes its terminal to the server, which reads it from outside the session (tty.c `tty_read_callback`), so keys typed at a background `tmux attach &` reach the pane while the shell competes for them.
+- **vtmux:** the client reads the terminal itself, with SIGTTIN ignored as tmux ignores it (proc.c `proc_set_signals`). In the background the read fails (EIO) and the keys stay for the foreground job; once the client is put in the foreground (`fg`, SIGCONT) it reads what is left.
+- **Evidence:** reference tmux 3.8: `sh -c 'set -m; tmux attach -t a & wait'` under a PTY draws the session, and typed keys reach the pane's `cat`. vtmux draws it, and the keys stay unread until the client is in the foreground.
 
 ## Adding an entry
 

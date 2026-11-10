@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
-use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
+use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{
     self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_TOKEN_ENV, ServerMsg, UPGRADED_DETACH,
@@ -38,10 +38,29 @@ pub struct Reattach {
     pub login: bool,
 }
 
+/// The signal dispositions the attached client changes, set by the
+/// binary's `sys` code (D10: no `unsafe` here). The binary ignores
+/// SIGPIPE, SIGTSTP, SIGTTIN, SIGTTOU and SIGQUIT from the start (proc.c
+/// `proc_set_signals`).
+#[derive(Clone, Copy)]
+pub struct Sys {
+    /// SIGTSTP to its default action, for the stop on `Suspend`
+    /// (client.c:788-795).
+    pub stop_on_tstp: fn(),
+    /// SIGTSTP ignored again, on SIGCONT (client.c:551-556).
+    pub ignore_tstp: fn(),
+    /// The ignored signals back to their defaults before an exec
+    /// (client.c `client_exec`, `proc_clear_signals`).
+    pub defaults: fn(),
+    /// The client's signals are its own from here on: the binary drops
+    /// those it caught before the attach (`client_attached`).
+    pub attached: fn(),
+}
+
 /// Called after Ready; the server owns startup and teardown escapes.
 #[must_use]
-pub fn attach(stream: &mut UnixStream, how: &Reattach) -> i32 {
-    match run(stream, how.sent_size) {
+pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
+    match run(stream, how.sent_size, sys) {
         Ok(Leave::Exit { code, message, hup }) => {
             if let Some(message) = message {
                 println!("[{message}]");
@@ -55,7 +74,10 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach) -> i32 {
         }
         // The terminal is restored (run dropped its guard): the process
         // becomes the command.
-        Ok(Leave::Exec { command, shell }) => exec(&shell, &command, how.login),
+        Ok(Leave::Exec { command, shell }) => {
+            (sys.defaults)();
+            exec(&shell, &command, how.login)
+        }
         // The terminal has its modes back and has taken every frame: the
         // process becomes the new binary, on the same terminal.
         Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how),
@@ -138,13 +160,13 @@ pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
     1
 }
 
-fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>) -> io::Result<Leave> {
+fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::Result<Leave> {
     // Install signal handlers before entering raw mode: all returns drop the
-    // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT
-    // goes to proc_signal_cb and client_signal ignores it while attached;
-    // SIGQUIT is SIG_IGN (proc.c proc_set_signals:254-261). Catching it and
-    // doing nothing is the same for a process that never execs.
-    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGQUIT, SIGCONT])?;
+    // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT,
+    // SIGUSR1 and SIGUSR2 go to proc_signal_cb and client_signal ignores
+    // them while attached (proc.c proc_set_signals:254-276).
+    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGCONT, SIGUSR1, SIGUSR2])?;
+    (sys.attached)();
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut signals, SIGNALS, Interest::READABLE)?;
@@ -169,7 +191,15 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>) -> io::Result<Lea
     );
     stream.set_nonblocking(true)?;
     let mut out = Output::default();
-    let result = relay(stream, &mut poll, &mut signals, &mut out, &raw, sent_size);
+    let result = relay(
+        stream,
+        &mut poll,
+        &mut signals,
+        &mut out,
+        &raw,
+        sent_size,
+        sys,
+    );
     // Teardown escapes are in the buffer: deliver them before the guard
     // restores termios.
     let flushed = out.finish();
@@ -338,19 +368,32 @@ fn read_stdin(stream: &mut UnixStream) -> io::Result<Option<Leave>> {
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            // A background job's read of its terminal, with SIGTTIN
+            // ignored: the input is the foreground's, and what is left
+            // is read when the client is put in the foreground (SIGCONT).
+            // tmux's server, outside the session, reads it regardless.
+            Err(e) if e.raw_os_error() == Some(EIO) && in_background() => return Ok(None),
             Err(e) => return Err(e),
         }
     }
 }
 
+const EIO: i32 = rustix::io::Errno::IO.raw_os_error();
+
+/// The terminal's foreground process group is not this process's.
+fn in_background() -> bool {
+    rustix::termios::tcgetpgrp(io::stdin()).is_ok_and(|fg| fg != rustix::process::getpgrp())
+}
+
 /// `MSG_SUSPEND` (client.c:784-795): the teardown the server sent is
 /// written, the terminal gets its modes back and the client stops itself
-/// with SIGTSTP (left at its default action by the binary). In an
-/// orphaned process group the kernel discards it and the client stays
-/// suspended, as tmux's does.
-fn suspend(out: &mut Output, raw: &RawTty) -> io::Result<()> {
+/// with SIGTSTP, set to its default action for this. In an orphaned
+/// process group the kernel discards it and the client stays suspended,
+/// as tmux's does.
+fn suspend(out: &mut Output, raw: &RawTty, sys: Sys) -> io::Result<()> {
     out.finish()?;
     raw.suspend();
+    (sys.stop_on_tstp)();
     let _ = rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP);
     Ok(())
 }
@@ -390,6 +433,7 @@ fn relay(
     out: &mut Output,
     raw: &RawTty,
     sent_size: Option<(u32, u32)>,
+    sys: Sys,
 ) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
@@ -440,6 +484,7 @@ fn relay(
                             // terminal is raw again and the server told.
                             // A resize meanwhile comes as SIGWINCH.
                             SIGCONT if socket.suspended => {
+                                (sys.ignore_tstp)();
                                 socket.suspended = false;
                                 raw.resume()?;
                                 // As for Unlock: a client that left while
@@ -453,7 +498,15 @@ fn relay(
                                     return Ok(exit);
                                 }
                             }
-                            _ => {} // SIGINT, SIGQUIT, SIGCONT
+                            // Put in the foreground: what was typed
+                            // while it was in the background is read now
+                            // (edge-triggered, it raises no event).
+                            SIGCONT => {
+                                if let Some(exit) = read_stdin(stream)? {
+                                    return Ok(exit);
+                                }
+                            }
+                            _ => {} // SIGINT, SIGUSR1, SIGUSR2
                         }
                     }
                 }
@@ -468,7 +521,7 @@ fn relay(
         }
         if socket.suspend_now {
             socket.suspend_now = false;
-            suspend(out, raw)?;
+            suspend(out, raw, sys)?;
         }
         if let Some(command) = socket.lock.take() {
             if let Some(exit) = lock(stream, out, raw, &command)? {

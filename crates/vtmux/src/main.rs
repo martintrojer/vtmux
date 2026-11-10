@@ -4,6 +4,7 @@
 
 mod cli;
 mod files;
+mod signals;
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -315,6 +316,8 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         write_err(b"not implemented in vtmux yet: -D");
         return ExitCode::from(1);
     }
+    // client.c:275-276: proc_set_signals once the command line is read.
+    signals::ignore_job_control();
     // tmux.c:415-416: a login shell (`argv[0]` starting `-`) runs `-c`
     // as one, as `-l` asks.
     let login = cli.login || argv0.as_bytes().first() == Some(&b'-');
@@ -425,6 +428,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
 /// image restored it before the notice, so every way out here leaves it
 /// as a detach does.
 fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path) -> ExitCode {
+    signals::ignore_job_control();
     let Some(token) = token
         .and_then(|t| t.to_str())
         .filter(|t| protocol::is_upgrade_token(t))
@@ -781,9 +785,12 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
 /// it.
 fn shell_relay(stream: &mut UnixStream, command: &str, how: &Reattach) -> ExitCode {
     match protocol::read_msg::<ServerMsg>(stream) {
-        Ok(Some(ServerMsg::Exec { shell, .. })) => ExitCode::from(
-            u8::try_from(vtmux_client::attach::exec(&shell, command, how.login)).unwrap_or(1),
-        ),
+        Ok(Some(ServerMsg::Exec { shell, .. })) => {
+            vtmux_server::sys::signal::default_job_control();
+            ExitCode::from(
+                u8::try_from(vtmux_client::attach::exec(&shell, command, how.login)).unwrap_or(1),
+            )
+        }
         Ok(Some(first)) => relay(stream, Some(first), how),
         Ok(None) | Err(_) => relay(stream, None, how),
     }
@@ -815,16 +822,16 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
                 return ExitCode::from(u8::try_from(code).unwrap_or(1));
             }
             Ok(Some(ServerMsg::Exec { command, shell })) => {
+                vtmux_server::sys::signal::default_job_control();
                 return ExitCode::from(
                     u8::try_from(vtmux_client::attach::exec(&shell, &command, how.login))
                         .unwrap_or(1),
                 );
             }
             Ok(Some(ServerMsg::Ready)) => {
-                // suspend-client stops the client with SIGTSTP.
-                vtmux_server::sys::signal::default_stop_on_tstp();
                 return ExitCode::from(
-                    u8::try_from(vtmux_client::attach::attach(stream, how)).unwrap_or(1),
+                    u8::try_from(vtmux_client::attach::attach(stream, how, signals::SYS))
+                        .unwrap_or(1),
                 );
             }
             Ok(Some(ServerMsg::WriteOpen { path, append })) => {

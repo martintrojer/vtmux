@@ -19,14 +19,43 @@ pub fn ignore_job_control() {
     }
 }
 
+/// What [`ignore_job_control`] ignores back to the default action, for a
+/// client about to become another program (client.c `client_exec`,
+/// `proc_clear_signals`): an ignored signal stays ignored across exec.
+pub fn default_job_control() {
+    for sig in [
+        libc::SIGPIPE,
+        libc::SIGTSTP,
+        libc::SIGTTIN,
+        libc::SIGTTOU,
+        libc::SIGQUIT,
+    ] {
+        // SAFETY: SIG_DFL installs no handler code; signal(2) with a valid
+        // signal number cannot violate memory safety.
+        unsafe {
+            libc::signal(sig, libc::SIG_DFL);
+        }
+    }
+}
+
 /// SIGTSTP back to its default action, stopping the process: an attached
 /// client stops itself with it on `suspend-client` (client.c:788-795 sets
-/// `SIG_DFL` before `kill(getpid(), SIGTSTP)`), whatever it inherited.
+/// `SIG_DFL` before `kill(getpid(), SIGTSTP)`), and only then.
 pub fn default_stop_on_tstp() {
     // SAFETY: SIG_DFL installs no handler code; signal(2) with a valid
     // signal number cannot violate memory safety.
     unsafe {
         libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+    }
+}
+
+/// SIGTSTP ignored again: an attached client back from its stop
+/// (client.c:551-556, on SIGCONT).
+pub fn ignore_tstp() {
+    // SAFETY: SIG_IGN installs no handler code; signal(2) with a valid
+    // signal number cannot violate memory safety.
+    unsafe {
+        libc::signal(libc::SIGTSTP, libc::SIG_IGN);
     }
 }
 

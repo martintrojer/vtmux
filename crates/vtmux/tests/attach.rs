@@ -686,20 +686,90 @@ fn stalled_terminal_under_heavy_output_keeps_the_client() {
     }
 }
 
-/// proc.c `proc_set_signals`: SIGQUIT is ignored and SIGINT is caught and
-/// ignored by an attached client (client.c `client_signal`).
+/// proc.c `proc_set_signals`: SIGQUIT is ignored and SIGINT, SIGUSR1 and
+/// SIGUSR2 are caught and ignored by an attached client (client.c
+/// `client_signal`). The man page has users send SIGUSR1 to the server, and
+/// `pkill -USR1 tmux` reaches its clients too.
 #[test]
-fn sigint_and_sigquit_leave_the_client_attached() {
+fn ignored_signals_leave_the_client_attached() {
+    use rustix::process::Signal;
     par::each(&bins(), |bin| {
         let bin = bin.clone();
         let w = World::new(bin);
         let mut a = w.attach(&["new", "-s", "a", "cat"]);
         a.wait(|a| a.text().contains("\x1b[?1049h"));
-        a.signal(rustix::process::Signal::INT);
-        a.signal(rustix::process::Signal::QUIT);
+        for signal in [Signal::INT, Signal::QUIT, Signal::USR1, Signal::USR2] {
+            a.signal(signal);
+        }
         thread::sleep(Duration::from_millis(300));
         assert!(a.alive());
         a.keys(b"\x02d");
+        a.exited(0);
+        a.wait(|a| a.text().contains("[detached (from session a)]"));
+    });
+}
+
+/// The pid of the one client attached to `w`'s server.
+fn client_pid(w: &World) -> rustix::process::Pid {
+    let out = w.cli(&["lsc", "-F", "#{client_pid}"]);
+    common::parse_pid(&String::from_utf8_lossy(&out.stdout)).expect("one client")
+}
+
+/// `attach -t a` started by a job-control shell (`set -m`), in a process
+/// group of its own, in the background when `background`: a group that is
+/// not orphaned, where a stop signal stops. The harness's own client leads
+/// its session, an orphaned group, where the kernel discards them.
+fn attach_under_job_control(w: &World, background: bool) -> Attached {
+    let mut cmd = CommandBuilder::new("sh");
+    // Not the script's last command: a shell may exec that in its place,
+    // and the client would lead the session again.
+    let script = if background {
+        r#"set -m; "$0" -L "$1" -f /dev/null attach -t a & wait; s=$?; exit $s"#
+    } else {
+        r#"set -m; "$0" -L "$1" -f /dev/null attach -t a; s=$?; exit $s"#
+    };
+    cmd.args(["-c", script, w.bin.to_str().unwrap(), &w.label]);
+    w.spawn_attached(cmd, 40, 10, &[])
+}
+
+/// proc.c `proc_set_signals`: an attached client ignores SIGTSTP from
+/// outside (`kill -TSTP`, `pkill -TSTP`); only `suspend-client` stops it
+/// (client.c:788-795 sets `SIG_DFL` for that stop alone).
+#[test]
+fn sigtstp_from_outside_leaves_the_client_running() {
+    par::each(&bins(), |bin| {
+        let w = World::new(bin.clone());
+        assert!(w.cli(&["new", "-d", "-s", "a", "cat"]).status.success());
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let mut a = attach_under_job_control(&w, false);
+        a.wait(|a| a.text().contains("[a]"));
+        let pid = client_pid(&w);
+        rustix::process::kill_process(pid, rustix::process::Signal::TSTP).unwrap();
+        thread::sleep(Duration::from_millis(300));
+        a.keys(b"typed\r");
+        a.wait(|_| pane_line(&w).contains("typed"));
+        assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
+        a.exited(0);
+    });
+}
+
+/// proc.c `proc_set_signals` ignores SIGTTIN and SIGTTOU: an attach run in
+/// the background draws, where the default SIGTTOU would stop it at its
+/// first `tcsetattr`. What is typed meanwhile is the foreground's: vtmux's
+/// client can't read it (EIO) and leaves it, where tmux's server, outside
+/// the session, reads it for the pane (D-069).
+#[test]
+fn a_background_attach_draws() {
+    par::each(&bins(), |bin| {
+        let w = World::new(bin.clone());
+        assert!(w.cli(&["new", "-d", "-s", "a", "cat"]).status.success());
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let mut a = attach_under_job_control(&w, true);
+        a.wait(|a| a.text().contains("[a]"));
+        a.keys(b"typed");
+        thread::sleep(Duration::from_millis(300));
+        assert!(a.alive(), "{:?}", a.text());
+        assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
         a.exited(0);
         a.wait(|a| a.text().contains("[detached (from session a)]"));
     });
