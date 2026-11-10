@@ -200,6 +200,8 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
             break;
         }
         let cols = usize::from(screen.cols);
+        // popup_resize keeps the popup on the terminal; a column past it
+        // draws nothing rather than panic.
         let at_x = usize::from(p.px);
         let n = sx.min(cols.saturating_sub(at_x));
         let start = at_y * cols + at_x;
@@ -359,6 +361,33 @@ mod tests {
                 ".╰────╯...",
             ]
         );
+    }
+
+    /// A popup left of nothing (its column past the terminal's last) is
+    /// drawn and kept as nothing, never a slice past the screen.
+    #[test]
+    fn a_popup_past_the_last_column_draws_nothing() {
+        let content = blank(2, 1);
+        let mut screen = blank(4, 2);
+        let style = CellStyle::default();
+        let p = PopupDraw {
+            px: 6,
+            py: 1,
+            sx: 4,
+            sy: 3,
+            lines: BoxLines::Rounded,
+            border: &style,
+            defaults: &style,
+            title: "",
+            content: &content,
+            palette: None,
+            redrawn: false,
+        };
+        let before = text(&screen);
+        draw(&p, &Theme::default(), Clear::Bce, &mut screen);
+        let held = screen.cells.clone();
+        keep(&p, &held, &mut screen);
+        assert_eq!(text(&screen), before);
     }
 
     #[test]
