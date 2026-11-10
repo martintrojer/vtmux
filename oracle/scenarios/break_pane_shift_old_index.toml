@@ -1,0 +1,21 @@
+name = "break_pane_shift_old_index"
+# break-pane -a/-b shuffles the windows up before it moves the pane;
+# pane-moved's old window index is the source's index before the shuffle
+# (`old_idx = wl->idx`, cmd-break-pane.c:103), for a pane from a bigger
+# window and for a one-pane window alike.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:1", "-n", "w", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:3", "-n", "w", "cat", "-"] },
+  { run = ["set-hook", "-g", "pane-moved", "set -gaF @m '|#{hook_pane}:o=#{hook_old_window_index}:n=#{hook_new_window_index}'"] },
+  { run = ["break-pane", "-d", "-b", "-s", "a:1.1", "-t", "a:0"] },
+  { run = ["show", "-gv", "@m", ";", "set", "-gu", "@m"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_panes}"] },
+  { run = ["break-pane", "-d", "-a", "-s", "a:3", "-t", "a:0"] },
+  { run = ["show", "-gv", "@m", ";", "set", "-gu", "@m"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_panes}"] },
+  { run = ["break-pane", "-d", "-a", "-s", "a:0", "-t", "a:3"] },
+  { run = ["show", "-gv", "@m", ";", "set", "-gu", "@m"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_panes}"] },
+]

@@ -30,6 +30,9 @@ pub fn exec(
     else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    // pane-moved's old index is the source's before any -a/-b shuffle
+    // (`old_idx = wl->idx`, cmd-break-pane.c:103).
+    let old_idx = src_idx;
     // cmd-break-pane.c:106-109.
     if server.model.windows[&w].panes.modal == Some(wp) {
         return Err(EdgeError::Message("pane is modal".into()).into());
@@ -101,7 +104,7 @@ pub fn exec(
         // cmd-break-pane.c:145.
         server
             .model
-            .fire_pane_moved(wp, (w, Some(src_idx)), (w, Some(index)));
+            .fire_pane_moved(wp, (w, Some(old_idx)), (w, Some(index)));
         (index, w)
     } else {
         if let Some(i) = idx
@@ -123,7 +126,7 @@ pub fn exec(
         server.model.fire_window("window-created", new_w);
         server
             .model
-            .fire_pane_moved(wp, (w, Some(src_idx)), (new_w, Some(index)));
+            .fire_pane_moved(wp, (w, Some(old_idx)), (new_w, Some(index)));
         if !detached {
             server.model.set_current(dst_s, index);
             // cmd-break-pane.c:188-191 (not for a one-pane window, which
