@@ -73,8 +73,10 @@
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
 //!   path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own, with the
 //!   token in the environment variable [`REATTACH_TOKEN_ENV`], not on the
-//!   command line, where any user's `ps` would show it. The new process
-//!   takes it out of its environment at once.
+//!   command line, where any user's `ps` would show it, and
+//!   [`REATTACH_LOGIN_ENV`] set to `1` when the client was started with
+//!   `-l` (a binary that knows no such variable leaves it). The new process
+//!   takes both out of its environment at once.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
@@ -142,6 +144,10 @@ pub const REATTACH_FLAG: &str = "--vtmux-reattach";
 /// The environment variable the re-attach command line carries its token
 /// in (module docs, *Frozen frames*).
 pub const REATTACH_TOKEN_ENV: &str = "VTMUX_REATTACH_TOKEN";
+
+/// Set to `1` on the re-attach command line of a client started with `-l`
+/// (module docs, *Frozen frames*): its `argv[0]` alone can't say so.
+pub const REATTACH_LOGIN_ENV: &str = "VTMUX_REATTACH_LOGIN";
 
 /// What a client that can't follow an upgrade is detached with
 /// (live-upgrade spec, decisions 4 and 25); the client prints it in

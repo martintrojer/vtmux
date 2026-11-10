@@ -19,7 +19,7 @@ use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
     self, ClientFlags, ClientMsg, ControlMode, Hello, HelloExt, PROTOCOL_VERSION, REATTACH_FLAG,
-    REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
+    REATTACH_LOGIN_ENV, REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -289,11 +289,13 @@ fn main() -> ExitCode {
     // Taken out at once, whatever the command line: nothing this process
     // starts (a server, a pane, a lock command) inherits the token.
     let token = vtmux_server::sys::upgrade::take_env(REATTACH_TOKEN_ENV);
+    let login = vtmux_server::sys::upgrade::take_env(REATTACH_LOGIN_ENV).is_some_and(|v| v == "1");
     upgrade_image(args.get(1..).unwrap_or_default())
         .or_else(|| match args.as_slice() {
             [argv0, flag, socket] if flag == REATTACH_FLAG => Some(reattach_main(
                 argv0.clone(),
                 token.as_deref(),
+                login,
                 Path::new(socket),
             )),
             _ => None,
@@ -427,7 +429,8 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
 }
 
 /// The frozen re-attach command line (`<binary> --vtmux-reattach
-/// <socket>`, the token in `VTMUX_REATTACH_TOKEN`, protocol module docs)
+/// <socket>`, the token in `VTMUX_REATTACH_TOKEN` and `-l` in
+/// `VTMUX_REATTACH_LOGIN`, protocol module docs)
 /// that an attached client of this or another build runs when an upgrade
 /// tells it to (live-upgrade spec, *Clients*): connect to the same socket,
 /// never starting a server, and present the token, which binds this
@@ -436,7 +439,12 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
 /// The terminal is the shell's until the server starts it again: the old
 /// image restored it before the notice, so every way out here leaves it
 /// as a detach does.
-fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path) -> ExitCode {
+fn reattach_main(
+    argv0: OsString,
+    token: Option<&std::ffi::OsStr>,
+    login: bool,
+    socket: &Path,
+) -> ExitCode {
     signals::ignore_job_control();
     let Some(token) = token
         .and_then(|t| t.to_str())
@@ -480,7 +488,8 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
-    let login = argv0.as_bytes().first() == Some(&b'-');
+    // `-l` came in the environment, a `-` in front of `argv[0]` with it.
+    let login = login || argv0.as_bytes().first() == Some(&b'-');
     let how = Reattach {
         argv0,
         socket: socket.to_owned(),

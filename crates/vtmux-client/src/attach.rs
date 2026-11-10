@@ -11,7 +11,8 @@ use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{
-    self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_TOKEN_ENV, ServerMsg, UPGRADED_DETACH,
+    self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_LOGIN_ENV, REATTACH_TOKEN_ENV,
+    ServerMsg, UPGRADED_DETACH,
 };
 
 use crate::tty::RawTty;
@@ -146,12 +147,16 @@ pub fn exec(shell: &Path, command: &str, login: bool) -> i32 {
 #[must_use]
 pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
     use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new(binary)
+    let mut command = std::process::Command::new(binary);
+    command
         .arg0(&how.argv0)
         .arg(REATTACH_FLAG)
         .arg(&how.socket)
-        .env(REATTACH_TOKEN_ENV, token)
-        .exec();
+        .env(REATTACH_TOKEN_ENV, token);
+    if how.login {
+        command.env(REATTACH_LOGIN_ENV, "1");
+    }
+    let err = command.exec();
     eprintln!(
         "can't follow the server's upgrade: {}: {err}",
         binary.display()

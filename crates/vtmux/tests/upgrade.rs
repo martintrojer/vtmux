@@ -384,6 +384,11 @@ impl Attached {
 
     /// [`Self::new`] run by `binary`.
     fn of(world: &World, binary: &Path, session: &str) -> Self {
+        Self::with(world, binary, &["attach", "-t", session])
+    }
+
+    /// `binary` with the world's `-L` and `-f`, then `args`, under a PTY.
+    fn with(world: &World, binary: &Path, args: &[&str]) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -393,15 +398,8 @@ impl Attached {
             })
             .unwrap();
         let mut cmd = CommandBuilder::new(binary);
-        cmd.args([
-            "-L",
-            &world.label,
-            "-f",
-            "/dev/null",
-            "attach",
-            "-t",
-            session,
-        ]);
+        cmd.args(["-L", &world.label, "-f", "/dev/null"]);
+        cmd.args(args);
         cmd.env_clear();
         for (k, v) in world.env() {
             cmd.env(k, v);
@@ -719,6 +717,32 @@ fn input_a_pane_has_not_read_yet_survives_an_upgrade() {
         || std::fs::metadata(&got).map_or(0, |m| m.len()),
         |&n| n == 200_000,
     );
+}
+
+/// `-l` outlives a re-attach: after an upgrade, `detach-client -E` runs
+/// its command with a login shell (tmux.c:415-416, client.c `client_exec`,
+/// `shell_argv0`), as it does before one.
+#[test]
+fn a_login_client_stays_one_across_an_upgrade() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::with(&world, &world.client(), &["-l", "attach", "-t", "a"]);
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+    wait("the re-attach", || {
+        attached.args().contains("--vtmux-reattach") && world.run(&["lsc"]).lines().count() == 1
+    });
+    let out = world.home.path().join("argv0");
+    world.run(&[
+        "detach-client",
+        "-E",
+        &format!("echo \"$0\" > {}", out.display()),
+    ]);
+    wait("the command", || {
+        std::fs::read_to_string(&out).is_ok_and(|s| s.ends_with('\n'))
+    });
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "-sh\n");
+    wait("the client to exit", || attached.exited().is_some());
 }
 
 /// D29, live upgrade (spec, *Protocol extensions (D28)*): a pane granted
