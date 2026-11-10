@@ -850,8 +850,15 @@ fn draw_prompt(
         .complete_display()
         .filter(|_| cursor_col < aw)
         .map(|d| {
-            let cells: Vec<(String, u8)> =
-                d.chars().map(|c| (c.to_string(), char_width(c))).collect();
+            // screen_write_cell joins a zero-width character to the cell
+            // before it (prompt_draw_complete writes each one).
+            let mut cells: Vec<(String, u8)> = Vec::new();
+            for c in d.chars() {
+                match (char_width(c), cells.last_mut()) {
+                    (0, Some(last)) => last.0.push(c),
+                    (w, _) => cells.push((c.to_string(), w)),
+                }
+            }
             let width = cells.iter().map(|c| usize::from(c.1)).sum::<usize>();
             (cells, width.min(aw - cursor_col))
         });

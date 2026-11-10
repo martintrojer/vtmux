@@ -1,0 +1,26 @@
+# The matches Tab lists (prompt.c prompt_draw_complete) are written cell
+# by cell with screen_write_cell, so a combining mark in a command-alias
+# name joins the character before it and takes no column: the matches
+# after it stay in place, and right-aligned in message-style the last
+# match's end is not pushed off the line.
+name = "prompt_complete_combining"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-s", "command-alias[10]", "qe\u0301=display-message"] },
+  { run = ["set", "-s", "command-alias[11]", "qz=display-message"] },
+  { attach = { session = "a" } },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "q\t" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { settle = {} },
+  { run = ["set", "-g", "message-style", "bg=yellow,fg=black,align=right"] },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "q\t" },
+  { screen = {} },
+]

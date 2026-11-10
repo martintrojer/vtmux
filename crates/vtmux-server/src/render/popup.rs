@@ -202,8 +202,8 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
         let cols = usize::from(screen.cols);
         // popup_resize keeps the popup on the terminal; a column past it
         // draws nothing rather than panic.
-        let at_x = usize::from(p.px);
-        let n = sx.min(cols.saturating_sub(at_x));
+        let at_x = usize::from(p.px).min(cols);
+        let n = sx.min(cols - at_x);
         let start = at_y * cols + at_x;
         screen.cells[start..start + n].clone_from_slice(&cells[..n]);
     }
@@ -216,7 +216,7 @@ pub fn keep(p: &PopupDraw<'_>, held: &[Cell], screen: &mut Snapshot) {
     for y in
         usize::from(p.py)..(usize::from(p.py) + usize::from(p.sy)).min(usize::from(screen.rows))
     {
-        let x0 = usize::from(p.px);
+        let x0 = usize::from(p.px).min(cols);
         let x1 = (x0 + usize::from(p.sx)).min(cols);
         if y * cols + x1 <= held.len() {
             screen.cells[y * cols + x0..y * cols + x1]
