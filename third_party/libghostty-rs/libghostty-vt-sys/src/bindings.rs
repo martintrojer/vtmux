@@ -3748,6 +3748,27 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " ghostty_terminal_clone_screen of screen `screen_key` (0 primary, 1\n alternate), active or not, into a new terminal of that screen's size\n (vtmux patch 0038-read-the-primary-under-the-alternate-screen.patch).\n"]
+    pub fn ghostty_terminal_vtmux_clone_screen_of(
+        terminal: Terminal,
+        screen_key: u8,
+        out_terminal: *mut Terminal,
+    ) -> Result::Type;
+    #[doc = " ghostty_terminal_grid_ref of a point of screen `screen_key`, active or\n not (vtmux patch 0038).\n"]
+    pub fn ghostty_terminal_vtmux_screen_grid_ref(
+        terminal: Terminal,
+        screen_key: u8,
+        point: Point,
+        out_ref: *mut GridRef,
+    ) -> Result::Type;
+    #[doc = " The history rows of screen `screen_key`, active or not (vtmux patch\n 0038).\n"]
+    pub fn ghostty_terminal_vtmux_screen_scrollback_rows(
+        terminal: Terminal,
+        screen_key: u8,
+        out_rows: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " The grid reference n rows below ref, stepped to from ref's own\n page (vtmux patch 0033-grid-ref-step.patch).\n"]
     pub fn ghostty_grid_ref_down(
         ref_: *const GridRef,

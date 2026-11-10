@@ -310,6 +310,55 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         })
     }
 
+    /// [`Terminal::clone_screen`] of screen `screen` (0 primary, 1
+    /// alternate), active or not, in a new terminal of that screen's size.
+    /// `Err(Error::NoValue)` when there is no such screen yet. (vtmux:
+    /// `ghostty_terminal_vtmux_clone_screen_of`, patch 0038.)
+    pub fn vtmux_clone_screen_of(&self, screen: u8) -> Result<Terminal<'static, 'static>> {
+        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::ghostty_terminal_vtmux_clone_screen_of(self.inner.as_raw(), screen, &raw mut raw)
+        };
+        from_result(result)?;
+        Ok(Terminal {
+            inner: Object::new(raw)?,
+            vtable: Box::new(VTable::default()),
+        })
+    }
+
+    /// [`Terminal::grid_ref`] of a point of screen `screen` (0 primary,
+    /// 1 alternate), active or not: the primary screen is left as it was
+    /// while the alternate one is up, so its history reads in place.
+    /// (vtmux: `ghostty_terminal_vtmux_screen_grid_ref`, patch 0038.)
+    pub fn vtmux_screen_grid_ref(&self, screen: u8, point: Point) -> Result<GridRef<'_>> {
+        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let result = unsafe {
+            ffi::ghostty_terminal_vtmux_screen_grid_ref(
+                self.inner.as_raw(),
+                screen,
+                point.into(),
+                &raw mut grid_ref,
+            )
+        };
+        from_result(result)?;
+        Ok(unsafe { GridRef::from_raw(grid_ref) })
+    }
+
+    /// [`Terminal::scrollback_rows`] of screen `screen` (0 primary, 1
+    /// alternate), active or not. (vtmux:
+    /// `ghostty_terminal_vtmux_screen_scrollback_rows`, patch 0038.)
+    pub fn vtmux_screen_scrollback_rows(&self, screen: u8) -> Result<usize> {
+        let mut rows = 0usize;
+        from_result(unsafe {
+            ffi::ghostty_terminal_vtmux_screen_scrollback_rows(
+                self.inner.as_raw(),
+                screen,
+                &raw mut rows,
+            )
+        })?;
+        Ok(rows)
+    }
+
     /// Write VT-encoded data to the terminal for processing.
     ///
     /// Feeds raw bytes through the terminal's VT stream parser, updating

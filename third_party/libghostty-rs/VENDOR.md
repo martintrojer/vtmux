@@ -1246,6 +1246,40 @@ Recorded per commit in git history; the list is kept current:
   test binaries). Rust: `capture::tests::a_copy_of_whole_pages_reads_as_the_pane_did`
   (links included). Upstream candidate: any full-page clone gains.
 
+- `patches/0038-read-the-primary-under-the-alternate-screen.patch`
+  (`c/terminal.zig` new `vtmux_screen_grid_ref`,
+  `vtmux_screen_scrollback_rows`, `vtmux_clone_screen_of`, `clone_screen`
+  through the new `cloneScreenOf`; `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/terminal.h`): a grid ref to a point of either
+  screen, the history rows of either screen, and `clone_screen` of either
+  screen into a terminal of that screen's size, active or not (key 0
+  primary, 1 alternate; NO_VALUE for an alternate screen not yet made).
+  tmux goes on showing the primary history while an alternate screen is
+  up (screen.c `screen_alternate_on` saves only the visible rows), and
+  Ghostty reads only the active screen, so vtmux copied every history row
+  out as `?1049h` came up: 4.1 s over 1M lines on a shared server, 1.8 s
+  on a laptop (tmux 3 ms). With patch 0028 the primary screen is left
+  as it was meanwhile, so vtmux now reads its history in place: a grid
+  ref is a pin like any other, which the `grid_ref` calls read and step
+  (patch 0033) whatever screen it is on. `?1049h` over 1M lines: 3 ms.
+  Copy mode under the alternate screen clones the primary (patch 0035's
+  whole-page clone) as it clones the active screen. Read-only, no layout
+  change. Wrapper: `Terminal::vtmux_screen_grid_ref`,
+  `vtmux_screen_scrollback_rows`, `vtmux_clone_screen_of`
+  (`libghostty-vt/src/terminal.rs`), bindings added by hand to
+  `bindings.rs`; vtmux uses them in `capture.rs` (`PRIMARY` rows) and
+  `term.rs`. Test: new `vtmux_screen_grid_ref reads the primary history
+  under the alternate screen (vtmux)` (2000 lines; after `?1049h` and a
+  resize the primary keeps its rows and size, every row looked up or
+  stepped to reads as written, the clone is the primary at its own size
+  without the alternate screen's text, bad keys are refused); `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
+  -Dtest-filter=vtmux_screen_grid_ref -Dtest-filter=clone` (Debug) 167/167;
+  the whole `test-lib-vt` 7056/7136 pass, 76 skip, with the two known
+  failures (`Terminal: tabClear single`, `kitty.graphics_image`
+  "temporary file outside directory prefix is rejected") and the one
+  leak, in both test binaries. Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

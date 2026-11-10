@@ -1,0 +1,260 @@
+diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
+index 3cb479c..b8b6c05 100644
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -3264,6 +3264,41 @@ GHOSTTY_API void ghostty_terminal_free(GhosttyTerminal terminal);
+ GHOSTTY_API GhosttyResult ghostty_terminal_clone_screen(GhosttyTerminal terminal,
+                                                         GhosttyTerminal* out_terminal);
+ 
++/**
++ * vtmux: ghostty_terminal_clone_screen() of screen `screen_key` (0 primary,
++ * 1 alternate), active or not, into a new terminal of that screen's size.
++ * GHOSTTY_NO_VALUE when the terminal has no such screen.
++ *
++ * @ingroup terminal
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_vtmux_clone_screen_of(GhosttyTerminal terminal,
++                                                                 uint8_t screen_key,
++                                                                 GhosttyTerminal* out_terminal);
++
++/**
++ * vtmux: ghostty_terminal_grid_ref() of a point of screen `screen_key`
++ * (0 primary, 1 alternate), active or not. The primary screen is left as
++ * it was while the alternate one is up, so its history can be read in
++ * place. GHOSTTY_NO_VALUE when the terminal has no such screen.
++ *
++ * @ingroup terminal
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_vtmux_screen_grid_ref(GhosttyTerminal terminal,
++                                                                 uint8_t screen_key,
++                                                                 GhosttyPoint point,
++                                                                 GhosttyGridRef* out_ref);
++
++/**
++ * vtmux: the history rows of screen `screen_key` (0 primary, 1 alternate),
++ * active or not: GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS of that screen.
++ * GHOSTTY_NO_VALUE when the terminal has no such screen.
++ *
++ * @ingroup terminal
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_vtmux_screen_scrollback_rows(GhosttyTerminal terminal,
++                                                                        uint8_t screen_key,
++                                                                        size_t* out_rows);
++
+ /**
+  * Perform a full reset of the terminal (RIS).
+  *
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 5472fa7..8a0a349 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -329,6 +329,9 @@ comptime {
+         @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
+         @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
+         @export(&c.terminal_clone_screen, .{ .name = "ghostty_terminal_clone_screen" });
++        @export(&c.terminal_vtmux_clone_screen_of, .{ .name = "ghostty_terminal_vtmux_clone_screen_of" });
++        @export(&c.terminal_vtmux_screen_grid_ref, .{ .name = "ghostty_terminal_vtmux_screen_grid_ref" });
++        @export(&c.terminal_vtmux_screen_scrollback_rows, .{ .name = "ghostty_terminal_vtmux_screen_scrollback_rows" });
+         @export(&c.terminal_reset, .{ .name = "ghostty_terminal_reset" });
+         @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
+         @export(&c.terminal_set, .{ .name = "ghostty_terminal_set" });
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index cd0bd40..dcdce8c 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -191,6 +191,9 @@ pub const sys_set = sys.set;
+ pub const terminal_new = terminal.new;
+ pub const terminal_free = terminal.free;
+ pub const terminal_clone_screen = terminal.clone_screen;
++pub const terminal_vtmux_clone_screen_of = terminal.vtmux_clone_screen_of;
++pub const terminal_vtmux_screen_grid_ref = terminal.vtmux_screen_grid_ref;
++pub const terminal_vtmux_screen_scrollback_rows = terminal.vtmux_screen_scrollback_rows;
+ pub const terminal_reset = terminal.reset;
+ pub const terminal_resize = terminal.resize;
+ pub const terminal_set = terminal.set;
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+index f2678a5..7f3c771 100644
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -1074,10 +1074,48 @@ pub fn clone_screen(
+ 
+ fn clone_screen_(terminal_: Terminal) NewError!Terminal {
+     const src = (terminal_ orelse return error.InvalidValue).terminal;
+-    const out = try new_(null, src.cols, src.rows);
++    return cloneScreenOf(src.screens.active);
++}
++
++/// vtmux patch 0038: `clone_screen` of screen `screen_key` (0 primary,
++/// 1 alternate), active or not, into a new terminal of that screen's
++/// size: tmux's copy mode under the alternate screen shows the primary
++/// history, which the alternate screen leaves as it was (patch 0028).
++/// GHOSTTY_NO_VALUE when the terminal has no such screen.
++pub fn vtmux_clone_screen_of(
++    terminal_: Terminal,
++    screen_key: u8,
++    result: *Terminal,
++) callconv(lib.calling_conv) Result {
++    result.* = null;
++    const src = (terminal_ orelse return .invalid_value).terminal;
++    const screen = vtmuxScreen(src, screen_key) catch |err| return switch (err) {
++        error.InvalidValue => .invalid_value,
++        error.NoValue => .no_value,
++    };
++    result.* = cloneScreenOf(screen) catch |err| return switch (err) {
++        error.InvalidValue => .invalid_value,
++        error.OutOfMemory => .out_of_memory,
++    };
++    return .success;
++}
++
++/// vtmux patch 0038: screen `screen_key` of the terminal (0 primary,
++/// 1 alternate), active or not.
++fn vtmuxScreen(t: *ZigTerminal, screen_key: u8) error{ InvalidValue, NoValue }!*Screen {
++    const key: ScreenSet.Key = switch (screen_key) {
++        0 => .primary,
++        1 => .alternate,
++        else => return error.InvalidValue,
++    };
++    return t.screens.get(key) orelse error.NoValue;
++}
++
++fn cloneScreenOf(src_screen: *Screen) NewError!Terminal {
++    const out = try new_(null, src_screen.pages.cols, src_screen.pages.rows);
+     errdefer free(out);
+     const screen = out.?.terminal.screens.active;
+-    const copy = src.screens.active.clone(
++    const copy = src_screen.clone(
+         screen.io,
+         screen.alloc,
+         .{ .screen = .{} },
+@@ -2216,6 +2254,46 @@ pub fn grid_ref(
+     return .success;
+ }
+ 
++/// vtmux patch 0038: `grid_ref` of point `pt` of screen `screen_key`
++/// (0 primary, 1 alternate), active or not: while the alternate screen is
++/// up the primary one is left as it was (patch 0028), and tmux goes on
++/// showing its history. The ref is a pin like any other, so the grid ref
++/// calls read and step it as they do one of the active screen.
++/// GHOSTTY_NO_VALUE when the terminal has no such screen.
++pub fn vtmux_screen_grid_ref(
++    terminal_: Terminal,
++    screen_key: u8,
++    pt: point.Point.C,
++    out_ref: ?*grid_ref_c.CGridRef,
++) callconv(lib.calling_conv) Result {
++    const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
++    const screen = vtmuxScreen(t, screen_key) catch |err| return switch (err) {
++        error.InvalidValue => .invalid_value,
++        error.NoValue => .no_value,
++    };
++    const p = screen.pages.pin(.fromC(pt)) orelse return .invalid_value;
++    if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
++    return .success;
++}
++
++/// vtmux patch 0038: the history rows of screen `screen_key`, active or
++/// not (`scrollback_rows` of the active one): the rows above its own
++/// active area, at its own size.
++pub fn vtmux_screen_scrollback_rows(
++    terminal_: Terminal,
++    screen_key: u8,
++    out: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
++    const o = out orelse return .invalid_value;
++    const screen = vtmuxScreen(t, screen_key) catch |err| return switch (err) {
++        error.InvalidValue => .invalid_value,
++        error.NoValue => .no_value,
++    };
++    o.* = screen.pages.total_rows - screen.pages.rows;
++    return .success;
++}
++
+ pub fn grid_ref_track(
+     terminal_: Terminal,
+     pt: point.Point.C,
+@@ -7945,3 +8023,83 @@ test "get mouse_shape" {
+     try testing.expectEqual(Result.success, get(t, .mouse_shape, @ptrCast(&shape)));
+     try testing.expectEqual(mouse.Shape.wait, shape);
+ }
++
++test "vtmux_screen_grid_ref reads the primary history under the alternate screen (vtmux)" {
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, new(null, &t, 10, 3));
++    defer free(t);
++    t.?.terminal.tmux_alternate = true;
++    var buf: [16]u8 = undefined;
++    for (0..2000) |i| {
++        const line = try std.fmt.bufPrint(&buf, "{d}\r\n", .{i});
++        vt_write(t, line.ptr, line.len);
++    }
++    var history: usize = 0;
++    try testing.expectEqual(Result.success, vtmux_screen_scrollback_rows(t, 0, &history));
++    try testing.expectEqual(@as(usize, 2000 + 1 - 3), history);
++    // Not up yet: no alternate screen.
++    try testing.expectEqual(Result.no_value, vtmux_screen_scrollback_rows(t, 1, &history));
++    try testing.expectEqual(Result.invalid_value, vtmux_screen_scrollback_rows(t, 2, &history));
++
++    const alt = "\x1b[?1049hALT";
++    vt_write(t, alt.ptr, alt.len);
++    try testing.expect(t.?.terminal.screens.active_key == .alternate);
++    // A resize under the alternate screen leaves the primary as it was.
++    try t.?.terminal.resize(t.?.terminal.gpa(), .{ .cols = 20, .rows = 5 });
++    var alt_history: usize = 99;
++    try testing.expectEqual(Result.success, vtmux_screen_scrollback_rows(t, 1, &alt_history));
++    try testing.expectEqual(@as(usize, 0), alt_history);
++    try testing.expectEqual(Result.success, vtmux_screen_scrollback_rows(t, 0, &history));
++    try testing.expectEqual(@as(usize, 2000 + 1 - 3), history);
++
++    // Every history row reads as written, looked up or stepped to.
++    var ref: grid_ref_c.CGridRef = .{};
++    try testing.expectEqual(Result.success, vtmux_screen_grid_ref(
++        t,
++        0,
++        point.Point.cval(.{ .screen = .{ .x = 0, .y = 0 } }),
++        &ref,
++    ));
++    for (0..history) |y| {
++        var looked: grid_ref_c.CGridRef = .{};
++        try testing.expectEqual(Result.success, vtmux_screen_grid_ref(
++            t,
++            0,
++            point.Point.cval(.{ .screen = .{ .x = 0, .y = @intCast(y) } }),
++            &looked,
++        ));
++        try testing.expectEqual(looked.node, ref.node);
++        try testing.expectEqual(looked.y, ref.y);
++        const p = looked.toPin().?;
++        const cells = p.node.page().getCells(p.rowAndCell().row);
++        const want = try std.fmt.bufPrint(&buf, "{d}", .{y});
++        for (want, 0..) |ch, x| try testing.expectEqual(@as(u21, ch), cells[x].codepoint());
++        if (y + 1 < history) {
++            try testing.expectEqual(Result.success, grid_ref_c.grid_ref_down(&ref, 1, &ref));
++        }
++    }
++    try testing.expectEqual(Result.invalid_value, vtmux_screen_grid_ref(
++        t,
++        0,
++        point.Point.cval(.{ .screen = .{ .x = 0, .y = @intCast(history + 3) } }),
++        &ref,
++    ));
++
++    // The clone of the primary is the primary at its own size.
++    var copy: Terminal = null;
++    try testing.expectEqual(Result.success, vtmux_clone_screen_of(t, 0, &copy));
++    defer free(copy);
++    try testing.expectEqual(@as(u16, 10), copy.?.terminal.cols);
++    try testing.expectEqual(@as(u16, 3), copy.?.terminal.rows);
++    var copied: usize = 0;
++    try testing.expectEqual(Result.success, vtmux_screen_scrollback_rows(copy, 0, &copied));
++    try testing.expectEqual(history, copied);
++    const last = try copy.?.terminal.screens.active.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
++    defer testing.allocator.free(last);
++    try testing.expect(std.mem.startsWith(u8, last, "0\n1\n2\n"));
++    try testing.expect(std.mem.indexOf(u8, last, "\n1999") != null);
++    try testing.expect(std.mem.indexOf(u8, last, "ALT") == null);
++    var none: Terminal = null;
++    try testing.expectEqual(Result.invalid_value, vtmux_clone_screen_of(t, 5, &none));
++    try testing.expectEqual(@as(Terminal, null), none);
++}
