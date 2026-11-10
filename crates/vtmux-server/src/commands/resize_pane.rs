@@ -87,15 +87,16 @@ pub fn exec(
         .resize_pane_cmd(wp, &req, border, &mut resized);
     server.model.fix_panes(w);
     // layout_resize_layout's own event for each cell resize (layout.c:1002),
-    // then cmd-resize-pane.c:187 (also after a failed adjustment).
+    // then cmd-resize-pane.c:187, which a bad size or adjustment returns
+    // before (cmd-resize-pane.c:100-173).
     for _ in 0..resized {
         server.model.layout_changed(w);
     }
-    server.model.layout_changed(w);
     result.map_err(EdgeError::Message)?;
     if let Some(cause) = bad {
         return Err(EdgeError::Message(format!("adjustment {cause}")).into());
     }
+    server.model.layout_changed(w);
     Ok(())
 }
 

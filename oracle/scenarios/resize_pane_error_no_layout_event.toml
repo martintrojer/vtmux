@@ -1,0 +1,30 @@
+name = "resize_pane_error_no_layout_event"
+# resize-pane fires window-layout-changed once at the end
+# (cmd-resize-pane.c:187), plus once per cell resize inside
+# layout_resize_layout; a bad -x/-y or adjustment returns before the
+# final one (cmd-resize-pane.c:100-173).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a", "cat", "-"] },
+  { run = ["split-window", "-d", "-h", "-t", "a:0.0", "cat", "-"] },
+  { run = ["set", "-g", "@n", "0"] },
+  { run = ["set-hook", "-g", "window-layout-changed", "set -gF @n \"#{e|+:#{@n},1}\""] },
+  { run = ["resize-pane", "-t", "a:0.0", "-U", "abc"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-x", "10", "-U", "abc"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-x", "zz"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-y", "zz"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-D", "2", "-L", "abc"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-D", "2"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-x", "30"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-y", "5"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+  { run = ["resize-pane", "-t", "a:0.0", "-R", "abc"] },
+  { run = ["show", "-gv", "@n", ";", "set", "-g", "@n", "0"] },
+]
