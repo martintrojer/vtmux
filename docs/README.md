@@ -8,7 +8,7 @@ For contributors: [AGENTS.md](../AGENTS.md) (gates and rules), [ARCHITECTURE.md]
 
 | Spec | What it decides |
 |---|---|
-| [2026-10-29-vtmux.md](specs/2026-10-29-vtmux.md) | The project: pitch, scope, decisions D1-D31, compliance triangulation, milestones |
+| [2026-10-29-vtmux.md](specs/2026-10-29-vtmux.md) | The project: pitch, scope, decisions D1-D31 and D33, compliance triangulation, milestones |
 | [2026-10-31-history-memory.md](specs/2026-10-31-history-memory.md) | Scrollback memory: retain close to `history-limit`, compress quiet history, keep compressing a pane that never stops |
 | [2026-11-04-pane-blend.md](specs/2026-11-04-pane-blend.md) | Pane blend (D26): blend every cell of active or inactive panes toward a colour |
 | [2026-11-06-live-upgrade.md](specs/2026-11-06-live-upgrade.md) | Live upgrade and persistence (D27), with its own numbered decisions 1-30 (cited as "decision 13") |
@@ -51,5 +51,6 @@ From the main spec's *Key decisions*. The spec has the reasons; a change that co
 | D29 | Kitty keyboard protocol, pane side: `vtmux-kitty-keys` |
 | D30 | Desktop notifications, OSC 9 and 777, to Ghostty clients: `vtmux-notifications` |
 | D31 | In-band resize, mode 2048: `vtmux-inband-resize` |
+| D33 | Kitty graphics: `vtmux-graphics` and `vtmux-graphics-limit`, drawn as unicode placeholders, dropped on live upgrade |
 
 Divergence entries are numbered D-NNN (`D-001`, ...) in `compat/DIVERGENCES.md`: a different series from the decisions.

@@ -2,7 +2,7 @@
 
 vtmux has tmux's process model. A server owns every session, window, pane and shell. Each `vtmux` (or `tmux`) invocation is a short-lived client that talks to it over a Unix socket; an attached client also owns your real terminal.
 
-Each pane's screen lives in its own libghostty-vt terminal inside the server, where tmux has `grid.c` and `input.c`. Everything a script can read is still shaped like tmux. The decisions behind this (D1-D31) are indexed in [docs/README.md](README.md).
+Each pane's screen lives in its own libghostty-vt terminal inside the server, where tmux has `grid.c` and `input.c`. Everything a script can read is still shaped like tmux. The decisions behind this (D1-D31, D33) are indexed in [docs/README.md](README.md).
 
 ## The big picture
 
