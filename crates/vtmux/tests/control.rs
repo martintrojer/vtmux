@@ -334,6 +334,63 @@ fn attached_display_in_guard() {
     });
 }
 
+/// Signal `pid` with each of `signals`, then say whether `child` is still
+/// running a moment later.
+fn alive_after(child: &mut Child, signals: &[rustix::process::Signal]) -> bool {
+    let pid = rustix::process::Pid::from_child(child);
+    for &signal in signals {
+        let _ = rustix::process::kill_process(pid, signal);
+    }
+    thread::sleep(Duration::from_millis(300));
+    child.try_wait().unwrap().is_none()
+}
+
+/// What a client that is not attached does on a signal (client.c
+/// `client_signal`, proc.c `proc_set_signals`): SIGINT, SIGQUIT, SIGUSR1
+/// and SIGUSR2 do nothing, and SIGTERM ends it with status 0 and nothing
+/// said; a control client prints `%exit`.
+#[test]
+fn signals_of_a_client_that_is_not_attached() {
+    use rustix::process::Signal;
+    let ignored = [Signal::INT, Signal::QUIT, Signal::USR1, Signal::USR2];
+    compare("signals_of_a_command_client", |w| {
+        assert_eq!(w.run(&["new", "-d", "-s", "a", "cat"]).2, 0);
+        let mark = w.dir.path().join("mark");
+        let mut child = w
+            .command(&[
+                "run-shell",
+                &format!("touch {}", mark.display()),
+                ";",
+                "wait-for",
+                "foo",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        common::wait("the command to run", || mark.exists());
+        let alive = alive_after(&mut child, &ignored);
+        let terminated = alive_after(&mut child, &[Signal::TERM]);
+        let out = child.wait_with_output().unwrap();
+        (
+            alive,
+            terminated,
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    });
+    compare("signals_of_a_control_client", |w| {
+        let mut c = w.control(&["new", "-s", "c", "-n", "w", "cat"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let alive = alive_after(&mut c.child, &ignored);
+        let terminated = alive_after(&mut c.child, &[Signal::TERM]);
+        let (out, err, code) = c.close();
+        let has = w.run(&["has", "-t", "c"]);
+        (alive, terminated, normalise_guards(&out), err, code, has)
+    });
+}
+
 /// `display` without -p on a control client prints `%message <msg>`
 /// inside the guard (cmd-display-message.c:163-169).
 #[test]

@@ -365,6 +365,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         Ok(s) => s,
         Err(e) => return edge_exit(&e),
     };
+    signals::watch(&stream);
     let saved_tio = match control_control_raw(cli.control) {
         Ok(saved) => saved,
         Err(code) => return code,
@@ -441,6 +442,7 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
         Ok(s) => s,
         Err(e) => return edge_exit(&connect_error(socket, e)),
     };
+    signals::watch(&stream);
     let tty = tty_info(&[]);
     let sent_size = tty.as_ref().map(|t| (t.cols, t.rows));
     let hello = Hello {
@@ -756,6 +758,9 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
                 | ServerMsg::UpgradeResult { .. },
             ))
             | Err(protocol::ProtocolError::UnknownTag(_)) => {}
+            // SIGTERM or SIGHUP (client.c `client_signal`): `proc_exit`,
+            // with no reason and status 0.
+            Ok(None) | Err(_) if signals::terminated() => break (0, None),
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
     };
@@ -802,6 +807,11 @@ fn shell_relay(stream: &mut UnixStream, command: &str, how: &Reattach) -> ExitCo
 fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) -> ExitCode {
     let mut writing: Option<files::Write> = None;
     loop {
+        // SIGTERM or SIGHUP (client.c `client_signal`): `proc_exit`, status
+        // 0 and nothing said.
+        if signals::terminated() {
+            return ExitCode::SUCCESS;
+        }
         let next = match first.take() {
             Some(m) => Ok(Some(m)),
             None => protocol::read_msg::<ServerMsg>(stream),
@@ -858,6 +868,7 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
                 | ServerMsg::UpgradeNotice { .. }
                 | ServerMsg::UpgradeResult { .. },
             )) => {}
+            Ok(None) | Err(_) if signals::terminated() => return ExitCode::SUCCESS,
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");
