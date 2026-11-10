@@ -128,6 +128,8 @@ pub struct Persist {
     due: Option<Instant>,
     /// [`fingerprint`] of the last checkpoint written.
     last: Option<Vec<u8>>,
+    /// The manifest of the last checkpoint written ([`Writer::after`]).
+    on_disk: Option<Vec<u8>>,
     /// The shutdown checkpoint is written: nothing after it may replace it
     /// with the emptied server.
     exited: bool,
@@ -157,6 +159,7 @@ impl Default for Persist {
         Self {
             due: None,
             last: None,
+            on_disk: None,
             exited: false,
             full_may_be_on_disk: false,
             refusal: None,
@@ -227,7 +230,10 @@ impl Server {
         match w.step(Some(self.persist.step), &mut |_| Ok(())) {
             Ok(false) => {}
             Ok(true) => {
-                self.persist.last = self.persist.writing.take().map(|(_, print)| print);
+                if let Some((w, print)) = self.persist.writing.take() {
+                    self.persist.on_disk = Some(w.manifest().to_vec());
+                    self.persist.last = Some(print);
+                }
             }
             Err(e) => {
                 self.persist.writing = None;
@@ -304,6 +310,7 @@ impl Server {
         let (mut w, print) = self.checkpoint_writer(dir, mode, prune)?;
         match w.step(None, &mut |_| Ok(())) {
             Ok(_) => {
+                self.persist.on_disk = Some(w.manifest().to_vec());
                 self.persist.last = Some(print);
                 Some(w.written().clone())
             }
@@ -378,7 +385,10 @@ impl Server {
             return None;
         }
         match Writer::new(dir, &s) {
-            Ok(w) => Some((if prune { w.replacing_prev() } else { w }, print)),
+            Ok(w) => {
+                let w = w.after(self.persist.on_disk.clone());
+                Some((if prune { w.replacing_prev() } else { w }, print))
+            }
             Err(e) => {
                 self.persist_error(&e);
                 None

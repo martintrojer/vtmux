@@ -27,8 +27,9 @@
 //! crash-safe at every point: it writes each missing chunk as
 //! `chunks/<hash>.tmp`, syncs it and renames it, syncs `chunks/`, then
 //! writes `manifest.tmp`, flushes it to stable storage, renames `manifest`
-//! to `manifest.prev` and `manifest.tmp` to `manifest`, and syncs the
-//! directory. Only then does it delete the chunks neither manifest names,
+//! to `manifest.prev` (unless `manifest` does not read and `manifest.prev`
+//! does: that one stays, the last good checkpoint) and `manifest.tmp` to
+//! `manifest`, and syncs the directory. Only then does it delete the chunks neither manifest names,
 //! and any `.tmp` a crash left. A crash before the last rename leaves
 //! `manifest` (or, after the first rename, `manifest.prev`) the previous
 //! checkpoint, every chunk it names still there; [`load`] reads
@@ -164,6 +165,9 @@ pub struct Writer {
     /// `manifest.prev` becomes a copy of this manifest, not the one it
     /// replaces ([`Writer::replacing_prev`]).
     replace_prev: bool,
+    /// What `manifest` holds when it is the checkpoint this process last
+    /// wrote ([`Writer::after`]).
+    known: Option<Vec<u8>>,
 }
 
 impl Writer {
@@ -205,7 +209,23 @@ impl Writer {
             todo,
             done,
             replace_prev: false,
+            known: None,
         })
+    }
+
+    /// `manifest` should hold `bytes` ([`Writer::manifest`] of the last
+    /// checkpoint this process wrote): when it does, it becomes
+    /// `manifest.prev` without being read through first ([`rotates`]).
+    #[must_use]
+    pub fn after(mut self, bytes: Option<Vec<u8>>) -> Self {
+        self.known = bytes;
+        self
+    }
+
+    /// The manifest this writes.
+    #[must_use]
+    pub fn manifest(&self) -> &[u8] {
+        &self.manifest
     }
 
     /// Make `manifest.prev` a copy of this checkpoint instead of keeping
@@ -282,7 +302,7 @@ impl Writer {
                 &dir.join(MANIFEST_PREV),
                 &self.manifest,
             )?;
-        } else {
+        } else if rotates(dir, self.known.as_deref()) {
             match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
                 Ok(()) => {}
                 // The first checkpoint, or a crash after the rename below's
@@ -297,6 +317,21 @@ impl Writer {
         self.done.chunks_removed = collect(dir, &self.names);
         Ok(true)
     }
+}
+
+/// Whether `manifest` is to become `manifest.prev` at a checkpoint: yes,
+/// unless it does not read ([`load_file`]) and `manifest.prev` does. Then
+/// `manifest.prev` is the one checkpoint to fall back to, kept until the
+/// new `manifest` is in place, and the unreadable `manifest` is replaced.
+/// A `manifest` holding `known` (the checkpoint this process last wrote,
+/// synced with its chunks) is not read through: that is a decode of every
+/// chunk, done only at a server's first checkpoint.
+fn rotates(dir: &Path, known: Option<&[u8]>) -> bool {
+    let reads =
+        |name| std::panic::catch_unwind(|| load_file(dir, name)).is_ok_and(|loaded| loaded.is_ok());
+    known.is_some_and(|k| fs::read(dir.join(MANIFEST)).is_ok_and(|b| b == k))
+        || reads(MANIFEST)
+        || !reads(MANIFEST_PREV)
 }
 
 /// Delete every entry of `chunks/` that neither manifest names: `names`

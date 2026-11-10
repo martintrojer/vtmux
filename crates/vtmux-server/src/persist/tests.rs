@@ -225,6 +225,50 @@ fn a_torn_or_missing_manifest_falls_back_to_the_previous() {
     );
 }
 
+/// A torn `manifest` over a good `manifest.prev`: the next checkpoint
+/// replaces the torn one and keeps `manifest.prev`, the one checkpoint a
+/// crash can fall back to, at every stage; the one after rotates as usual.
+#[test]
+fn a_torn_manifest_is_replaced_not_kept_over_the_good_previous() {
+    for stage in [
+        Stage::ChunksWritten,
+        Stage::ManifestWritten,
+        Stage::PrevKept,
+    ] {
+        let dir = temp_dir(&format!("torn-rotate-{stage:?}"));
+        let s1 = snapshot("one", &["alpha"]);
+        let s2 = snapshot("two", &["beta"]);
+        write(&dir, &s1, &mut ok()).unwrap();
+        write(&dir, &s2, &mut ok()).unwrap();
+        let bytes = fs::read(dir.join(MANIFEST)).unwrap();
+        fs::write(dir.join(MANIFEST), &bytes[..bytes.len() / 2]).unwrap();
+        assert_eq!(load(&dir).unwrap(), (s1.clone(), MANIFEST_PREV));
+        let s3 = snapshot("three", &["gamma"]);
+        let mut crash = |at: Stage| {
+            if at == stage {
+                Err(io::Error::other("crash"))
+            } else {
+                Ok(())
+            }
+        };
+        assert_eq!(
+            write(&dir, &s3, &mut crash).unwrap_err().to_string(),
+            "crash"
+        );
+        assert_eq!(
+            load(&dir).unwrap(),
+            (s1.clone(), MANIFEST_PREV),
+            "{stage:?}"
+        );
+        write(&dir, &s3, &mut ok()).unwrap();
+        assert_eq!(load(&dir).unwrap(), (s3.clone(), MANIFEST), "{stage:?}");
+        assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s1, "{stage:?}");
+        let s4 = snapshot("four", &["delta"]);
+        write(&dir, &s4, &mut ok()).unwrap();
+        assert_eq!(load_file(&dir, MANIFEST_PREV).unwrap().0, s3, "{stage:?}");
+    }
+}
+
 #[test]
 fn nothing_is_collected_while_the_previous_manifest_cant_be_listed() {
     let dir = temp_dir("unlisted");
