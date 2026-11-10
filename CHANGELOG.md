@@ -16,6 +16,11 @@ Next is `3.8-beta2`.
 
 **vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s). A live upgrade with it up costs what one without does, and moving back onto an older build keeps the history it hides.
 
+- The cursor hides under a floating pane, in a shown overlay scrollbar, and in a pending wrap at the window's right edge, as tmux's does; it no longer draws over a floating pane.
+- `#{V:...}` loops over the session, global (`V/g`) and client (`V/c`) environment; it was always empty.
+- `TZ` names under `posix/` and `right/` give their zone (and leap seconds), and `TZ=:` is UTC.
+- A combining mark in the prompt's completion list takes no column; keys `0x110000`-`0x13FFFF` list as their bytes; a `t/f` format ending in `#` drops it; a `display -t` that does not resolve describes what tmux's does.
+
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
