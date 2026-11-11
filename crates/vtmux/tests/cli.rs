@@ -2276,9 +2276,21 @@ fn options_owner_config() {
                 .unwrap_or_else(|_| {
                     include_str!("../../vtmux-core/src/options/golden/owner_tmux.conf").to_owned()
                 });
+        // A `%if` on `#{vtmux_version}` is false in tmux and true here:
+        // the block is vtmux's own, so not compared (the owner's 100k
+        // `history-limit` under vtmux, dotfiles 2026-11-11).
+        let mut in_vtmux_block = false;
         let text = original
             .lines()
             .filter(|line| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("%if") && line.contains("vtmux_version") {
+                    in_vtmux_block = true;
+                }
+                if in_vtmux_block {
+                    in_vtmux_block = !trimmed.starts_with("%endif");
+                    return false;
+                }
                 let command = line.split_whitespace().next().unwrap_or("");
                 // The `%if "#{vtmux_version}"` block (D23, D26) sets
                 // options tmux has not got: vtmux-only, so not compared.
