@@ -1,0 +1,88 @@
+diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
+--- a/src/terminal/kitty/graphics_exec.zig
++++ b/src/terminal/kitty/graphics_exec.zig
+@@ -1060,12 +1060,17 @@ fn vtmuxInit(
+     cmd: *const Command,
+ ) !LoadingImage {
+     const t = cmd.transmission().?;
+-    if (t.medium != .direct)
+-        return try LoadingImage.init(io, alloc, cmd, storage.image_limits);
++    if (t.medium != .direct) {
++        var loading = try LoadingImage.init(io, alloc, cmd, storage.image_limits);
++        loading.vtmux_limit = storage.total_limit;
++        return loading;
++    }
+     var empty = cmd.*;
+     empty.data = "";
+     var loading = try LoadingImage.init(io, alloc, &empty, storage.image_limits);
+     errdefer loading.deinit(alloc);
++    // vtmux patch 0044: it decodes to no more than the limit either.
++    loading.vtmux_limit = storage.total_limit;
+     if (cmd.data.len <= storage.total_limit) {
+         try loading.data.ensureTotalCapacityPrecise(alloc, cmd.data.len);
+         try loading.addData(alloc, cmd.data);
+diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+--- a/src/terminal/kitty/graphics_image.zig
++++ b/src/terminal/kitty/graphics_image.zig
+@@ -48,6 +48,12 @@ pub const LoadingImage = struct {
+     /// is freed and its chunks are dropped until the last, which fails.
+     vtmux_over: bool = false,
+ 
++    /// vtmux patch 0044: the most bytes the load may decode to, its
++    /// storage's limit: an image past it would fail in `addImage`
++    /// (`ENOMEM`), so it fails before it is decompressed or decoded past
++    /// it, with the same error.
++    vtmux_limit: usize = max_size,
++
+     /// Quiet is the quiet settings for the initial load command. This is
+     /// used if q isn't set on subsequent chunks.
+     quiet: command.Command.Quiet,
+@@ -667,14 +673,20 @@ pub const LoadingImage = struct {
+             ) catch break :hint null;
+             break :hint if (bytes <= max_size) bytes else null;
+         };
++        const limit = @min(max_size, self.vtmux_limit);
+         const decompressed = wuffs.zlib.decode(
+             alloc,
+             self.data.items,
+-            max_size,
+-            size_hint,
++            limit,
++            if (size_hint) |h| @min(h, limit) else null,
+         ) catch |err| switch (err) {
+             error.OutOfMemory => return error.OutOfMemory,
+-            error.WuffsError, error.Overflow => return error.DecompressionFailed,
++            // vtmux patch 0044: past the storage's limit, `addImage`'s error.
++            error.Overflow => return if (limit < max_size)
++                error.OutOfMemory
++            else
++                error.DecompressionFailed,
++            error.WuffsError => return error.DecompressionFailed,
+         };
+ 
+         self.data.deinit(alloc);
+@@ -691,15 +703,21 @@ pub const LoadingImage = struct {
+         const decode_png_fn = sys.decode_png orelse
+             return error.UnsupportedFormat;
+ 
+-        var limited: LimitedAllocator = .init(alloc, max_size);
++        // vtmux patch 0044: the decoder may allocate no more than the
++        // storage's limit; past it, `addImage`'s error.
++        const limit = @min(max_size, self.vtmux_limit);
++        var limited: LimitedAllocator = .init(alloc, limit);
+         const decode_alloc = limited.allocator();
+         const result = decode_png_fn(
+             decode_alloc,
+             self.data.items,
+         ) catch |err| switch (err) {
+-            error.InvalidData => return error.InvalidData,
++            error.InvalidData => return if (limited.limit_exceeded and limit < max_size)
++                error.OutOfMemory
++            else
++                error.InvalidData,
+             error.OutOfMemory => if (limited.limit_exceeded)
+-                return error.InvalidData
++                return if (limit < max_size) error.OutOfMemory else error.InvalidData
+             else
+                 return error.OutOfMemory,
+         };

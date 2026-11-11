@@ -1379,6 +1379,16 @@ Recorded per commit in git history; the list is kept current:
   `a_first_chunk_is_held_to_the_limit`
   and `pending_loads_count_and_the_oldest_goes_first`. Upstream candidate:
   the cap on a pending load (Ghostty's own limit is per screen too).
+- `patches/0044-kitty-graphics-decode-limit.patch` (`kitty/graphics_image.zig`
+  a `vtmux_limit` field on `LoadingImage`, used by `decompressZlib` and
+  `decodePng`; `kitty/graphics_exec.zig` `vtmuxInit` sets it): a load
+  decodes to no more than its storage's limit. Ghostty inflates a
+  compressed payload (`o=z`) and lets the PNG decoder allocate up to 400 MB
+  (`max_size`) whatever the limit, and only `addImage` refuses the result:
+  300 KB of payload cost 250 MB on a screen limited to 1 MB. Past the limit
+  the load fails with `addImage`'s `ENOMEM`. Rust test: `vtmux-vt`
+  `tests/graphics_memory.rs`. Upstream candidate (Ghostty's limit is per
+  screen too).
 - `libghostty-vt/src/kitty/graphics.rs`:
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a
