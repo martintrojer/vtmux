@@ -408,6 +408,24 @@ fn the_lock_is_held_by_one_at_a_time() {
     drop(again);
 }
 
+/// A probe's shared `flock` held for a moment (`cargo xtask reap` asking
+/// whether a server holds the directory) does not refuse a server taking
+/// the lock: it waits the probe out.
+#[test]
+fn a_moments_probe_does_not_refuse_the_lock() {
+    let dir = temp_dir("probe");
+    drop(Lock::take(&dir).unwrap());
+    let probe = std::fs::File::open(dir.join(LOCK)).unwrap();
+    rustix::fs::flock(&probe, rustix::fs::FlockOperation::LockShared).unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        drop(probe);
+    });
+    let taken = Lock::take(&dir);
+    release.join().unwrap();
+    assert!(taken.is_ok(), "{taken:?}");
+}
+
 /// [`Writer`] at a zero budget does a piece a step, reading at most one
 /// chunk: a chunk on disk it does not know checked, a chunk written,
 /// `chunks/` synced, `manifest` decoded and read through a chunk at a

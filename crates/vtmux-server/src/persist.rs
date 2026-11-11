@@ -728,6 +728,9 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// How long [`Lock::take`] waits for a lock another holds.
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// The lock a server holds on its checkpoint directory while it writes
 /// there ([`LOCK`], `flock`), so two servers never write one directory.
 /// Released when dropped, or when the process ends however it ends.
@@ -737,7 +740,10 @@ pub struct Lock {
 }
 
 impl Lock {
-    /// Take the lock on `dir` (made private first) without waiting.
+    /// Take the lock on `dir` (made private first), waiting at most
+    /// [`LOCK_WAIT`]: long enough for a probe's shared lock (`cargo xtask
+    /// reap` asking whether a server holds the directory) to go, too short
+    /// for a server that holds it to matter.
     ///
     /// # Errors
     /// `WouldBlock` while another holds it (another process, or another
@@ -751,8 +757,16 @@ impl Lock {
             .truncate(false)
             .mode(FILE_MODE)
             .open(dir.join(LOCK))?;
-        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
-        Ok(Self { _file: file })
+        let deadline = std::time::Instant::now() + LOCK_WAIT;
+        loop {
+            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(rustix::io::Errno::WOULDBLOCK) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 }
 
