@@ -152,26 +152,9 @@ impl World {
         pid
     }
 
-    /// A command's output, or `None` when it has not finished within
-    /// `limit` (it is killed): for a server that may not answer.
+    /// [`common::output_within`] of `args`.
     fn run_within(&self, args: &[&str], limit: Duration) -> Option<std::process::Output> {
-        let mut child = self
-            .command(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let end = Instant::now() + limit;
-        while child.try_wait().unwrap().is_none() {
-            if Instant::now() >= end {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        Some(child.wait_with_output().unwrap())
+        common::output_within(&mut self.command(args), limit)
     }
 
     /// Every listing an upgrade must leave as it was.

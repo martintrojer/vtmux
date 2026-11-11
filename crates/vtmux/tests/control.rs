@@ -147,13 +147,9 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
-        let pid = self
-            .command(&["display", "-p", "#{pid}"])
-            .output()
-            .ok()
-            .and_then(|o| common::parse_pid(&String::from_utf8_lossy(&o.stdout)));
-        let _ = self.command(&["kill-server"]).output();
-        common::reap(pid);
+        common::teardown(self.dir.path(), &self.label, None, |args| {
+            self.command(args)
+        });
     }
 }
 

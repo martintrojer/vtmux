@@ -88,9 +88,9 @@ impl World {
         w
     }
 
-    fn run(&self, args: &[&str]) -> (String, String, i32) {
-        let out = Command::new(env!("CARGO_BIN_EXE_vtmux"))
-            .args(&self.socket)
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_vtmux"));
+        cmd.args(&self.socket)
             .arg("-f")
             .arg(&self.config)
             .args(args)
@@ -102,9 +102,12 @@ impl World {
             .env("SHELL", "/bin/sh")
             .env("TERM", "xterm-256color")
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .envs(self.env.iter().map(|(k, v)| (k, v)))
-            .output()
-            .expect("run vtmux");
+            .envs(self.env.iter().map(|(k, v)| (k, v)));
+        cmd
+    }
+
+    fn run(&self, args: &[&str]) -> (String, String, i32) {
+        let out = self.command(args).output().expect("run vtmux");
         (
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -177,7 +180,8 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
-        let _ = self.run(&["kill-server"]);
+        // Bounded: a stopped server must not hold teardown.
+        let _ = common::output_within(&mut self.command(&["kill-server"]), common::TEARDOWN_LIMIT);
         if let Some(pid) = self.pid {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }

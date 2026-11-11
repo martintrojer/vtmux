@@ -69,14 +69,16 @@ impl World {
             ("PATH", "/usr/bin:/bin".into()),
         ]
     }
-    fn cli(&self, args: &[&str]) -> std::process::Output {
-        Command::new(&self.bin)
-            .args(self.args())
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(&self.bin);
+        cmd.args(self.args())
             .args(args)
             .env_clear()
-            .envs(self.env())
-            .output()
-            .unwrap()
+            .envs(self.env());
+        cmd
+    }
+    fn cli(&self, args: &[&str]) -> std::process::Output {
+        self.command(args).output().unwrap()
     }
     fn attach(&self, args: &[&str]) -> Attached {
         self.attach_sized(args, 40, 10)
@@ -177,10 +179,9 @@ impl World {
 }
 impl Drop for World {
     fn drop(&mut self) {
-        let out = self.cli(&["display", "-p", "#{pid}"]);
-        let pid = common::parse_pid(&String::from_utf8_lossy(&out.stdout));
-        let _ = self.cli(&["kill-server"]);
-        common::reap(pid);
+        common::teardown(self.sockets.path(), &self.label, None, |args| {
+            self.command(args)
+        });
     }
 }
 struct Attached {
@@ -706,6 +707,36 @@ fn ignored_signals_leave_the_client_attached() {
         a.keys(b"\x02d");
         a.exited(0);
         a.wait(|a| a.text().contains("[detached (from session a)]"));
+    });
+}
+
+/// A world's teardown never waits on its server: one that is stopped (a
+/// wedged server answers nothing) is killed by its pid, so the test's own
+/// failure shows at once and the server does not outlive it.
+#[test]
+fn teardown_does_not_wait_for_a_stopped_server() {
+    use rustix::process::{Signal, kill_process, test_kill_process};
+    par::each(&bins(), |bin| {
+        let w = World::new(bin.clone());
+        assert!(w.cli(&["new", "-d", "-s", "a"]).status.success());
+        let out = w.cli(&["display", "-p", "#{pid}"]);
+        let pid = common::parse_pid(&String::from_utf8_lossy(&out.stdout)).expect("server pid");
+        kill_process(pid, Signal::STOP).unwrap();
+        let (done, finished) = std::sync::mpsc::channel();
+        let teardown = thread::spawn(move || {
+            drop(w);
+            let _ = done.send(());
+        });
+        let in_time = finished.recv_timeout(Duration::from_secs(20)).is_ok();
+        if !in_time {
+            // Let a teardown that waits finish, so the test can fail.
+            let _ = kill_process(pid, Signal::CONT);
+        }
+        teardown.join().unwrap();
+        assert!(in_time, "teardown waited for a stopped server");
+        common::wait("the stopped server to be killed", || {
+            test_kill_process(pid).is_err()
+        });
     });
 }
 

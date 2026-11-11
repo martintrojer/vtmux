@@ -317,9 +317,17 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
-        let pid = common::parse_pid(&self.run(&["display", "-p", "#{pid}"]).stdout);
-        let _ = self.run(&["kill-server"]);
-        common::reap(pid);
+        common::teardown(self.dir(), &self.label, None, |args| {
+            let mut cmd = Command::new(&self.bin);
+            cmd.args(["-L", &self.label, "-f", "/dev/null"])
+                .args(args)
+                .current_dir(self.dir())
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .env("TMUX_TMPDIR", self.dir())
+                .env("SHELL", "/bin/sh");
+            cmd
+        });
     }
 }
 
