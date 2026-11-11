@@ -18,7 +18,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 
 ### Fixed
 
-- Live upgrade: `vtmux-upgrade -b` onto a program that is not a vtmux (`/bin/echo`, `true`, a script that exits 0) is refused with exit 1, the server and its panes untouched; before, it passed the dry run and replaced the server, losing every session. The new binary must answer the dry run with the digest of the snapshot it read, so a vtmux 3.8-beta2 or older is refused too.
+- Live upgrade: `vtmux-upgrade -b` onto a program that is not a vtmux (`/bin/echo`, `true`, a script that exits 0) is refused with exit 1, the server and its panes untouched; before, it passed the dry run and replaced the server, losing every session. The new binary must answer the dry run with the digest of the snapshot it read; a downgrade to 3.8-beta1 or 3.8-beta2, which predate that, is still accepted when its `-V` says so.
 - `set -s vtmux-persist off` at run time is remembered: the next start restores nothing unless its config turns persistence on again, and the checkpoint files stay.
 - Live upgrade: a bracketed paste typed right after a key bound to `vtmux-upgrade` no longer refuses it; the paste lands in the new image as a paste.
 - A client that vanishes while a live upgrade tells clients to re-attach no longer fails the upgrade with `Bad file descriptor`.

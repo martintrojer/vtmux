@@ -1215,12 +1215,15 @@ fn a_binary_that_fails_the_dry_run_leaves_the_server_as_it_was() {
 
 /// A program that exits 0 on anything is no vtmux to upgrade onto: the
 /// dry run passes only when the binary says it read and rebuilt the
-/// snapshot (`CHECKED`, with the stream's digest). `vtmux-upgrade -b` onto
-/// `/bin/echo`, `true`, a script that exits 0, and a vtmux from before the
-/// acknowledgement (the real dry run with the line hidden: 3.8-beta2 writes
-/// only `vtmux-resume takes -S`) exits 1 saying so; the server, its panes
-/// and their programs carry on. Before the fix each of them replaced the
-/// server ("server exited unexpectedly", every pane gone).
+/// snapshot (`CHECKED`, with the stream's digest), or, for a vtmux from
+/// before that, when its `-V` is exactly a release before it (3.8-beta1,
+/// 3.8-beta2). `vtmux-upgrade -b` onto `/bin/echo` (`-V` prints `-V`),
+/// `true`, a script that exits 0 (prints nothing), and an old-style vtmux
+/// whose `-V` names another version each exits 1 saying so; the server,
+/// its panes and their programs carry on. Before the fix each of them
+/// replaced the server ("server exited unexpectedly", every pane gone).
+/// The old-style vtmux that says `vtmux 3.8-beta2` or `vtmux 3.8-beta1`
+/// takes over (a downgrade), and this build takes over from it again.
 #[test]
 fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     let world = World::new();
@@ -1228,19 +1231,26 @@ fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     let pid = world.pid();
     let panes = world.pane_pids();
     let script = world.home.path().join("exits-0");
-    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n\n").unwrap();
     set_executable(&script);
-    let old = wrapper(
-        &world,
-        "vtmux-3.8-beta2",
-        "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>&1 | grep -v '^vtmux-snapshot-checked ' >&2; \
-         exit 0;;",
-    );
+    // The real dry run with its acknowledgement hidden, as a build from
+    // before it writes, and `-V` saying `version`.
+    let old = |name: &str, version: &str| {
+        wrapper(
+            &world,
+            name,
+            &format!(
+                "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>&1 | grep -v '^vtmux-snapshot-checked ' >&2; \
+                 exit 0;;\n-V) echo '{version}'; exit 0;;"
+            ),
+        )
+    };
     let candidates = [
         PathBuf::from("/bin/echo"),
         PathBuf::from("/usr/bin/true"),
         script,
-        old,
+        old("vtmux-beta3", "vtmux 3.8-beta3"),
+        old("vtmux-as-tmux", "tmux 3.8"),
     ];
     for binary in &candidates {
         let shown = binary.display().to_string();
@@ -1258,39 +1268,26 @@ fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     }
     assert!(!world.server_args().contains("--vtmux-resume"));
     world.echo("a:w1", "still");
-    // The old vtmux, vouched for by a wrapper that acknowledges for it
-    // (how the downgrade tests run a build from before), takes over.
-    let vouched = acknowledging(&world, &candidates[3]);
-    assert_eq!(world.upgrade(&vouched), Some(upgraded()));
-    assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.upgrade(&bin()), Some(upgraded()));
-    assert_eq!(world.pid(), pid);
-}
-
-/// `old`, a vtmux from before the dry run's acknowledgement (3.8-beta2 and
-/// older), wrapped so that its dry run, when it passes, acknowledges the
-/// snapshot as this build's does (`CHECKED`, the digest from the stream's
-/// header): the test vouches that it is a vtmux, so a downgrade onto it
-/// can be tested.
-fn acknowledging(world: &World, old: &Path) -> PathBuf {
-    let path = world.home.path().join(format!(
-        "{}-acknowledging",
-        old.file_name().unwrap().to_string_lossy()
-    ));
-    std::fs::write(
-        &path,
-        format!(
-            "#!/bin/sh\ncase \"$1\" in\n--vtmux-check-snapshot) '{}' \"$@\" || exit $?\n\
-             printf 'vtmux-snapshot-checked %s\\n' \
-             \"$(od -An -v -tx1 -j20 -N32 /dev/fd/$2 | tr -d ' \\n')\" >&2; exit 0;;\n\
-             esac\nexec '{}' \"$@\"\n",
-            old.display(),
-            old.display()
-        ),
-    )
-    .unwrap();
-    set_executable(&path);
-    path
+    for version in ["vtmux 3.8-beta2", "vtmux 3.8-beta1"] {
+        let release = old(&version.replace(' ', "-"), version);
+        let out = world
+            .run_within(
+                &["vtmux-upgrade", "-b", &release.display().to_string()],
+                Duration::from_secs(30),
+            )
+            .expect("vtmux-upgrade answers");
+        // 0 only once the new image serves (decision 7).
+        assert_eq!(out.status.code(), Some(0), "{version}: {out:?}");
+        assert!(world.server_args().contains("--vtmux-resume"), "{version}");
+        assert_eq!(world.pid(), pid, "{version}");
+        assert_eq!(world.pane_pids(), panes, "{version}");
+        assert_eq!(
+            world.upgrade(&bin()),
+            Some(upgraded()),
+            "back from {version}"
+        );
+    }
+    world.echo("a:w1", "after");
 }
 
 /// Decision 7: a resume that fails after the exec (the test hook) switches
@@ -3075,8 +3072,7 @@ fn a_server_of_the_previous_protocol_moves_onto_this_build() {
 /// A downgrade under an editor up over a long history, onto
 /// `VTMUX_PRE_0038_BINARY` (a build from before Ghostty patch 0038, which
 /// copied the history on `?1049h`: `git worktree add` main and `cargo
-/// build -p vtmux` there; run through [`acknowledging`], since it predates
-/// the dry run's acknowledgement), and back. The build before shows the copy this
+/// build -p vtmux` there), and back. The build before shows the copy this
 /// build writes beside the primary screen (`AltEntry::history`), so its
 /// `history_size` and capture stay tmux's, and it goes on applying a
 /// history-limit lowered under the alternate screen (options.c
@@ -3089,7 +3085,6 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
         std::env::var_os("VTMUX_PRE_0038_BINARY").expect("VTMUX_PRE_0038_BINARY is set"),
     );
     let world = World::new();
-    let before = acknowledging(&world, &before);
     world.populate(&[]);
     world.run(&["set", "-g", "history-limit", "400000"]);
     let program = "seq 300000; printf '\\033[?1049hvim'; read x; \

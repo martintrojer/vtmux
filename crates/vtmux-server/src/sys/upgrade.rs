@@ -64,9 +64,19 @@ pub const TAKES_SOCKET: &str = "vtmux-resume takes -S\n";
 /// ([`acknowledgement`]). A dry run passes only with that exact line: an
 /// exit status of 0 alone is any program's (`/bin/echo`, `true`, a
 /// script), and the exec that follows would replace the server with it.
-/// A vtmux from before it (3.8-beta2 and older) writes no such line, so
-/// it is refused too.
+/// A vtmux from before it writes no such line; it passes on exit 0 only
+/// if its `-V` names one of the releases before it ([`LEGACY_VERSIONS`]),
+/// so a downgrade to one still works.
 pub const CHECKED: &str = "vtmux-snapshot-checked ";
+
+/// What `<binary> -V` (run as `vtmux`, so a binary named `tmux` answers
+/// as vtmux too) prints, exactly, for a vtmux from before [`CHECKED`]:
+/// 3.8-beta1, 3.8-beta2, and this cycle's builds that report 3.8-beta2.
+/// `/bin/echo -V` prints `-V`, a script nothing.
+pub const LEGACY_VERSIONS: &[&str] = &["vtmux 3.8-beta1", "vtmux 3.8-beta2"];
+
+/// How long [`legacy_vtmux`] waits for `-V`.
+const VERSION_LIMIT: Duration = Duration::from_secs(1);
 
 /// The line a dry run of the stream whose body hashes to `digest` answers
 /// with ([`CHECKED`]).
@@ -470,11 +480,14 @@ impl DryRun {
                     .split_inclusive(|&b| b == b'\n')
                     .any(|l| l == want)
             };
-            if !self.expect.as_deref().is_some_and(line) {
+            // Only for a binary that does not acknowledge (rare: another
+            // program, or a downgrade), so the loop waits on its `-V`
+            // ([`VERSION_LIMIT`]) only then.
+            if !self.expect.as_deref().is_some_and(line) && !legacy_vtmux(&self.binary) {
                 return Ok(Err(format!(
                     "{} is not a vtmux that can take over: its {CHECK_FLAG} exited 0 \
-                     without saying it read the snapshot (another program, or a vtmux \
-                     3.8-beta2 or older)",
+                     without saying it read the snapshot, and its -V names no vtmux \
+                     release from before that",
                     self.binary.display()
                 )));
             }
@@ -599,8 +612,29 @@ pub fn next_exited() -> Option<i32> {
 /// stdout open can't hold the wait.
 #[must_use]
 pub fn patch_stack(binary: &Path, limit: Duration) -> Option<String> {
-    let mut child = Command::new(binary)
-        .arg(PATCH_STACK_FLAG)
+    let said = answer(Command::new(binary).arg(PATCH_STACK_FLAG), limit)?;
+    let hash = said.trim_end_matches('\n');
+    (!hash.is_empty() && hash.len() <= 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| hash.to_owned())
+}
+
+/// Whether `binary` is a vtmux from before the dry run's acknowledgement
+/// ([`CHECKED`]): its `-V`, run as `vtmux` within [`VERSION_LIMIT`], is
+/// exactly one of [`LEGACY_VERSIONS`] and a newline.
+fn legacy_vtmux(binary: &Path) -> bool {
+    use std::os::unix::process::CommandExt as _;
+    answer(Command::new(binary).arg0("vtmux").arg("-V"), VERSION_LIMIT).is_some_and(|said| {
+        said.strip_suffix('\n')
+            .is_some_and(|v| LEGACY_VERSIONS.contains(&v))
+    })
+}
+
+/// What `command` writes on stdout (its first 128 bytes) if it exits 0
+/// within `limit`; `None` when it can't be started, exits non-zero, writes
+/// what is not UTF-8 or takes longer (it is killed then). Read once it has
+/// exited: a descendant that keeps its stdout open can't hold the wait.
+fn answer(command: &mut Command, limit: Duration) -> Option<String> {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -629,9 +663,7 @@ pub fn patch_stack(binary: &Path, limit: Duration) -> Option<String> {
             Ok(k) => n += k,
         }
     }
-    let hash = std::str::from_utf8(&said[..n]).ok()?.trim_end_matches('\n');
-    (!hash.is_empty() && hash.len() <= 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
-        .then(|| hash.to_owned())
+    std::str::from_utf8(&said[..n]).ok().map(str::to_owned)
 }
 
 /// Give the heap's free memory back to the system where the allocator
@@ -1073,10 +1105,11 @@ mod tests {
     }
 
     /// A dry run passes only with the acknowledgement of the snapshot it
-    /// was given, a line of its own: exit 0 alone, an old vtmux's
-    /// `TAKES_SOCKET`, another stream's digest or the line run into
-    /// other output are refused. The snapshot is left at offset 0 for a
-    /// script that reads its descriptor.
+    /// was given, a line of its own: exit 0 alone, `TAKES_SOCKET` alone,
+    /// another stream's digest or the line run into other output are
+    /// refused, unless the binary's `-V` (run as `vtmux`) is exactly a
+    /// release from before the acknowledgement. The snapshot is left at
+    /// offset 0 for a script that reads its descriptor.
     #[test]
     fn a_dry_run_passes_only_with_the_snapshots_acknowledgement() {
         let d = dir();
@@ -1107,7 +1140,7 @@ mod tests {
                 .unwrap()
                 .unwrap_err();
             assert!(
-                message.ends_with("or a vtmux 3.8-beta2 or older)"),
+                message.ends_with("names no vtmux release from before that"),
                 "{}: {message}",
                 binary.display()
             );
@@ -1124,6 +1157,38 @@ mod tests {
                 takes_socket: false
             })
         );
+        // A vtmux from before the acknowledgement: its `-V` says which;
+        // nothing else will do. (Run as `vtmux`, which a script, given its
+        // path as `$0`, can't see; the real 3.8-beta2 named `tmux` was
+        // checked by hand.)
+        let legacy = |name: &str, version: &str| {
+            script(
+                &d,
+                name,
+                &format!(
+                    "case \"$1\" in\n\
+                     -V) echo '{version}'; exit 0;;\n\
+                     --vtmux-check-snapshot) printf '{}' >&2; exit 0;;\n\
+                     esac\nexit 1",
+                    TAKES_SOCKET.trim_end().to_owned() + "\\n"
+                ),
+            )
+        };
+        for (name, version, passes) in [
+            ("tmux", "vtmux 3.8-beta2", true),
+            ("beta1", "vtmux 3.8-beta1", true),
+            ("beta3", "vtmux 3.8-beta3", false),
+            ("spaced", "vtmux 3.8-beta2 ", false),
+            ("bare", "3.8-beta2", false),
+            ("tmux-like", "tmux 3.8", false),
+        ] {
+            let got = dry_run(&legacy(name, version), snapshot.as_fd(), DRY_RUN_LIMIT).unwrap();
+            if passes {
+                assert_eq!(got, Ok(Checked { takes_socket: true }), "{name}");
+            } else {
+                assert!(got.is_err(), "{name}: {got:?}");
+            }
+        }
         // Read through its descriptor, as a script does: the whole stream.
         let reads = script(
             &d,

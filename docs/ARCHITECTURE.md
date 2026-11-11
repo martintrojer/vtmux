@@ -104,7 +104,8 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
  snapshot ─► memfd ─► B --vtmux-check-snapshot  (dry run: decode + rebuild,
  serve on meanwhile                             at most 3 s + 1 s per 100k rows;
                                                 passes only if B answers the
-                                                snapshot's digest on stderr)
+                                                snapshot's digest on stderr,
+                                                or B -V is 3.8-beta1/beta2)
  passed: quiesce, flush clients, snapshot again
  UpgradeNotice + token ─► attached clients
  execve(B --vtmux-resume <fd>) ──────────────────────────► decode, adopt the fds,
