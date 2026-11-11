@@ -80,7 +80,7 @@ set -s vtmux-inband-resize on
 %endif
 ```
 
-Kitty graphics: a program that sends kitty graphics as it would to Ghostty gets its images shown, with no `allow-passthrough`. vtmux draws them as cells, so they clip at pane edges, hide under popups, follow zoom and window switches and scroll into copy mode, which passthrough gets wrong. Apps that spot tmux and wrap their images for passthrough (yazi 26.9 does) keep doing that. Images come only inside the escape: vtmux never opens a file or shared memory a program names, so nothing at the far end of an ssh can make it read your files. All panes' images, half-sent ones included, share 256 MB (`vtmux-graphics-limit`), and a live upgrade drops them until the app redraws.
+Kitty graphics: images from yazi, `kitten icat`, image.nvim and plotting tools show up in the pane, no `allow-passthrough` needed. They clip at pane edges, hide under popups and follow zoom, scrolling and window switches. A live upgrade drops them until the app redraws.
 
 ```tmux
 %if "#{vtmux_version}"
@@ -128,7 +128,7 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 - **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
-- **Just the core.** No agent integration, no extra TUI, no animations. Images pass through to your terminal.
+- **Just the core.** No agent integration, no extra TUI.
 
 Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
