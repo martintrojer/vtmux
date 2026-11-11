@@ -542,6 +542,56 @@ fn a_locked_directory_is_not_written() {
     );
 }
 
+/// The periodic checkpoint never sleeps on the loop for a lock another
+/// holds: it is due again a moment later, unreported. A lock still held
+/// after `LOCK_WAIT` of retries is another server's: said once, and left
+/// until the next interval. Once free, the checkpoint is written.
+#[test]
+fn a_periodic_checkpoint_retries_a_locked_directory_from_the_loop() {
+    use std::time::Duration;
+    let (mut server, dir) = server("ckpt-lock-retry");
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "layout"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    let said = |server: &mut Server| {
+        run(server, &dir, &["show-messages"])
+            .lines()
+            .filter(|t| t.contains("in use by another server"))
+            .count()
+    };
+    let held = crate::persist::Lock::take(&state).unwrap();
+    server.persist.due = Some(Instant::now());
+    server.persist_timers(Instant::now());
+    assert_eq!(said(&mut server), 0);
+    assert!(server.persist_deadline().unwrap() <= Instant::now() + super::LOCK_RETRY);
+
+    let give_up = Instant::now() + Duration::from_secs(10);
+    loop {
+        let due = server.persist_deadline().unwrap();
+        if due > Instant::now() + Duration::from_secs(1) {
+            break;
+        }
+        assert!(Instant::now() < give_up, "retried for good");
+        std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        server.persist_timers(Instant::now());
+    }
+    assert_eq!(said(&mut server), 1);
+    assert!(!state.join(MANIFEST).exists());
+
+    // A pane another test thread is spawning may hold the lock's
+    // descriptor until it execs (`a_locked_directory_is_not_written`).
+    drop(held);
+    let give_up = Instant::now() + Duration::from_secs(60);
+    while !state.join(MANIFEST).exists() {
+        assert!(Instant::now() < give_up, "the lock was never released");
+        server.persist.due = Some(Instant::now());
+        server.persist_timers(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(said(&mut server), 1);
+}
+
 /// An idle server is not exported again to find it unchanged: the
 /// precheck stands in for its terminals, and anything that changes one
 /// (output, a resize, `clear-history`, a title, copy mode) still makes

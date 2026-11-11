@@ -22,6 +22,8 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - A detach during a flood no longer leaves your terminal frozen in a synchronized update.
 - Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order, and an Esc still waiting out `escape-time` is kept; an upgrade refused for a program's kitty graphics says which pane and what to do.
 - Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
+- A pane started with no `PATH` searches what glibc's `execvp` does (`getconf PATH`: `/usr/bin` on EL9), not always `/bin:/usr/bin`.
+- With `vtmux-persist` on, a periodic checkpoint whose directory another server holds no longer stalls the server for 50 ms each time.
 
 ## 3.8-beta2
 

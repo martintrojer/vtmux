@@ -728,8 +728,10 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// How long [`Lock::take`] waits for a lock another holds.
-const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+/// How long [`Lock::take`] waits for a lock another holds, and how long a
+/// periodic checkpoint retries [`Lock::try_take`] before it says the
+/// directory is in use.
+pub const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// The lock a server holds on its checkpoint directory while it writes
 /// there ([`LOCK`], `flock`), so two servers never write one directory.
@@ -749,14 +751,7 @@ impl Lock {
     /// `WouldBlock` while another holds it (another process, or another
     /// [`Lock`] in this one); else the directory or lock file failed.
     pub fn take(dir: &Path) -> io::Result<Self> {
-        private_dir(dir)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(FILE_MODE)
-            .open(dir.join(LOCK))?;
+        let file = Self::open(dir)?;
         let deadline = std::time::Instant::now() + LOCK_WAIT;
         loop {
             match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
@@ -767,6 +762,29 @@ impl Lock {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+
+    /// [`Lock::take`] without the wait: one attempt, for the event loop
+    /// (a periodic checkpoint retries on a later turn).
+    ///
+    /// # Errors
+    /// As [`Lock::take`].
+    pub fn try_take(dir: &Path) -> io::Result<Self> {
+        let file = Self::open(dir)?;
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
+        Ok(Self { _file: file })
+    }
+
+    /// The lock file of `dir`, the directory made private first.
+    fn open(dir: &Path) -> io::Result<File> {
+        private_dir(dir)?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(FILE_MODE)
+            .open(dir.join(LOCK))
     }
 }
 

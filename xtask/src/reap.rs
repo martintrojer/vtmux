@@ -182,7 +182,10 @@ fn is_test_server(args: &str) -> bool {
 /// The global `-L` and `-S` values of a `tmux`/`vtmux` command line, or of
 /// a server a live upgrade re-executed (`--vtmux-resume` on it, whatever
 /// its `argv0`), with whether `argv0` is `tmux` or `vtmux`; `None` for any
-/// other command line. Global flags only: they stop at the command.
+/// other command line. Global flags only, read as tmux's `getopt` does
+/// (`main`, tmux.c: `"2c:CDdf:hlL:NqS:T:uUvV"`): bundled (`-uL rv1`,
+/// `-dLrv1`), a value attached or the next word, up to `--` or the
+/// command. `--vtmux-resume <fd>` is skipped with its value.
 fn socket_flags(args: &str) -> Option<(bool, Vec<(char, &str)>)> {
     let mut words = args.split_whitespace();
     let argv0 = words.next()?;
@@ -191,20 +194,36 @@ fn socket_flags(args: &str) -> Option<(bool, Vec<(char, &str)>)> {
         return None;
     }
     let mut found = Vec::new();
-    // -L -S -f -c -T take a value.
     while let Some(w) = words.next() {
-        let Some(flag) = w.strip_prefix('-') else {
+        if w == "--" {
+            break;
+        }
+        if let Some(long) = w.strip_prefix("--") {
+            if long == "vtmux-resume" {
+                words.next();
+            }
+            continue;
+        }
+        let Some(bundle) = w.strip_prefix('-').filter(|b| !b.is_empty()) else {
             break;
         };
-        let value = match flag.chars().next() {
-            Some(f @ ('L' | 'S' | 'f' | 'c' | 'T')) if flag.len() == 1 => {
-                words.next().map(|v| (f, v))
+        for (i, f) in bundle.char_indices() {
+            if !matches!(f, 'c' | 'f' | 'L' | 'S' | 'T') {
+                continue;
             }
-            Some(f @ ('L' | 'S')) => Some((f, &flag[1..])),
-            _ => None,
-        };
-        if let Some(v @ ('L' | 'S', _)) = value {
-            found.push(v);
+            // The rest of the word, else the next one, is the value.
+            let rest = &bundle[i + f.len_utf8()..];
+            let value = if rest.is_empty() {
+                words.next()
+            } else {
+                Some(rest)
+            };
+            if let Some(v) = value
+                && matches!(f, 'L' | 'S')
+            {
+                found.push((f, v));
+            }
+            break;
         }
     }
     Some((named, found))
@@ -215,6 +234,13 @@ fn socket_flags(args: &str) -> Option<(bool, Vec<(char, &str)>)> {
 /// a server of one may be about to take its checkpoint directory's lock
 /// (at its restore, or at its first checkpoint), which it does not hold
 /// yet.
+///
+/// A server a live upgrade re-executed from a binary before the `-S` form
+/// runs as `<binary> --vtmux-resume <fd>` alone, which names no label
+/// ([`is_test_server`]): its directory is kept by the other checks of
+/// [`sweep_checkpoints`], its socket answering (in the default socket
+/// directories) or its lock, which it takes again at its first checkpoint
+/// after the exec.
 fn labels_in_use<'a>(args: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
     args.into_iter()
         .filter_map(socket_flags)
@@ -445,7 +471,8 @@ pub fn default_state_root() -> Option<PathBuf> {
 /// Whether a server holds the checkpoint directory `dir` (its `lock` is
 /// `flock`ed, `vtmux_server::persist::Lock`). The probe's own shared lock
 /// lasts a moment, which a server taking the lock then waits out
-/// (`Lock::take`).
+/// (`Lock::take`) or retries past (a periodic checkpoint's
+/// `Lock::try_take`, `Server::persist_lock`).
 fn checkpoint_locked(dir: &Path) -> bool {
     let Ok(file) = std::fs::File::open(dir.join(vtmux_server::persist::LOCK)) else {
         return false;
@@ -557,10 +584,12 @@ pub fn run() -> ExitCode {
         if dry { "would remove" } else { "removed" },
         socks.len()
     );
-    // The processes still running once the kill is done.
+    // The processes running once the kill and the socket sweep are done
+    // (a server started meanwhile too), but those just killed, which may
+    // linger a moment.
+    let now = parse_procs(&ps_full());
     let in_use = labels_in_use(
-        procs
-            .iter()
+        now.iter()
             .filter(|p| !pids.contains(&p.pid))
             .map(|p| p.args.as_str()),
     );
@@ -635,6 +664,8 @@ mod tests {
             "vtmux -L cli7 -f /dev/null start",
             "vtmux -L ctl7-0 -f /dev/null -C new",
             "tmux -2 -L i42 new",
+            "tmux -uL rv2 new",
+            "vtmux -2dS/tmp/vto-a1b2c3/s new",
             "tmux -S /tmp/vto-a1b2c3/s -f /dev/null new",
             "tmux -S /tmp/vto-a1b2c3/s --vtmux-resume 9",
             "/w/vtmux -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9 --vtmux-switched-back",
@@ -683,6 +714,26 @@ mod tests {
         let mut found: Vec<&str> = found.iter().map(String::as_str).collect();
         found.sort_unstable();
         assert_eq!(found, ["att4-0", "cli3", "rv1", "testA2"]);
+    }
+
+    /// Global flags as tmux's `getopt` reads them: bundled, a value
+    /// attached or the next word, up to `--` or the first non-option.
+    #[test]
+    fn labels_in_use_read_bundled_flags_as_getopt_does() {
+        let found = labels_in_use([
+            "tmux -uL rv1 new",
+            "/w/vtmux -2dLrv2",
+            "vtmux -vS /tmp/t/tmux-1/cli3 ls",
+            "vtmux -S /tmp/t/vtmux-1/ctl4 --vtmux-resume 3 --vtmux-switched-back",
+            "vtmux -uf /dev/null -L rv5 new",
+            "vtmux -f -L rv6 new",
+            "vtmux -- -L rv7",
+            "vtmux - -L rv8",
+            "vtmux -Tfeatures -L rv9",
+        ]);
+        let mut found: Vec<&str> = found.iter().map(String::as_str).collect();
+        found.sort_unstable();
+        assert_eq!(found, ["cli3", "ctl4", "rv1", "rv2", "rv5", "rv9"]);
     }
 
     #[test]

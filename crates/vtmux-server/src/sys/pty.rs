@@ -284,8 +284,10 @@ unsafe fn forkpty(master: &mut libc::c_int, ws: &libc::winsize) -> libc::pid_t {
 
 /// The search path `execvp` takes when there is no `PATH`: macOS's and
 /// FreeBSD's `_PATH_DEFPATH` (paths.h, gen/exec.c), musl's literal
-/// (src/process/execvp.c), glibc's `CS_PATH` (posix/execvpe.c). Other
-/// targets (the other BSDs, whose `_PATH_DEFPATH` lists more) get glibc's.
+/// (src/process/execvp.c), glibc's `CS_PATH` (posix/execvpe.c), which a
+/// distribution may change and glibc itself reads from
+/// [`exec_default_path`]. Other targets (the other BSDs, whose
+/// `_PATH_DEFPATH` lists more) get glibc's upstream value.
 #[cfg(any(target_vendor = "apple", target_os = "freebsd"))]
 const EXEC_DEFAULT_PATH: &str = "/usr/bin:/bin";
 #[cfg(all(target_env = "musl", not(target_os = "freebsd")))]
@@ -293,9 +295,40 @@ const EXEC_DEFAULT_PATH: &str = "/usr/local/bin:/bin:/usr/bin";
 #[cfg(not(any(target_vendor = "apple", target_os = "freebsd", target_env = "musl")))]
 const EXEC_DEFAULT_PATH: &str = "/bin:/usr/bin";
 
+/// glibc's `execvpe` searches its build's `CS_PATH` (posix/execvpe.c),
+/// which a distribution sets (EL9's is `/usr/bin`) and `confstr(_CS_PATH)`
+/// returns (posix/confstr.c); [`EXEC_DEFAULT_PATH`] if that fails. Only
+/// glibc: macOS's, FreeBSD's and musl's `confstr(_CS_PATH)` is not what
+/// their `execvp` searches.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn exec_default_path() -> &'static str {
+    static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        // SAFETY: a null buffer of length 0 asks for the size only.
+        let len = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
+        if len == 0 {
+            return EXEC_DEFAULT_PATH.to_owned();
+        }
+        let mut buf = vec![0u8; len];
+        // SAFETY: `buf` holds `len` bytes, the size confstr asked for
+        // (its NUL included).
+        let got = unsafe { libc::confstr(libc::_CS_PATH, buf.as_mut_ptr().cast(), len) };
+        match std::ffi::CStr::from_bytes_until_nul(&buf) {
+            Ok(s) if got == len => s.to_str().unwrap_or(EXEC_DEFAULT_PATH).to_owned(),
+            _ => EXEC_DEFAULT_PATH.to_owned(),
+        }
+    })
+}
+
+/// [`EXEC_DEFAULT_PATH`]: this libc's `execvp` takes it as it is.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn exec_default_path() -> &'static str {
+    EXEC_DEFAULT_PATH
+}
+
 /// The paths `execvp` would try for a directly executed command: the
 /// program itself when it holds a `/` (or for the shell cases), else
-/// `$PATH` (the pane's, else [`EXEC_DEFAULT_PATH`]) joined with it.
+/// `$PATH` (the pane's, else [`exec_default_path`]) joined with it.
 fn exec_candidates(
     program: &CString,
     env: &[(String, String)],
@@ -308,7 +341,7 @@ fn exec_candidates(
     let path = env
         .iter()
         .find(|(k, _)| k == "PATH")
-        .map_or(EXEC_DEFAULT_PATH, |(_, v)| v.as_str());
+        .map_or(exec_default_path(), |(_, v)| v.as_str());
     path.split(':')
         .map(|dir| {
             // glibc execvpe tries the bare name for an empty PATH component
@@ -671,9 +704,33 @@ mod tests {
             &["/usr/bin/prog", "/bin/prog"]
         } else if cfg!(target_env = "musl") {
             &["/usr/local/bin/prog", "/bin/prog", "/usr/bin/prog"]
+        } else if cfg!(all(target_os = "linux", target_env = "gnu")) {
+            return;
         } else {
             &["/bin/prog", "/usr/bin/prog"]
         };
+        let got: Vec<_> = got.iter().map(|c| c.to_str().unwrap()).collect();
+        assert_eq!(got, want);
+    }
+
+    /// glibc's `execvp` searches the `CS_PATH` its build was given, which
+    /// `getconf PATH` prints (EL9: `/usr/bin`, upstream `/bin:/usr/bin`).
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    #[test]
+    fn no_path_searches_glibcs_cs_path() {
+        let out = std::process::Command::new("getconf")
+            .arg("PATH")
+            .output()
+            .expect("getconf");
+        assert!(out.status.success());
+        let cs_path = String::from_utf8(out.stdout).unwrap();
+        let want: Vec<String> = cs_path
+            .trim_end()
+            .split(':')
+            .map(|d| format!("{d}/prog"))
+            .collect();
+        let program = CString::new("prog").unwrap();
+        let got = exec_candidates(&program, &[], true).unwrap();
         let got: Vec<_> = got.iter().map(|c| c.to_str().unwrap()).collect();
         assert_eq!(got, want);
     }

@@ -94,6 +94,10 @@ pub fn interval() -> Duration {
 /// How long one loop turn writes chunks of a periodic checkpoint.
 const STEP: Duration = Duration::from_millis(5);
 
+/// How soon a periodic checkpoint refused the directory's lock tries
+/// again, for [`crate::persist::LOCK_WAIT`] ([`Server::persist_lock`]).
+const LOCK_RETRY: Duration = Duration::from_millis(2);
+
 /// What the checkpoint found at start leaves this server free to write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Kept {
@@ -182,6 +186,9 @@ pub struct Persist {
     pub(super) kept: Kept,
     /// Another server holds the lock: said once in the message log.
     refused: bool,
+    /// The first of the periodic checkpoint's refused attempts at the
+    /// lock being retried ([`Server::persist_lock`]).
+    lock_retry: Option<Instant>,
     /// A periodic checkpoint being written, and its fingerprint.
     writing: Option<(Writer, Print)>,
     /// How long a loop turn writes its chunks ([`STEP`]).
@@ -207,6 +214,7 @@ impl Default for Persist {
             lock: None,
             kept: Kept::No,
             refused: false,
+            lock_retry: None,
             writing: None,
             step: STEP,
             auto_pass: crate::restored::AutoPass::Done,
@@ -246,6 +254,7 @@ impl Server {
             self.persist.due = None;
             self.persist.writing = None;
             self.persist.lock = None;
+            self.persist.lock_retry = None;
             return;
         }
         // `full` set to `layout`: the screens and history of the full
@@ -358,7 +367,7 @@ impl Server {
     /// and not keeping the previous checkpoint ([`Writer::replacing_prev`]).
     fn checkpoint_run(&mut self, dir: &Path, mode: Mode, prune: bool) -> Option<Written> {
         self.persist_drop_writer();
-        let (mut w, print) = self.checkpoint_writer(dir, mode, prune)?;
+        let (mut w, print) = self.checkpoint_writer(dir, mode, prune, true)?;
         let stepped = w.step(None, &mut |_| Ok(()));
         let written = w.written().clone();
         self.persist.known = w.into_known();
@@ -386,7 +395,7 @@ impl Server {
     fn checkpoint_begin(&mut self) {
         self.persist.writing = self
             .checkpoint_target()
-            .and_then(|(dir, mode)| self.checkpoint_writer(&dir, mode, false));
+            .and_then(|(dir, mode)| self.checkpoint_writer(&dir, mode, false, false));
     }
 
     /// The directory and mode a checkpoint goes to, while `vtmux-persist`
@@ -429,15 +438,17 @@ impl Server {
     }
 
     /// A writer for a checkpoint of `mode` into `dir`, if one is wanted:
-    /// this server holding the directory's lock, and the server changed
-    /// (or `prune`: see [`Server::checkpoint_run`]).
+    /// this server holding the directory's lock (`wait`: see
+    /// [`Server::persist_lock`]), and the server changed (or `prune`: see
+    /// [`Server::checkpoint_run`]).
     fn checkpoint_writer(
         &mut self,
         dir: &Path,
         mode: Mode,
         prune: bool,
+        wait: bool,
     ) -> Option<(Writer, Print)> {
-        if !self.persist_lock(dir) {
+        if !self.persist_lock(dir, wait) {
             return None;
         }
         let pre = (mode == Mode::Full).then(|| self.precheck());
@@ -477,20 +488,43 @@ impl Server {
     /// Hold the lock on `dir`, taking it if needed. Another server holding
     /// it is said in the message log once, and nothing is written while
     /// it does.
-    fn persist_lock(&mut self, dir: &Path) -> bool {
+    ///
+    /// With `wait` (a checkpoint written at once, once: the shutdown's,
+    /// or `full` set to `layout`) this waits up to
+    /// [`crate::persist::LOCK_WAIT`] for it ([`Lock::take`]): there is no
+    /// later turn to retry on. Without (the periodic one) the loop never sleeps
+    /// on it: a refused attempt is retried [`LOCK_RETRY`] later, from the
+    /// loop, for as long, so a moment's holder (`cargo xtask reap`'s probe)
+    /// neither costs the checkpoint nor gets reported; after that it is
+    /// another server's until the next interval.
+    fn persist_lock(&mut self, dir: &Path, wait: bool) -> bool {
         if self.persist.lock.as_ref().is_some_and(|(d, _)| d == dir) {
             return true;
         }
         self.persist.lock = None;
-        match Lock::take(dir) {
+        let taken = if wait {
+            Lock::take(dir)
+        } else {
+            Lock::try_take(dir)
+        };
+        match taken {
             Ok(l) => {
                 // Without the lock another server may have written there.
                 self.persist.known = Known::default();
                 self.persist.lock = Some((dir.to_path_buf(), l));
                 self.persist.refused = false;
+                self.persist.lock_retry = None;
                 true
             }
+            Err(e)
+                if !wait
+                    && e.kind() == std::io::ErrorKind::WouldBlock
+                    && self.persist_lock_retry() =>
+            {
+                false
+            }
             Err(e) => {
+                self.persist.lock_retry = None;
                 if !std::mem::replace(&mut self.persist.refused, true) {
                     let why = if e.kind() == std::io::ErrorKind::WouldBlock {
                         "in use by another server, not written".to_owned()
@@ -502,6 +536,19 @@ impl Server {
                 false
             }
         }
+    }
+
+    /// A periodic checkpoint refused the lock: due again [`LOCK_RETRY`]
+    /// from now while its refusals are younger than
+    /// [`crate::persist::LOCK_WAIT`] (true); false once they are not.
+    fn persist_lock_retry(&mut self) -> bool {
+        let now = Instant::now();
+        let since = *self.persist.lock_retry.get_or_insert(now);
+        if now.duration_since(since) >= crate::persist::LOCK_WAIT {
+            return false;
+        }
+        self.persist.due = Some(now + LOCK_RETRY);
+        true
     }
 
     fn persist_error(&mut self, e: &std::io::Error) {
