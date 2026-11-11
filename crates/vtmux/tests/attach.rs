@@ -1130,7 +1130,10 @@ fn an_escape_and_a_key_read_late_are_meta_the_key() {
     par::each(&bins(), |bin| {
         let w = World::new(bin.clone());
         let fifo = w.home.path().join("fifo");
-        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, rustix::fs::Mode::from(0o600)).unwrap();
+        // The utility, as cli.rs makes its FIFOs: rustix has no `mkfifoat`
+        // on Apple targets.
+        let made = Command::new("mkfifo").arg(&fifo).status().unwrap();
+        assert!(made.success(), "mkfifo {}", fifo.display());
         let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
         ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
         ok(&["set", "-s", "escape-time", "1000"]);
