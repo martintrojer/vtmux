@@ -504,12 +504,13 @@ Closed (vtmux now matches tmux):
 ### D-022: children's `PATH` starts with the `tmux` shim (spec D5)
 
 - **Category:** Spec decision (D5, drop-in: plugins call `tmux` and must not depend on the user's `PATH`).
-- **Test:** `crates/vtmux/tests/attach.rs` `tmux_shim_reaches_this_server_from_children` (vtmux only); `vtmux-server` `shim::tests`; regress `new-session-environment.sh` (`PATH=1` became `<shim>:1`).
+- **Test:** `crates/vtmux/tests/attach.rs` `tmux_shim_reaches_this_server_from_children` and `a_child_without_path_gets_the_default_path_after_the_shim` (vtmux only); `vtmux-server` `shim::tests`; regress `new-session-environment.sh` (`PATH=1` became `<shim>:1`).
 - **Patch:** `compat/patches/0001-new-session-environment-path-shim.patch`. The script prints a pane's `PATH`; the patch drops a leading shim entry, a no-op under tmux.
-- **tmux:** panes get the session/global `PATH` (or the command client's, spawn.c:418-424). Jobs (`run-shell`, `if-shell`, `#()`, hooks) and popups get `environ_for_session` unchanged. A script's `tmux` is whatever that `PATH` finds.
+- **tmux:** panes get the session/global `PATH` (or the command client's, spawn.c:418-424), else `_PATH_DEFPATH` (`/usr/bin:/bin` on Linux and macOS). Jobs (`run-shell`, `if-shell`, `#()`, hooks) and popups get `environ_for_session` unchanged, so without a `PATH` there they get none and the shell picks its own (bash: `/usr/local/bin:/usr/bin`; job.c:153,189). A script's `tmux` is whatever that `PATH` finds.
 - **vtmux:**
   - At start the server makes `.<socket name>.bin/` (0700) beside its socket, holding `tmux` -> its own executable (symlinks resolved).
   - It puts that directory first on `PATH` for every pane, respawned pane, popup and job, the config's `run-shell`/`if-shell` included. It adds it only once, when `PATH` already starts with it.
+  - Without a `PATH`, a pane gets `<shim>:/usr/bin:/bin` (tmux's `_PATH_DEFPATH` after the shim), and so do jobs and popups, where tmux gives them none: the shim needs a `PATH` to go first on.
   - The directory is removed when the server exits, and a stale one is reused.
   - Invoked as `tmux`, the binary finds this server through `$TMUX`. So `tmux set -g @x 1` from a script reaches it even when the server was started as `vtmux -L foo` and the user's `PATH` has another `tmux` first.
   - `show-environment PATH` still shows the stored value.

@@ -6949,6 +6949,46 @@ fn default_bindings_drag_or_forward() {
 /// The shim, invoked as `tmux`, finds the server through `$TMUX`, for a
 /// `-L` and a `-S` socket alike. vtmux only: tmux has no shim
 /// (compat/DIVERGENCES.md D-022).
+/// Started with no `PATH` at all, a pane gets tmux's `_PATH_DEFPATH`
+/// (spawn.c:423-424) after the shim, and a job, which tmux gives none, the
+/// same (compat/DIVERGENCES.md D-022).
+#[test]
+fn a_child_without_path_gets_the_default_path_after_the_shim() {
+    #[cfg(not(target_env = "musl"))]
+    const DEFPATH: &str = "/usr/bin:/bin";
+    #[cfg(target_env = "musl")]
+    const DEFPATH: &str = "/usr/local/bin:/bin:/usr/bin";
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let no_path = |args: &[&str]| {
+        let mut cmd = w.command(args);
+        cmd.env_remove("PATH");
+        cmd.output().unwrap()
+    };
+    let out = no_path(&[
+        "new",
+        "-d",
+        "echo \"P=$PATH\" >\"$HOME/p.tmp\"; mv \"$HOME/p.tmp\" \"$HOME/p\"; exec sleep 100",
+    ]);
+    assert!(out.status.success(), "{out:?}");
+    let socket = String::from_utf8(no_path(&["display", "-p", "#{socket_path}"]).stdout).unwrap();
+    let (dir, name) = socket.trim_end().rsplit_once('/').unwrap();
+    let want = format!("{dir}/.{name}.bin:{DEFPATH}");
+    let file = w.home.path().join("p");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !file.exists() {
+        assert!(std::time::Instant::now() < deadline, "the pane never wrote");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pane = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(pane.trim_end(), format!("P={want}"), "pane");
+    let job = no_path(&["run-shell", "echo \"J=$PATH\""]);
+    assert_eq!(
+        String::from_utf8_lossy(&job.stdout).trim_end(),
+        format!("J={want}"),
+        "job"
+    );
+}
+
 #[test]
 fn tmux_shim_reaches_this_server_from_children() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));

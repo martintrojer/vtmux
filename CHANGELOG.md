@@ -23,6 +23,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order, and an Esc still waiting out `escape-time` is kept; an upgrade refused for a program's kitty graphics says which pane and what to do.
 - Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
 - On Linux, a pane started with no `PATH` searches what glibc's `execvp` does (`getconf PATH`: `/usr/bin` on EL9), not `/usr/bin:/bin`.
+- A server started with no `PATH` gives its panes, jobs and popups `/usr/bin:/bin` after the `tmux` shim, as tmux gives panes, not `/usr/bin:/bin:/usr/sbin:/sbin`.
 
 ## 3.8-beta2
 

@@ -12,8 +12,17 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-/// `PATH` when a child would have none (spawn.c's fallback for panes).
-pub const DEFAULT_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+/// `PATH` when a child would have none: tmux's fallback for panes,
+/// `_PATH_DEFPATH` (spawn.c:423-424), which glibc's, macOS's and
+/// FreeBSD's paths.h and tmux's own compat.h make `/usr/bin:/bin`, and
+/// musl's paths.h `/usr/local/bin:/bin:/usr/bin`. Jobs and popups take it
+/// too, where tmux gives them none: the shim needs a `PATH` to go first on
+/// (compat/DIVERGENCES.md D-022).
+#[cfg(not(target_env = "musl"))]
+pub const DEFAULT_PATH: &str = "/usr/bin:/bin";
+/// As above, musl's.
+#[cfg(target_env = "musl")]
+pub const DEFAULT_PATH: &str = "/usr/local/bin:/bin:/usr/bin";
 
 /// The shim directory; removed when dropped (the server exits).
 #[derive(Debug)]
