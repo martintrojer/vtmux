@@ -906,6 +906,16 @@ mod tests {
         left.sort();
         assert_eq!(left, ["att3", "default", "mywork", "rv5", "rv6", "testA4"]);
         drop(lock);
+        // A parallel test's fork between the lock's open and its drop holds
+        // the lock too until its child execs (`CLOEXEC` acts at exec, as
+        // `dead_socket` says): wait until it is free.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !std::fs::File::open(held.join("lock")).is_ok_and(|f| {
+            rustix::fs::flock(&f, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_ok()
+        }) {
+            assert!(std::time::Instant::now() < deadline, "the lock stays held");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(
             names(&sweep_checkpoints(&root, &dirs, &in_use, false)).len(),
             1,
