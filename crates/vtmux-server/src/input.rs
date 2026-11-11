@@ -326,6 +326,16 @@ impl Decoder {
         self.pending = None;
         std::mem::take(&mut self.bytes)
     }
+    /// The bytes held (an ESC waiting out `escape-time`, a split sequence)
+    /// moved to `next` with their wait, which runs on there, and the
+    /// `escape-time` it is measured by (a live upgrade's re-attach gives
+    /// the client a new decoder: the ESC still fires alone once its wait
+    /// is out, or combines with the key that comes before then).
+    pub fn hand_held_to(&mut self, next: &mut Self) {
+        next.bytes = std::mem::take(&mut self.bytes);
+        next.pending = self.pending.take();
+        next.escape_time = self.escape_time;
+    }
     /// The last mouse report held a button down (no release, no wheel):
     /// the next report's `lb` says so (a popup starts its drag from it).
     #[must_use]
@@ -1116,6 +1126,44 @@ mod tests {
         d.feed(b"\x1b");
         assert_eq!(d.drain(now), Vec::new());
         assert_eq!(d.deadline(), Some(now + ms(500)));
+    }
+
+    /// A held ESC handed to a new decoder (a live upgrade's re-attach)
+    /// keeps its wait and `escape-time`: it fires alone when the wait is
+    /// out, or combines with a key that comes before then.
+    #[test]
+    fn a_held_escape_handed_on_keeps_its_wait() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        let handed = || {
+            let mut old = Decoder {
+                escape_time: Some(ms(1500)),
+                ..Decoder::default()
+            };
+            old.feed(b"\x1b");
+            assert_eq!(old.drain(now), Vec::new());
+            let mut new = Decoder::default();
+            old.hand_held_to(&mut new);
+            assert!(old.held().is_empty() && old.deadline().is_none());
+            assert_eq!(new.deadline(), Some(now + ms(1500)));
+            new
+        };
+        let mut d = handed();
+        assert_eq!(d.drain(now + ms(1499)), Vec::new());
+        assert_eq!(
+            d.drain(now + ms(1500)),
+            vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+        let mut d = handed();
+        d.feed(b"x");
+        assert_eq!(
+            d.drain(now + ms(100)),
+            vec![Event::Key(Key {
+                meta: true,
+                esc_prefix: true,
+                ..key(Base::Char('x'))
+            })]
+        );
     }
 
     /// `tty_keys_next` (tty-keys.c:900-933): after an Escape only the key

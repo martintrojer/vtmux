@@ -924,6 +924,74 @@ fn a_key_typed_right_after_a_bound_upgrade_runs_in_the_new_image() {
     );
 }
 
+/// A server with `escape-time` long enough that an ESC typed after a key
+/// bound to `vtmux-upgrade` is still held when the server execs, ESC and
+/// F6 bound to set options, and the attached client.
+fn held_escape_world() -> (World, Attached) {
+    let world = World::new();
+    world.populate(&[]);
+    let attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.run(&["set", "-s", "escape-time", "1500"]);
+    world.run(&[
+        "bind",
+        "-n",
+        "F5",
+        "vtmux-upgrade",
+        "-b",
+        &bin().display().to_string(),
+    ]);
+    world.run(&["bind", "-n", "F6", "set", "-g", "@typed", "after"]);
+    world.run(&["bind", "-n", "Escape", "set", "-g", "@esc", "yes"]);
+    (world, attached)
+}
+
+fn show_global(world: &World, option: &str) -> Vec<u8> {
+    world
+        .command(&["show", "-gv", option])
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default()
+}
+
+/// A lone ESC typed right after a key bound to `vtmux-upgrade`, still
+/// waiting out `escape-time` when the server execs: the image that serves
+/// next fires it as Escape. (Before: the re-attach replaced the client's
+/// decoder after feeding it the carried ESC, and the key was lost; review
+/// of 5e27a857.)
+#[test]
+fn a_lone_escape_held_across_a_bound_upgrade_fires_in_the_new_image() {
+    let (world, mut attached) = held_escape_world();
+    let pid = world.pid();
+    attached.keys("\x1b[15~\x1b");
+    wait("the upgrade", || {
+        world.server_args().contains("--vtmux-resume")
+    });
+    wait("the held Escape's binding", || {
+        show_global(&world, "@esc") == b"yes\n"
+    });
+    assert_eq!(world.pid(), pid);
+}
+
+/// F5 (bound to `vtmux-upgrade`), F6 and ESC in one read: F6 goes back to
+/// the client's input as a key queued behind the upgrade, the ESC the
+/// decoder holds behind it, and the new image runs both. (Before: F6 ran,
+/// the ESC was lost at the re-attach; review of 5e27a857.)
+#[test]
+fn an_escape_held_behind_keys_given_back_fires_in_the_new_image() {
+    let (world, mut attached) = held_escape_world();
+    let pid = world.pid();
+    attached.keys("\x1b[15~\x1b[17~\x1b");
+    wait("the second key's binding", || {
+        show_global(&world, "@typed") == b"after\n"
+    });
+    assert!(world.server_args().contains("--vtmux-resume"));
+    wait("the held Escape's binding", || {
+        show_global(&world, "@esc") == b"yes\n"
+    });
+    assert_eq!(world.pid(), pid);
+}
+
 /// `vtmux-upgrade` from a control client (mu, murmur): its guard closes
 /// as for any waiting command, and the line it sent behind it, held while
 /// the upgrade ran, runs in the new image.

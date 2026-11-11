@@ -2229,17 +2229,25 @@ impl Server {
 }
 
 /// A client's input as the next image reads it: the bytes its key decoder
-/// holds (an ESC waiting out `escape-time`, a split sequence) as one
-/// `Input` frame, then the frames not read yet (`inbuf`), in the order they
-/// came. The next image's decoder starts the ESC's wait again.
+/// holds (an ESC waiting out `escape-time`, a split sequence) as `Input`
+/// frames, then the frames not read yet (`inbuf`), in the order they came.
+/// The next image's decoder starts the ESC's wait again, and the re-attach
+/// hands it on to the new connection's decoder.
 fn carried_input(c: &Client) -> Vec<u8> {
-    let held = c.decoder.held();
-    let mut out = if held.is_empty() {
-        Vec::new()
-    } else {
-        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(held.to_vec()))
-            .expect("held key bytes fit a frame")
-    };
+    // In chunks of the size `upgrade_behind` gives keys back in: each fits
+    // a frame (16 KiB, far under `MAX_FRAME`), so `encode` refuses none and
+    // nothing held is dropped; were one refused, it would be skipped rather
+    // than the snapshot lost to a panic.
+    let mut out: Vec<u8> = c
+        .decoder
+        .held()
+        .chunks(16 * 1024)
+        .filter_map(|chunk| {
+            vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(chunk.to_vec()))
+                .ok()
+        })
+        .flatten()
+        .collect();
     out.extend_from_slice(&c.inbuf);
     out
 }

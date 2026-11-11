@@ -1164,8 +1164,13 @@ impl Server {
         // as they were: those the terminal answered stay answered, and the
         // start timer runs on (tty_start_tty would start it again, but a
         // live upgrade asks the terminal nothing, so it changes nothing).
+        // The key bytes the old one holds (an ESC carried across the exec
+        // and fed just now by `client_readable`) go on to it with their
+        // `escape-time` wait.
         let queries = c.decoder.queries();
-        c.decoder = crate::input::Decoder::default();
+        let mut decoder = crate::input::Decoder::default();
+        c.decoder.hand_held_to(&mut decoder);
+        c.decoder = decoder;
         if let Some(term) = c.term.as_deref() {
             c.decoder.set_terminal(term);
         }
