@@ -11,13 +11,13 @@ This page is how the runs are made: the method, the scenarios, how to run them, 
 - Speed and memory are claimed only where a recorded run measures them (D24 in the [spec](../specs/2026-10-29-vtmux.md)). Every number in PERFORMANCE.md comes from a run in this directory.
 - Most rows come from the runs of 2026-11-05 in [`2026-11-05-perf-refresh.md`](2026-11-05-perf-refresh.md): commands, load and raw output, with the JSON next to it.
 - That run measured vtmux main `ada47ba` (release build) against tmux 3.8 from `cargo xtask ref-tmux`. `bench.py` rows are the median of 3 runs.
-- Later runs, each in its own record: hidden panes after `8a7d31f` (in the refresh record, *Agent panes fixed*), many streaming panes (2026-11-06), live upgrade (2026-11-07), the hot paths and the 1M-line search (2026-11-08), capture, styled copy mode, many clients and the release profile (2026-11-09); the terminal table's size, the first checkpoint of a new process (2026-11-10), key echo and agent panes after the render work, an idle `full` checkpoint (2026-11-10).
+- Later runs, each in its own record: hidden panes after `8a7d31f` (in the refresh record, *Agent panes fixed*), many streaming panes (2026-11-06), live upgrade (2026-11-07), the hot paths and the 1M-line search (2026-11-08), capture, styled copy mode, many clients and the release profile (2026-11-09); the terminal table's size, the first checkpoint of a new process (2026-11-10), key echo and agent panes after the render work ([`2026-11-10-perf-dirty-rows.md`](2026-11-10-perf-dirty-rows.md)), an idle `full` checkpoint, the alternate screen over a long history, kitty graphics with real apps (2026-11-10); unfinished strings and the binary size after kitty graphics (2026-11-11). Review records (fork safety, the test harness) sit next to them.
 - The 2026-11-10 run is the latest for key echo and agent panes at 5-20 panes; the 2026-11-09 release-profile run for 50-100 agent panes, 16-32 clients and throughput. Rows before 2026-11-09 were built with cargo's default release profile, which is 7-18% slower on render-bound work.
 - The injected-regression check of the guard (below) is a separate scratch run.
 
 ### Host and load
 
-- A a shared Linux server, : Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
+- A shared Linux server: Linux 6.16, AMD EPYC Genoa, 96 cpus, shared with other agents.
 - Load was 2.6 to 4.9 (`uptime`) over the refresh runs, every one under `flock /tmp/vtmux-stress.lock`. Later runs saw more (load 3 to 22; the release-profile run 9 to 15, under `muzzle run --class high`); each record says.
 - The host is shared, so run when `uptime` load is under 4, under that lock, and one bench at a time.
 - macOS numbers have not been collected yet.

@@ -142,6 +142,7 @@ It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, wi
 - **Library safety:** process-wide Unicode options are one atomic pointer to an immutable width table plus one atomic flag byte, read once per print call, so another thread may set them while a terminal prints, with no lock on the print path.
 - **Live upgrade:** whole-state export and import, page by page.
 - **Speed:** cloning a screen and whole pages as memory, stepping row to row instead of walking the page list, reading the primary history in place while the alternate screen is up.
+- **Kitty graphics (D33):** image storage per granted screen, a pane's storage limit and its unfinished loads held to it, a decode capped at the screen's limit.
 
 A build reports its patch stack (`--vtmux-patch-stack`); live upgrade uses it to decide whether compressed pages can travel as they are.
 
@@ -166,7 +167,7 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 ```
 
 - **Regress:** tmux's test suite from the 3.8 tag, unchanged, scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
-- **Oracle:** 438 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
+- **Oracle:** 442 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 
 `scripts/check.sh` runs all of it on Linux and macOS in CI. Numbers against tmux: [PERFORMANCE.md](PERFORMANCE.md).

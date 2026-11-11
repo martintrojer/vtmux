@@ -15,6 +15,13 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 
 - A client that vanishes while a live upgrade tells clients to re-attach no longer fails the upgrade with `Bad file descriptor`.
 - `SIGTERM` or `SIGHUP` as a client attaches says `[terminated]` or `[lost tty]`, not `server exited unexpectedly`.
+- `tmux` run in a pane with `TMUX_PANE` unset (a cleaned environment) finds its pane by its tty, as tmux does, instead of acting on the newest session.
+- `break-pane -a`/`-b` that can't shuffle the windows is an error: the rest of the command list doesn't run and `command-error` fires.
+- `copy-mode -S` on another pane makes it active without firing `window-pane-changed`.
+- `#{<:...}`, `#{>:...}`, `#{<=:...}` and `#{>=:...}` order bytes that are not UTF-8 as tmux does.
+- A detach during a flood no longer leaves your terminal frozen in a synchronized update.
+- Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order; an upgrade refused for a program's kitty graphics says which pane and what to do.
+- Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
 
 ## 3.8-beta2
 
@@ -31,7 +38,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - **More terminals.** Most of ncurses 6.6's terminal database attaches with the features tmux 3.8 gives it, on hosts without terminfo for it: 2,663 names, including `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm`.
   - Hardcopy terminals are refused with tmux's message.
   - 163 8-bit terminals (`vt220-8bit`, `ansi.sys`) are refused where tmux takes them.
-  - The binary grows by 0.3 MB, to 10.4 MB.
+  - The table adds 0.3 MB to the binary; with kitty graphics it is 10.4 MB, up from 9.8 MB.
 - **Pixel sizes.** A pane reports its size in pixels from your terminal's cell size (`ws_xpixel`, `CSI 14 t`, `#{window_cell_width}`), so image tools size their output. 16x32 per cell until a client gives one.
 - **`#{pane_last_output_time}`**, as tmux sets it.
 

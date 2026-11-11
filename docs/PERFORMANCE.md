@@ -13,8 +13,8 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | 20 panes streaming at a 100k limit | 1.25 GB | 217 MB | 0.17x |
 | Idle server | 4.2 MB | 9.0 MB | 2.1x **Worse** |
 | Each idle pane | 5.4 KB | 18 KB | 3.4x **Worse** |
-| Pane output, no client | | | 0.37-0.54x CPU |
-| Pane output, one client attached | | | 0.42-0.62x CPU |
+| Pane output, no client | | | 0.43-0.54x CPU |
+| Pane output, one client attached | | | 0.48-0.58x CPU |
 | 8 clients, a 20 MB flood | | | 0.06-0.19x CPU |
 | Redraw-heavy output, bytes to the terminal | 10.1 MB | 0.07 MB | about 140x fewer, at 0.3x CPU |
 | Agent TUIs, 5-20 panes, 1-2 clients | | | 0.76-0.92x CPU |
@@ -28,7 +28,7 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | `capture-pane -S -` of 1M lines | 840 ms | 385 ms | 0.46x |
 | Alternate screen up over 1M lines of history | 3-4 ms | 3 ms | 1x |
 | Live upgrade, 10 panes x 100k lines | kill-server | 0.6-0.9 s | |
-| Release binary, stripped | 1.3 MB | 10.0 MB | 7.7x **Worse** |
+| Release binary, stripped | 1.3 MB | 10.4 MB | 8.0x **Worse** |
 
 ## Memory
 
@@ -146,10 +146,10 @@ The release profile is fat LTO in one codegen unit, stripped. Against cargo's de
 
 | | default | vtmux's profile |
 |---|---|---|
-| stripped binary (tmux 3.8: 1.3 MB) | 10.7 MB | 10.0 MB |
+| stripped binary (tmux 3.8: 1.3 MB), 2026-11-09, before kitty graphics (10.4 MB now) | 10.7 MB | 10.0 MB |
 | gzipped, in the release tarball | 4.41 MB | 4.28 MB |
 | server CPU, agent panes and many clients | | 7-18% less |
-| key echo p50 | 0.43 ms | 0.38 ms |
+| key echo p50 (2026-11-09; 0.30 ms since the render work) | 0.43 ms | 0.38 ms |
 | output parsing (Ghostty's, untouched by LTO) | | flat |
 | build after touching `vtmux-core` | 108 s | 118 s |
 
