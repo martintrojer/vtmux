@@ -29,3 +29,13 @@ CONDITIONS: busy loops killed by an EXIT trap.
 GATE: f404a368 the same selection once with a dash-like `/bin/sh` (`unshare --user --map-root-user --mount`, a POSIX-mode bash that keeps its shell after `-c`, bound over `/usr/bin/bash`)
 RESULT: exit 0, all passed.
 CONDITIONS: namespace-only bind mount; not a real dash binary.
+
+After the `-V` fallback for builds before the acknowledgement (4dc80724):
+
+GATE: 4dc80724 `muzzle run --class high --rule vtmux-check --run-timeout 3000 -- mise exec -- bash scripts/check.sh`
+RESULT: exit 0, 266 s; fmt and clippy clean; tests 1,789 passed, 0 failed, 11 ignored; regress 171/174 (2 flaky passed, 1 xfail, 0 skipped); oracle replay 443/443; `--upgrade-every 3` 443/443 (3,453 upgrades); `--upgrade-every 1` 9/9 (231 upgrades).
+CONDITIONS: as above; the macOS cross-check skipped (no target, no network).
+
+GATE: 4dc80724 stress, the same selection 5x under 48 busy loops in `flock /tmp/vtmux-stress.lock`, then once with the dash-like `/bin/sh`
+RESULT: exit 0, 5/5 and 1/1 passed.
+CONDITIONS: as above.
