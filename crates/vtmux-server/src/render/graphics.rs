@@ -329,7 +329,15 @@ pub fn overlay(
                 let (Ok(x), Ok(c)) = (usize::try_from(x), u32::try_from(x - x0)) else {
                     continue;
                 };
-                if d.below && has_text(&row[x]) {
+                // A wide character's spacer is part of its text: covering
+                // it would make the terminal erase the character.
+                if d.below
+                    && (has_text(&row[x])
+                        || (row[x].width == 0
+                            && x > 0
+                            && row[x - 1].width == 2
+                            && has_text(&row[x - 1])))
+                {
                     continue;
                 }
                 let Some(cell) = placeholder(&row[x], d.id, d.placement, r, c) else {
@@ -584,6 +592,37 @@ mod tests {
             overlay(&content, &[], &pg, &[at(0, false)], 1).is_none(),
             "above the top"
         );
+    }
+
+    /// A placement below the text leaves a wide character whole: its
+    /// spacer is part of the text, so the head keeps its width.
+    #[test]
+    fn a_placement_below_the_text_leaves_a_wide_character_whole() {
+        let pg = PaneGraphics::default();
+        let mut content = row("");
+        content.cells[0].text = "中".into();
+        content.cells[0].width = 2;
+        content.cells[1].width = 0;
+        content.cells[2].text = "x".into();
+        content.cells[2].width = 1;
+        let d = Direct {
+            id: FIRST,
+            placement: 7,
+            col: 0,
+            row: 0,
+            cols: 4,
+            rows: 1,
+            below: true,
+        };
+        let (under, _) = overlay(&content, &[], &pg, &[d], 0).unwrap();
+        let cells: Vec<_> = under.cells[..4]
+            .iter()
+            .map(|c| (c.text.as_str().to_owned(), c.width, shown(c)))
+            .collect();
+        assert_eq!(cells[0], ("中".to_owned(), 2, None));
+        assert_eq!((cells[1].1, cells[1].2), (0, None), "the spacer stays");
+        assert_eq!(cells[2], ("x".to_owned(), 1, None));
+        assert_eq!(cells[3].2, Some((FIRST, 7)));
     }
 
     fn shown_of(s: &Snapshot, x: usize) -> Option<(u32, u32)> {

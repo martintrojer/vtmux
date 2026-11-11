@@ -198,6 +198,9 @@ pub struct PaneDraw {
     /// D33: its content has vtmux's placeholder cells, whose colours are
     /// image ids: no palette, dim, blend or default colour touches them.
     pub graphics: bool,
+    /// `content` is the program's own screen as it is now, kitty graphics
+    /// overlaid or not: not a mode's, nor one held for synchronized output.
+    pub live: bool,
 }
 
 /// How a pane's scrollbar draws (`redraw_draw_scrollbar_span`).
@@ -529,6 +532,7 @@ impl DrawKey {
                     && k.no_palette == p.no_palette
                     && k.dim == p.dim
                     && k.blend == p.blend
+                    && k.graphics == p.graphics
             })
     }
 
@@ -1285,6 +1289,7 @@ mod tests {
                             dim: None,
                             blend: None,
                             graphics: false,
+                            live: true,
                         },
                     )
                 })
@@ -1297,6 +1302,22 @@ mod tests {
             clear: Clear::Bce,
             isolates: false,
         }
+    }
+
+    /// A key matches the drawing it was made of and no drawing that
+    /// differs in a pane's colour handling (D33's `graphics`).
+    #[test]
+    fn a_draw_key_matches_its_own_draw_only() {
+        let terms = [
+            vtmux_vt::PaneTerm::new(9, 4, 10),
+            vtmux_vt::PaneTerm::new(10, 4, 10),
+        ];
+        let theme = Theme::default();
+        let mut draw = two_pane_draw(&terms);
+        let key = DrawKey::of(&draw, theme.clone(), 20, 4);
+        assert!(key.matches(&draw, &theme, 20, 4));
+        draw.panes.get_mut(&PaneId(1)).unwrap().graphics = true;
+        assert!(!key.matches(&draw, &theme, 20, 4), "graphics");
     }
 
     /// The row cache composes what a full compose does, after every change

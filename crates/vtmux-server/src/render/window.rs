@@ -36,6 +36,8 @@ struct PaneScreen {
     no_palette: Vec<bool>,
     /// [`PaneDraw::graphics`].
     graphics: bool,
+    /// [`PaneDraw::live`].
+    live: bool,
 }
 
 /// D33: `shown` without placeholder cells naming vtmux's ids, for a
@@ -599,6 +601,7 @@ impl Source<'_> {
                     dim,
                     blend: None,
                     graphics: shown.graphics,
+                    live: shown.live,
                 },
             );
         }
@@ -858,6 +861,7 @@ impl Source<'_> {
             selected: Vec::new(),
             no_palette: Vec::new(),
             graphics: false,
+            live: false,
         };
         if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
             let screen = self.clock_screen(pane, m, ctx, caps);
@@ -896,11 +900,11 @@ impl Source<'_> {
             // MODE_SYNC (screen-write.c:211-240): while the program has
             // synchronized output on, nothing new of it is drawn. The held
             // grid keeps the stamps it had, so its rows stay cached.
-            let (content, stamps) = if let Some(held) = pane.term.sync_held() {
-                (Rc::clone(&held.screen), held.stamps.to_vec())
+            let (content, stamps, live) = if let Some(held) = pane.term.sync_held() {
+                (Rc::clone(&held.screen), held.stamps.to_vec(), false)
             } else {
                 let view = pane.term.screen();
-                (view.shared(), view.row_stamps().to_vec())
+                (view.shared(), view.row_stamps().to_vec(), true)
             };
             return PaneScreen {
                 content,
@@ -908,6 +912,7 @@ impl Source<'_> {
                 selected: Vec::new(),
                 no_palette: Vec::new(),
                 graphics: false,
+                live,
             };
         }
         let top = pane.modes.first();
@@ -946,6 +951,7 @@ impl Source<'_> {
             selected,
             no_palette,
             graphics: false,
+            live: false,
         }
     }
 
@@ -1255,8 +1261,9 @@ pub fn cursor_of(
     };
     // The program's own screen: tmux's `s->cx` is the column count while
     // a wrap is pending (Ghostty keeps the last column and a flag), so the
-    // cursor of a full line sits on the border right of the pane.
-    if Rc::ptr_eq(&d.content, &pane.term.screen().shared()) {
+    // cursor of a full line sits on the border right of the pane. With
+    // its kitty graphics overlaid too (D33): the cursor is the program's.
+    if d.live {
         let (tx, ty) = pane.term.cursor();
         if ty == cy && tx > cx {
             cx = tx;

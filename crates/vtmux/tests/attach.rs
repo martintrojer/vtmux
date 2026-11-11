@@ -9466,6 +9466,24 @@ fn clients_with_and_without_hyperlinks_get_their_own_frames() {
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
+/// D33: a pane drawn with an image keeps tmux's cursor for a wrap
+/// pending, on the border right of the pane (`s->cx` is the width,
+/// server-client.c `server_client_reset_state`), as without graphics.
+#[test]
+fn a_pending_wrap_beside_an_image_puts_the_cursor_on_the_border() {
+    let (w, a) = notify_world(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")), true);
+    w.cli(&["set", "-s", "vtmux-graphics", "on"]);
+    w.cli(&["select-window", "-t", "a:0"]);
+    w.cli(&["split-window", "-h", "-d", "-t", "a:0", "cat", "-"]);
+    let out = w.cli(&["display", "-p", "-t", "a:0.0", "#{pane_width}"]);
+    let width: u16 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    a.wait(|a| status_row(a).contains("0:w*"));
+    let mut bytes = b"\x1b[H\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;/wAA\x1b\\\x1b[3;1H".to_vec();
+    bytes.extend(std::iter::repeat_n(b'x', usize::from(width)));
+    notify_emit(&w, &a, 0, &bytes);
+    a.wait(|a| a.screen().cursor() == (width, 2));
+}
+
 /// D33 across a live upgrade: a Ghostty client gets vtmux's id range freed
 /// then the upload at its first graphics frame, and again after
 /// `vtmux-upgrade` (its re-exec attaches afresh). The grant comes over,
