@@ -6942,13 +6942,6 @@ fn default_bindings_drag_or_forward() {
     );
 }
 
-/// D5: every child's `PATH` starts with a private shim dir holding `tmux`
-/// -> this server's executable, so scripts that call plain `tmux` reach
-/// this server even when it was started as `vtmux` and the `PATH` it was
-/// given has another `tmux` first (here one that prints FAKE and fails).
-/// The shim, invoked as `tmux`, finds the server through `$TMUX`, for a
-/// `-L` and a `-S` socket alike. vtmux only: tmux has no shim
-/// (compat/DIVERGENCES.md D-022).
 /// Started with no `PATH` at all, a pane gets tmux's `_PATH_DEFPATH`
 /// (spawn.c:423-424) after the shim, and a job, which tmux gives none, the
 /// same (compat/DIVERGENCES.md D-022).
@@ -6989,6 +6982,13 @@ fn a_child_without_path_gets_the_default_path_after_the_shim() {
     );
 }
 
+/// D5: every child's `PATH` starts with a private shim dir holding `tmux`
+/// -> this server's executable, so scripts that call plain `tmux` reach
+/// this server even when it was started as `vtmux` and the `PATH` it was
+/// given has another `tmux` first (here one that prints FAKE and fails).
+/// The shim, invoked as `tmux`, finds the server through `$TMUX`, for a
+/// `-L` and a `-S` socket alike. vtmux only: tmux has no shim
+/// (compat/DIVERGENCES.md D-022).
 #[test]
 fn tmux_shim_reaches_this_server_from_children() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
