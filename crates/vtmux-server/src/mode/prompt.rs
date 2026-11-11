@@ -170,12 +170,8 @@ pub(crate) mod tests {
     /// copy mode, and a client to key from.
     pub(crate) fn setup() -> (Server, PaneId, SessionId, ClientId, std::path::PathBuf) {
         // One directory per test thread: each test removes its own when done.
-        let thread = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
-        let dir = std::env::temp_dir().join(format!("vtmux-mp-{}-{thread}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let socket = dir.join("s");
-        let _ = std::fs::remove_file(&socket);
-        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let dir = crate::server::snapshot::tests::temp_dir("mp");
+        let (listener, socket) = crate::server::snapshot::tests::listener(&dir, "s");
         let mut server = Server::new(listener, socket.clone(), ServerConfig::default()).unwrap();
         let s = server
             .create_session(NewSession {

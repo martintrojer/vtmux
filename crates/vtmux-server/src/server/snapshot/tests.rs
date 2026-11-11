@@ -16,14 +16,26 @@ use vtmux_snapshot as snap;
 
 use super::super::{Client, ClientId, Server, ServerConfig};
 
-/// A temp directory per test thread.
+/// A temp directory per test thread. Under `/tmp`, not `$TMPDIR`: a socket
+/// in it must fit `sun_path` (104 bytes on macOS, where `$TMPDIR` is
+/// `/var/folders/...`).
 pub(crate) fn temp_dir(tag: &str) -> PathBuf {
     let thread = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
-    let dir =
-        std::env::temp_dir().join(format!("vtmux-snap-{tag}-{}-{thread}", std::process::id()));
+    let dir = Path::new("/tmp").join(format!("vtmux-snap-{tag}-{}-{thread}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// The test directories do not move with `$TMPDIR`, so a socket in one
+/// has a short path whatever it is.
+#[test]
+fn test_directories_are_under_tmp() {
+    let dir = temp_dir("under-tmp");
+    assert!(dir.starts_with("/tmp"), "{}", dir.display());
+    let (_l, socket) = listener(&dir, "s");
+    assert!(socket.as_os_str().len() < 104, "{}", socket.display());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 pub(crate) fn listener(dir: &Path, name: &str) -> (std::os::unix::net::UnixListener, PathBuf) {

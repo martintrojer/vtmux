@@ -7513,11 +7513,8 @@ mod tests {
         super::SessionId,
         std::path::PathBuf,
     ) {
-        let dir = std::env::temp_dir().join(format!("vtmux-sh-{}-{name}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let socket = dir.join("s");
-        let _ = std::fs::remove_file(&socket);
-        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let dir = crate::server::snapshot::tests::temp_dir(&format!("sh-{name}"));
+        let (listener, socket) = crate::server::snapshot::tests::listener(&dir, "s");
         let mut server =
             super::Server::new(listener, socket, super::ServerConfig::default()).unwrap();
         let s = server
