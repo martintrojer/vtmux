@@ -649,7 +649,15 @@ fn input_failing_as_the_server_closes_still_tears_down() {
     a.exited(0);
     typing.store(false, Ordering::Relaxed);
     let text = a.text();
-    assert!(text.contains("DOWN[exited]"), "{text:?}");
+    // The typist's keys the terminal echoed meanwhile may sit between the
+    // frame and the message on a loaded host.
+    let after = text
+        .split_once("DOWN")
+        .map(|(_, rest)| rest.trim_start_matches('x'));
+    assert!(
+        after.is_some_and(|rest| rest.starts_with("[exited]")),
+        "{text:?}"
+    );
 }
 
 /// tmux buffers frames for a stalled terminal (bufferevents); the vtmux
