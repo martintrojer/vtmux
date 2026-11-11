@@ -1,0 +1,213 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_colour_escape_client",
+  "inputs": {
+    "name": "format_colour_escape_client",
+    "size": [
+      40,
+      4
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "term": "screen"
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-t",
+          "a",
+          "-p",
+          "#{client_colours} #{c/f:#ff0000} #{c/b:colour196} #{c/f:themered} #{c/b:themeblack}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "b",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-as",
+          "terminal-features",
+          ",xterm-256color:RGB"
+        ]
+      },
+      {
+        "attach": {
+          "session": "b",
+          "id": "x"
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-t",
+          "b",
+          "-p",
+          "#{client_colours} #{c/f:#ff0000} #{c/b:colour196}"
+        ]
+      },
+      {
+        "divergence": {
+          "id": "D-074",
+          "expect": {
+            "kind": "cli",
+            "stdout": "16777216 \u001b[31m \u001b[40m\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-t",
+          "b",
+          "-p",
+          "#{client_colours} #{c/f:themered} #{c/b:themeblack}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "8 \u001b[38;2;255;0;0m \u001b[48;5;196m \u001b[31m \u001b[40m\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "16777216 \u001b[38;2;255;0;0m \u001b[48;5;196m\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "16777216 \u001b[38;2;205;92;92m \u001b[48;2;13;13;13m\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

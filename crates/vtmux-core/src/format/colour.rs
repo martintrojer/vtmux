@@ -2,9 +2,10 @@
 //! (colour.c:295) for a format with no client attached. The colour itself is
 //! [`crate::colour::Colour`].
 //!
-//! With a client, `colour_toescape` also downgrades to what the terminal supports and
-//! resolves theme colours from the client; that is the server's business and is not
-//! modelled here (no client: 256 colours and RGB are both available; D-074).
+//! With a client, `colour_toescape` resolves theme colours from the client's theme
+//! (D-074); that is not modelled here. Its downgrade of RGB and 256 colours for the
+//! client's terminal never runs (colour.c:318-323 masks disjoint bits), so none is
+//! modelled either.
 
 use crate::colour::Colour;
 

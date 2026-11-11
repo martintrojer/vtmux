@@ -78,7 +78,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-071](#d-071) | Keys typed at a background `attach` stay with the foreground job | Spec decision | open |
 | [D-072](#d-072) | Kitty graphics drawn as unicode placeholders for Ghostty clients (`vtmux-graphics`) | Extension | extension |
 | [D-073](#d-073) | `-D` (run the server in the foreground) is refused | Deferred | deferred |
-| [D-074](#d-074) | `#{c/f:...}` and `#{c/b:...}` give the full colour, whatever the client's terminal | Deferred | deferred |
+| [D-074](#d-074) | `#{c/f:theme...}` and `#{c/b:theme...}` give the slot's terminal colour, whatever the client's theme | Deferred | deferred |
 
 Closed (vtmux now matches tmux):
 
@@ -1250,13 +1250,16 @@ Closed (vtmux now matches tmux):
 - **Evidence:** reference tmux 3.8 `tmux -D` runs a server in the foreground; vtmux exits 1.
 
 <a id="d-074"></a>
-### D-074: `#{c/f:...}` and `#{c/b:...}` give the full colour, whatever the client's terminal
+### D-074: `#{c/f:theme...}` and `#{c/b:theme...}` give the slot's terminal colour, whatever the client's theme
 
-- **Category:** Deferred: the format evaluator has no client terminal or theme colours yet; a style is still drawn in what the terminal supports.
-- **Test:** none fails: the formats are tmux's with no client (the `c/f` and `c/b` rows of `crates/vtmux-core/src/format/golden_rows.in`).
-- **tmux:** `colour_toescape(ft->c, ...)` (colour.c:295-343) downgrades RGB to 256 and 256 to 16 colours for a client whose terminal lacks them, and takes a theme slot from the client's `theme_colours`.
-- **vtmux:** always the escape for no client: RGB as RGB, a theme slot as its terminal colour. `display -c <client on TERM=screen> -p '#{c/f:#ff0000}'` gives `\e[38;2;255;0;0m` where tmux gives `\e[38;5;196m`.
-- **Evidence:** source reading (colour.c, format.c `format_replace`'s `c` modifier).
+- **Category:** Deferred: the format evaluator has no client theme colours yet; the renderer resolves theme colours per client, so a style still draws right.
+- **Test:** oracle `format_colour_escape_client`: the annotated step (a client with RGB, `#{c/f:themered} #{c/b:themeblack}`); its other steps match the reference.
+- **tmux:**
+  - `format_defaults_client` (format.c) makes the attached client the format's client (`display -p`, `display -c`, a key binding's commands), and `colour_toescape` (colour.c:295-343) takes a theme slot from that client's `theme_colours`.
+  - `server_client_update_theme_colours` (server-client.c) fills them from `dark-theme-*` or `light-theme-*`, so `themered` is `indianred` (`\e[38;2;205;92;92m`) on a client with 256 colours or more and `red` on one with fewer.
+  - RGB and 256 colours are never downgraded: colour.c:318-323 tests `(~flags & TERM_RGBCOLOURS) & (colour & COLOUR_FLAG_RGB)`, disjoint bits (0x10 and 0x02000000), so `#{c/f:#ff0000}` is `\e[38;2;255;0;0m` even for a TERM=screen client, in tmux as in vtmux.
+- **vtmux:** a theme slot always gives its terminal colour (`themered` is `\e[31m`, `themeblack` `\e[40m`), as tmux does with no client, and with the default theme options on a client with fewer than 256 colours.
+- **Evidence:** the oracle trace; a probe of reference tmux 3.8 and vtmux with a key binding running `set -gF @x '#{c/f:themered}'` on an RGB client gave `\e[38;2;205;92;92m` and `\e[31m`.
 
 ## Adding an entry
 

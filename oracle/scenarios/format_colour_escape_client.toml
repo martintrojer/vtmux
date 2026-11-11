@@ -1,0 +1,27 @@
+# `#{c/f:...}` and `#{c/b:...}` (format.c format_replace's `c`
+# modifier -> colour.c colour_toescape) with an attached client, which
+# format_defaults_client (format.c) makes the format's client for `display -p`.
+#
+# A TERM=screen client keeps RGB and 256 colours as they are:
+# colour_toescape's downgrade tests `(~flags & TERM_RGBCOLOURS) & (colour &
+# COLOUR_FLAG_RGB)`, two disjoint bits (0x10 and 0x02000000), so it never runs.
+#
+# A theme colour takes the client's theme slot (server_client_update_theme_colours
+# from `dark-theme-red`, which picks `indianred` on a client with 256 colours or
+# more). vtmux gives the slot's terminal colour whatever the client (D-074).
+name = "format_colour_escape_client"
+size = [40, 4]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "3", "cat", "-"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a", "-T", "p"] },
+  { attach = { session = "a", term = "screen" } },
+  { run = ["display", "-t", "a", "-p", "#{client_colours} #{c/f:#ff0000} #{c/b:colour196} #{c/f:themered} #{c/b:themeblack}"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "40", "-y", "3", "cat", "-"] },
+  { run = ["select-pane", "-t", "b", "-T", "p"] },
+  { run = ["set", "-as", "terminal-features", ",xterm-256color:RGB"] },
+  { attach = { session = "b", id = "x" } },
+  { run = ["display", "-t", "b", "-p", "#{client_colours} #{c/f:#ff0000} #{c/b:colour196}"] },
+  { divergence = { id = "D-074", expect = { kind = "cli", stdout = "16777216 \u001b[31m \u001b[40m\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-t", "b", "-p", "#{client_colours} #{c/f:themered} #{c/b:themeblack}"] },
+]
