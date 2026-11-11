@@ -3520,17 +3520,28 @@ impl Server {
         };
         let blank = crate::render::blank(None, 1, 1);
         let panes = &self.model.panes;
-        let (before, after) =
-            client
-                .graphics
-                .frame(screen.unwrap_or(&blank), tick, &self.graphics_ids, |key| {
-                    let term = &panes.get(&key.pane)?.term;
-                    if term.alternate_on() != key.alternate {
-                        return None;
-                    }
-                    let (generation, px) = term.graphics_image(key.image)?;
-                    (generation == key.generation).then_some(px)
-                });
+        // Only the images of the panes it shows: the window its session
+        // is on.
+        let window = client
+            .attached
+            .and_then(|s| crate::target::Found::from_session(&self.model, s).window);
+        let shows = |key: crate::render::graphics::ImageKey| {
+            window.is_some() && panes.get(&key.pane).map(|p| p.window) == window
+        };
+        let (before, after) = client.graphics.frame(
+            screen.unwrap_or(&blank),
+            tick,
+            &self.graphics_ids,
+            shows,
+            |key| {
+                let term = &panes.get(&key.pane)?.term;
+                if term.alternate_on() != key.alternate {
+                    return None;
+                }
+                let (generation, px) = term.graphics_image(key.image)?;
+                (generation == key.generation).then_some(px)
+            },
+        );
         if !before.is_empty() {
             frame.splice(0..0, before);
         }
@@ -4344,7 +4355,14 @@ impl Server {
         let Some((defaults, border)) = self.popup_styles(id, &source) else {
             return;
         };
-        let content = vtmux_vt::snapshot(&p.term);
+        let mut content = vtmux_vt::snapshot(&p.term);
+        // D33: vtmux's image ids are its panes' alone.
+        if caps.graphics.is_some()
+            && self.graphics_tick.is_some()
+            && let Some((scrubbed, _)) = crate::render::graphics::scrub(&content, &[])
+        {
+            content = scrubbed;
+        }
         let theme = source.theme(caps);
         // pd->palette takes pane-colours from the global window options
         // (popup.c:625-626). tmux reads them once, as the popup opens;

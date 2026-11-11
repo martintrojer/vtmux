@@ -38,6 +38,16 @@ struct PaneScreen {
     graphics: bool,
 }
 
+/// D33: `shown` without placeholder cells naming vtmux's ids, for a
+/// client that draws graphics ([`super::graphics::scrub`]).
+fn scrubbed(mut shown: PaneScreen) -> PaneScreen {
+    if let Some((content, stamps)) = super::graphics::scrub(&shown.content, &shown.stamps) {
+        shown.content = Rc::new(content);
+        shown.stamps = stamps;
+    }
+    shown
+}
+
 /// A palette as `tty_attributes` reads it (`wp->palette`, `pd->palette`):
 /// the entries the program on `term` set with OSC 4 (`palette->palette`)
 /// over `pane-colours` in `tree` (`default_palette`, colour.c
@@ -797,12 +807,11 @@ impl Source<'_> {
         caps: Caps,
     ) -> PaneScreen {
         let mut shown = self.pane_screen_cells(pane, tree, ctx, caps);
-        let Some(pg) = caps
-            .graphics
-            .and(self.graphics)
-            .and_then(|t| t.panes.get(&pane.id))
-        else {
+        let Some(tick) = caps.graphics.and(self.graphics) else {
             return shown;
+        };
+        let Some(pg) = tick.panes.get(&pane.id) else {
+            return scrubbed(shown);
         };
         let (direct, top, left) = match pane.modes.first() {
             None => (&pg.direct[..], 0, 0),
@@ -814,7 +823,7 @@ impl Source<'_> {
                     let top = i32::try_from(c.scroll_offset()).map_or(i32::MIN, |o| -o);
                     (&pg.copy[..], top, i32::try_from(left).unwrap_or(0))
                 }
-                _ => return shown,
+                _ => return scrubbed(shown),
             },
         };
         let moved: Vec<super::graphics::Direct> = direct

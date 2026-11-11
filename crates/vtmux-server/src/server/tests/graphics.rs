@@ -197,6 +197,66 @@ fn placeholder_cells_clip_zoom_and_hide_under_a_popup() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Placeholder cells a program prints naming one of vtmux's ids (they
+/// are handed out in order, so easy to guess) show no image: not in a
+/// pane holding none, nor in another window or session than the image's.
+/// The client is sent no upload and the cells blanked.
+#[test]
+fn placeholder_cells_naming_vtmuxs_ids_show_no_other_panes_image() {
+    let (mut server, p, (id, mut peer), dir) = ghostty_server("gfx-forge");
+    server.pane_input(p, &image(1, 2, 1), false);
+    server.render_clients();
+    let upload = format!("\x1b_Ga=t,f=24,s=2,v=2,o=z,i={FIRST},q=2");
+    assert!(has(&frames(&mut server, id, &mut peer), upload.as_bytes()));
+    ok(&mut server, &dir, &["new-window", "-t", "a", "cat", "-"]);
+    let q = *server.model.panes.keys().find(|&&k| k != p).unwrap();
+    let forged = [
+        b"\x1b[38;2;0;0;0m".as_slice(),
+        &cell(FIRST, 0, 0),
+        &cell(FIRST, 0, 1),
+        b"\x1b[m",
+    ]
+    .concat();
+    let check = |sent: &[u8], what: &str| {
+        let text = String::from_utf8_lossy(sent);
+        assert!(!has(sent, b"\x1b_Ga=t"), "{what}: an upload in {text:?}");
+        assert!(
+            !has(sent, "\u{10EEEE}".as_bytes()),
+            "{what}: cells in {text:?}"
+        );
+    };
+    server.pane_input(q, &forged, false);
+    server.render_clients();
+    check(&frames(&mut server, id, &mut peer), "another window");
+    // Another session's client.
+    ok(
+        &mut server,
+        &dir,
+        &["new-session", "-d", "-s", "b", "cat", "-"],
+    );
+    let b = server
+        .model
+        .sessions
+        .iter()
+        .find(|(_, s)| s.name == "b")
+        .map(|(&s, _)| s)
+        .unwrap();
+    let (other, mut opeer) = attach_test_client(&mut server, b, &dir);
+    server.on_client_input(other, XTVERSION).unwrap();
+    server.render_clients();
+    frames(&mut server, other, &mut opeer);
+    let r = *server
+        .model
+        .panes
+        .keys()
+        .find(|&&k| k != p && k != q)
+        .unwrap();
+    server.pane_input(r, &forged, false);
+    server.render_clients();
+    check(&frames(&mut server, other, &mut opeer), "another session");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A program's own placeholder cells (a virtual placement, `U=1`) go out
 /// with vtmux's id, every diacritic written; its virtual placement is
 /// uploaded as it made it. A client of another terminal gets the cells as

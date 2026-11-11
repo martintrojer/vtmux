@@ -347,27 +347,67 @@ pub fn overlay(
             changed[y] = true;
         }
     }
-    let stamps = if stamps.len() == changed.len() {
-        stamps
-            .iter()
-            .zip(&changed)
-            .enumerate()
-            .map(|(y, (&stamp, &c))| {
-                if !c {
-                    return stamp;
-                }
-                let mut h = std::hash::DefaultHasher::new();
-                stamp.hash(&mut h);
-                for c in &out.cells[y * cols..(y + 1) * cols] {
-                    c.text.as_str().hash(&mut h);
-                    format!("{:?}{:?}", c.style.fg, c.style.underline_color).hash(&mut h);
-                }
-                h.finish() | 1 << 63
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let stamps = restamp(stamps, &changed, &out);
+    Some((out, stamps))
+}
+
+/// The row stamps of `out`, from `content`'s `stamps`: a row `changed`
+/// gets one of its own.
+fn restamp(stamps: &[u64], changed: &[bool], out: &Snapshot) -> Vec<u64> {
+    if stamps.len() != changed.len() {
+        return Vec::new();
+    }
+    let cols = usize::from(out.cols);
+    stamps
+        .iter()
+        .zip(changed)
+        .enumerate()
+        .map(|(y, (&stamp, &c))| {
+            if !c {
+                return stamp;
+            }
+            let mut h = std::hash::DefaultHasher::new();
+            stamp.hash(&mut h);
+            for c in &out.cells[y * cols..(y + 1) * cols] {
+                c.text.as_str().hash(&mut h);
+                format!("{:?}{:?}", c.style.fg, c.style.underline_color).hash(&mut h);
+            }
+            h.finish() | 1 << 63
+        })
+        .collect()
+}
+
+/// `content` with the placeholder cells that name one of vtmux's image
+/// ids blanked, with its row stamps: `None` when it has none. For what
+/// reaches a client that draws graphics without [`overlay`] (a pane
+/// holding no images, a mode's screen, a popup): those ids are vtmux's
+/// alone, and a program printing one would show another pane's image,
+/// another session's even. A program's own ids (through passthrough) are
+/// left as written.
+#[must_use]
+pub fn scrub(content: &Snapshot, stamps: &[u64]) -> Option<(Snapshot, Vec<u64>)> {
+    let cols = usize::from(content.cols);
+    if cols == 0 || !content.cells.iter().any(g::is_placeholder) {
+        return None;
+    }
+    let mut out = content.clone();
+    let mut changed = vec![false; usize::from(content.rows)];
+    for (y, row) in out.cells.chunks_mut(cols).enumerate() {
+        if !row.iter().any(g::is_placeholder) {
+            continue;
+        }
+        let resolved = g::resolve_row(row);
+        for (cell, r) in row.iter_mut().zip(resolved) {
+            if r.is_some_and(|r| (FIRST..=LAST).contains(&r.image)) {
+                *cell = blank(cell);
+                changed[y] = true;
+            }
+        }
+    }
+    if !changed.contains(&true) {
+        return None;
+    }
+    let stamps = restamp(stamps, &changed, &out);
     Some((out, stamps))
 }
 
@@ -403,12 +443,14 @@ pub struct ClientGraphics {
 impl ClientGraphics {
     /// The bytes to write before and after a frame of `screen`: uploads
     /// and virtual placements it lacks, then frees of what it no longer
-    /// shows. `pixels` gives an image's pixels by its key.
+    /// shows. `mine` says whether the client may be shown an image (one
+    /// of a pane it shows), `pixels` gives its pixels, both by its key.
     pub fn frame(
         &mut self,
         screen: &Snapshot,
         tick: &Tick,
         ids: &Ids,
+        mine: impl Fn(ImageKey) -> bool,
         pixels: impl Fn(ImageKey) -> Option<g::Pixels>,
     ) -> (Vec<u8>, Vec<u8>) {
         let mut before = Vec::new();
@@ -416,7 +458,12 @@ impl ClientGraphics {
             self.cleared = true;
             before.extend(g::free_range(FIRST, LAST));
         }
-        let shows: BTreeSet<(u32, u32)> = screen.cells.iter().filter_map(shown).collect();
+        let shows: BTreeSet<(u32, u32)> = screen
+            .cells
+            .iter()
+            .filter_map(shown)
+            .filter(|s| ids.key(s.0).is_some_and(&mine))
+            .collect();
         let images: BTreeSet<u32> = shows.iter().map(|s| s.0).collect();
         for &id in &images {
             if self.uploaded.contains(&id) {
@@ -541,5 +588,29 @@ mod tests {
 
     fn shown_of(s: &Snapshot, x: usize) -> Option<(u32, u32)> {
         shown(&s.cells[x])
+    }
+
+    /// What reaches a client without [`overlay`] loses the placeholder
+    /// cells naming vtmux's ids, a run's bare cells too (they take the
+    /// id of the cell before them); a program's own ids stay.
+    #[test]
+    fn scrub_blanks_placeholder_cells_of_vtmuxs_ids_only() {
+        let d = |n: usize| g::DIACRITICS[n];
+        let p = g::PLACEHOLDER;
+        let mut content = row("ab");
+        let mut put = |x: usize, text: String, fg: u32| {
+            content.cells[x].text = text.as_str().into();
+            content.cells[x].style.fg = g::id_colour(fg);
+        };
+        put(1, format!("{p}{}{}{}", d(0), d(0), d(0xEE)), FIRST);
+        put(2, p.to_string(), FIRST);
+        put(4, format!("{p}{}{}{}", d(0), d(0), d(1)), 0x0100_0005);
+        let (out, stamps) = scrub(&content, &[9]).unwrap();
+        let text: Vec<&str> = out.cells.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(text[..4], ["a", " ", " ", ""]);
+        assert_eq!(out.cells[4], content.cells[4], "the program's own id");
+        assert_ne!(stamps, [9], "the row changed");
+        assert!(scrub(&row("ab"), &[]).is_none());
+        assert!(scrub(&out, &[]).is_none(), "nothing left to blank");
     }
 }
