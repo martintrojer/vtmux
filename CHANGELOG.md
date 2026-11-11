@@ -1,71 +1,123 @@
 # Changelog
 
-vtmux's version is the tmux release it is tested against: `3.8-beta1` is the first beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints `vtmux 3.8-beta1`.
+vtmux's version is the tmux release it is tested against: `3.8-beta2` is the second beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
 ## 3.8-beta2
 
-**Kitty graphics (opt-in).** `set -s vtmux-graphics on`: programs that send kitty graphics unwrapped get them shown on Ghostty clients without `allow-passthrough`, drawn as unicode placeholder cells, so pane edges, popups, zoom, window switches and copy mode treat them as text. Each client gets its own uploads, freed when nothing shows them; every pane's images, half-sent ones included, share one cap (`vtmux-graphics-limit`, 256 MB), and decoding one (PNG, compressed, or a query) never costs more than its screen's share: a 36 MB PNG peaks at 36 MB, a 300-byte one naming 9000x9000 pixels is refused before allocating. Images come only inside the escape: file, temporary-file and shared-memory transmissions are refused, so a program, local or over ssh, never makes the server open a path. Other terminals and control clients see tmux. Apps that wrap for tmux (yazi) still use passthrough. Live upgrades keep the grant and drop the images.
+### New
 
-**Your terminal.** Most of ncurses 6.6's terminal database (2,663 names in vtmux's table: `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm` among them) attaches with the features, colours and capabilities tmux 3.8 gives it, on hosts that have no terminfo for it. Hardcopy terminals are refused with tmux's message. 163 8-bit terminals (`vt220-8bit`, `ansi.sys`) are refused where tmux takes them. The binary grows by 0.3 MB, to 10.4 MB.
+- **Kitty graphics (opt-in).** `set -s vtmux-graphics on`.
+  - Programs that send kitty graphics unwrapped get them shown on Ghostty clients, with no `allow-passthrough`.
+  - Images are drawn as unicode placeholder cells, so pane edges, popups, zoom, window switches and copy mode treat them as text.
+  - Each client gets its own uploads, freed when nothing shows them.
+  - All panes' images, half-sent ones included, share one cap (`vtmux-graphics-limit`, 256 MB). Decoding never costs more than the screen's share: a 300-byte PNG naming 9000x9000 pixels is refused before allocating.
+  - Images only come inside the escape. File, temporary-file and shared-memory transmissions are refused, so a program, local or over ssh, never makes the server open a path.
+  - Other terminals and control clients see tmux. Apps that wrap for tmux (yazi) still use passthrough.
+  - Live upgrades keep the grant and drop the images.
+- **More terminals.** Most of ncurses 6.6's terminal database attaches with the features tmux 3.8 gives it, on hosts without terminfo for it: 2,663 names, including `wezterm`, `contour`, `foot`, `rio`, `ansi` and `Eterm`.
+  - Hardcopy terminals are refused with tmux's message.
+  - 163 8-bit terminals (`vt220-8bit`, `ansi.sys`) are refused where tmux takes them.
+  - The binary grows by 0.3 MB, to 10.4 MB.
+- **Pixel sizes.** A pane reports its size in pixels from your terminal's cell size (`ws_xpixel`, `CSI 14 t`, `#{window_cell_width}`), so image tools size their output. 16x32 per cell until a client gives one.
+- **`#{pane_last_output_time}`**, as tmux sets it.
 
-**Pixel sizes, as tmux gives them.** A pane's terminal reports its size in pixels from your terminal's cell size (`ws_xpixel`, `CSI 14 t`, `#{window_cell_width}`), so image tools size their output; 16x32 per cell until a client gives one.
+### Faster
 
-**Formats.** `#{pane_last_output_time}`, the second of the pane's last output, as tmux sets it.
+- **vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines, as in tmux (was 4.1 s).
+  - Copy-mode search of that history while it is up: 0.57 s (was 4.8 s, tmux 1.7 s).
+  - A live upgrade with it up costs what one without does.
+- **Frames.**
+  - Key echo 0.30 ms (was 0.38; tmux 0.24).
+  - Agent TUIs at 0.76-0.92x tmux's server CPU at 5-20 panes with one or two clients (was up to 1.25x).
+  - 5 clients on one window at 1.4x (was 1.85x).
+  - Frames are byte for byte what they were ([numbers](docs/PERFORMANCE.md)).
+- **Idle full persistence.** An idle server with `vtmux-persist full` no longer exports every pane each minute: 8 ms at 10 panes x 100k lines, where keys used to freeze for 1.7 s.
 
-**Bounded strings.** An OSC a program opens and never ends (OSC 52's clipboard text, say) is dropped past `input-buffer-size`, 1 MiB, as in tmux, and its rest is skipped: 12 panes that each got 8 MiB of one held 147 MB, now 49 MB (tmux 165 MB). Later sequences work as before.
+### Live upgrade and persistence
 
-**Fixes.** A split or respawned pane's window is named after its command, as a new window's is, not after the process caught before it execs (the server binary, `vtmux-<sha>`, on macOS). With `vtmux-notifications on`, a client re-attaching after a live upgrade while a pane sent a notification no longer crashes the server. A pane or popup whose process gets stopped (`kill -STOP`) is sent SIGCONT and goes on, as in tmux, instead of staying frozen. A live upgrade loses nothing in flight: a paste a busy pane has not read yet arrives whole, a client's half-read command finishes, a pane's directory with a non-UTF-8 name stays its own, a long `DCS tmux;` passthrough ends whole, and a half-parsed escape sequence no longer runs its newline or backspace twice. `vtmux-upgrade ; more commands` is refused, naming them, rather than dropping them. `capture-pane -a` in a pane without history says `no alternate screen` once it has left it, as tmux does. Commands after `switch-client`, `new-window`, `select-window`, `select-pane`, `break-pane`, `join-pane` or `rotate-window` in a list (`a \; b`, a key binding) start where those moved to, as in tmux: `new-window -t other: \; send-keys ...` types into the new window. `session:.%N`, `session:@N`, `=+1` and `[[:digit:]]` targets resolve as tmux's do. A checkpoint written while `manifest` is torn keeps the good `manifest.prev` until the new `manifest` is in place, so a crash then still restores. `set -s vtmux-persist layout ; kill-server` leaves no screen or history on disk, as setting it on a running server does. A line a resize reflows keeps tmux's extended-cell flag (`capture-pane -F`'s `X`) after its text is overwritten. A line a resize reflows keeps tmux's extended-cell flag (`capture-pane -F`'s `X`) after its text is overwritten, and a live upgrade or restore keeps those flags as the pane had them. The first checkpoint after a live upgrade reads the previous one back a chunk at a time, in loop turns of at most 10 ms, not in one turn of 330-360 ms (20 panes x 40k lines), and a history chunk damaged on disk is written again rather than reused. A key bound to `vtmux-upgrade` is no longer refused for keys typed right after it: they wait and run once the upgrade is done. `new-window -c`, `new-session -c` and `#{session_path}` take a directory whose name is not UTF-8, as do the `-S`, `-f`, `-L` and `-c` of the command line, and a control client's `new-window` starts in its session's directory, not the client's. A program with in-band resize on is told of a change in pixels alone, as `SIGWINCH` is. The client puts the terminal in raw mode as tmux does (a BREAK is ignored, parity and character size are left alone). A long-lived server's `#()` jobs and popups no longer run out of token numbers after 2^29 jobs or 2^30 clients. Run from a shell, `rename-window`, `rename-session`, `select-pane -T`, the `-P` of `split-window`, `new-window`, `break-pane` and `new-session`, and the `-n` and `-c` of the commands that start panes read the client formats (`#{client_width}`) tmux gives them, not empty ones. A client whose terminal hangs up (a closed window, a dropped ssh) exits 1 quietly, as tmux does, rather than panicking with status 101. A client detached while suspended (`suspend-client`, then `detach-client`) no longer clears the shell's screen when it is brought back. An idle server with `vtmux-persist full` no longer exports every pane each minute to find nothing changed: 8 ms at 10 panes x 100k lines, where keys froze for the whole export (1.7 s). An APC, PM or SOS whose text holds a UTF-8 character with byte 0x9c in it ("本") no longer ends there and prints the rest on the pane.
+- Nothing in flight is lost: a paste a busy pane hasn't read yet, a client's half-read command, a long `DCS tmux;` passthrough, a half-parsed escape sequence, a non-UTF-8 directory name.
+- With `vtmux-notifications on`, a client re-attaching while a pane sent a notification no longer crashes the server.
+- `vtmux-upgrade ; more commands` is refused, naming them, instead of dropping them.
+- A key bound to `vtmux-upgrade` is no longer refused by keys typed right after it.
+- A checkpoint written while `manifest` is torn keeps the good `manifest.prev`, so a crash then still restores.
+- `set -s vtmux-persist layout ; kill-server` leaves no screen or history on disk.
+- The first checkpoint after a live upgrade reads the previous one back in steps of at most 10 ms (was one 330-360 ms turn). A damaged chunk is written again, not reused.
 
-**vim and less over a long history.** The alternate screen comes up in 3 ms over 1M lines of scrollback, as in tmux (was 4.1 s; 0.43 s over 100k). Searching that history in copy mode while it is up takes 0.57 s (was 4.8 s, tmux 1.7 s). A live upgrade with it up costs what one without does, and moving back onto an older build keeps the history it hides.
+### Closer to tmux
 
-**Faster frames.** A key's echo takes 0.30 ms (was 0.38; tmux 0.24). Agent TUIs cost 0.76-0.92x tmux's server CPU at 5-20 panes with one or two clients (was up to 1.25x), and 5 clients on one window 1.4x (was 1.85x). A one-cell change composes one row, a pane's screen is read once per write whatever the number of clients, and a client's frame acknowledgement wakes no render. Frames are byte for byte what they were ([numbers](docs/PERFORMANCE.md)).
-
-**Library safety.** The published Ghostty wrapper lets another thread change Unicode options while terminals print (lock-free, at full printing speed), rejects out-of-range grid reads and borrows custom allocators instead of keeping dangling callback pointers. Growable key/mouse buffers and OSC window-title strings also return their full output.
-
-
-- The cursor hides under a floating pane, in a shown overlay scrollbar, and in a pending wrap at the window's right edge, as tmux's does; it no longer draws over a floating pane.
-- `#{V:...}` loops over the session, global (`V/g`) and client (`V/c`) environment; it was always empty.
-- `TZ` names under `posix/` and `right/` give their zone (and leap seconds), and `TZ=:` is UTC.
-- A combining mark in the prompt's completion list takes no column; keys `0x110000`-`0x13FFFF` list as their bytes; a `t/f` format ending in `#` drops it; a `display -t` that does not resolve describes what tmux's does.
-
-**Signals and terminals, as tmux.** Typing while a session is killed no longer leaves your terminal on the alternate screen. An attached client survives `SIGUSR1`, `SIGUSR2` and an outside `SIGTSTP`, and `tmux attach &` draws instead of stopping; `SIGTERM` ends `wait-for` or a `-C` client with status 0 (and `%exit`), `SIGINT` and `SIGQUIT` don't. Panes start with the control characters of the terminal that made the session (`stty intr`, `werase`), `VERASE` from the `backspace` option. `-l` survives a live upgrade.
-
-**Commands and targets, as tmux.** `switch-client`, `new-window`, `select-*`, `break-pane`, `join-pane` and `rotate-window` move the current target for the commands after them in the same list; `session:.%N` finds the pane in any of the session's windows and `session:@N` prefers its current winlink; window names with a leading sign are names; patterns match as glibc's fnmatch. `break-pane`'s `pane-moved` reports the old index, a bad `resize-pane` fires no layout hook, `wait-for -E` survives a waiter leaving mid-wake, and a reaped pid credits every pane that has it.
+- **Signals and terminals.**
+  - Typing while a session is killed no longer leaves your terminal on the alternate screen.
+  - An attached client survives `SIGUSR1`, `SIGUSR2` and an outside `SIGTSTP`; `tmux attach &` draws instead of stopping.
+  - `SIGTERM` ends `wait-for` or a `-C` client with status 0 (and `%exit`); `SIGINT` and `SIGQUIT` don't.
+  - A client whose terminal hangs up exits 1 quietly, as tmux does (was a panic, status 101).
+  - A client detached while suspended no longer clears the shell's screen when it comes back.
+  - Panes start with the control characters of the terminal that made the session (`stty intr`, `werase`), `VERASE` from `backspace`.
+  - The client sets raw mode as tmux does. `-l` survives a live upgrade.
+- **Commands and targets.**
+  - Commands after `switch-client`, `new-window`, `select-*`, `break-pane`, `join-pane` or `rotate-window` in a list start where those moved to: `new-window -t other: \; send-keys ...` types into the new window.
+  - `session:.%N`, `session:@N`, `=+1` and `[[:digit:]]` targets resolve as tmux's do.
+  - `break-pane`'s `pane-moved` reports the old index; a bad `resize-pane` fires no layout hook; `wait-for -E` survives a waiter leaving mid-wake; a reaped pid credits every pane that has it.
+  - `rename-window`, `rename-session`, `select-pane -T`, the `-P` and `-n`/`-c` of the pane-starting commands read the client formats tmux gives them.
+  - `new-window -c`, `new-session -c`, `#{session_path}` and the command line's `-S`, `-f`, `-L`, `-c` take non-UTF-8 paths; a control client's `new-window` starts in its session's directory.
+- **Panes and formats.**
+  - A split or respawned pane's window is named after its command, not after the server binary caught before it execs.
+  - A stopped pane or popup process (`kill -STOP`) gets SIGCONT, as in tmux.
+  - An OSC a program never ends is dropped past `input-buffer-size` (1 MiB), as in tmux: 12 panes that got 8 MiB each held 147 MB, now 49 MB (tmux 165 MB).
+  - An APC, PM or SOS holding a UTF-8 character with byte 0x9c ("本") no longer ends early.
+  - `capture-pane -a` in a pane without history says `no alternate screen` once it has left it.
+  - A line a resize reflows keeps tmux's extended-cell flag (`capture-pane -F`'s `X`), across live upgrade and restore too.
+  - The cursor hides under a floating pane, in a shown overlay scrollbar and in a pending wrap at the right edge.
+  - `#{V:...}` loops over the session, global (`V/g`) and client (`V/c`) environment; it was always empty.
+  - `TZ` names under `posix/` and `right/` give their zone, and `TZ=:` is UTC.
+  - Smaller: a combining mark in prompt completion takes no column; keys past U+10FFFF list as bytes; a `t/f` format ending in `#` drops it; long-lived servers no longer run out of job or client token numbers.
+- **Library safety.** The published Ghostty wrapper lets another thread change Unicode options while terminals print (lock-free, at full speed), rejects out-of-range grid reads, and no longer keeps dangling allocator pointers.
 
 ## 3.8-beta1
 
 First release. Linux (x86_64, aarch64) and macOS 15+ (Apple silicon).
 
-**Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged. All 415 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 173 of tmux's own 174 regress tests (1 expected failure, recorded).
+### Highlights
 
-**Ghostty's emulator.** Each pane is a [libghostty-vt](https://github.com/ghostty-org/ghostty) terminal, with tmux's quirks kept where scripts can see them.
+- **Drop-in tmux 3.8.** Every tmux 3.8 command, option, format, hook and control-mode message. Your `.tmux.conf`, plugins and scripts work unchanged.
+  - All 415 behaviour-oracle scenarios recorded from real tmux 3.8 pass.
+  - 173 of tmux's own 174 regress tests pass (1 expected failure, recorded).
+- **Ghostty's emulator.** Each pane is a [libghostty-vt](https://github.com/ghostty-org/ghostty) terminal, with tmux's quirks kept where scripts can see them.
+- **Better rendering.** One frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. A redraw-heavy benchmark sends 0.07 MB to your terminal where tmux sends 10.1 MB, at 0.3x the CPU.
+- **Live upgrade.** `tmux vtmux-upgrade -b <new binary>` swaps the binary under a running server. Shells, editors and builds keep running; clients stay attached; scrollback comes along. 10 panes x 100k lines upgrade in 0.6-0.9 s.
 
-**Better rendering.** One frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. A redraw-heavy benchmark sends 0.07 MB to your terminal where tmux sends 10.1 MB, at 0.3x the CPU.
-
-**Live upgrade.** `tmux vtmux-upgrade -b <new binary>` swaps the binary under a running server. Shells, editors and builds keep running; clients stay attached; scrollback comes along. 10 panes x 100k lines upgrade in 0.6-0.9 s.
-
-**Persistence (opt-in).** `set -s vtmux-persist layout` (or `full`, with screens and scrollback) checkpoints the server. After a crash or reboot it comes back with its sessions, windows and layout, panes dead until `respawn-pane`.
-
-**Pane blend (opt-in).** `vtmux-pane-inactive-blend` dims inactive panes like Ghostty's unfocused splits.
-
-**Kitty keyboard protocol (opt-in).** `set -s vtmux-kitty-keys on` and programs that ask for it (neovim, helix, agent TUIs) get kitty-encoded keys: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Key tables and the prefix work as before; programs that don't ask see tmux. A grant ends with the program that asked, so a killed editor never leaves the shell sending `CSI 99;5u` for C-c, and a live upgrade keeps it. One exception: a program sharing a surviving shell's process group (`prog; exec bash`) keeps it until `reset`.
-
-**Desktop notifications (opt-in).** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients from any window (a `display-popup -E` agent's too, on its own client), rate-limited as Ghostty limits itself.
-
-**crates.io ready.** All eight crates package and build from their `.crate` files alone, published as 3.8.0-beta.1: `cargo install --locked vtmux@3.8.0-beta.1` (a beta: cargo needs the version named; Zig 0.17 on `PATH`). The patched libghostty-rs ships as `vtmux-ghostty-vt-sys` and `vtmux-ghostty-vt`, whose build downloads the pinned Ghostty and checks its hash (`GHOSTTY_SOURCE_TARBALL` for offline builds), and stops with what to install when Zig is missing or the wrong version. How to release: [docs/RELEASING.md](docs/RELEASING.md).
-
-**In-band resize (opt-in).** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, no `SIGWINCH` race. Live upgrades keep the grant, and a downgrade that would drop it is refused.
+### Opt-in extras
 
 Every opt-in is tmux 3.8, byte for byte, while off.
 
-**Built for speed.** Whole-program LTO: 7-18% less server CPU on render-bound work, key echo 12% faster, a 9.8 MB stripped binary (was 10.7).
+- **Persistence.** `set -s vtmux-persist layout` (or `full`, with screens and scrollback). After a crash or reboot the server comes back with its sessions, windows and layout, panes dead until `respawn-pane`.
+- **Pane blend.** `vtmux-pane-inactive-blend` dims inactive panes like Ghostty's unfocused splits.
+- **Kitty keyboard protocol.** `set -s vtmux-kitty-keys on`: programs that ask (neovim, helix, agent TUIs) get Shift+Enter, C-i apart from Tab, Escape apart from Alt.
+  - Key tables and the prefix work as before; programs that don't ask see tmux.
+  - A grant ends with the program that asked, so a killed editor never leaves the shell getting `CSI 99;5u` for C-c. A live upgrade keeps it.
+  - Exception: a program sharing a surviving shell's process group (`prog; exec bash`) keeps it until `reset`.
+- **Desktop notifications.** `set -s vtmux-notifications on`: a pane's OSC 9 and OSC 777 notifications reach attached Ghostty clients from any window, rate-limited as Ghostty limits itself.
+- **In-band resize.** `set -s vtmux-inband-resize on`: programs that ask for mode 2048 (neovim) get every new size in-band, with no `SIGWINCH` race. A downgrade that would drop the grant is refused.
 
-**Lean where it counts** ([numbers](docs/PERFORMANCE.md)):
+### Packaging
+
+- **crates.io.** `cargo install --locked vtmux@3.8.0-beta.1` (a beta: cargo needs the version named; Zig 0.17 on `PATH`).
+  - The patched libghostty-rs ships as `vtmux-ghostty-vt-sys` and `vtmux-ghostty-vt`. Its build downloads the pinned Ghostty and checks the hash (`GHOSTTY_SOURCE_TARBALL` for offline builds).
+  - How to release: [docs/RELEASING.md](docs/RELEASING.md).
+- **Built for speed.** Whole-program LTO: 7-18% less server CPU on render-bound work, key echo 12% faster, a 9.8 MB stripped binary (was 10.7).
+
+### Numbers
+
+[Details](docs/PERFORMANCE.md).
 
 - 1M lines of scrollback settle at 103 MB vs tmux's 622 MB; 20 panes streaming at a 100k limit at 217 MB vs 1.25 GB.
 - Pane output at 0.37-0.62x tmux's server CPU; 8 attached clients at 0.06-0.19x; an idle server with a real config at 0.28x.
 - Searching or capturing all of a 1M-line history at 0.2-0.55x tmux's time.
 
-**What it costs:** an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.38 ms vs 0.26 ms; a few agent TUIs with two clients cost up to 1.25x tmux's CPU; vim or less opening over a 1M-line history holds the server for 2-4 s.
+What it costs:
+
+- An idle server uses 9.0 MB vs 4.2 MB, and each idle pane 18 KB vs 5.4 KB.
+- A key's echo takes 0.38 ms vs 0.26 ms.
+- A few agent TUIs with two clients cost up to 1.25x tmux's CPU.
+- vim or less opening over a 1M-line history holds the server for 2-4 s.
 
 Real tmux bugs fixed by default are in [compat/DIVERGENCES.md](compat/DIVERGENCES.md); opt-in fixes and options in [docs/PAPERCUTS.md](docs/PAPERCUTS.md).
