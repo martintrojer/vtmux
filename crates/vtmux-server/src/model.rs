@@ -341,11 +341,12 @@ pub struct Pane {
     /// restored and dead, at the width it was made for
     /// ([`crate::remain`]); never in its grid.
     pub restored_hint: Option<(u16, Vec<vtmux_core::styled::Cell>)>,
-    /// Respawned from a restored pane: the checkpoint time it came from
-    /// and when its program started, so a program that exits within
-    /// [`crate::restored::RESTART_GRACE`] puts it back as restored
-    /// instead of closing it. Not carried by a snapshot.
-    pub restart_guard: Option<(i64, std::time::Instant)>,
+    /// Respawned from a restored pane and given no input since: the
+    /// checkpoint time it came from, so the program's exit puts the pane
+    /// back as restored instead of closing it (decision 31, *A restart
+    /// that does not run*). The first input written to the program (a
+    /// key, a paste, `send-keys`) clears it ([`Pane::took_input`]).
+    pub restart_guard: Option<i64>,
 }
 
 /// D33: a pane's kitty graphics as the server keeps them
@@ -2379,6 +2380,12 @@ impl Rect {
 }
 
 impl Pane {
+    /// Input was written to the program: its exit is an ordinary one from
+    /// now on, a restart that ran ([`Pane::restart_guard`]).
+    pub fn took_input(&mut self) {
+        self.restart_guard = None;
+    }
+
     /// `window_pane_resize` (window.c:1702-1740) plus the pane offsets: the
     /// terminal reflows at once; the program hears of a new size later,
     /// from the queue [`Self::send_resizes`] works through. The old size

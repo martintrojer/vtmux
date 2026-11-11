@@ -229,9 +229,11 @@ impl Server {
         // bufferevent_write(wp->event, ...): raw bytes to the PTY, whatever
         // the pane's modes; nothing once it is closed.
         if !got.is_empty()
-            && let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.as_mut())
+            && let Some(pane) = self.model.panes.get_mut(&p)
+            && let Some(io) = pane.io.as_mut()
         {
             io.write(&got);
+            pane.took_input();
             self.pane_output_queued(p);
         }
         if closed {

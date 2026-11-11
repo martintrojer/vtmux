@@ -1255,6 +1255,7 @@ impl Server {
                     graphics_owner_primary: p.graphics.owner[0],
                     graphics_owner_alternate: p.graphics.owner[1],
                     restored_from: p.restored_from,
+                    restart_from: p.restart_guard,
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -2000,7 +2001,7 @@ impl Server {
             ]),
             restored_from: x.restored_from,
             restored_hint: None,
-            restart_guard: None,
+            restart_guard: x.restart_from,
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,

@@ -3338,8 +3338,13 @@ impl Server {
                 o.end_dead_kitty_grants();
             }
             let bytes = bytes_for(self, other);
-            if let Some(io) = self.model.panes.get_mut(&other).and_then(|o| o.io.as_mut()) {
+            if let Some(o) = self.model.panes.get_mut(&other)
+                && let Some(io) = o.io.as_mut()
+            {
                 io.write(&bytes);
+                if !bytes.is_empty() {
+                    o.took_input();
+                }
             }
             self.pane_output_queued(other);
         }
@@ -3352,6 +3357,9 @@ impl Server {
         };
         if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
             io.write(bytes);
+            if !bytes.is_empty() {
+                pane.took_input();
+            }
         }
         self.pane_output_queued(p);
     }

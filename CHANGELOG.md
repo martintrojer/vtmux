@@ -7,11 +7,12 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 ### New
 
 - **Restores you can pick up.** After a restart a restored pane shows its last screen with a hint over its bottom row; press Enter and its command starts again below that screen (a dim `restored <time>` row between), editors' screens included. `respawn-pane` does the same.
-  - `set -s vtmux-persist-respawn auto` restarts every restored shell at once, after the config; panes that ran anything else wait for Enter. `off` keeps panes dead until `respawn-pane`.
+  - `set -s vtmux-persist-respawn auto` restarts, after the config, every restored pane that ran your default shell; panes started with a command (`sh` and `bash -c …` included) wait for Enter. `off` keeps panes dead until `respawn-pane`.
   - `send-keys` (but `send-keys -K`, a client key), pastes and synchronized panes never restart one.
-  - A restart that exits at once (a program gone since the checkpoint, a missing shell) no longer closes the pane and its saved screen: it stays restored, the hint saying the restart failed with its status, and Enter tries again.
-  - An editor's screen kept by a restart keeps its links and its wrapped lines (`capture-pane -J`).
-  - An empty `remain-on-exit-format` draws nothing over a restored pane's last row, as tmux draws no dead line.
+  - A restarted command that exits before anything is typed into it (a program gone since the checkpoint, a missing shell) no longer closes the pane and its saved screen, however long the server takes to see the exit: it stays restored, the hint saying the restart failed with its status, and Enter tries again. Once you type into it, its exit is tmux's.
+  - An editor's screen kept by a restart is copied cell for cell: line drawing, coloured blank cells, links (across lines, with their ids) and wrapped lines.
+  - On a narrow pane the hint drops the time, then the failure, before `Enter restarts`; a failed restart's status is not carried into the next restart.
+  - With `vtmux-persist-respawn off`, an empty `remain-on-exit-format` draws nothing over a restored pane's last row, as tmux draws no dead line.
   - A checkpoint holds a restored pane still waiting as one that ran, so an older vtmux restoring it draws its dead line.
   - The restored dead line is no longer written into the pane's screen: `capture-pane` and the next checkpoint show the saved screen as it was.
 

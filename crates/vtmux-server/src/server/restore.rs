@@ -328,12 +328,18 @@ pub(crate) fn prepare(
     apply_drop(&mut s, says);
     // Decision 31: a pane whose program ran when the checkpoint was
     // written is restored from it; one restored before and still waiting
-    // keeps the time it came with (*Respawning a restored pane*).
+    // keeps the time it came with (*Respawning a restored pane*), and
+    // either has status unknown: a failed restart's status was another
+    // server's (a checkpoint before this rule kept it).
     let written = s.meta.written_us.div_euclid(1_000_000);
     for p in &mut s.panes {
         if !p.exited && !p.empty && p.restored_from.is_none() {
             p.restored_from = Some(written);
         }
+        if p.restored_from.is_some() {
+            p.status = None;
+        }
+        p.restart_from = None;
         p.exited = true;
         p.status.get_or_insert_with(snap::ExitStatus::default);
         p.pid = 0;

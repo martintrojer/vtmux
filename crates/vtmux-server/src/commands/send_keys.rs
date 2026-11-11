@@ -450,6 +450,9 @@ fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
     };
     if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
         io.write(&bytes);
+        if !bytes.is_empty() {
+            pane.took_input();
+        }
     }
     server.pane_output_queued(p);
 }

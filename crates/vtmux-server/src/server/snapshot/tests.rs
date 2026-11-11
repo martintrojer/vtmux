@@ -1596,6 +1596,9 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // (`restored_from`, decision 31): every reboot restore makes them.
     let restored = *a.model.panes.keys().max().unwrap();
     a.model.panes.get_mut(&restored).unwrap().restored_from = Some(1_790_000_000);
+    // One respawned from a restored pane whose program has had no input
+    // yet (`restart_from`): every `auto` restart makes them.
+    a.model.panes.get_mut(&PaneId(0)).unwrap().restart_guard = Some(1_790_000_000);
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
@@ -1618,6 +1621,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
             .iter()
             .any(|p| p.restored_from == Some(1_790_000_000))
     );
+    assert_eq!(s.panes[0].restart_from, Some(1_790_000_000));
     assert_eq!(s.meta.requires, Vec::<String>::new());
     let rows = a.to_snapshot_with(
         snap::Meta {

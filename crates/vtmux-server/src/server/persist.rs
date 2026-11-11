@@ -667,7 +667,8 @@ impl Server {
         };
         let mut s = self.to_snapshot_with(meta, form);
         // A restored pane still waiting (decision 31) goes as a pane that
-        // was alive at the checkpoint, with no dead time: a build before
+        // was alive at the checkpoint, with no dead time and no status (a
+        // failed restart's is this server's): a build before
         // the provenance, which reads none, draws its dead line at the
         // restore as for one (it draws none on a pane dead with a saved
         // screen, whose line the screen holds); this build reads the
@@ -676,6 +677,7 @@ impl Server {
         for p in &mut s.panes {
             if p.restored_from.is_some() {
                 p.dead_time = None;
+                p.status = None;
             }
         }
         // The process: gone with it.

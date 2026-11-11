@@ -97,18 +97,25 @@ fn the_writer_executable_descriptor_round_trips() {
 }
 
 /// A restored pane's provenance (`Pane::restored_from`, the live-upgrade
-/// spec's decision 31), added within v1, round-trips with no feature
+/// spec's decision 31) and a restarted one's guard (`restart_from`),
+/// added within v1, round-trip with no feature
 /// required, so a reader before skips it and reads an ordinary dead pane;
 /// the golden stream has none.
 #[test]
 fn a_restored_panes_provenance_round_trips_and_requires_nothing() {
     let mut s = sample();
     s.panes[0].restored_from = Some(1_790_000_000);
+    s.panes[1].restart_from = Some(1_790_000_001);
     let back = decode(&encode(&s)).unwrap();
     assert_eq!(back, s);
     assert_eq!(back.meta.requires, Vec::<String>::new());
     let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
-    assert!(golden.panes.iter().all(|p| p.restored_from.is_none()));
+    assert!(
+        golden
+            .panes
+            .iter()
+            .all(|p| p.restored_from.is_none() && p.restart_from.is_none())
+    );
 }
 
 /// `Meta::requester`, added within v1, round-trips in both forms; a

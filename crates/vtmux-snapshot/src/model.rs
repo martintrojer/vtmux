@@ -696,6 +696,12 @@ record! {
         /// brought it back from, until it is respawned or killed.
         /// Ignorable: a reader before reads an ordinary dead pane.
         50 => opt restored_from: Option<i64>,
+        /// A pane respawned from a restored one whose program has had no
+        /// input yet: the checkpoint time it came from, so the program's
+        /// exit puts it back as restored (decision 31, *A restart that
+        /// does not run*). Ignorable: a reader before closes the pane on
+        /// that exit as any.
+        51 => opt restart_from: Option<i64>,
     }
 }
 
@@ -1481,6 +1487,7 @@ pub(crate) mod tests {
             graphics_owner_primary: None,
             graphics_owner_alternate: None,
             restored_from: None,
+            restart_from: None,
         }
     }
 

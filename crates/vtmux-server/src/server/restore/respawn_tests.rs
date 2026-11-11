@@ -694,3 +694,77 @@ fn an_empty_dead_line_format_draws_nothing_over_the_bottom_row() {
     let shown = screen.rows(&mut server);
     assert_eq!(shown[usize::from(bottom) - 1], "dead", "{shown:?}");
 }
+
+/// The hint after a restart that did not run says its status; on a pane
+/// too narrow for all of it the time goes first, then the failure, so
+/// `Enter restarts` shows; a program that exited 0 (it ran, but was given
+/// no input) reads `exited`.
+#[test]
+fn a_narrow_hint_keeps_its_instruction() {
+    let (mut server, dir) = restored("hint-narrow", &[], &[]);
+    let mut screen = Screen::attach(&mut server, &dir);
+    let time = server.restored_time(WRITTEN);
+    let status = |server: &mut Server, n| {
+        server.model.panes.get_mut(&PaneId(0)).unwrap().status =
+            Some(crate::jobs::JobStatus::Exited(n));
+    };
+    status(&mut server, 127);
+    let shown = screen.rows(&mut server);
+    assert_eq!(
+        shown[23],
+        format!("Restored {time}: restart failed (status 127); Enter restarts cat -")
+    );
+    for (cols, hint) in [
+        ("50", "restart failed (status 127); Enter restarts cat -"),
+        ("20", "Enter restarts cat -"),
+        ("10", "Enter rest"),
+    ] {
+        ok(
+            &mut server,
+            &dir,
+            &["resize-window", "-t", "a", "-x", cols, "-y", "24"],
+        );
+        let shown = screen.rows(&mut server);
+        assert!(shown[23].starts_with(hint), "{cols}: {shown:?}");
+    }
+    status(&mut server, 0);
+    ok(
+        &mut server,
+        &dir,
+        &["resize-window", "-t", "a", "-x", "80", "-y", "24"],
+    );
+    let shown = screen.rows(&mut server);
+    assert_eq!(
+        shown[23],
+        format!("Restored {time}: exited (status 0); Enter restarts cat -")
+    );
+    drop(server);
+}
+
+/// A failed restart's status is this server's: the checkpoint writes the
+/// waiting pane with none, and a cold restore of a checkpoint that has one
+/// (a build before) drops it, so the next server's hint and
+/// `#{pane_dead_status}` say no restart failed.
+#[test]
+fn a_failed_restarts_status_does_not_survive_a_cold_restore() {
+    let (mut server, dir) = restored("status-restore", &[], &[]);
+    server.model.panes.get_mut(&PaneId(0)).unwrap().status =
+        Some(crate::jobs::JobStatus::Exited(127));
+    assert_eq!(
+        display(&mut server, &dir, "%0", "#{pane_dead_status}"),
+        "127"
+    );
+    let mut s = server.checkpoint_snapshot(Mode::Full);
+    assert!(s.panes[0].status.is_none(), "{:?}", s.panes[0].status);
+    s.panes[0].status = Some(snap::ExitStatus {
+        code: Some(127),
+        ..snap::ExitStatus::default()
+    });
+    let (l, socket) = listener(&dir, "s3");
+    let s = prepare(s, &ConfigSays::default(), &socket, &ServerConfig::default());
+    let mut again = rebuild(l, ServerConfig::default(), &s).unwrap();
+    assert_eq!(display(&mut again, &dir, "%0", "#{pane_dead_status}"), "");
+    assert_eq!(again.model.panes[&PaneId(0)].restored_from, Some(WRITTEN));
+    drop(again);
+    drop(server);
+}

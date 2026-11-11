@@ -1699,26 +1699,27 @@ fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
     });
     w.repid();
     client.keys(b"\r");
-    // The shell's status for an exec of a missing file: 127 from dash and
-    // bash 5, 126 from macOS's /bin/sh (bash 3.2: "cannot execute").
-    common::wait("the hint saying the restart failed", || {
-        let screen = client.screen();
-        [126, 127].iter().any(|s| {
-            screen.contains(&format!(
-                ": restart failed (status {s}); Enter restarts \"exec "
-            ))
-        })
+    // Whatever status and message the host's shell gives an exec of a
+    // missing file, the pane is dead and restored again, and the hint
+    // says the status it has.
+    common::wait("the restart failed", || {
+        w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]) != "\n"
     });
     assert_eq!(w.dead(), "%0=1 %1=1 ");
+    let status = w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]);
+    let status = status.trim_end();
+    assert_ne!(status, "0", "an exec of a missing file fails");
+    common::wait("the hint saying the restart failed", || {
+        client.screen().contains(&format!(
+            ": restart failed (status {status}); Enter restarts \"exec "
+        ))
+    });
     let rows = w.rows("a:0");
     let at = rows
         .iter()
         .position(|r| r == "precious output")
         .expect("kept");
     assert!(rows[at + 1].starts_with("restored "), "{rows:?}");
-    assert!(rows[at + 2].contains("prog"), "the shell's error: {rows:?}");
-    let status = w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]);
-    assert!(status == "127\n" || status == "126\n", "{status:?}");
     // The history too.
     let all = w.ok(&["capture-pane", "-p", "-S", "-", "-t", "a:0"]);
     assert_eq!(all.lines().filter(|l| *l == "old").count(), 26, "{all}");
@@ -1739,6 +1740,134 @@ fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
             && w.ok(&["display", "-p", "-t", "a:0", "#{pane_current_command}"]) == "cat\n"
     });
     w.echo("a:0", "again");
+}
+
+/// An editor's screen up at the checkpoint is kept cell for cell by the
+/// respawn (decision 31): `capture-pane -e` of its rows reads after it,
+/// and after a resize, what it read before (line drawing, an erased row's
+/// colour, a link going on past a line end, an id and URI with a
+/// backslash), and an attached client draws the line drawing as lines.
+#[test]
+fn an_editor_screen_is_kept_cell_for_cell_by_the_respawn() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["set", "-g", "status-right", "pinned"]);
+    let editor = w.dir.path().join("editor");
+    std::fs::write(
+        &editor,
+        b"\x1b[?1049h\x1b[H\x1b)0\x0elqqk\x0f plain\r\n\
+          \x1b(0mqqj\x1b(B\r\n\
+          \x1b[41m\x1b[K\x1b[m\r\n\
+          \x1b]8;;https://example.com/\x1b\\ONE\r\nTWO\x1b]8;;\x1b\\\r\n\
+          \x1b]8;id=a\\b;https://example.com/x\\y\x1b\\slash\x1b]8;;\x1b\\",
+    )
+    .unwrap();
+    let command = format!("cat '{}'; exec cat -", editor.display());
+    w.ok(&["respawn-pane", "-k", "-t", "a:0", &command]);
+    common::wait("the editor's screen", || {
+        w.rows("a:0").iter().any(|r| r == "slash")
+    });
+    let capture = |w: &World| w.ok(&["capture-pane", "-e", "-p", "-S", "-", "-t", "a:0"]);
+    let before: String = capture(&w).split_inclusive('\n').take(6).collect();
+    assert!(before.contains("\x0elqqk\x0f"), "{before:?}");
+    w.wait_saved();
+    w.kill_9();
+    let client = Attached::new(&w, &["attach", "-t", "a"]);
+    common::wait("the hint over the restored pane", || {
+        client.screen().contains(": Enter restarts ")
+    });
+    w.repid();
+    // Into another program: the saved command would draw the screen anew.
+    w.ok(&["respawn-pane", "-t", "a:0", "cat", "-"]);
+    assert_eq!(w.dead(), "%0=0 ");
+    for size in ["80", "60"] {
+        w.ok(&["resize-window", "-t", "a", "-x", size]);
+        let after = capture(&w);
+        let at = after.find("\x0elqqk").expect("the copied rows");
+        assert!(after[at..].starts_with(&before), "{before:?} in {after:?}");
+        assert!(
+            after[at + before.len()..].contains("restored "),
+            "{after:?}"
+        );
+    }
+    common::wait("the client drawing the lines", || {
+        let screen = client.screen();
+        screen.contains("┌──┐ plain") && screen.contains("\n└──┘ ")
+    });
+}
+
+/// The SIGSTOP and SIGCONT of process `pid`, CONT again when dropped (a
+/// failed assertion must not leave the server stopped for the teardown).
+struct Stopped(rustix::process::Pid);
+
+impl Stopped {
+    fn new(pid: rustix::process::Pid) -> Self {
+        rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+        Self(pid)
+    }
+}
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        let _ = rustix::process::kill_process(self.0, rustix::process::Signal::CONT);
+    }
+}
+
+/// No time decides a restart that does not run (decision 31): a
+/// restarted program given no input whose exit the server takes in long
+/// after it (the server stopped from before the exit until 2.5 s after,
+/// as a stalled loop, a slow `pipe-pane` or late reaping would) leaves
+/// the pane restored, its screen kept and the hint saying so, also with a
+/// live upgrade between its spawn and its exit; one typed into exits as
+/// tmux's, closing the pane under `remain-on-exit off`.
+#[test]
+fn a_restart_given_no_input_keeps_the_pane_however_late_its_exit_is_seen() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["set", "-g", "status-right", "pinned"]);
+    w.echo("a:0", "precious");
+    w.ok(&["new-window", "-d", "-t", "a:1", "cat", "-"]);
+    w.wait_saved();
+    w.kill_9();
+    let client = Attached::new(&w, &["attach", "-t", "a"]);
+    common::wait("the hint over the restored pane", || {
+        client.screen().contains(": Enter restarts cat -")
+    });
+    w.repid();
+    let go = w.dir.path().join("go");
+    let done = w.dir.path().join("done");
+    let script = format!(
+        "while [ ! -e '{}' ]; do sleep 0.02; done; : > '{}'; exit 3",
+        go.display(),
+        done.display()
+    );
+    w.ok(&["respawn-pane", "-t", "a:0", "sh", "-c", &script]);
+    assert_eq!(w.dead(), "%0=0 %1=1 ");
+    upgrade(&w);
+    {
+        let _stopped = Stopped::new(w.pid.expect("server pid"));
+        std::fs::write(&go, "").unwrap();
+        common::wait("the program at its exit", || done.exists());
+        // Past the 2 s a restart once had to run in, its exit unseen.
+        std::thread::sleep(Duration::from_millis(2500));
+    }
+    common::wait("the exit taken in", || {
+        w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]) == "3\n"
+    });
+    assert_eq!(w.dead(), "%0=1 %1=1 ");
+    let rows = w.rows("a:0");
+    assert_eq!(rows[..2], ["precious", "precious"], "{rows:?}");
+    assert!(rows[2].starts_with("restored "), "{rows:?}");
+    common::wait("the hint saying the restart failed", || {
+        client
+            .screen()
+            .contains(": restart failed (status 3); Enter restarts sh -c ")
+    });
+    // Typed into, the restarted program's end is an ordinary one.
+    w.ok(&["respawn-pane", "-t", "a:1"]);
+    w.echo("a:1", "typed");
+    w.ok(&["send-keys", "-t", "a:1", "C-d"]);
+    common::wait("the pane closed", || w.dead() == "%0=1 ");
 }
 
 /// The same for `respawn-pane` into a command that exits at once, under

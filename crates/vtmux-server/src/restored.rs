@@ -17,17 +17,11 @@ use vtmux_core::keys::Key;
 use vtmux_core::options::TreeId;
 use vtmux_core::style::CellStyle;
 use vtmux_core::styled;
-use vtmux_vt::{CaptureOpts, Cell, ExtendedKeys, LineRef, PaneTerm, Row, Style};
+use vtmux_vt::{Cell, ExtendedKeys, PaneTerm, Row, RowCopy, Style};
 
 use crate::model::Pane;
 use crate::server::{ClientId, PaneSpawn, Server, spawn_failed};
 use crate::target::Found;
-
-/// How long the program a restored pane was respawned into must run for
-/// its exit to be an ordinary one (decision 31, *A restart that does not
-/// run*): a missing binary or shell, or a command that fails at once,
-/// exits well within it.
-pub(crate) const RESTART_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// `vtmux-persist-respawn`'s values (decision 32).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,11 +65,14 @@ impl Server {
     /// is about to decide): true when the pane stays as it is, whatever
     /// `remain-on-exit` says (decision 31, *A restart that does not run*).
     /// A pane still waiting as restored stays; one respawned from a
-    /// restored pane whose program ran less than [`RESTART_GRACE`] goes
-    /// back to waiting: dead, restored from the same checkpoint, its
-    /// screen (the old one, the marker, what the program wrote) kept,
-    /// `pane-died` fired as for a pane `remain-on-exit` keeps, no dead
-    /// line written (the hint says the restart failed).
+    /// restored pane whose program was given no input
+    /// (`Pane::restart_guard`) goes back to waiting: dead, restored from
+    /// the same checkpoint, its screen (the old one, the marker, what the
+    /// program wrote) kept, `pane-died` fired as for a pane
+    /// `remain-on-exit` keeps, no dead line written (the hint says the
+    /// restart failed). No time decides it, so no stall of the loop, slow
+    /// `pipe-pane` or late reaping between the exit and this can close
+    /// the pane.
     pub(crate) fn keep_restored(&mut self, p: PaneId) -> bool {
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return false;
@@ -83,12 +80,9 @@ impl Server {
         if pane.restored_from.is_some() {
             return true;
         }
-        let Some((from, at)) = pane.restart_guard.take() else {
+        let Some(from) = pane.restart_guard.take() else {
             return false;
         };
-        if at.elapsed() >= RESTART_GRACE {
-            return false;
-        }
         pane.restored_from = Some(from);
         pane.dead_time = Some(crate::model::now_epoch());
         self.fire_pane_exit("pane-died", p);
@@ -115,7 +109,9 @@ impl Server {
     /// (server-fn.c `server_destroy_pane` draws nothing for it). Every
     /// column is the line's. After a restart that did not run (its status
     /// known), `Restored <time>: restart failed (status N); Enter restarts
-    /// <command>`.
+    /// <command>` (`exited (status 0)` for a success). On a pane too narrow
+    /// for `Enter restarts` after them, the time goes, then the failure;
+    /// the command is clipped.
     fn restored_hint(&self, p: PaneId, from: i64) -> Option<Vec<styled::Cell>> {
         let pane = &self.model.panes[&p];
         let sx = usize::from(pane.term.cols());
@@ -144,6 +140,7 @@ impl Server {
                 command
             };
             let failed = match pane.status {
+                Some(crate::jobs::JobStatus::Exited(0)) => "exited (status 0); ".to_owned(),
                 Some(crate::jobs::JobStatus::Exited(n)) => format!("restart failed (status {n}); "),
                 Some(crate::jobs::JobStatus::Signaled(n)) => {
                     format!("restart failed (signal {n}); ")
@@ -151,11 +148,17 @@ impl Server {
                 _ => String::new(),
             };
             // `#[...]` in a command is text, not a style.
-            format!(
-                "Restored {}: {failed}Enter restarts {}",
-                self.restored_time(from),
-                command.replace('#', "##")
-            )
+            let enter = format!("Enter restarts {}", command.replace('#', "##"));
+            let time = format!("Restored {}: ", self.restored_time(from));
+            // ASCII: one column a byte.
+            let fits = |head: &str| head.len() + "Enter restarts".len() <= sx;
+            if fits(&format!("{time}{failed}")) {
+                format!("{time}{failed}{enter}")
+            } else if fits(&failed) {
+                format!("{failed}{enter}")
+            } else {
+                enter
+            }
         };
         let under = vec![
             styled::Cell {
@@ -362,7 +365,7 @@ impl Server {
         pane.dead_time = None;
         pane.changed = true;
         pane.restored_from = None;
-        pane.restart_guard = Some((from, Instant::now()));
+        pane.restart_guard = Some(from);
         pane.io = fresh.io;
         pane.empty = fresh.empty;
         pane.last_rename = fresh.last_rename;
@@ -380,45 +383,25 @@ impl Server {
 /// visible rows taken when it is up; an ordinary respawn's resets without
 /// the clear and the cursor's homing (leaving the alternate screen
 /// resizes the main one to the pane, as tmux's `screen_alternate_off`);
-/// the rows appended below the main screen's last occupied row; `marker`
-/// dim, hard and clipped to the width on the row below them (the top row
-/// of a blank screen); the cursor at the start of the next row, a line
-/// feed scrolling at the bottom.
+/// the rows appended below the main screen's last occupied row (blank
+/// lines fed, then the rows put over them cell for cell,
+/// `PaneTerm::put_rows`); `marker` dim, hard and clipped to the width on
+/// the row below them (the top row of a blank screen); the cursor at the
+/// start of the next row, a line feed scrolling at the bottom.
 fn keep_screen(term: &mut PaneTerm, extended_keys: ExtendedKeys, marker: &str) {
-    // The alternate screen's visible rows as `capture-pane -e -J` gives
-    // them: styles, charsets and links, a wrapped row joined to the next
-    // so the main screen (the same width) wraps it again.
-    let alternate: Option<Vec<u8>> = term
-        .alternate_on()
-        .then(|| {
-            let h = term.history_size();
-            let used = term
-                .rows_in(h..h + usize::from(term.rows()))
-                .collect::<Vec<_>>()
-                .iter()
-                .rposition(row_occupied)?;
-            let captured = vtmux_vt::capture(
-                term,
-                CaptureOpts {
-                    escapes: true,
-                    join: true,
-                    start: LineRef::Line(0),
-                    end: LineRef::Line(i64::try_from(used).ok()?),
-                    ..CaptureOpts::default()
-                },
-            );
-            let captured = captured.strip_suffix(b"\n").unwrap_or(&captured);
-            let mut out = Vec::with_capacity(captured.len() + 16);
-            for (i, line) in captured.split(|&b| b == b'\n').enumerate() {
-                if i > 0 {
-                    out.extend_from_slice(b"\r\n");
-                }
-                out.extend_from_slice(line);
-            }
-            out.extend_from_slice(b"\x1b[m\x0f\x1b]8;;\x1b\\");
-            Some(out)
-        })
-        .flatten();
+    // The alternate screen's visible rows down to its last occupied one,
+    // cell for cell: text, widths, styles (an erase's coloured blanks
+    // too), links with their ids, the line-drawing set, the row flags.
+    let alternate: Option<RowCopy> = term.alternate_on().then(|| {
+        let h = term.history_size();
+        let used = term
+            .rows_in(h..h + usize::from(term.rows()))
+            .collect::<Vec<_>>()
+            .iter()
+            .rposition(row_occupied)
+            .map_or(0, |y| y + 1);
+        term.copy_rows(0..used)
+    });
     term.reset_input();
     term.stop_sync();
     term.reset_kitty_keys();
@@ -453,7 +436,10 @@ fn keep_screen(term: &mut PaneTerm, extended_keys: ExtendedKeys, marker: &str) {
     let mut marker_row = b"\x1b[2m".to_vec();
     marker_row.extend_from_slice(marker.as_bytes());
     marker_row.extend_from_slice(b"\x1b[m");
-    for line in alternate.iter().chain(std::iter::once(&marker_row)) {
+    // A blank line for each copied row, written over once they are there.
+    let copied = alternate.as_ref().map_or(0, RowCopy::len);
+    let blanks = std::iter::repeat_n(&[][..], copied);
+    for line in blanks.chain(std::iter::once(&marker_row[..])) {
         if !std::mem::take(&mut first) {
             bytes.extend_from_slice(b"\r\n");
         }
@@ -464,6 +450,17 @@ fn keep_screen(term: &mut PaneTerm, extended_keys: ExtendedKeys, marker: &str) {
     let _ = term.take_replies();
     drop(term.take_passthrough());
     term.take_events();
+    if let Some(rows) = alternate.filter(|r| !r.is_empty()) {
+        // The marker is on the row above the cursor, the copy above it.
+        let top = isize::try_from(usize::from(term.cursor().1)).unwrap_or(0)
+            - 1
+            - isize::try_from(copied).unwrap_or(0);
+        // A copy the screen does not take (it cannot happen: the same
+        // width, the primary screen) leaves blank rows, never a pane lost.
+        let _ = term.put_rows(&rows, top);
+        let _ = term.take_replies();
+        term.take_events();
+    }
 }
 
 /// Whether a row of a restored pane's screen was written (decision 31): a
@@ -533,6 +530,8 @@ mod tests {
     /// The alternate screen's rows keep what `capture-pane -J` and `-e`
     /// read of them (cmd-capture-pane.c `cmd_capture_pane_history`): a
     /// soft wrap (`GRID_LINE_WRAPPED`) and a hyperlink with its id.
+    /// (Replayed as `capture -e -J` text they lost the line-drawing set,
+    /// erased cells' colours and a link past a row's end: the next test.)
     #[test]
     fn an_alternate_screen_keeps_its_wraps_and_links() {
         let mut t = PaneTerm::new(10, 5, 100);
@@ -559,5 +558,82 @@ mod tests {
             all.contains("abcdefghij\x1b]8;id=x;https://example.com/\x1b\\ABCDEFGHIJ"),
             "{all:?}"
         );
+    }
+
+    /// `capture-pane -e` of the whole of `t` with its history.
+    fn captured(t: &PaneTerm) -> String {
+        let all = vtmux_vt::capture(
+            t,
+            vtmux_vt::CaptureOpts {
+                escapes: true,
+                start: vtmux_vt::LineRef::Start,
+                ..vtmux_vt::CaptureOpts::default()
+            },
+        );
+        String::from_utf8_lossy(&all).into_owned()
+    }
+
+    /// The alternate screen's rows are copied cell for cell: `capture-pane
+    /// -e` of them after the respawn is what it was before (DEC line
+    /// drawing still drawn from G1 and marked as tmux's ACS, an `EL`-erased
+    /// row still red to its end, a coloured tail after text, a link that
+    /// goes on past a hard line end still on the second row, an id with a
+    /// backslash as it was given), and the same holds after a resize
+    /// reflows them.
+    #[test]
+    fn an_alternate_screen_is_copied_cell_for_cell() {
+        let editor: &[u8] = b"\x1b[?1049h\x1b[H\x1b)0\x0elqqk\x0f plain\r\n\
+            \x1b[41m\x1b[K\x1b[m\r\n\
+            RED\x1b[44m\x1b[K\x1b[m\r\n\
+            \x1b]8;;https://example.com/\x1b\\ONE\r\nTWO\x1b]8;;\x1b\\\r\n\
+            \x1b]8;id=a\\b;https://example.com/x\\y\x1b\\slash\x1b]8;;\x1b\\";
+        let mut alt = PaneTerm::new(20, 10, 100);
+        alt.feed(editor);
+        let before = captured(&alt);
+        let mut t = PaneTerm::new(20, 10, 100);
+        t.feed(b"$ vi\r\n");
+        t.feed(editor);
+        keep_screen(&mut t, ExtendedKeys::Off, "restored 2026-11-11 09:00");
+        let rows: Vec<String> = t.rows_in(0..10).map(|r| r.text()).collect();
+        assert_eq!(rows[0], "$ vi");
+        assert!(rows[7].starts_with("restored"), "{rows:?}");
+        let after = captured(&t);
+        let copied = after
+            .split_once('\n')
+            .and_then(|(_, rest)| rest.rsplit_once("\x1b[2mrestored"))
+            .map(|(rows, _)| rows.to_owned())
+            .expect("the copy between the prompt and the marker");
+        let before_rows: String = before.split_inclusive('\n').take(6).collect();
+        assert_eq!(copied, before_rows, "{after:?}");
+        assert!(copied.contains("\x0elqqk\x0f"), "{copied:?}");
+        assert!(t.row(1).cells[0].acs, "the line-drawing set");
+        assert_eq!(t.row(2).cells[19].style.bg, alt.row(1).cells[19].style.bg);
+        assert_eq!(t.hyperlink(0, 5).as_deref(), Some("https://example.com/"));
+        // `capture -e` writes a backslash of the id and URI as `\\`, as
+        // before the respawn: one backslash in the cells.
+        assert!(
+            copied.contains("id=a\\\\b;https://example.com/x\\\\y\x1b\\slash"),
+            "{copied:?}"
+        );
+        // Reflowed by a resize, the rows keep their cells.
+        t.resize(30, 10);
+        let wider = captured(&t);
+        assert!(wider.contains("\x0elqqk\x0f"), "{wider:?}");
+        assert!(
+            wider.contains("id=a\\\\b;https://example.com/x\\\\y"),
+            "{wider:?}"
+        );
+        let h = t.history_size();
+        let row = |text: &str| {
+            (0..h + 10)
+                .find(|&y| t.row(y).text() == text)
+                .unwrap_or_else(|| panic!("{text:?} in {wider:?}"))
+        };
+        assert_eq!(
+            t.hyperlink(0, row("TWO")).as_deref(),
+            Some("https://example.com/")
+        );
+        let red = t.row(row("RED"));
+        assert_eq!(red.cells[19].style.bg, alt.row(2).cells[19].style.bg);
     }
 }

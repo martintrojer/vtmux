@@ -60,13 +60,13 @@ pub fn exec(server: &mut Server, args: &Args, found: Found) -> Result<(), CmdErr
         if bracket {
             out.extend_from_slice(b"\x1b[201~");
         }
-        if let Some(io) = server
-            .model
-            .panes
-            .get_mut(&p)
-            .and_then(|pane| pane.io.as_mut())
+        if let Some(pane) = server.model.panes.get_mut(&p)
+            && let Some(io) = pane.io.as_mut()
         {
             io.write(&out);
+            if !out.is_empty() {
+                pane.took_input();
+            }
         }
         server.pane_output_queued(p);
     }
