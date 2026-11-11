@@ -1699,10 +1699,15 @@ fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
     });
     w.repid();
     client.keys(b"\r");
+    // The shell's status for an exec of a missing file: 127 from dash and
+    // bash 5, 126 from macOS's /bin/sh (bash 3.2: "cannot execute").
     common::wait("the hint saying the restart failed", || {
-        client
-            .screen()
-            .contains(": restart failed (status 127); Enter restarts \"exec ")
+        let screen = client.screen();
+        [126, 127].iter().any(|s| {
+            screen.contains(&format!(
+                ": restart failed (status {s}); Enter restarts \"exec "
+            ))
+        })
     });
     assert_eq!(w.dead(), "%0=1 %1=1 ");
     let rows = w.rows("a:0");
@@ -1712,10 +1717,8 @@ fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
         .expect("kept");
     assert!(rows[at + 1].starts_with("restored "), "{rows:?}");
     assert!(rows[at + 2].contains("prog"), "the shell's error: {rows:?}");
-    assert_eq!(
-        w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]),
-        "127\n"
-    );
+    let status = w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]);
+    assert!(status == "127\n" || status == "126\n", "{status:?}");
     // The history too.
     let all = w.ok(&["capture-pane", "-p", "-S", "-", "-t", "a:0"]);
     assert_eq!(all.lines().filter(|l| *l == "old").count(), 26, "{all}");
@@ -1724,6 +1727,17 @@ fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
     std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
     client.keys(b"\r");
     common::wait("the pane respawned", || w.dead() == "%0=0 %1=1 ");
+    // The script prints its lines before it execs cat: a key typed earlier
+    // is echoed among them and scrolls off the screen.
+    common::wait("the program's output again", || {
+        w.rows("a:0").last().is_some_and(String::is_empty)
+            && w.rows("a:0")
+                .iter()
+                .filter(|r| *r == "precious output")
+                .count()
+                == 1
+            && w.ok(&["display", "-p", "-t", "a:0", "#{pane_current_command}"]) == "cat\n"
+    });
     w.echo("a:0", "again");
 }
 
