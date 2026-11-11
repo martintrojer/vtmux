@@ -2530,7 +2530,8 @@ impl PaneTerm {
             self.enable_graphics(screen);
         }
         self.graphics_reply.set(true);
-        self.feed_piece(end);
+        let limit = self.graphics_storage(screen == 1).1;
+        crate::graphics::with_png_budget(limit, || self.feed_piece(end));
         self.graphics_reply.set(false);
     }
 

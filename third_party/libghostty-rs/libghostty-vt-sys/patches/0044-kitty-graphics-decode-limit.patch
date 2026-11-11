@@ -1,7 +1,16 @@
 diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
 --- a/src/terminal/kitty/graphics_exec.zig
 +++ b/src/terminal/kitty/graphics_exec.zig
-@@ -1060,12 +1060,17 @@ fn vtmuxInit(
+@@ -184,6 +184,8 @@ fn query(
+         return result;
+     };
+     defer loading.deinit(alloc);
++    // vtmux patch 0044: a query decodes to no more than a load may.
++    loading.vtmux_limit = storage.total_limit;
+ 
+     var img = loading.complete(alloc) catch |err| {
+         encodeError(&result, err);
+@@ -1060,12 +1062,17 @@ fn vtmuxInit(
      cmd: *const Command,
  ) !LoadingImage {
      const t = cmd.transmission().?;
@@ -61,7 +70,7 @@ diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics
          };
  
          self.data.deinit(alloc);
-@@ -691,15 +703,21 @@ pub const LoadingImage = struct {
+@@ -691,30 +703,35 @@ pub const LoadingImage = struct {
          const decode_png_fn = sys.decode_png orelse
              return error.UnsupportedFormat;
  
@@ -86,3 +95,23 @@ diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics
              else
                  return error.OutOfMemory,
          };
+-        defer decode_alloc.free(result.data);
+-
+         if (result.data.len > max_size) {
++            decode_alloc.free(result.data);
+             log.warn("png image too large size={} max_size={}", .{ result.data.len, max_size });
+             return error.InvalidData;
+         }
+ 
+-        // Replace our data
++        // Replace our data. vtmux patch 0044: with the decoder's buffer,
++        // not a copy (the limited allocator allocates from `alloc`), so
++        // the image costs its size once.
+         self.data.deinit(alloc);
+-        self.data = .empty;
+-        try self.data.ensureUnusedCapacity(alloc, result.data.len);
+-        try self.data.appendSlice(alloc, result.data[0..result.data.len]);
++        self.data = .fromOwnedSlice(result.data);
+ 
+         // Store updated image dimensions
+         self.image.width = result.width;

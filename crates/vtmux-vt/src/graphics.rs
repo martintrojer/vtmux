@@ -711,8 +711,23 @@ pub fn free_range(first: u32, last: u32) -> Vec<u8> {
 struct PngDecoder;
 
 /// The largest image a PNG may decode to, in bytes (kitty's own cap is
-/// 400 MB; Ghostty's storage limit applies after).
+/// 400 MB; the screen's limit is lower).
 const PNG_LIMIT: usize = 400_000_000;
+
+thread_local! {
+    /// The limit of the screen a graphics command runs on, while it runs
+    /// ([`with_png_budget`]): what a PNG may cost to decode.
+    static PNG_BUDGET: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f`, a graphics command on a screen limited to `limit` bytes:
+/// the PNG it decodes, if any, costs no more.
+pub(crate) fn with_png_budget<R>(limit: u64, f: impl FnOnce() -> R) -> R {
+    let old = PNG_BUDGET.replace(usize::try_from(limit).unwrap_or(usize::MAX));
+    let r = f();
+    PNG_BUDGET.set(old);
+    r
+}
 
 impl kg::DecodePng for PngDecoder {
     fn decode_png<'alloc>(
@@ -722,8 +737,9 @@ impl kg::DecodePng for PngDecoder {
     ) -> Option<kg::DecodedImage<'alloc>> {
         // Ghostty's allocator refuses what the screen's limit could not
         // store (patch 0044), before anything is decoded.
-        let (width, height, data) =
-            decode_png_into(data, |len| Bytes::new_with_alloc(alloc, len).ok())?;
+        let (width, height, data) = decode_png_into(data, PNG_BUDGET.get(), |len| {
+            Bytes::new_with_alloc(alloc, len).ok()
+        })?;
         Some(kg::DecodedImage {
             width,
             height,
@@ -732,50 +748,60 @@ impl kg::DecodePng for PngDecoder {
     }
 }
 
-/// A PNG as 8-bit RGBA, in `out(len)`: asked for once the header gives
-/// the size, before decoding, so a size `out` refuses costs nothing more.
+/// The size a PNG's header names: its first chunk, IHDR (PNG §11.2.2).
+/// The decoder checks the rest.
+fn png_size(data: &[u8]) -> Option<(u32, u32)> {
+    let ihdr = data.get(12..24)?;
+    let be = |b: &[u8]| Some(u32::from_be_bytes(b.try_into().ok()?));
+    (&ihdr[..4] == b"IHDR").then_some(())?;
+    Some((be(&ihdr[4..8])?, be(&ihdr[8..])?))
+}
+
+/// A PNG as 8-bit RGBA, in `out(len)`, costing no more than `budget`
+/// bytes in all. The size is asked for from the header, before the
+/// decoder exists, so a size `out` refuses costs nothing more (and Ghostty
+/// answers `ENOMEM`, patch 0044); the decoder gets what is left, and ignores the chunks that are not the image (an
+/// ICC profile or text could inflate a few KB to the whole budget).
 fn decode_png_into<B: std::ops::DerefMut<Target = [u8]>>(
     data: &[u8],
+    budget: usize,
     out: impl FnOnce(usize) -> Option<B>,
 ) -> Option<(u32, u32, B)> {
     use png::{ColorType, Transformations};
-    let mut d =
-        png::Decoder::new_with_limits(std::io::Cursor::new(data), png::Limits { bytes: PNG_LIMIT });
-    d.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
-    let mut r = d.read_info().ok()?;
-    // The size its header names, as RGBA, before anything is allocated:
-    // the decoder's limit leaves out the frame it decodes into.
-    let (width, height) = r.info().size();
+    let (width, height) = png_size(data)?;
     let rgba = usize::try_from(u64::from(width) * u64::from(height) * 4).ok()?;
     if rgba > PNG_LIMIT {
         return None;
     }
     let mut pixels = out(rgba)?;
-    // At most as large: 8-bit, at most 4 channels after the transformations.
-    let mut buf = vec![0; r.output_buffer_size()?];
-    let info = r.next_frame(&mut buf).ok()?;
+    let left = budget.min(PNG_LIMIT).saturating_sub(rgba);
+    let mut d =
+        png::Decoder::new_with_limits(std::io::Cursor::new(data), png::Limits { bytes: left });
+    d.set_ignore_iccp_chunk(true);
+    d.set_ignore_text_chunk(true);
+    d.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
+    let mut r = d.read_info().ok()?;
+    if r.info().size() != (width, height) || r.output_buffer_size()? > rgba {
+        return None;
+    }
+    // Decoded into the front of the image's own buffer (8-bit, at most 4
+    // channels after the transformations), then spread to RGBA in place
+    // from the last pixel back, which never overwrites a pixel not read.
+    let info = r.next_frame(&mut pixels).ok()?;
     if (info.width, info.height) != (width, height) {
         return None;
     }
-    let buf = &buf[..info.buffer_size()];
-    let px = pixels.as_chunks_mut::<4>().0.iter_mut();
+    let spread = |pixels: &mut [u8], n: usize, f: fn(&[u8]) -> [u8; 4]| {
+        for i in (0..rgba / 4).rev() {
+            let p = f(&pixels[i * n..i * n + n]);
+            pixels[i * 4..i * 4 + 4].copy_from_slice(&p);
+        }
+    };
     match info.color_type {
-        ColorType::Rgba => pixels.copy_from_slice(buf),
-        ColorType::Rgb => {
-            for (p, &[r, g, b]) in px.zip(buf.as_chunks::<3>().0) {
-                *p = [r, g, b, 255];
-            }
-        }
-        ColorType::GrayscaleAlpha => {
-            for (p, &[v, a]) in px.zip(buf.as_chunks::<2>().0) {
-                *p = [v, v, v, a];
-            }
-        }
-        ColorType::Grayscale => {
-            for (p, &v) in px.zip(buf) {
-                *p = [v, v, v, 255];
-            }
-        }
+        ColorType::Rgba => {}
+        ColorType::Rgb => spread(&mut pixels, 3, |p| [p[0], p[1], p[2], 255]),
+        ColorType::GrayscaleAlpha => spread(&mut pixels, 2, |p| [p[0], p[0], p[0], p[1]]),
+        ColorType::Grayscale => spread(&mut pixels, 1, |p| [p[0], p[0], p[0], 255]),
         ColorType::Indexed => return None,
     }
     Some((width, height, pixels))
@@ -784,7 +810,7 @@ fn decode_png_into<B: std::ops::DerefMut<Target = [u8]>>(
 /// [`decode_png_into`] a `Vec`.
 #[cfg(test)]
 fn decode_png(data: &[u8]) -> Option<Pixels> {
-    let (width, height, data) = decode_png_into(data, |len| Some(vec![0; len]))?;
+    let (width, height, data) = decode_png_into(data, PNG_LIMIT, |len| Some(vec![0; len]))?;
     Some(Pixels {
         width,
         height,
@@ -912,8 +938,10 @@ mod tests {
         assert_eq!(rgb.data, [1, 2, 3, 255, 4, 5, 6, 255]);
         let gray = decode_png(&encode(png::ColorType::Grayscale, &[9, 8])).unwrap();
         assert_eq!(gray.data, [9, 9, 9, 255, 8, 8, 8, 255]);
+        let ga = decode_png(&encode(png::ColorType::GrayscaleAlpha, &[9, 1, 8, 2])).unwrap();
+        assert_eq!(ga.data, [9, 9, 9, 1, 8, 8, 8, 2]);
         let rgba = decode_png(&encode(png::ColorType::Rgba, &[1, 2, 3, 4, 5, 6, 7, 8])).unwrap();
-        assert_eq!((rgba.width, rgba.height, rgba.data.len()), (2, 1, 8));
+        assert_eq!(rgba.data, [1, 2, 3, 4, 5, 6, 7, 8]);
         assert!(decode_png(b"not a png").is_none());
     }
 
