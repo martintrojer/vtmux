@@ -55,13 +55,18 @@
 //! old one did.
 //!
 //! Restored panes come back dead (`#{pane_dead}` 1, exit status unknown:
-//! `JobStatus::Unknown`), showing `remain-on-exit-format`'s dead line
-//! (server-fn.c `server_destroy_pane`) on their saved screen: empty for
-//! `layout`; for `full`, the screen and history pane terminal state
-//! carries, which `snapshot::restore_term` imports (the hook
-//! `lu_pane_state` fills). `respawn-pane` and `respawn-window` start the
-//! saved command in the saved cwd, as for any dead pane. Nothing is
-//! relaunched by itself (decision 8).
+//! `JobStatus::Unknown`) on their saved screen: empty for `layout`; for
+//! `full`, the screen and history pane terminal state carries, which
+//! `snapshot::restore_term` imports (the hook `lu_pane_state` fills). A
+//! pane that ran in the checkpoint is restored from it (decision 31,
+//! `Pane::restored_from`): its status is drawn over its last row by the
+//! renderer and respawning it keeps its screen ([`crate::restored`]); one
+//! dead there gets `remain-on-exit-format`'s dead line in its grid
+//! (server-fn.c `server_destroy_pane`) unless its saved screen holds it.
+//! `respawn-pane` and `respawn-window` start the saved command in the
+//! saved cwd; Enter does too under `vtmux-persist-respawn key`, and
+//! `auto` respawns the restored shells once the config has run
+//! (decision 32).
 
 use std::io;
 use std::os::fd::{AsFd as _, OwnedFd};
@@ -321,7 +326,14 @@ pub(crate) fn prepare(
     s.clients.clear();
     s.server.next_client = 0;
     apply_drop(&mut s, says);
+    // Decision 31: a pane whose program ran when the checkpoint was
+    // written is restored from it; one restored before and still waiting
+    // keeps the time it came with (*Respawning a restored pane*).
+    let written = s.meta.written_us.div_euclid(1_000_000);
     for p in &mut s.panes {
+        if !p.exited && !p.empty && p.restored_from.is_none() {
+            p.restored_from = Some(written);
+        }
         p.exited = true;
         p.status.get_or_insert_with(snap::ExitStatus::default);
         p.pid = 0;
@@ -387,6 +399,13 @@ pub(crate) fn rebuild(
         };
         if untitled {
             pane.term.set_title(&host);
+        }
+        if pane.restored_from.is_some() {
+            // Its status text is the renderer's, over its bottom row
+            // (`Server::refresh_restored_hints`), never in its grid.
+            pane.dead_time.get_or_insert_with(crate::model::now_epoch);
+            server.hide_restored_cursor(p);
+            continue;
         }
         if shown.contains(&p.0) {
             continue;
@@ -557,6 +576,9 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
             drop(fresh);
             match super::resume::guarded(|| rebuild(listener.try_clone()?, config.clone(), &s)) {
                 Ok(mut server) => {
+                    // A cold restore: `vtmux-persist-respawn auto` has its
+                    // pass once the config has run (`Server::cfg_done`).
+                    server.persist.auto_pass = crate::restored::AutoPass::Due;
                     server.persist.lock = Some((dir.clone(), lock));
                     // Its first checkpoint need not read back what this
                     // did (`crate::persist::Writer`).
@@ -593,5 +615,7 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
     Ok(fresh)
 }
 
+#[cfg(test)]
+mod respawn_tests;
 #[cfg(test)]
 mod tests;

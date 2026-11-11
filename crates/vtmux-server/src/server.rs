@@ -3309,6 +3309,8 @@ impl Server {
         // Work from here on (during the render or after it) is drawn by
         // the next render, so it is not "since the last render".
         self.rendered_work = self.turn_work;
+        // Restored panes' hints as the options say now (decision 31).
+        self.refresh_restored_hints();
         let attached: Vec<_> = self
             .clients
             .iter()
@@ -5060,6 +5062,11 @@ impl Server {
         self.config_sets = None;
         self.prompt_load_history();
         self.cfg_show_causes(None);
+        // Decision 32: once the config's queue is done, before the
+        // starting client's command.
+        if std::mem::take(&mut self.persist.auto_pass) == crate::restored::AutoPass::Due {
+            self.auto_respawn_restored();
+        }
         if let Some(step) = self.cfg_wait.take() {
             self.cmdq_continue(step);
         }
@@ -5607,6 +5614,8 @@ impl Server {
             shell_commands: crate::model::ShellCommands::default(),
             kitty_owner: [None; 2],
             graphics: crate::model::PaneGraphics::default(),
+            restored_from: None,
+            restored_hint: None,
         })
     }
 
@@ -5761,6 +5770,12 @@ impl Server {
     /// longer matches the pane, which now has the new pid.
     pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
         let p = ps.pane;
+        // Decision 31: a restored pane keeps its screen; `-E` keeps it
+        // restored and writes nothing (*Respawning a restored pane*).
+        let restored = self.model.panes.get(&p).and_then(|x| x.restored_from);
+        if let Some(from) = restored {
+            return self.respawn_restored_pane(ps, from);
+        }
         // The old process is hung up once the new PTY is made: while its
         // master is open, the new one cannot take its minor ([`hang_up`]).
         let old = self.model.panes.get_mut(&p).and_then(|pane| {

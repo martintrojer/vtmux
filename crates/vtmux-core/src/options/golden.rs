@@ -579,6 +579,35 @@ fn vtmux_graphics_limit_is_a_hidden_server_number() {
     assert!(!sim.take().contains(NAME));
 }
 
+/// `vtmux-persist-respawn` (D27, decision 32): a server choice, `key`
+/// until set, `off`, `key` or `auto`, hidden from listings until set.
+#[test]
+fn vtmux_persist_respawn_is_a_hidden_server_choice() {
+    const NAME: &str = "vtmux-persist-respawn";
+    let mut sim = Sim::new();
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+    for c in [
+        &["show", "-sv", NAME][..],
+        &["set", "-s", NAME, "auto"],
+        &["show", "-s", NAME],
+        &["set", "-s", NAME, "always"],
+        &["show", "-sv", NAME],
+        &["set", "-s", NAME, "off"],
+        &["show", "-sv", NAME],
+        &["set", "-su", NAME],
+        &["show", "-s", NAME],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        format!("key\n{NAME} auto\nunknown value: always\nauto\noff\n{NAME} key\n")
+    );
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+}
+
 /// `vtmux-persist` (D27, decision 17): a server option, `off` until set,
 /// `layout` or `full`, hidden from listings until set like every vtmux
 /// option.

@@ -2,6 +2,15 @@
 
 vtmux's version is the tmux release it is tested against: `3.8-beta2` is the second beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
+## Unreleased
+
+### New
+
+- **Restores you can pick up.** After a restart a restored pane shows its last screen with a hint over its bottom row; press Enter and its command starts again below that screen (a dim `restored <time>` row between), editors' screens included. `respawn-pane` does the same.
+  - `set -s vtmux-persist-respawn auto` restarts every restored shell at once, after the config; panes that ran anything else wait for Enter. `off` keeps panes dead until `respawn-pane`.
+  - `send-keys`, pastes and synchronized panes never restart one.
+  - The restored dead line is no longer written into the pane's screen: `capture-pane` and the next checkpoint show the saved screen as it was.
+
 ## 3.8-beta2
 
 ### New

@@ -186,6 +186,9 @@ pub struct Persist {
     writing: Option<(Writer, Print)>,
     /// How long a loop turn writes its chunks ([`STEP`]).
     pub(crate) step: Duration,
+    /// A cold restore's `vtmux-persist-respawn auto` pass, due once the
+    /// config has run ([`crate::restored`]).
+    pub(crate) auto_pass: crate::restored::AutoPass,
     /// Checkpoint snapshots built ([`Server::checkpoint_snapshot`]).
     #[cfg(test)]
     pub(super) built: u32,
@@ -206,6 +209,7 @@ impl Default for Persist {
             refused: false,
             writing: None,
             step: STEP,
+            auto_pass: crate::restored::AutoPass::Done,
             #[cfg(test)]
             built: 0,
         }

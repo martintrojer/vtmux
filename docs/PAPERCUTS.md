@@ -8,13 +8,13 @@ Long-standing tmux annoyances vtmux fixes without breaking compliance: each fix 
 | The cursor jumps around the screen under heavy output | each pane update written as it comes (tty.c `tty_cmd_*`) | One finished frame per client, inside synchronized output, the cursor placed once | always on |
 | Big scrollback costs so much RAM that people keep `history-limit` low | tmux #3352, #3194, #4859 | Quiet history is compressed: 1M lines settle at 103 MB against tmux's 622 MB | always on |
 | Upgrading kills every session | tmux FAQ, "protocol version mismatch" (client.c `client_dispatch_wait`) | Live upgrade: the server moves onto the new binary, panes and clients stay | `tmux vtmux-upgrade -b <binary>` |
-| A crash or reboot loses every session; tmux-resurrect brings back the layout and a guess at the commands | the same FAQ; tmux-resurrect | Restore with screens and scrollback, panes dead until `respawn-pane` | `set -s vtmux-persist full` |
+| A crash or reboot loses every session; tmux-resurrect brings back the layout and a guess at the commands | the same FAQ; tmux-resurrect | Restore with screens and scrollback; Enter restarts a pane below its old screen, or every shell restarts at once | `set -s vtmux-persist full` |
 
 Terminal protocols tmux 3.8 drops (kitty keys, notifications, in-band resize, kitty graphics) are listed with the options below.
 
 ## vtmux options
 
-All are off until set and invisible to scripts while unset. Guard them with `%if "#{vtmux_version}"` so the same `.tmux.conf` loads in real tmux:
+All are off until set (`vtmux-persist-respawn` acts only on restored panes) and invisible to scripts while unset. Guard them with `%if "#{vtmux_version}"` so the same `.tmux.conf` loads in real tmux:
 
 ```tmux
 %if "#{vtmux_version}"
@@ -28,6 +28,7 @@ set -s vtmux-persist full
 | `vtmux-pane-inactive-blend` | window | `fg=<colour>[/<pct>],bg=<colour>[/<pct>]` | Blends every cell of the window's inactive panes toward the colours (`/pct` 0-100, default 100). `fg` and `bg` as colours are the outer terminal's defaults. `fg=bg/25,bg=bg/25` dims like Ghostty's `unfocused-split-opacity = 0.75`. |
 | `vtmux-pane-active-blend` | window | as above | The same, for the active pane. |
 | `vtmux-persist` | server | `off`, `layout`, `full` | Checkpoints the server to `$XDG_STATE_HOME/vtmux/` (default `~/.local/state`, private to you) on a clean exit and every 60 s while something changed. A server starting on that socket restores it before the config runs, every pane dead. `layout`: sessions, windows, layout, each pane's command and directory, options and key bindings. `full` adds screens, scrollback, titles and paste buffers. A checkpoint that can't be read leaves a fresh server and says why in `show-messages`. |
+| `vtmux-persist-respawn` | server | `off`, `key` (default), `auto` | What restarts a restored pane. `key`: Enter typed in it (not `send-keys`); a hint over its last row says so. `auto`: also every restored shell at once after a restart, once the config has run; panes that ran another command wait for Enter. `off`: only `respawn-pane`. A restarted pane keeps its old screen above a dim `restored <time>` row. |
 | `vtmux-persist-drop` | session | globs | User options not restored, e.g. `set -g vtmux-persist-drop '@murmur_*'` so a tool's state for panes that are now dead doesn't come back. |
 | `vtmux-kitty-keys` | server | `off`, `on` | A program that asks for the kitty keyboard protocol gets kitty-encoded keys, typed or sent with `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as before. |
 | `vtmux-notifications` | server | `off`, `on` | A pane's desktop notifications (OSC 9, OSC 777) reach attached Ghostty clients, from any window and from `display-popup -E` programs, at Ghostty's own rate limits. No `allow-passthrough` needed. |

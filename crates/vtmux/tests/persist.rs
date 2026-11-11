@@ -629,6 +629,7 @@ impl World {
 struct Attached {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    writer: Box<dyn std::io::Write + Send>,
     _master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
@@ -671,11 +672,20 @@ impl Attached {
                 sink.lock().unwrap().extend_from_slice(&buf[..n]);
             }
         });
+        let writer = pair.master.take_writer().unwrap();
         Self {
             child,
             bytes,
+            writer,
             _master: pair.master,
         }
+    }
+
+    /// Type `bytes` on its terminal.
+    fn keys(&mut self, bytes: &[u8]) {
+        use std::io::Write as _;
+        self.writer.write_all(bytes).unwrap();
+        self.writer.flush().unwrap();
     }
 
     /// The screen its output draws.
@@ -722,8 +732,8 @@ fn structure(w: &World) -> Vec<String> {
 
 /// `layout` checkpoint, `kill -9`, and a server started again restores
 /// it: the same sessions, windows, layout, ids and user options; every
-/// pane dead (status unknown) with its start command and cwd and the dead
-/// line on its screen. `list-sessions` does not start the server; any
+/// pane dead (status unknown) with its start command and cwd, nothing
+/// written on its screen. `list-sessions` does not start the server; any
 /// command that starts one restores first (decision 28).
 #[test]
 fn a_checkpoint_comes_back_after_kill_9() {
@@ -767,8 +777,10 @@ fn a_checkpoint_comes_back_after_kill_9() {
         "#{pane_id} #{pane_dead}[#{pane_dead_status}#{pane_dead_signal}] #{?pane_pid,pid,}",
     ]);
     assert_eq!(dead, "%0 1[] \n%1 1[] \n%2 1[] \n%3 1[] \n%4 1[] \n");
+    // A pane that ran is restored (decision 31): its status is drawn over
+    // its last row by the renderer, not written into its grid.
     assert!(
-        w.ok(&["capture-pane", "-p", "-t", "a:w1.0"])
+        !w.ok(&["capture-pane", "-p", "-t", "a:w1.0"])
             .contains("Pane is dead"),
     );
     assert!(
@@ -796,7 +808,9 @@ fn attach_with_no_server_restores_and_attaches() {
     let client = Attached::new(&w, &["attach", "-t", "a"]);
     common::wait("the attached client shows the restored pane", || {
         let screen = client.screen();
-        screen.contains("Pane is dead") && screen.contains("0:restored*")
+        screen.contains("Restored ")
+            && screen.contains("Enter restarts cat -")
+            && screen.contains("0:restored*")
     });
     w.repid();
     assert_eq!(w.ok(&["list-clients", "-F", "#{client_session}"]), "a\n");
@@ -827,13 +841,13 @@ impl World {
 }
 
 /// A `full` restore shows a pane's saved screen as it was, every row in
-/// place, with the dead line on its blank last row; the restored server's
-/// own checkpoint comes back the same, with no second dead line. (A
-/// `cat -` pane with line1 to line3 typed came back with its first row
-/// scrolled into history, and every restart scrolled it once more and
-/// stacked another dead line.)
+/// place and nothing written into it (its status is drawn over its last
+/// row, decision 31); the restored server's own checkpoint comes back the
+/// same. (A `cat -` pane with line1 to line3 typed came back with its
+/// first row scrolled into history, and every restart scrolled it once
+/// more and stacked another dead line.)
 #[test]
-fn a_full_restore_shows_the_saved_screen_and_one_dead_line() {
+fn a_full_restore_shows_the_saved_screen_as_it_was() {
     let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
     w.ok(&["set", "-s", "vtmux-persist", "full"]);
     for word in ["line1", "line2", "line3"] {
@@ -849,16 +863,12 @@ fn a_full_restore_shows_the_saved_screen_and_one_dead_line() {
     w.repid();
     let restored = w.shown("a");
     let (screen, history, all) = &restored;
-    let rows: Vec<&str> = screen.lines().collect();
-    assert_eq!(rows.len(), 24, "{screen}");
-    let saved_rows: Vec<&str> = saved.lines().collect();
-    assert_eq!(&rows[..23], &saved_rows[..23], "{screen}");
-    assert!(rows[23].starts_with("Pane is dead (, "), "{screen}");
+    assert_eq!(screen, &saved);
     assert_eq!(history, "0\n");
     assert_eq!(all, screen);
 
     // The restored server checkpoints the dead pane on its way out; the
-    // next start shows it as it was, its dead line drawn once.
+    // next start shows it as it was.
     w.kill_server();
     w.ok(&["start-server"]);
     w.repid();
@@ -1490,4 +1500,164 @@ fn upgrade(w: &World) {
         ),
         "{answer:?}"
     );
+}
+
+// Respawning a restored pane (decisions 31 and 32, *Respawning a restored
+// pane*).
+
+impl World {
+    /// `pane`'s visible rows.
+    fn rows(&self, pane: &str) -> Vec<String> {
+        self.ok(&["capture-pane", "-p", "-t", pane])
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// `#{pane_dead}` of every pane, in order.
+    fn dead(&self) -> String {
+        self.ok(&["list-panes", "-a", "-F", "#{pane_id}=#{pane_dead}"])
+            .replace('\n', " ")
+    }
+
+    /// Wait until `client`'s keys so far have been handled: a key bound
+    /// to set a user option goes after them.
+    fn keys_handled(&self, client: &mut Attached, n: u32) {
+        self.ok(&["bind", "-n", "F12", "set", "-g", "@k", &n.to_string()]);
+        client.keys(b"\x1b[24~");
+        common::wait("the keys handled", || {
+            self.ok(&["show", "-gv", "@k"]) == format!("{n}\n")
+        });
+    }
+}
+
+/// `key` (the default): after `kill -9` and a restart, a restored pane
+/// shows its saved screen with the hint over its last row; `send-keys
+/// Enter` does nothing, Enter typed in an attached client respawns the
+/// active pane only, its screen kept above a `restored <time>` row and the
+/// new program writing below it.
+#[test]
+fn enter_respawns_a_restored_pane_keeping_its_screen() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["set", "-g", "status-right", "pinned"]);
+    w.echo("a", "line1");
+    w.ok(&["new-window", "-d", "-t", "a:1", "cat", "-"]);
+    w.wait_saved();
+    w.kill_9();
+    let mut client = Attached::new(&w, &["attach", "-t", "a"]);
+    common::wait("the hint over the restored pane", || {
+        let screen = client.screen();
+        screen.contains("line1\nline1\n") && screen.contains(": Enter restarts cat -")
+    });
+    w.repid();
+    for target in ["a:0", "a:1"] {
+        w.ok(&["send-keys", "-t", target, "Enter"]);
+        w.ok(&["send-keys", "-t", target, "-l", "\r"]);
+    }
+    assert_eq!(w.dead(), "%0=1 %1=1 ");
+    client.keys(b"\r");
+    common::wait("the pane respawned", || w.dead() == "%0=0 %1=1 ");
+    let rows = w.rows("a:0");
+    assert_eq!(rows[..2], ["line1", "line1"], "{rows:?}");
+    assert!(rows[2].starts_with("restored "), "{rows:?}");
+    w.echo("a:0", "after");
+    let rows = w.rows("a:0");
+    assert_eq!(rows[3..5], ["after", "after"], "{rows:?}");
+    // Respawned, Enter is the program's again.
+    w.keys_handled(&mut client, 1);
+    assert_eq!(w.dead(), "%0=0 %1=1 ");
+}
+
+/// `auto` from the config: the restart respawns the restored shell (its
+/// saved command empty) before the starting client's command, its screen
+/// kept above the marker, and leaves the `cat -` pane for a key.
+#[test]
+fn auto_restarts_the_restored_shells_after_the_config() {
+    let mut w = World::start_with(
+        &["cat", "-"],
+        &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
+        None,
+        Some("set -s vtmux-persist-respawn auto\n"),
+    );
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    // A shell that reads no profile of the host's, with a known prompt.
+    let shell = w.dir.path().join("shell");
+    std::fs::write(
+        &shell,
+        "#!/bin/sh\nunset ENV\nexport PS1='$ '\nexec /bin/sh -i\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    w.ok(&["set", "-g", "default-shell", shell.to_str().unwrap()]);
+    w.ok(&["new-window", "-d", "-t", "a:1"]);
+    w.ok(&["send-keys", "-t", "a:1", "echo be''fore", "Enter"]);
+    common::wait("the shell's output", || {
+        w.rows("a:1").iter().any(|r| r == "before")
+    });
+    w.wait_saved();
+    w.kill_9();
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.dead(), "%0=1 %1=0 ");
+    let rows = w.rows("a:1");
+    let marker = rows
+        .iter()
+        .position(|r| r.starts_with("restored "))
+        .expect("a marker");
+    // The output, then the prompt the shell was left at.
+    assert_eq!(rows[marker - 2], "before", "{rows:?}");
+    assert!(!rows[marker - 1].is_empty(), "{rows:?}");
+    w.ok(&["send-keys", "-t", "a:1", "echo ag''ain", "Enter"]);
+    common::wait("the new shell runs", || {
+        w.rows("a:1").iter().skip(marker).any(|r| r == "again")
+    });
+}
+
+/// `off` (decision 8 as first written): the restored pane's status is
+/// `remain-on-exit-format`'s line, drawn over its last row and not in
+/// its grid, and Enter does nothing.
+#[test]
+fn off_shows_the_dead_line_and_enter_does_nothing() {
+    let mut w = World::start_with(
+        &["cat", "-"],
+        &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
+        None,
+        Some("set -s vtmux-persist-respawn off\nset -g status-right pinned\n"),
+    );
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.wait_saved();
+    w.kill_9();
+    let mut client = Attached::new(&w, &["attach", "-t", "a"]);
+    common::wait("the dead line over the restored pane", || {
+        client.screen().contains("Pane is dead (, ")
+    });
+    w.repid();
+    assert!(w.rows("a").iter().all(|r| !r.contains("Pane is dead")));
+    client.keys(b"\r");
+    w.keys_handled(&mut client, 1);
+    assert_eq!(w.dead(), "%0=1 ");
+}
+
+/// Provenance survives a second restart and a live upgrade: the pane
+/// restored after the first, still waiting, respawns keeping its screen
+/// after both.
+#[test]
+fn a_restored_pane_stays_restored_across_a_restart_and_an_upgrade() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.echo("a", "kept");
+    w.wait_saved();
+    w.kill_9();
+    w.ok(&["start-server"]);
+    w.repid();
+    w.kill_server();
+    w.ok(&["start-server"]);
+    w.repid();
+    upgrade(&w);
+    w.ok(&["respawn-pane", "-t", "a:0"]);
+    let rows = w.rows("a:0");
+    assert_eq!(rows[..2], ["kept", "kept"], "{rows:?}");
+    assert!(rows[2].starts_with("restored "), "{rows:?}");
+    assert_eq!(w.dead(), "%0=0 ");
 }

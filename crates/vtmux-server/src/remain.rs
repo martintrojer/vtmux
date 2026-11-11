@@ -218,6 +218,11 @@ impl Server {
         if !pane.exited && pane.io.is_some() {
             return false;
         }
+        // Decision 32: a restored pane waits for Enter instead while the
+        // option offers it; tmux's rule applies again once respawned.
+        if pane.restored_from.is_some() && self.respawn_setting() != crate::restored::Respawn::Off {
+            return false;
+        }
         let remain =
             Remain::from_option(self.model.number_option(TreeId::Pane(p), "remain-on-exit"));
         if !matches!(remain, Remain::Key | Remain::FailedKey) {
@@ -303,7 +308,7 @@ fn bottom_row_blank(term: &vtmux_vt::PaneTerm, sy: u16) -> bool {
 }
 
 /// The SGR that gives a grid cell `style`, from a reset.
-fn cell_sgr(style: &vtmux_vt::Style) -> String {
+pub(crate) fn cell_sgr(style: &vtmux_vt::Style) -> String {
     use vtmux_vt::{Color, Underline};
     let colour = |c: Color, base: u16| -> Option<String> {
         Some(match c {

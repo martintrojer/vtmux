@@ -1581,6 +1581,10 @@ fn an_ordinary_attached_client_requires_no_feature() {
     a.clients.get_mut(&client).unwrap().inbuf = vec![0x03, 0x00];
     // A client stopped by `suspend-client` (`stopped`).
     a.suspend_client(client);
+    // A pane a cold restore brought back, still waiting for its respawn
+    // (`restored_from`, decision 31): every reboot restore makes them.
+    let restored = *a.model.panes.keys().max().unwrap();
+    a.model.panes.get_mut(&restored).unwrap().restored_from = Some(1_790_000_000);
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
@@ -1598,6 +1602,11 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
     assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
     assert_eq!(s.sessions[0].control_chars, Some(vec![3, 28, 127, 21]));
+    assert!(
+        s.panes
+            .iter()
+            .any(|p| p.restored_from == Some(1_790_000_000))
+    );
     assert_eq!(s.meta.requires, Vec::<String>::new());
     let rows = a.to_snapshot_with(
         snap::Meta {

@@ -691,6 +691,11 @@ record! {
         /// group's on import.
         48 => opt graphics_owner_primary: Option<i32>,
         49 => opt graphics_owner_alternate: Option<i32>,
+        /// vtmux's restored pane (live-upgrade spec, decision 31): the
+        /// write time, epoch seconds, of the checkpoint a cold restore
+        /// brought it back from, until it is respawned or killed.
+        /// Ignorable: a reader before reads an ordinary dead pane.
+        50 => opt restored_from: Option<i64>,
     }
 }
 
@@ -1461,6 +1466,7 @@ pub(crate) mod tests {
             input_queued: Vec::new(),
             graphics_owner_primary: None,
             graphics_owner_alternate: None,
+            restored_from: None,
         }
     }
 

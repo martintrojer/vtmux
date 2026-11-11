@@ -333,6 +333,14 @@ pub struct Pane {
     pub kitty_owner: [Option<i32>; 2],
     /// D33: its kitty graphics as the server keeps them.
     pub graphics: PaneGraphics,
+    /// vtmux only (live-upgrade spec, decision 31): the write time of the
+    /// checkpoint a cold restore brought it back from (epoch seconds),
+    /// while it waits to be respawned; `None` for every other pane.
+    pub restored_from: Option<i64>,
+    /// The status text the renderer draws over its bottom row while it is
+    /// restored and dead, at the width it was made for
+    /// ([`crate::remain`]); never in its grid.
+    pub restored_hint: Option<(u16, Vec<vtmux_core::styled::Cell>)>,
 }
 
 /// D33: a pane's kitty graphics as the server keeps them

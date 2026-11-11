@@ -594,6 +594,11 @@ impl Server {
                 let outer = self.key_after.replace(step);
                 let taken = self.handle_key(id, key.to_core(), None);
                 self.key_after = outer;
+                // vtmux (decision 32): Enter no binding took respawns a
+                // restored pane, last of all, and goes no further.
+                if !taken && self.restored_enter(id, key.to_core()) {
+                    return;
+                }
                 if !taken
                     && !self.clients[&id].flags.read_only
                     && let Some(p) = self.client_pane(id)

@@ -872,6 +872,26 @@ impl Source<'_> {
         if let Some(crate::mode::Mode::Panes(m)) = pane.modes.first() {
             return only(self.panes_screen(pane, m, caps));
         }
+        // vtmux (decision 31): a restored pane's hint over its bottom row,
+        // never in its grid.
+        if let Some((_, hint)) = pane
+            .restored_hint
+            .as_ref()
+            .filter(|(cols, _)| *cols == pane.term.cols())
+            .filter(|_| pane.modes.is_empty() && pane.mode_prompt.is_none())
+        {
+            let mut screen = vtmux_vt::snapshot(&pane.term);
+            let (cols, rows) = (usize::from(screen.cols), usize::from(screen.rows));
+            if cols > 0 && rows > 0 {
+                let theme = self.theme(caps);
+                for (x, drawn) in hint.iter().take(cols).enumerate() {
+                    if drawn.width > 0 {
+                        screen.cells[(rows - 1) * cols + x] = theme.cell(drawn);
+                    }
+                }
+            }
+            return only(screen);
+        }
         if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
             // MODE_SYNC (screen-write.c:211-240): while the program has
             // synchronized output on, nothing new of it is drawn. The held

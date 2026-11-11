@@ -222,6 +222,8 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
         ..snap::ExitStatus::default()
     });
     s.panes[1].dead_time = Some(12345);
+    s.panes[1].exited = true;
+    s.meta.written_us = 1_790_000_000_123_456;
     let cwd0 = s.panes[0].cwd.clone();
     drop(server);
 
@@ -238,6 +240,10 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
             .all(|p| p.exited && p.pid == 0 && p.tty.is_empty())
     );
     assert_eq!(s.panes[0].status, Some(snap::ExitStatus::default()));
+    // Decision 31: the pane that ran is restored from the checkpoint's
+    // write time; the one dead already is an ordinary dead pane.
+    assert_eq!(s.panes[0].restored_from, Some(1_790_000_000));
+    assert_eq!(s.panes[1].restored_from, None);
     // It dies when it is rebuilt, its dead line drawn then.
     assert_eq!(s.panes[0].dead_time, None);
     let since = crate::model::now_epoch();
@@ -261,11 +267,12 @@ fn a_rebuilt_checkpoint_is_a_starting_server_with_every_pane_dead() {
         sock = socket.display()
     );
     assert!(out.ends_with(&want), "{out}");
-    // `layout` keeps no screen: a pane dead already gets its line again.
-    for p in ["%0", "%1"] {
-        let out = run(&mut server, &dir, &["capture-pane", "-p", "-t", p]);
-        assert!(out.contains("Pane is dead"), "{p}: {out}");
-    }
+    // `layout` keeps no screen: a pane dead already gets its line again;
+    // a restored one's status is the renderer's, not in its grid.
+    let out = run(&mut server, &dir, &["capture-pane", "-p", "-t", "%1"]);
+    assert!(out.contains("Pane is dead"), "{out}");
+    let out = run(&mut server, &dir, &["capture-pane", "-p", "-t", "%0"]);
+    assert!(!out.contains("Pane is dead"), "{out}");
     // `layout` keeps no title: a new pane's, the host name.
     let out = run(
         &mut server,
@@ -294,11 +301,11 @@ fn shown(server: &mut Server, dir: &std::path::Path, p: &str) -> (Vec<String>, S
     (rows, history.lines().nth(1).unwrap_or_default().to_owned())
 }
 
-/// A `full` checkpoint rebuilt: a pane whose last row is blank shows its
-/// saved rows where they were, the dead line on that row and nothing
-/// scrolled into history; one whose last row holds output scrolls it up a
-/// row as tmux's dead line does (server-fn.c `server_destroy_pane`); one
-/// dead already shows its saved screen, its dead line on it, unchanged.
+/// A `full` checkpoint rebuilt: a pane that ran shows its saved rows
+/// where they were, nothing written into its grid and nothing scrolled
+/// into history, whatever its last row holds (its status is drawn over
+/// it, decision 31); one dead already shows its saved screen, its dead
+/// line on it, unchanged.
 #[test]
 fn a_rebuilt_full_checkpoint_keeps_each_saved_screen_in_place() {
     let dir = temp_dir("rebuild-full");
@@ -339,19 +346,18 @@ fn a_rebuilt_full_checkpoint_keeps_each_saved_screen_in_place() {
     }
     let mut s = server.checkpoint_snapshot(Mode::Full);
     s.panes[2].dead_time = Some(12345);
+    s.panes[2].exited = true;
     drop(server);
 
     let (l, socket) = listener(&dir, "s2");
     let s = prepare(s, &ConfigSays::default(), &socket, &ServerConfig::default());
     let mut server = rebuild(l, ServerConfig::default(), &s).unwrap();
     let (rows, history) = shown(&mut server, &dir, "%0");
-    assert_eq!(rows[..3], ["one", "two", ""], "{rows:?}");
-    assert!(rows[3].starts_with("Pane is dead (, "), "{rows:?}");
+    assert_eq!(rows, ["one", "two", "", ""], "{rows:?}");
     assert_eq!(history, "0");
     let (rows, history) = shown(&mut server, &dir, "%1");
-    assert_eq!(rows[..3], ["two", "three", "four"], "{rows:?}");
-    assert!(rows[3].starts_with("Pane is dead (, "), "{rows:?}");
-    assert_eq!(history, "1");
+    assert_eq!(rows, ["one", "two", "three", "four"], "{rows:?}");
+    assert_eq!(history, "0");
     assert_eq!(
         shown(&mut server, &dir, "%2"),
         (

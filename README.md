@@ -42,11 +42,12 @@ Without `-b` it takes the path the server started from, or, when the client's pr
 
 ### Full restores
 
-After a crash or a reboot, sessions come back with their windows, layout, screens and scrollback. Panes come back dead; `respawn-pane` restarts each one's command in its directory.
+After a crash or a reboot, sessions come back with their windows, layout, screens and scrollback. Panes come back dead with their last screen; press Enter in one (or `respawn-pane`) and its command starts again in its directory, below the old screen instead of over it.
 
 ```tmux
 %if "#{vtmux_version}"
-set -s vtmux-persist full    # or layout: sessions and windows, no screens
+set -s vtmux-persist full            # or layout: sessions and windows, no screens
+set -s vtmux-persist-respawn auto    # also restart every shell at once
 %endif
 ```
 

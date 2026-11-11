@@ -1248,6 +1248,7 @@ impl Server {
                     kitty_owner_alternate: p.kitty_owner[1],
                     graphics_owner_primary: p.graphics.owner[0],
                     graphics_owner_alternate: p.graphics.owner[1],
+                    restored_from: p.restored_from,
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -1986,6 +1987,8 @@ impl Server {
                 x.graphics_owner_primary,
                 x.graphics_owner_alternate,
             ]),
+            restored_from: x.restored_from,
+            restored_hint: None,
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,
