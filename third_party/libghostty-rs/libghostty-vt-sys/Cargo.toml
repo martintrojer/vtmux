@@ -5,7 +5,7 @@
 # `version`; `xtask`'s `publish_manifests` test checks they agree).
 [package]
 name = "vtmux-ghostty-vt-sys"
-version = "3.8.0-beta.1"
+version = "3.8.0-beta.2"
 edition = "2024"
 rust-version = "1.90"
 build = "build.rs"

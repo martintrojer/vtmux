@@ -2,9 +2,7 @@
 
 vtmux's version is the tmux release it is tested against: `3.8-beta1` is the first beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints `vtmux 3.8-beta1`.
 
-## Unreleased
-
-Next is `3.8-beta2`.
+## 3.8-beta2
 
 **Kitty graphics (opt-in).** `set -s vtmux-graphics on`: programs that send kitty graphics unwrapped get them shown on Ghostty clients without `allow-passthrough`, drawn as unicode placeholder cells, so pane edges, popups, zoom, window switches and copy mode treat them as text. Each client gets its own uploads, freed when nothing shows them; every pane's images, half-sent ones included, share one cap (`vtmux-graphics-limit`, 256 MB), and decoding one (PNG, compressed, or a query) never costs more than its screen's share: a 36 MB PNG peaks at 36 MB, a 300-byte one naming 9000x9000 pixels is refused before allocating. Images come only inside the escape: file, temporary-file and shared-memory transmissions are refused, so a program, local or over ssh, never makes the server open a path. Other terminals and control clients see tmux. Apps that wrap for tmux (yazi) still use passthrough. Live upgrades keep the grant and drop the images.
 

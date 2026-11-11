@@ -115,14 +115,14 @@ With cargo. The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:
 
 ```sh
 mise use -g zig@0.17
-cargo install --locked vtmux@3.8.0-beta.1   # a beta: cargo needs the version named
+cargo install --locked vtmux@3.8.0-beta.2   # a beta: cargo needs the version named
 ```
 
 That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
 
 From a checkout (mise brings the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
 
-Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets: `vtmux -V` prints `vtmux 3.8-beta1`.
+Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets: `vtmux -V` prints `vtmux 3.8-beta2`.
 
 ## Also
 
@@ -132,6 +132,6 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
-**Status:** beta ([3.8-beta1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
+**Status:** beta ([3.8-beta2](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
 Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.

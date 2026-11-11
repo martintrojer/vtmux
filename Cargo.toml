@@ -6,7 +6,7 @@ members = ["crates/vtmux-core","crates/vtmux-vt","crates/vtmux-server","crates/v
 exclude = ["third_party"]
 
 [workspace.package]
-version = "3.8.0-beta.1"
+version = "3.8.0-beta.2"
 edition = "2024"
 rust-version = "1.99.1"
 license = "ISC"
@@ -18,11 +18,11 @@ authors = ["Martin Trojer <martin.trojer@gmail.com>"]
 # so each path dependency also names the exact version it is published at:
 # the crates are one program split up, with no API promised between them.
 [workspace.dependencies]
-vtmux-core = { path = "crates/vtmux-core", version = "=3.8.0-beta.1" }
-vtmux-vt = { path = "crates/vtmux-vt", version = "=3.8.0-beta.1" }
-vtmux-server = { path = "crates/vtmux-server", version = "=3.8.0-beta.1" }
-vtmux-client = { path = "crates/vtmux-client", version = "=3.8.0-beta.1" }
-vtmux-snapshot = { path = "crates/vtmux-snapshot", version = "=3.8.0-beta.1" }
+vtmux-core = { path = "crates/vtmux-core", version = "=3.8.0-beta.2" }
+vtmux-vt = { path = "crates/vtmux-vt", version = "=3.8.0-beta.2" }
+vtmux-server = { path = "crates/vtmux-server", version = "=3.8.0-beta.2" }
+vtmux-client = { path = "crates/vtmux-client", version = "=3.8.0-beta.2" }
+vtmux-snapshot = { path = "crates/vtmux-snapshot", version = "=3.8.0-beta.2" }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
