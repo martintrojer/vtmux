@@ -282,11 +282,15 @@ unsafe fn forkpty(master: &mut libc::c_int, ws: &libc::winsize) -> libc::pid_t {
     }
 }
 
-/// The search path `execvp` takes when there is no `PATH`: glibc's
-/// `CS_PATH` (posix/execvpe.c), macOS's `_PATH_DEFPATH` (paths.h).
-#[cfg(target_vendor = "apple")]
+/// The search path `execvp` takes when there is no `PATH`: macOS's and
+/// FreeBSD's `_PATH_DEFPATH` (paths.h, gen/exec.c), musl's literal
+/// (src/process/execvp.c), glibc's `CS_PATH` (posix/execvpe.c). Other
+/// targets (the other BSDs, whose `_PATH_DEFPATH` lists more) get glibc's.
+#[cfg(any(target_vendor = "apple", target_os = "freebsd"))]
 const EXEC_DEFAULT_PATH: &str = "/usr/bin:/bin";
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(all(target_env = "musl", not(target_os = "freebsd")))]
+const EXEC_DEFAULT_PATH: &str = "/usr/local/bin:/bin:/usr/bin";
+#[cfg(not(any(target_vendor = "apple", target_os = "freebsd", target_env = "musl")))]
 const EXEC_DEFAULT_PATH: &str = "/bin:/usr/bin";
 
 /// The paths `execvp` would try for a directly executed command: the
@@ -657,13 +661,16 @@ mod tests {
     use super::*;
 
     /// With no `PATH`, the search is `execvp`'s own: glibc's `/bin` first,
-    /// macOS's `/usr/bin` first.
+    /// macOS's and FreeBSD's `/usr/bin` first, musl's `/usr/local/bin`
+    /// first.
     #[test]
     fn no_path_searches_as_execvp_does() {
         let program = CString::new("prog").unwrap();
         let got = exec_candidates(&program, &[], true).unwrap();
-        let want: &[&str] = if cfg!(target_vendor = "apple") {
+        let want: &[&str] = if cfg!(any(target_vendor = "apple", target_os = "freebsd")) {
             &["/usr/bin/prog", "/bin/prog"]
+        } else if cfg!(target_env = "musl") {
+            &["/usr/local/bin/prog", "/bin/prog", "/usr/bin/prog"]
         } else {
             &["/bin/prog", "/usr/bin/prog"]
         };
