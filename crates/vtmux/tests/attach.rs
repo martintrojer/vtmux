@@ -501,6 +501,45 @@ fn a_signal_as_the_client_attaches_ends_it_as_attached() {
     }
 }
 
+/// A SIGTERM or SIGHUP that lands as `Ready` is read, before the client
+/// is attached (the pre-attach watcher cut the connection first), ends it
+/// as `client_signal` ends a client not attached: `proc_exit`, status 0,
+/// nothing said (client.c `client_main` prints a reason only once
+/// attached), the terminal untouched; the server loses it (one
+/// client-detached, no focus-out). Before, it exited 1 with
+/// `[terminated]` and sent no `MSG_EXITING`, which tmux never does.
+/// vtmux only: the hook is its.
+#[test]
+fn a_signal_as_ready_is_read_ends_it_as_not_attached() {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
+    for signal in ["TERM-cut", "HUP-cut"] {
+        let w = World::new(bin.clone());
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
+        ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
+        ok(&["set", "-g", "focus-events", "on"]);
+        ok(&["set", "-g", "@log", ""]);
+        for hook in ["pane-focus-out", "client-detached"] {
+            ok(&["set-hook", "-g", hook, "set -agF @log '|#{hook}'"]);
+        }
+        let mut a = w.attach_env(
+            &["attach", "-t", "a"],
+            40,
+            10,
+            &[("VTMUX_TEST_ATTACH_SIGNAL", signal)],
+        );
+        a.exited(0);
+        let text = a.text();
+        assert!(!text.contains('['), "{signal}: {text:?}");
+        assert!(!text.contains("\x1b[?1049h"), "{signal}: {text:?}");
+        let log = common::wait_for(
+            "client-detached",
+            || String::from_utf8_lossy(&w.cli(&["show", "-gv", "@log"]).stdout).into_owned(),
+            |log| log.contains("client-detached"),
+        );
+        assert_eq!(log.trim_end(), "|client-detached", "{signal}");
+    }
+}
+
 /// A terminal client whose tty goes away is dropped by the server itself
 /// (tty.c:181-189 `tty_read_callback` -> `server_client_lost`): client-detached
 /// fires, with no `window_update_focus` and so no pane-focus-out. Only
@@ -1044,6 +1083,99 @@ fn escape_escape_arrow_is_escape_then_arrow() {
             a.keys(b"\x1b\x1b[A|");
             a.wait(|_| pane_line(&w) == want);
         }
+    });
+}
+
+/// A server busy past `escape-time` after reading an ESC reads the `x`
+/// typed meanwhile before its key timer fires: libevent runs the read
+/// callbacks a wait returns before the timers it finds expired, and
+/// `tty_keys_next` takes the ESC and `x` in its buffer as M-x whether or
+/// not the timer is out (tty-keys.c: only a partial key looks at it).
+/// vtmux decoded the ESC alone first, as Escape then `x`. F6, read with
+/// the ESC, runs first; F7 marks the end. tmux is held by a binding's
+/// `save-buffer` to a FIFO (an attached client's file is opened by the
+/// server, file.c `file_write`), which blocks it until the test opens the
+/// other end; vtmux opens it `O_NONBLOCK` (so a FIFO can't stall it), so
+/// it is stopped instead (tmux can't be: its SIGCONT handler breaks the
+/// wait with `EINTR`, and libevent then runs the timers with no read).
+#[test]
+fn an_escape_and_a_key_read_late_are_meta_the_key() {
+    /// Lets the server go on: opens the FIFO's read end (tmux), or
+    /// continues the stopped process (vtmux).
+    enum Release {
+        Fifo(PathBuf),
+        Stopped(rustix::process::Pid),
+    }
+    impl Drop for Release {
+        fn drop(&mut self) {
+            use std::os::unix::fs::OpenOptionsExt;
+            match self {
+                Self::Fifo(path) => {
+                    let nonblock = i32::try_from(rustix::fs::OFlags::NONBLOCK.bits()).unwrap();
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .read(true)
+                        .custom_flags(nonblock)
+                        .open(path)
+                    {
+                        let _ = f.read_to_end(&mut Vec::new());
+                    }
+                }
+                Self::Stopped(pid) => {
+                    let _ = rustix::process::kill_process(*pid, rustix::process::Signal::CONT);
+                }
+            }
+        }
+    }
+    let vtmux = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
+    par::each(&bins(), |bin| {
+        let w = World::new(bin.clone());
+        let fifo = w.home.path().join("fifo");
+        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, rustix::fs::Mode::from(0o600)).unwrap();
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
+        ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
+        ok(&["set", "-s", "escape-time", "1000"]);
+        ok(&["set", "-g", "@log", ""]);
+        ok(&["setb", "held"]);
+        ok(&[
+            "bind",
+            "-n",
+            "F5",
+            "save-buffer",
+            &fifo.display().to_string(),
+        ]);
+        for (key, says) in [
+            ("F6", "F6,"),
+            ("Escape", "ESC,"),
+            ("x", "x,"),
+            ("M-x", "MX,"),
+            ("F7", "end"),
+        ] {
+            ok(&["bind", "-n", key, "set", "-ga", "@log", says]);
+        }
+        let log = || String::from_utf8_lossy(&w.cli(&["show", "-gv", "@log"]).stdout).into_owned();
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
+        let held = if *bin == vtmux {
+            let pid =
+                String::from_utf8_lossy(&w.cli(&["display", "-p", "#{pid}"]).stdout).into_owned();
+            let pid = common::parse_pid(&pid).unwrap();
+            a.keys(b"\x1b[17~\x1b");
+            common::wait_for("F6", log, |l| l.trim_end() == "F6,");
+            rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+            Release::Stopped(pid)
+        } else {
+            a.keys(b"\x1b[17~\x1b[15~\x1b");
+            Release::Fifo(fifo.clone())
+        };
+        // The ESC's 1 s is out while the server is held, then `x`, given
+        // time to reach the server's socket.
+        thread::sleep(Duration::from_millis(1500));
+        a.keys(b"x");
+        thread::sleep(Duration::from_millis(500));
+        drop(held);
+        a.keys(b"\x1b[18~");
+        let got = common::wait_for("the end mark", log, |l| l.trim_end().ends_with("end"));
+        assert_eq!(got.trim_end(), "F6,MX,end", "{}", bin.display());
     });
 }
 

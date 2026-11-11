@@ -18,12 +18,13 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 ### Fixed
 
 - A client that vanishes while a live upgrade tells clients to re-attach no longer fails the upgrade with `Bad file descriptor`.
-- `SIGTERM` or `SIGHUP` as a client attaches says `[terminated]` or `[lost tty]`, not `server exited unexpectedly`, and detaches as tmux does (the pane gets its focus-out). One that arrives as a command or control client starts no longer leaves it blocked.
+- `SIGTERM` or `SIGHUP` as a client attaches says `[terminated]` or `[lost tty]`, not `server exited unexpectedly`, and detaches as tmux does (the pane gets its focus-out). One that arrives as a command or control client starts no longer leaves it blocked. One that arrives as an attached client follows a live upgrade ends it the same way instead of being lost (the client stayed attached), and one that lands just before the client is attached ends it quietly with status 0, as tmux does.
 - `tmux` run in a pane with `TMUX_PANE` unset (a cleaned environment) finds its pane by its tty, as tmux does, instead of acting on the newest session.
 - `break-pane -a`/`-b` that can't shuffle the windows is an error: the rest of the command list doesn't run and `command-error` fires.
 - `copy-mode -S` on another pane makes it active without firing `window-pane-changed`.
 - `#{<:...}`, `#{>:...}`, `#{<=:...}` and `#{>=:...}` order bytes that are not UTF-8 as tmux does.
 - A detach during a flood no longer leaves your terminal frozen in a synchronized update.
+- Esc then a key that a busy server reads after `escape-time` is M-x, as in tmux, not Esc and the key.
 - Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order and stay the keys they were (Esc then `x` is no longer read as M-x), an Esc still waiting out `escape-time` keeps its wait, and a paste the upgrade lands in stays a paste; an upgrade refused for a program's kitty graphics says which pane and what to do.
 - Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
 - On Linux, a job or popup command started with no `PATH` (a server started without one, and no `tmux` shim) searches what glibc's `execvp` does (`getconf PATH`: `/usr/bin` on EL9), not `/usr/bin:/bin`.

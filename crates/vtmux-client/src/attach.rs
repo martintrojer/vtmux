@@ -11,8 +11,8 @@ use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{
-    self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_LOGIN_ENV, REATTACH_TOKEN_ENV,
-    ServerMsg, UPGRADED_DETACH,
+    self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_LOGIN_ENV, REATTACH_SIGNAL_ENV,
+    REATTACH_TOKEN_ENV, ServerMsg, UPGRADED_DETACH,
 };
 
 use crate::tty::RawTty;
@@ -58,6 +58,10 @@ pub struct Sys {
     /// SIGTERM or SIGHUP it caught, if one came: the client leaves as for
     /// it.
     pub attached: fn() -> Option<Caught>,
+    /// The SIGTERM or SIGHUP the binary has caught since it was connected,
+    /// if one came: read last thing before a live upgrade's re-exec, which
+    /// would discard it, so the new image is told to end for it.
+    pub caught: fn() -> Option<i32>,
 }
 
 /// A SIGTERM or SIGHUP the binary caught before the attach's handlers.
@@ -65,7 +69,8 @@ pub struct Sys {
 pub struct Caught {
     pub sig: i32,
     /// It shut the connection down (it came before `Ready`, when the client
-    /// was not attached), so no `Detach` can go.
+    /// was not attached), so no `Detach` can go: the client ends as one
+    /// not attached does.
     pub cut: bool,
 }
 
@@ -92,7 +97,7 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
         }
         // The terminal has its modes back and has taken every frame: the
         // process becomes the new binary, on the same terminal.
-        Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how),
+        Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how, sys.caught),
         Err(e) => {
             crate::say_err(&e.to_string());
             1
@@ -156,8 +161,18 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
 /// for a detach, so it is the shell's whatever happens next. Only returns,
 /// with the exit status, if the exec fails: the client can't follow, so it
 /// says why and what the server would have.
+///
+/// A SIGTERM or SIGHUP caught since the client connected (`caught`, read
+/// just before the exec) would be lost with this image's handlers: an
+/// attached tmux client leaves for it (client.c `client_signal`), so the
+/// new image is told in [`REATTACH_SIGNAL_ENV`] and detaches for it as
+/// soon as it is back. One the attach sent `Detach` for already is
+/// carried too: the server may have read the notice's exec first. Only
+/// the few instructions of the exec itself are left, and in the new
+/// image those before its first handlers, where the signal's default
+/// action ends the process, as it does a tmux client starting up.
 #[must_use]
-pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
+pub fn reexec(binary: &Path, token: &str, how: &Reattach, caught: fn() -> Option<i32>) -> i32 {
     use std::os::unix::process::CommandExt;
     let mut command = std::process::Command::new(binary);
     command
@@ -167,6 +182,15 @@ pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
         .env(REATTACH_TOKEN_ENV, token);
     if how.login {
         command.env(REATTACH_LOGIN_ENV, "1");
+    }
+    match caught() {
+        Some(SIGTERM) => {
+            command.env(REATTACH_SIGNAL_ENV, "TERM");
+        }
+        Some(SIGHUP) => {
+            command.env(REATTACH_SIGNAL_ENV, "HUP");
+        }
+        _ => {}
     }
     let err = command.exec();
     crate::say_err(&format!(
@@ -187,18 +211,18 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     // SIGHUP the binary's caught before then ends the client as client.c
     // `client_signal` does once attached: with `Detach` (`MSG_EXITING`),
     // so the server takes the client out of its session (focus-out and
-    // all, server-client.c:2733-2739); or, when it cut the connection
-    // before `Ready`, at once: status 1, the terminal still untouched.
+    // all, server-client.c:2733-2739). One that cut the connection came
+    // before `Ready` was read, when the client was not attached: it ends
+    // as `client_signal` ends a client then (`proc_exit`, status 0,
+    // nothing said: client.c `client_main` prints a reason only once
+    // attached), the terminal still untouched; the server loses it.
     let pending = match (sys.attached)() {
-        Some(Caught { sig, cut: true }) => {
-            return Ok(Leave::exit(
-                1,
-                if sig == SIGTERM {
-                    "terminated"
-                } else {
-                    "lost tty"
-                },
-            ));
+        Some(Caught { cut: true, .. }) => {
+            return Ok(Leave::Exit {
+                code: 0,
+                message: None,
+                hup: false,
+            });
         }
         Some(Caught { sig, cut: false }) => Some(sig),
         None => None,
@@ -590,6 +614,7 @@ fn relay(
 /// Server socket state. Registration is edge-triggered, so `readable`
 /// remembers unread data while reading is paused for backpressure.
 #[derive(Default)]
+#[expect(clippy::struct_excessive_bools, reason = "independent states")]
 struct Socket {
     input: Vec<u8>,
     readable: bool,
@@ -600,19 +625,28 @@ struct Socket {
     suspend_now: bool,
     /// `Lock` arrived: run its command once this read is dispatched.
     lock: Option<String>,
+    /// `Detach` went for a SIGTERM or SIGHUP.
+    detach_sent: bool,
 }
 
 impl Socket {
     /// SIGTERM or SIGHUP while attached (client.c `client_signal`):
     /// `Detach` (`MSG_EXITING`), and the reason kept for the server's
-    /// `Exit`.
+    /// `Exit`. `Detach` goes once: one signal delivered as the attach's
+    /// handlers went in reaches both them and the binary's (the attach's
+    /// `pending`), and a second `MSG_EXITING` changes nothing in tmux's
+    /// server (server-client.c:2733-2739: the client has no session left
+    /// to leave).
     fn exit_signal(&mut self, stream: &mut UnixStream, sig: i32) -> Option<Leave> {
         // Closing the terminal raises SIGHUP as well as EOF on stdin; with
         // the tty already hung up it is the same loss as EOF.
         if sig == SIGHUP && tty_hung_up() {
             return Some(Leave::exit(1, "lost tty"));
         }
-        let _ = send(stream, &ClientMsg::Detach);
+        if !self.detach_sent {
+            self.detach_sent = true;
+            let _ = send(stream, &ClientMsg::Detach);
+        }
         // client.c:543-544: a suspended client leaves with no reason on
         // SIGTERM.
         self.signal_exit = match sig {
@@ -744,5 +778,28 @@ mod tests {
         assert_eq!(shell_argv0(Path::new("/bin/bash"), false), "bash");
         assert_eq!(shell_argv0(Path::new("/bin/bash"), true), "-bash");
         assert_eq!(shell_argv0(Path::new("sh"), true), "-sh");
+    }
+
+    /// One SIGTERM seen twice (by the binary's handler, the attach's
+    /// `pending`, and the attach's own), or a second one: one `Detach`,
+    /// the reason the last signal's.
+    #[test]
+    fn a_signal_seen_twice_sends_one_detach() {
+        let (mut ours, mut theirs) = UnixStream::pair().unwrap();
+        let mut socket = Socket::default();
+        assert!(socket.exit_signal(&mut ours, SIGTERM).is_none());
+        assert!(socket.exit_signal(&mut ours, SIGTERM).is_none());
+        drop(ours);
+        let mut bytes = Vec::new();
+        theirs.read_to_end(&mut bytes).unwrap();
+        let mut detaches = 0;
+        let mut rest = bytes.as_slice();
+        while !rest.is_empty() {
+            let (msg, used) = protocol::decode::<ClientMsg>(rest).unwrap();
+            detaches += usize::from(matches!(msg, ClientMsg::Detach));
+            rest = &rest[used..];
+        }
+        assert_eq!(detaches, 1);
+        assert_eq!(socket.signal_exit.as_deref(), Some("terminated"));
     }
 }

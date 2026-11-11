@@ -75,8 +75,11 @@
 //!   token in the environment variable [`REATTACH_TOKEN_ENV`], not on the
 //!   command line, where any user's `ps` would show it, and
 //!   [`REATTACH_LOGIN_ENV`] set to `1` when the client was started with
-//!   `-l` (a binary that knows no such variable leaves it). The new process
-//!   takes both out of its environment at once.
+//!   `-l` (a binary that knows no such variable leaves it), and
+//!   [`REATTACH_SIGNAL_ENV`] set to `TERM` or `HUP` when the client caught
+//!   that signal and has not ended for it yet (a binary that knows no such
+//!   variable stays attached, as every build before it did). The new
+//!   process takes them out of its environment at once.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
@@ -148,6 +151,12 @@ pub const REATTACH_TOKEN_ENV: &str = "VTMUX_REATTACH_TOKEN";
 /// Set to `1` on the re-attach command line of a client started with `-l`
 /// (module docs, *Frozen frames*): its `argv[0]` alone can't say so.
 pub const REATTACH_LOGIN_ENV: &str = "VTMUX_REATTACH_LOGIN";
+
+/// `TERM` or `HUP` on the re-attach command line of a client that caught
+/// SIGTERM or SIGHUP and has not ended for it yet (module docs, *Frozen
+/// frames*): its handlers go with the exec, so the new image ends for it,
+/// detaching once it is back as an attached client does.
+pub const REATTACH_SIGNAL_ENV: &str = "VTMUX_REATTACH_SIGNAL";
 
 /// What a client that can't follow an upgrade is detached with
 /// (live-upgrade spec, decisions 4 and 25); the client prints it in

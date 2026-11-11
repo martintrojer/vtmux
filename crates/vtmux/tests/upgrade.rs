@@ -372,6 +372,11 @@ impl Attached {
 
     /// `binary` with the world's `-L` and `-f`, then `args`, under a PTY.
     fn with(world: &World, binary: &Path, args: &[&str]) -> Self {
+        Self::with_env(world, binary, args, &[])
+    }
+
+    /// [`Self::with`], `extra` added to the client's environment.
+    fn with_env(world: &World, binary: &Path, args: &[&str], extra: &[(&str, &str)]) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -385,6 +390,9 @@ impl Attached {
         cmd.args(args);
         cmd.env_clear();
         for (k, v) in world.env() {
+            cmd.env(k, v);
+        }
+        for (k, v) in extra {
             cmd.env(k, v);
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -2082,6 +2090,49 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
         attached.since(at).contains("typed")
     });
     assert!(attached.exited().is_none());
+}
+
+/// A SIGTERM or SIGHUP an attached client catches as it follows an
+/// upgrade ends it as an attached tmux client ends for it (client.c
+/// `client_signal`): `[terminated]` or `[lost tty]`, status 1, its
+/// session left with one client-detached. A test hook raises it in each
+/// window that once lost it: in the old image, once the relay has ended
+/// and its handlers are gone, just before the exec (the client stayed
+/// attached, no hook fired); and in the new image before its `Hello`
+/// (`-reattach`: the watcher cut the connection, and the client was given
+/// up on).
+#[test]
+fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
+    for (hook, says) in [
+        ("TERM", "[terminated]"),
+        ("HUP", "[lost tty]"),
+        ("TERM-reattach", "[terminated]"),
+        ("HUP-reattach", "[lost tty]"),
+    ] {
+        let world = World::new();
+        world.populate(&[]);
+        world.run(&["set", "-g", "@log", ""]);
+        world.run(&[
+            "set-hook",
+            "-g",
+            "client-detached",
+            "set -ga @log '|detached'",
+        ]);
+        let mut attached = Attached::with_env(
+            &world,
+            &world.client(),
+            &["attach", "-t", "a"],
+            &[("VTMUX_TEST_REEXEC_SIGNAL", hook)],
+        );
+        wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "{hook}");
+        wait("the client to end", || attached.exited().is_some());
+        assert_eq!(attached.exited(), Some(1), "{hook}: {}", attached.since(0));
+        wait("its reason", || attached.since(0).contains(says));
+        assert!(!attached.since(0).contains("unexpectedly"), "{hook}");
+        assert_eq!(world.run(&["lsc"]), "", "{hook}");
+        assert_eq!(world.run(&["show", "-gv", "@log"]), "|detached\n", "{hook}");
+    }
 }
 
 /// The cursor style and colour the terminal was given are not in the

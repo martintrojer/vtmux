@@ -339,21 +339,18 @@ impl Decoder {
         }
         self.bytes.extend_from_slice(bytes);
     }
-    /// Bytes read at `now`: the events in them and in what was held. Bytes
-    /// held past their wait (`escape-time`) are decoded first, alone, as
-    /// the key timer would have done before these came (tty-keys.c
-    /// `tty_keys_callback`): an ESC whose wait is out and an `x` read after
-    /// it are Escape and `x`, not M-x, however late the server reads them
-    /// (a loop busy for longer than `escape-time`, a live upgrade).
+    /// Bytes read at `now`: the events in them and in what was held, which
+    /// they join whether or not its wait (`escape-time`) is out: the server
+    /// reads before it looks at its key timer, as libevent runs the read
+    /// callbacks a wait returns before the timers it finds expired, and
+    /// `tty_keys_next` takes an ESC and the `x` after it in its buffer as
+    /// M-x, timer out or not (only a partial key looks at it). So an ESC
+    /// and an `x` a loop busy past `escape-time` reads late are M-x, as in
+    /// tmux. (Keys a live upgrade gives back are decoded at their own
+    /// instants: [`Self::take_whole`], [`Self::feed_held`].)
     pub fn take_in(&mut self, bytes: &[u8], now: Instant) -> Vec<(Event, Vec<u8>)> {
-        let mut events = if self.deadline().is_some_and(|t| now >= t) {
-            self.drain_with_bytes(now)
-        } else {
-            Vec::new()
-        };
         self.bytes.extend_from_slice(bytes);
-        events.extend(self.drain_with_bytes(now));
-        events
+        self.drain_with_bytes(now)
     }
     /// The bytes of one key decoded before, given back: decoded again as
     /// that one key, its wait out (an ESC decoded alone once is Escape
@@ -1226,12 +1223,12 @@ mod tests {
         );
     }
 
-    /// Bytes read after what is held has waited out `escape-time` do not
-    /// join it: an ESC whose wait is out and an `x` read late are Escape
-    /// and `x` (the key timer would have fired before the `x` came); one
-    /// read in time is M-x.
+    /// Bytes read join what is held, its wait out or not: an ESC and an
+    /// `x` read late (a busy loop) are M-x, as tmux's read comes before its
+    /// key timer (tty-keys.c `tty_keys_next`); the timer alone fires the
+    /// ESC as Escape.
     #[test]
-    fn bytes_read_after_the_wait_do_not_join_what_is_held() {
+    fn bytes_read_after_the_wait_join_what_is_held() {
         let now = Instant::now();
         let ms = Duration::from_millis;
         let held = || {
@@ -1245,12 +1242,15 @@ mod tests {
         let keys = |events: Vec<(Event, Vec<u8>)>| -> Vec<Event> {
             events.into_iter().map(|(e, _)| e).collect()
         };
+        let meta_x = vec![Event::Key(Key {
+            meta: true,
+            esc_prefix: true,
+            ..key(Base::Char('x'))
+        })];
+        assert_eq!(keys(held().take_in(b"x", now + ms(15))), meta_x);
         assert_eq!(
-            keys(held().take_in(b"x", now + ms(15))),
-            vec![
-                Event::Key(key(Base::Char('\x1b'))),
-                Event::Key(key(Base::Char('x')))
-            ]
+            held().drain(now + ms(15)),
+            vec![Event::Key(key(Base::Char('\x1b')))]
         );
         assert_eq!(
             keys(held().take_in(b"x", now + ms(5))),

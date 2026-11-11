@@ -40,12 +40,7 @@ pub fn ignore_job_control() {
 /// once [`attached`], they do nothing here.
 pub fn watch(stream: &UnixStream) {
     // First, so every signal the watcher gets is in `CAUGHT` too.
-    let caught = CAUGHT.get_or_init(Arc::default);
-    for sig in [SIGTERM, SIGHUP] {
-        if let Ok(value) = usize::try_from(sig) {
-            let _ = signal_hook::flag::register_usize(sig, Arc::clone(caught), value);
-        }
-    }
+    let caught = catch();
     watch_hook();
     let (Ok(mut signals), Ok(socket), Ok(here)) = (
         Signals::new([SIGTERM, SIGHUP, SIGINT, SIGUSR1, SIGUSR2]),
@@ -64,6 +59,63 @@ pub fn watch(stream: &UnixStream) {
     // flag: act on it here, or nothing would.
     if let Ok(sig) = i32::try_from(caught.load(Ordering::SeqCst)) {
         act(sig, &here);
+    }
+}
+
+/// [`CAUGHT`], its handlers installed the first time.
+fn catch() -> &'static Arc<AtomicUsize> {
+    CAUGHT.get_or_init(|| {
+        let caught = Arc::<AtomicUsize>::default();
+        for sig in [SIGTERM, SIGHUP] {
+            if let Ok(value) = usize::try_from(sig) {
+                let _ = signal_hook::flag::register_usize(sig, Arc::clone(&caught), value);
+            }
+        }
+        caught
+    })
+}
+
+/// A re-attach after a live upgrade (`--vtmux-reattach`), first thing:
+/// the client never stopped being attached (the server kept its record),
+/// so a SIGTERM or SIGHUP from now on is the attach's, as one after
+/// `Ready` is: kept in [`CAUGHT`] for it to detach for, never cutting the
+/// connection, which would leave the server's record waiting and the
+/// client ending as one not attached. `carried` is the one the image
+/// before caught and could not end for (`VTMUX_REATTACH_SIGNAL`).
+pub fn reattaching(carried: Option<&std::ffi::OsStr>) {
+    STATE.store(ATTACHED, Ordering::SeqCst);
+    let caught = catch();
+    let carried = match carried.and_then(|c| c.to_str()) {
+        Some("TERM") => SIGTERM,
+        Some("HUP") => SIGHUP,
+        _ => 0,
+    };
+    if let Ok(sig) = usize::try_from(carried) {
+        // One caught since is the later.
+        let _ = caught.compare_exchange(0, sig, Ordering::SeqCst, Ordering::SeqCst);
+    }
+    reexec_hook(true);
+}
+
+/// The SIGTERM or SIGHUP caught since the client connected, if any (the
+/// last): before a live upgrade's re-exec, which would lose it.
+fn caught() -> Option<i32> {
+    reexec_hook(false);
+    last_caught()
+}
+
+fn last_caught() -> Option<i32> {
+    let caught = CAUGHT.get().map_or(0, |c| c.load(Ordering::SeqCst));
+    i32::try_from(caught).ok().filter(|&sig| sig > 0)
+}
+
+/// Whether a re-attaching client has a SIGTERM or SIGHUP to end for:
+/// its reason, as an attached client gives it (client.c
+/// `client_exit_message`).
+pub fn reason() -> Option<&'static str> {
+    match last_caught()? {
+        SIGTERM => Some("terminated"),
+        _ => Some("lost tty"),
     }
 }
 
@@ -93,6 +145,7 @@ pub const SYS: vtmux_client::attach::Sys = vtmux_client::attach::Sys {
     ignore_tstp: vtmux_server::sys::signal::ignore_tstp,
     defaults: vtmux_server::sys::signal::default_job_control,
     attached,
+    caught,
 };
 
 /// Attached: the client's own handlers, installed just before, take
@@ -100,9 +153,8 @@ pub const SYS: vtmux_client::attach::Sys = vtmux_client::attach::Sys {
 /// attached client's to report: one the watcher acted on before `Ready`
 /// (the connection is shut down), or one since, still in [`CAUGHT`], which
 /// the attach detaches for as for its own. One delivered after reaches the
-/// client's own handlers (and [`CAUGHT`] too, so the attach may send a
-/// second `Detach`, which the server ignores, as tmux's does a second
-/// `MSG_EXITING`).
+/// client's own handlers (and [`CAUGHT`] too: the attach sends one
+/// `Detach` for both).
 fn attached() -> Option<vtmux_client::attach::Caught> {
     at_attach_hook();
     let acted = STATE.swap(ATTACHED, Ordering::SeqCst);
@@ -128,22 +180,37 @@ fn attached() -> Option<vtmux_client::attach::Caught> {
 /// - `TERM` or `HUP`: raised once the attached client's handlers are
 ///   installed, before this watcher is closed, so both have it;
 /// - `TERM-early` or `HUP-early`: raised on the server's `Ready`, before
-///   the attached client's handlers go in, so only [`CAUGHT`] has it.
+///   the attached client's handlers go in, so only [`CAUGHT`] has it;
+/// - `TERM-cut` or `HUP-cut`: raised as `Ready` is read, the watcher left
+///   to act on it first, as when the signal lands just before `Ready`.
 const ATTACH_SIGNAL_HOOK: &str = "VTMUX_TEST_ATTACH_SIGNAL";
 
-/// [`ATTACH_SIGNAL_HOOK`]: the signal, and whether it comes early.
-fn hook() -> Option<(i32, bool)> {
+/// When [`ATTACH_SIGNAL_HOOK`] raises its signal.
+#[derive(Clone, Copy, PartialEq)]
+enum At {
+    Handlers,
+    Early,
+    Cut,
+}
+
+/// [`ATTACH_SIGNAL_HOOK`]: the signal, and when it comes.
+fn hook() -> Option<(i32, At)> {
     let value = std::env::var(ATTACH_SIGNAL_HOOK).ok()?;
-    let (name, early) = match value.strip_suffix("-early") {
-        Some(name) => (name.to_owned(), true),
-        None => (value, false),
+    let (name, at) = match value.split_once('-') {
+        Some((name, "early")) => (name, At::Early),
+        Some((name, "cut")) => (name, At::Cut),
+        Some(_) => return None,
+        None => (value.as_str(), At::Handlers),
     };
-    let sig = match name.as_str() {
-        "TERM" => SIGTERM,
-        "HUP" => SIGHUP,
-        _ => return None,
-    };
-    Some((sig, early))
+    Some((signal_named(name)?, at))
+}
+
+fn signal_named(name: &str) -> Option<i32> {
+    match name {
+        "TERM" => Some(SIGTERM),
+        "HUP" => Some(SIGHUP),
+        _ => None,
+    }
 }
 
 /// The server's `Ready` came: the client is attached (client.c
@@ -151,8 +218,36 @@ fn hook() -> Option<(i32, bool)> {
 /// from here on is the attach's: it detaches, where the watcher would cut
 /// the connection.
 pub fn ready() {
+    if let Some((sig, At::Cut)) = hook() {
+        let _ = signal_hook::low_level::raise(sig);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !terminated() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
     let _ = STATE.compare_exchange(WATCHING, ATTACHED, Ordering::SeqCst, Ordering::SeqCst);
-    if let Some((sig, true)) = hook() {
+    if let Some((sig, At::Early)) = hook() {
+        let _ = signal_hook::low_level::raise(sig);
+    }
+}
+
+/// A test hook read from the client's environment
+/// (`crates/vtmux/tests/upgrade.rs`): `TERM` or `HUP`, raised once a live
+/// upgrade's re-exec is decided, the attach's handlers gone (a signal
+/// that once left the client attached after the exec); `TERM-reattach`
+/// or `HUP-reattach`, raised in the image it execs, before its `Hello`.
+const REEXEC_SIGNAL_HOOK: &str = "VTMUX_TEST_REEXEC_SIGNAL";
+
+fn reexec_hook(reattach: bool) {
+    let Ok(value) = std::env::var(REEXEC_SIGNAL_HOOK) else {
+        return;
+    };
+    let sig = match value.strip_suffix("-reattach") {
+        Some(name) if reattach => signal_named(name),
+        None if !reattach => signal_named(&value),
+        _ => None,
+    };
+    if let Some(sig) = sig {
         let _ = signal_hook::low_level::raise(sig);
     }
 }
@@ -173,7 +268,7 @@ fn watch_hook() {
 }
 
 fn at_attach_hook() {
-    if let Some((sig, false)) = hook() {
+    if let Some((sig, At::Handlers)) = hook() {
         let _ = signal_hook::low_level::raise(sig);
     }
 }

@@ -19,7 +19,7 @@ use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
     self, ClientFlags, ClientMsg, ControlMode, Hello, HelloExt, PROTOCOL_VERSION, REATTACH_FLAG,
-    REATTACH_LOGIN_ENV, REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
+    REATTACH_LOGIN_ENV, REATTACH_SIGNAL_ENV, REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -305,12 +305,14 @@ fn main() -> ExitCode {
     // starts (a server, a pane, a lock command) inherits the token.
     let token = vtmux_server::sys::upgrade::take_env(REATTACH_TOKEN_ENV);
     let login = vtmux_server::sys::upgrade::take_env(REATTACH_LOGIN_ENV).is_some_and(|v| v == "1");
+    let carried = vtmux_server::sys::upgrade::take_env(REATTACH_SIGNAL_ENV);
     upgrade_image(args.get(1..).unwrap_or_default())
         .or_else(|| match args.as_slice() {
             [argv0, flag, socket] if flag == REATTACH_FLAG => Some(reattach_main(
                 argv0.clone(),
                 token.as_deref(),
                 login,
+                carried.as_deref(),
                 Path::new(socket),
             )),
             _ => None,
@@ -456,14 +458,19 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
 /// client. A token the server no longer knows is told to attach again.
 /// The terminal is the shell's until the server starts it again: the old
 /// image restored it before the notice, so every way out here leaves it
-/// as a detach does.
+/// as a detach does. It is an attached client from the start: a SIGTERM
+/// or SIGHUP, carried from the image before (`carried`) or caught here,
+/// ends it once it is back, with `Detach`, as an attached tmux client
+/// ends (client.c `client_signal`).
 fn reattach_main(
     argv0: OsString,
     token: Option<&std::ffi::OsStr>,
     login: bool,
+    carried: Option<&std::ffi::OsStr>,
     socket: &Path,
 ) -> ExitCode {
     signals::ignore_job_control();
+    signals::reattaching(carried);
     let Some(token) = token
         .and_then(|t| t.to_str())
         .filter(|t| protocol::is_upgrade_token(t))
@@ -515,12 +522,17 @@ fn reattach_main(
         login,
     };
     match protocol::read_msg::<ServerMsg>(&mut stream) {
-        // Told to attach again: said as a detached client says it.
+        // Told to attach again: said as a detached client says it, or as
+        // the signal it is ending for says (`Socket::pump`'s `Exit`).
         Ok(Some(ServerMsg::Exit {
             code,
             message: Some(m),
             ..
         })) => {
+            if let Some(reason) = signals::reason() {
+                vtmux_client::say(&format!("[{reason}]"));
+                return ExitCode::from(1);
+            }
             vtmux_client::say(&format!("[{m}]"));
             ExitCode::from(u8::try_from(code).unwrap_or(1))
         }
