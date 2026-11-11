@@ -1190,6 +1190,7 @@ fn own_name() {
     // D-073: -D (no fork) is refused.
     let d = w.raw(&["-D"]);
     assert_eq!(d.stderr, "not implemented in vtmux yet: -D\n");
+    assert_eq!(d.code, 1);
 }
 
 /// D25: `#{version}` stays tmux's bare `3.8` for plugin gates;
