@@ -130,7 +130,8 @@ pub fn run() -> ExitCode {
 #[derive(Debug, Serialize, Deserialize)]
 struct Trace {
     tmux_version: String,
-    /// Hostname of the machine that recorded the trace (see `host_view`).
+    /// `<HOST>` for traces recorded now: the recorder replaces its hostname with
+    /// `<HOST>` in the observations (see `host_view`). Older traces may hold a name.
     recorded_host: String,
     name: String,
     inputs: Scenario,
@@ -397,6 +398,9 @@ fn run_inner() -> Result<ExitCode> {
     }
 }
 
+/// What a new trace stores as `recorded_host`: never the recording machine's name.
+const RECORDED_HOST: &str = "<HOST>";
+
 fn current_host() -> String {
     std::process::Command::new("hostname")
         .output()
@@ -522,9 +526,18 @@ fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
                     bad += 1;
                     continue;
                 }
+                let observations = observations
+                    .into_iter()
+                    .map(|it| Item {
+                        observation: map_text(&it.observation, &|t| {
+                            normalize::replace_hosts(t, &[&host])
+                        }),
+                        ..it
+                    })
+                    .collect();
                 let trace = Trace {
                     tmux_version: TMUX_VERSION.into(),
-                    recorded_host: host,
+                    recorded_host: RECORDED_HOST.into(),
                     name: sc.name.clone(),
                     inputs: sc.clone(),
                     observations,
@@ -915,6 +928,19 @@ mod tests {
             vec![cli(0, "\"other\" and linuxpcx\n")],
         );
         assert!(compare(&want, &got, false).mismatches.is_empty());
+    }
+
+    #[test]
+    fn a_placeholder_trace_replays_on_any_host() {
+        // A trace recorded now: the recorder put `<HOST>` where its name was.
+        for host in ["linuxpc", "server", "x"] {
+            let (want, got) = host_view(
+                &trace(RECORDED_HOST, "on <HOST> now\n"),
+                host,
+                vec![cli(0, &format!("on {host} now\n"))],
+            );
+            assert!(compare(&want, &got, false).mismatches.is_empty(), "{host}");
+        }
     }
 
     #[test]

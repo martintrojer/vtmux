@@ -99,10 +99,11 @@ Applied before storing or diffing:
 - ctime-style dates (`Thu Oct 29 17:17:32 2026`, from `#{t:session_created}`) -> `<DATE>`
 - status-line clocks (`%H:%M %d-%b-%y`) -> `<CLOCK>`
 - tty names (`/dev/pts/3`) -> `<TTY>`
-- hostnames: scenarios never depend on the hostname (pin pane titles with `select-pane -T`). Traces store
-  `recorded_host`; replaying on another host replaces the recorded name on the trace side, and the current
-  name on the vtmux side (only in steps whose trace has one), with `<HOST>`, whole token only (not adjacent to
-  `[A-Za-z0-9_.-]`). On the recording host nothing is replaced.
+- hostnames: scenarios never depend on the hostname (pin pane titles with `select-pane -T`). Recording
+  replaces the host name with `<HOST>` in the observations and stores `recorded_host: "<HOST>"`. Replay
+  replaces the current name on the vtmux side with `<HOST>` (only in steps whose trace has one), whole token
+  only (not adjacent to `[A-Za-z0-9_.-]`). A trace that still holds a real name gets that name replaced on
+  the trace side too; on that same host nothing is replaced.
 - control streams: `%begin/%end/%error` timestamps -> `<TIME>`; guard command numbers renumbered by first
   appearance (`#1`, `#2`; absolute numbers count internal queue items, cmd-queue.c:713,745-746); consecutive
   `%output %N` lines per pane coalesced into one decoded payload between other events (chunking depends on
