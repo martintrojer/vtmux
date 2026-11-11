@@ -901,6 +901,10 @@ record! {
         /// (vtmux's own protocol): the bytes after it finish it.
         /// Ignorable: a reader before drops it, as every build did.
         49 => one inbuf: Vec<u8>,
+        /// Suspended by `suspend-client` rather than locked: a detach
+        /// reaches it before it wakes, so it gets no teardown. Ignorable:
+        /// a reader before tears it down again, as every build did.
+        50 => one stopped: bool,
     }
 }
 
@@ -1626,6 +1630,8 @@ pub(crate) mod tests {
             cwd_bytes: None,
             // Added within v1 too (a_frame_read_in_part_round_trips).
             inbuf: Vec::new(),
+            // Added within v1 too (a_stopped_client_round_trips).
+            stopped: false,
         }
     }
 

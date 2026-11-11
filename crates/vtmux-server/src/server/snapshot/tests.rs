@@ -1579,12 +1579,15 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .queue(b"typed ahead");
     // A frame from the client read in part (`inbuf`).
     a.clients.get_mut(&client).unwrap().inbuf = vec![0x03, 0x00];
+    // A client stopped by `suspend-client` (`stopped`).
+    a.suspend_client(client);
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
     });
     assert_eq!(s.panes[0].input_queued, b"typed ahead");
     assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
+    assert!(s.clients[0].stopped);
     let [c] = &s.clients[..] else {
         panic!("{:?}", s.clients)
     };

@@ -1414,6 +1414,7 @@ impl Server {
             table_ago_ms: since(now, c.keys.table_since),
             focused: c.focused,
             suspended: c.suspended,
+            stopped: c.stopped,
             title: c.title.clone(),
             terminal_title: c.terminal_title.clone(),
             pan: c.pan.map(|p| snap::ClientPan {
@@ -2088,6 +2089,7 @@ impl Server {
         c.written = usize::try_from(x.written).unwrap_or(usize::MAX);
         c.flags = flags_in(&x.flags);
         c.suspended = x.suspended;
+        c.stopped = x.stopped;
         c.title.clone_from(&x.title);
         c.terminal_title.clone_from(&x.terminal_title);
         c.pan = x.pan.as_ref().map(|p| crate::view::Pan {

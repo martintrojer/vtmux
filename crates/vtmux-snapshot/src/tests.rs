@@ -336,6 +336,15 @@ fn a_frame_read_in_part_round_trips() {
 }
 
 #[test]
+fn a_stopped_client_round_trips() {
+    let mut s = sample();
+    s.clients[0].stopped = true;
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| !c.stopped));
+}
+
+#[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();
     // Pane 1's primary (2) and alternate-entry (1) history, its copy mode

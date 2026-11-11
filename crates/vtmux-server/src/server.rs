@@ -196,6 +196,9 @@ pub(crate) struct Client {
     /// until the client sends `Wakeup`. Nothing is drawn, the client sizes
     /// no window and is not listed, but it keeps its session.
     pub(crate) suspended: bool,
+    /// Suspended by `suspend-client` (the client stopped itself), not
+    /// locked: a detach reaches it before its `Wakeup`.
+    pub(crate) stopped: bool,
     /// The connecting process's uid and gid (`getpeereid`, proc.c:331),
     /// checked against the server's access list.
     peer: Option<(u32, u32)>,
@@ -348,6 +351,7 @@ impl Client {
             last_write: Instant::now(),
             dead: false,
             suspended: false,
+            stopped: false,
             hello: None,
             speaks: Speaks::Full,
             attached: None,
@@ -2689,6 +2693,7 @@ impl Server {
         self.send_teardown(id);
         if let Some(c) = self.clients.get_mut(&id) {
             c.suspended = true;
+            c.stopped = true;
         }
         self.send(id, &ServerMsg::Suspend);
     }
@@ -2790,6 +2795,7 @@ impl Server {
             return;
         };
         c.suspended = false;
+        c.stopped = false;
         let Some(s) = c.attached.filter(|_| !c.closing) else {
             return;
         };
@@ -2851,18 +2857,22 @@ impl Server {
     }
 
     fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
-        // A suspended or locked client reads this once it is back. tmux
-        // keeps it until MSG_EXITING, which comes after its MSG_WAKEUP or
-        // MSG_UNLOCK; that starts the terminal again while the client
-        // still has its session (server-client.c:2741-2763), so tty_close
-        // writes the teardown, taking it off the lock screen. With its
-        // session gone (kill-session) nothing is started or torn down.
+        // A suspended or locked client reads this once it is back. A
+        // locked one is in its lock command, so tmux has its MSG_UNLOCK
+        // before its MSG_EXITING; that starts the terminal again while the
+        // client still has its session (server-client.c:2741-2763), so
+        // tty_close writes the teardown, taking it off the lock screen. A
+        // stopped one reads the detach before it sends MSG_WAKEUP, which
+        // then finds no session: its terminal, handed back at the stop, is
+        // never started or torn down again. Nor is one whose session is
+        // gone (kill-session).
         let session_alive = |server: &Self, c: &Client| {
             c.attached
                 .is_some_and(|s| server.model.sessions.contains_key(&s))
         };
         if let Some(c) = self.clients.get(&id)
             && c.suspended
+            && !c.stopped
             && session_alive(self, c)
             && let Some(c) = self.clients.get_mut(&id)
         {

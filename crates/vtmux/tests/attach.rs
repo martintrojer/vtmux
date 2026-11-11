@@ -7303,6 +7303,67 @@ fn suspend_client_stops_and_sigcont_redraws() {
     });
 }
 
+/// A suspended client detached (`detach-client -s`) leaves on SIGCONT
+/// with nothing more written: its terminal was handed back before the
+/// stop, and tmux, reading the detach before its `MSG_WAKEUP`, never starts
+/// it again (server-client.c:2741-2763: the client has no session by
+/// then), so there is no second teardown to clear the shell's screen.
+#[test]
+fn a_suspended_client_detached_writes_no_second_teardown() {
+    par::each(&bins(), |bin| {
+        let bin = bin.clone();
+        let w = World::new(bin.clone());
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["select-pane", "-t", "a", "-T", "p"]);
+        let go = w.home.path().join("go");
+        let script = format!(
+            "'{}' -L {} -f /dev/null attach -t a; echo STOPPED; \
+             while [ ! -e '{}' ]; do sleep 0.05; done; fg; echo DONE",
+            bin.display(),
+            w.label,
+            go.display()
+        );
+        let shell = ["/bin/dash", "/bin/sh"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap();
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.args(["-m", "-c", &script]);
+        let mut a = w.spawn_attached(cmd, 40, 10, &[]);
+        let ctx = bin.display().to_string();
+        let limit = Duration::from_secs(5);
+        a.wait_labelled(&ctx, limit, |a| status_row(a).starts_with("[a] 0:w*"));
+        let out = w.cli(&["lsc", "-F", "#{client_pid}"]).stdout;
+        let pid: u32 = String::from_utf8_lossy(&out).trim().parse().unwrap();
+        a.keys(b"\x02\x1a");
+        a.wait_labelled(&ctx, limit, |a| a.text().contains("STOPPED"));
+        common::wait(&format!("{ctx}: client {pid} to stop"), || {
+            proc_state(pid) == 'T'
+        });
+        assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
+        std::fs::write(&go, "").unwrap();
+        a.wait_labelled(&ctx, limit, |a| a.text().contains("DONE"));
+        a.exited(0);
+        let text = a.text();
+        let stopped = text.rfind("STOPPED").unwrap();
+        assert_eq!(
+            (
+                text.matches("\x1b[?1049h").count(),
+                text.matches("\x1b[?1049l").count()
+            ),
+            (1, 1),
+            "{ctx}"
+        );
+        assert!(
+            !text[stopped..].contains("\x1b[2J"),
+            "{ctx}: cleared after the stop"
+        );
+    });
+}
+
 /// Lines in `path`, 0 while it does not exist.
 fn line_count(path: &std::path::Path) -> usize {
     std::fs::read_to_string(path).map_or(0, |s| s.lines().count())
