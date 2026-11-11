@@ -9491,6 +9491,39 @@ fn a_pending_wrap_beside_an_image_puts_the_cursor_on_the_border() {
     a.wait(|a| a.screen().cursor() == (width, 2));
 }
 
+/// D33, as README says: images are drawn for Ghostty clients only. Two
+/// clients whose terminal has RGB and underline colours, one identifying
+/// as kitty and one as Ghostty: both get the text, only Ghostty the upload.
+#[test]
+fn graphics_are_drawn_for_a_ghostty_client_only() {
+    for (version, drawn) in [("kitty(0.45.0)", false), ("ghostty 1.2.3", true)] {
+        let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+        let program = "while read -r f; do cat \"$f\"; done";
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "sh", "-c", program]);
+        w.cli(&["set", "-g", "status-right", ""]);
+        w.cli(&["set", "-g", "allow-passthrough", "all"]);
+        w.cli(&["set", "-s", "terminal-features", "*:RGB:usstyle"]);
+        w.cli(&["set", "-s", "vtmux-graphics", "on"]);
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("0:w*"));
+        a.keys(format!("\x1bP>|{version}\x1b\\").as_bytes());
+        common::wait("the termtype", || {
+            String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_termtype}"]).stdout)
+                .starts_with(&version[..4])
+        });
+        let got = notify_emit(&w, &a, 0, b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;/wAA\x1b\\TEXT");
+        let upload = b"\x1b_Ga=t,";
+        let uploaded = got.windows(upload.len()).any(|x| x == upload);
+        assert_eq!(
+            uploaded,
+            drawn,
+            "{version}: {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        a.wait(|a| pane_text(a).contains("TEXT"));
+    }
+}
+
 /// D33 across a live upgrade: a Ghostty client gets vtmux's id range freed
 /// then the upload at its first graphics frame, and again after
 /// `vtmux-upgrade` (its re-exec attaches afresh). The grant comes over,

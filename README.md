@@ -81,7 +81,7 @@ set -s vtmux-inband-resize on
 %endif
 ```
 
-Kitty graphics: images from `kitten icat`, chafa, image.nvim and plotting tools show up in the pane, no `allow-passthrough` needed. They clip at pane edges, hide under popups and follow zoom, scrolling and window switches. A live upgrade drops them until the app redraws.
+Kitty graphics, for a Ghostty client: images from `kitten icat`, chafa, image.nvim and plotting tools show up in the pane, no `allow-passthrough` needed. They clip at pane edges, hide under popups and follow zoom, scrolling and window switches. Other terminals, kitty included, get the text without the images. A live upgrade drops them until the app redraws.
 
 ```tmux
 %if "#{vtmux_version}"
