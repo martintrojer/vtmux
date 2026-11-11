@@ -4,7 +4,7 @@
 //!
 //! With a client, `colour_toescape` also downgrades to what the terminal supports and
 //! resolves theme colours from the client; that is the server's business and is not
-//! modelled here (no client: 256 colours and RGB are both available).
+//! modelled here (no client: 256 colours and RGB are both available; D-074).
 
 use crate::colour::Colour;
 

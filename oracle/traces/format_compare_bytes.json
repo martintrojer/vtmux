@@ -1,0 +1,70 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_compare_bytes",
+  "inputs": {
+    "name": "format_compare_bytes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "sh",
+          "-c",
+          "tmux set -g @x \"$(printf '\\377')\"; tmux set -g @y \"$(printf 'caf\\351')\"; tmux wait-for -S done; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{<:#{@x},a}|#{>:#{@x},a}|#{<=:#{@x},a}|#{>=:#{@x},a}|#{<:#{@y},cafz}|#{>:#{@y},cafe}|#{==:#{@x},#{@x}}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|0|1|0|1|1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

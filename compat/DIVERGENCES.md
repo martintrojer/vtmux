@@ -77,6 +77,8 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-070](#d-070) | A failed `-t` with no session part and no client keeps the session in formats | Deferred | deferred |
 | [D-071](#d-071) | Keys typed at a background `attach` stay with the foreground job | Spec decision | open |
 | [D-072](#d-072) | Kitty graphics drawn as unicode placeholders for Ghostty clients (`vtmux-graphics`) | Extension | extension |
+| [D-073](#d-073) | `-D` (run the server in the foreground) is refused | Deferred | deferred |
+| [D-074](#d-074) | `#{c/f:...}` and `#{c/b:...}` give the full colour, whatever the client's terminal | Deferred | deferred |
 
 Closed (vtmux now matches tmux):
 
@@ -1197,7 +1199,7 @@ Closed (vtmux now matches tmux):
 
 - **Category:** Do not copy tmux bug: tmux can overwrite a kept dead pane's status, or destroy it.
 - **Test:** `vtmux-server` unit test `server::tests::a_reused_pid_credits_the_live_pane_not_a_dead_one`.
-- **tmux:** `server_child_exited` (server.c:491-515) gives a reaped child's status to every pane with that pid, a dead `remain-on-exit` pane included, whose pid the OS may have reused. That pane takes the new process's status, and with `remain-on-exit failed` and an exit of 0, `server_destroy_pane` (server-fn.c:382-399) removes it.
+- **tmux:** `server_child_exited` (server.c:491-515) gives a reaped child's status to the first pane with that pid in each window (the loop breaks there), a dead `remain-on-exit` pane included, whose pid the OS may have reused. That pane takes the new process's status, and with `remain-on-exit failed` and an exit of 0, `server_destroy_pane` (server-fn.c:382-399) removes it.
 - **vtmux:** the status goes to every pane with that pid whose process has not exited yet; a dead pane keeps its own.
 - **Evidence:** source reading: a pid can't be made to come back on demand, so no oracle scenario can show it. Most likely on macOS (pid_max 99999) with frequent `#()` jobs.
 
@@ -1237,6 +1239,24 @@ Closed (vtmux now matches tmux):
   - `TMUX` and XTVERSION stay tmux's (D28 rule 3), so an app that wraps its commands for tmux keeps doing so through `allow-passthrough`, unchanged: yazi 26.9 sets `allow-passthrough all` on its pane and wraps every command (`docs/test-health/2026-11-10-graphics-real-apps.md`).
 - **Live upgrade:** the grant is carried (`TermState.graphics_primary`, `graphics_alternate`, required as `graphics-grant` while a granted program runs; its process group ignorable), the images are not: a resumed screen draws nothing until its program sends them again. A checkpoint (`vtmux-persist`) keeps no grant.
 - **Evidence:** Ghostty implements the protocol in the pane (`graphics_exec.zig` `execute`, `graphics_storage.zig`, placeholders `graphics_unicode.zig:16`) and as the outer terminal with placeholders (termio/Termio.zig:294-295, 511-512).
+
+<a id="d-073"></a>
+### D-073: `-D` (run the server in the foreground) is refused
+
+- **Category:** Deferred: vtmux's client starts the server as its own process (D14), and no user has asked for a foreground server.
+- **Test:** cli.rs `own_name` (`vtmux -D` prints `not implemented in vtmux yet: -D` and exits 1).
+- **tmux:** `-D` sets `CLIENT_NOFORK` (tmux.c:434): the server runs in the foreground of the starting process instead of daemonising (server.c:189, 230), as a service manager wants.
+- **vtmux:** refused with `not implemented in vtmux yet: -D`, status 1.
+- **Evidence:** reference tmux 3.8 `tmux -D` runs a server in the foreground; vtmux exits 1.
+
+<a id="d-074"></a>
+### D-074: `#{c/f:...}` and `#{c/b:...}` give the full colour, whatever the client's terminal
+
+- **Category:** Deferred: the format evaluator has no client terminal or theme colours yet; a style is still drawn in what the terminal supports.
+- **Test:** none fails: the formats are tmux's with no client (the `c/f` and `c/b` rows of `crates/vtmux-core/src/format/golden_rows.in`).
+- **tmux:** `colour_toescape(ft->c, ...)` (colour.c:295-343) downgrades RGB to 256 and 256 to 16 colours for a client whose terminal lacks them, and takes a theme slot from the client's `theme_colours`.
+- **vtmux:** always the escape for no client: RGB as RGB, a theme slot as its terminal colour. `display -c <client on TERM=screen> -p '#{c/f:#ff0000}'` gives `\e[38;2;255;0;0m` where tmux gives `\e[38;5;196m`.
+- **Evidence:** source reading (colour.c, format.c `format_replace`'s `c` modifier).
 
 ## Adding an entry
 

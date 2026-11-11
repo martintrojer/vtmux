@@ -359,14 +359,16 @@ impl Eval<'_> {
             Value::Cmp { op, left, right } => {
                 let l = self.expand(left, inner);
                 let r = self.expand(right, inner);
-                // strcmp: bytewise, which is also how `str` orders.
+                // strcmp: bytewise over the bytes the strings stand for (a
+                // stray byte is NUL + U+10FFxx in `str`, which sorts low).
+                let order = crate::rawstr::to_bytes(&l).cmp(&crate::rawstr::to_bytes(&r));
                 flag01(match op {
                     CmpOp::Eq => l == r,
                     CmpOp::Ne => l != r,
-                    CmpOp::Lt => l < r,
-                    CmpOp::Gt => l > r,
-                    CmpOp::Le => l <= r,
-                    CmpOp::Ge => l >= r,
+                    CmpOp::Lt => order.is_lt(),
+                    CmpOp::Gt => order.is_gt(),
+                    CmpOp::Le => order.is_le(),
+                    CmpOp::Ge => order.is_ge(),
                 })
             }
             Value::Cond { arms, default, vm } => {

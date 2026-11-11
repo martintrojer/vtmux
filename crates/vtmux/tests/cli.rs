@@ -1187,6 +1187,9 @@ fn own_name() {
     );
     let (_keep, as_tmux) = vtmux_as_tmux();
     assert_eq!(World::new(&as_tmux).raw(&["-V"]).stdout, "tmux 3.8\n");
+    // D-073: -D (no fork) is refused.
+    let d = w.raw(&["-D"]);
+    assert_eq!(d.stderr, "not implemented in vtmux yet: -D\n");
 }
 
 /// D25: `#{version}` stays tmux's bare `3.8` for plugin gates;

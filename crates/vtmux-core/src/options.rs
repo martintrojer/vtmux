@@ -341,6 +341,8 @@ impl OptionsStore {
         self.changed();
         self.sessions.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Session(id));
+        self.hook_fires
+            .retain(|(t, _), _| *t != TreeId::Session(id));
     }
 
     pub fn add_window(&mut self, id: WindowId) {
@@ -352,6 +354,7 @@ impl OptionsStore {
         self.changed();
         self.windows.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Window(id));
+        self.hook_fires.retain(|(t, _), _| *t != TreeId::Window(id));
     }
 
     /// A new pane's tree, under its window's.
@@ -372,6 +375,7 @@ impl OptionsStore {
         self.panes.remove(&id);
         self.pane_window.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Pane(id));
+        self.hook_fires.retain(|(t, _), _| *t != TreeId::Pane(id));
     }
 
     /// A count that changes whenever any option of any tree may have: a
@@ -740,6 +744,26 @@ fn resolve_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tree removed takes its hooks' fire counts with it (they would
+    /// pile up on a long-lived server: IDs are never reused).
+    #[test]
+    fn removing_a_tree_forgets_its_hook_fires() {
+        let mut store = OptionsStore::new(&Defaults::default());
+        let (s, w, p) = (SessionId(1), WindowId(1), PaneId(1));
+        store.add_session(s);
+        store.add_window(w);
+        store.add_pane(p, w);
+        for t in [TreeId::Session(s), TreeId::Window(w), TreeId::Pane(p)] {
+            store.hook_fired(t, "pane-focus-in", 1);
+        }
+        store.hook_fired(TreeId::Server, "pane-focus-in", 1);
+        store.remove_pane(p);
+        store.remove_window(w);
+        store.remove_session(s);
+        let left: Vec<_> = store.hook_fires.keys().map(|(t, _)| *t).collect();
+        assert_eq!(left, [TreeId::Server]);
+    }
 
     /// `format_find`'s order (format.c): the pane's tree before the window's,
     /// the session's after both, the server's first; an option the pane

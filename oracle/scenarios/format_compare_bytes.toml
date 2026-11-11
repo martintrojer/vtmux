@@ -1,0 +1,9 @@
+name = "format_compare_bytes"
+# #{<:...}, #{>:...}, #{<=:...} and #{>=:...} compare with strcmp
+# (format.c:6481-6499, format_replace): bytewise, so a byte
+# that is not UTF-8 (0xff, 0xe9) sorts above every ASCII character.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "tmux set -g @x \"$(printf '\\377')\"; tmux set -g @y \"$(printf 'caf\\351')\"; tmux wait-for -S done; exec cat -"] },
+  { wait_for = "done" },
+  { run = ["display", "-p", "#{<:#{@x},a}|#{>:#{@x},a}|#{<=:#{@x},a}|#{>=:#{@x},a}|#{<:#{@y},cafz}|#{>:#{@y},cafe}|#{==:#{@x},#{@x}}"] },
+]
