@@ -80,7 +80,7 @@ set -s vtmux-inband-resize on
 %endif
 ```
 
-Kitty graphics: images from yazi, `kitten icat`, image.nvim and plotting tools show up in the pane, no `allow-passthrough` needed. They clip at pane edges, hide under popups and follow zoom, scrolling and window switches. A live upgrade drops them until the app redraws.
+Kitty graphics: images from `kitten icat`, chafa, image.nvim and plotting tools show up in the pane, no `allow-passthrough` needed. They clip at pane edges, hide under popups and follow zoom, scrolling and window switches. A live upgrade drops them until the app redraws.
 
 ```tmux
 %if "#{vtmux_version}"
@@ -130,8 +130,6 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI.
 
-Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
-
 **Status:** beta ([3.8-beta2](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
-Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.
+ISC license.
