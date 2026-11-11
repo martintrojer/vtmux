@@ -55,8 +55,8 @@ pub struct Sys {
     pub defaults: fn(),
     /// The client's signals are its own from here on: the binary drops
     /// those it caught before the attach (`client_attached`). Returns the
-    /// SIGTERM or SIGHUP it caught first, if one came: it has shut the
-    /// connection down, and the client leaves as for it.
+    /// SIGTERM or SIGHUP it caught, if one came (it may have shut the
+    /// connection down): the client leaves as for it.
     pub attached: fn() -> Option<i32>,
 }
 
@@ -174,10 +174,11 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     // SIGUSR1 and SIGUSR2 go to proc_signal_cb and client_signal ignores
     // them while attached (proc.c proc_set_signals:254-276).
     let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGCONT, SIGUSR1, SIGUSR2])?;
-    // These handlers go in before the binary's are dropped, so no signal
-    // is missed. One the binary's took first cut the connection (no
-    // `Detach` can go): the client leaves as client.c `client_signal`
-    // does once attached, status 1, the terminal still untouched.
+    // These handlers go in before the binary's are dropped. A SIGTERM or
+    // SIGHUP the binary's caught before then (which may have cut the
+    // connection, so no `Detach` can go) ends the client here, as client.c
+    // `client_signal` does once attached: status 1, the terminal still
+    // untouched.
     if let Some(sig) = (sys.attached)() {
         return Ok(Leave::exit(
             1,

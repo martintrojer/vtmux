@@ -872,6 +872,7 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
                 );
             }
             Ok(Some(ServerMsg::Ready)) => {
+                signals::ready();
                 return ExitCode::from(
                     u8::try_from(vtmux_client::attach::attach(stream, how, signals::SYS))
                         .unwrap_or(1),

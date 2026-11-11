@@ -452,15 +452,22 @@ fn signal_exit_restores_terminal_modes() {
     });
 }
 
-/// A SIGTERM or SIGHUP once the attached client's handlers are in place,
-/// but before the pre-attach watcher is closed (a test hook puts it there
-/// and lets the watcher take it first), ends the client as an attached
-/// one: `[terminated]` or `[lost tty]`, status 1, never "server exited
-/// unexpectedly". vtmux only: the hook is its.
+/// A SIGTERM or SIGHUP as the client attaches ends it as an attached one:
+/// `[terminated]` or `[lost tty]`, status 1, never "server exited
+/// unexpectedly", nor left attached. A test hook puts it in each order
+/// that once went wrong: once the attached client's handlers are in place
+/// but before the pre-attach watcher is closed, the watcher taking it
+/// first; and before those handlers, the watcher's thread not yet run
+/// when the attach takes over (`-early`). vtmux only: the hook is its.
 #[test]
 fn a_signal_as_the_client_attaches_ends_it_as_attached() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
-    for (signal, says) in [("TERM", "[terminated]"), ("HUP", "[lost tty]")] {
+    for (signal, says) in [
+        ("TERM", "[terminated]"),
+        ("HUP", "[lost tty]"),
+        ("TERM-early", "[terminated]"),
+        ("HUP-early", "[lost tty]"),
+    ] {
         let w = World::new(bin.clone());
         let mut a = w.attach_env(
             &["new", "-s", "a", "cat"],
