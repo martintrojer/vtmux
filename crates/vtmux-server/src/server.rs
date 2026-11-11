@@ -5606,6 +5606,15 @@ impl Server {
         .unwrap_or(0o177)
     }
 
+    /// `default-command` in `tree`, unless empty.
+    fn default_command(&self, tree: TreeId) -> Option<String> {
+        self.model
+            .options
+            .get(tree, "default-command")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .filter(|cmd| !cmd.is_empty())
+    }
+
     /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
     /// (`environ_for_session` plus the spawn additions), the shell from
     /// `default-shell`, the PTY sized to `rect` (in pixels too), and a terminal whose title
@@ -5625,15 +5634,7 @@ impl Server {
         // A respawn keeps the pane's stored words.
         let mut argv = ps.argv.clone();
         if argv.is_empty() && ps.shell.is_none() {
-            let cmd = self
-                .model
-                .options
-                .get(session_tree, "default-command")
-                .map(|e| e.value.to_text(e.def, None, false))
-                .unwrap_or_default();
-            if !cmd.is_empty() {
-                argv.push(cmd);
-            }
+            argv.extend(self.default_command(session_tree));
         }
         child.set("SHELL", &shell.to_string_lossy(), false);
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
@@ -5724,6 +5725,7 @@ impl Server {
             graphics: crate::model::PaneGraphics::default(),
             restored_from: None,
             restored_hint: None,
+            restart_guard: None,
         })
     }
 
@@ -5880,7 +5882,11 @@ impl Server {
         let p = ps.pane;
         // Decision 31: a restored pane keeps its screen; `-E` keeps it
         // restored and writes nothing (*Respawning a restored pane*).
-        let restored = self.model.panes.get(&p).and_then(|x| x.restored_from);
+        let restored = self.model.panes.get_mut(&p).and_then(|x| {
+            // Respawned again, a pane once restored respawns as tmux's.
+            x.restart_guard = None;
+            x.restored_from
+        });
         if let Some(from) = restored {
             return self.respawn_restored_pane(ps, from);
         }

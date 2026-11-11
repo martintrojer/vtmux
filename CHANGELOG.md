@@ -9,6 +9,10 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - **Restores you can pick up.** After a restart a restored pane shows its last screen with a hint over its bottom row; press Enter and its command starts again below that screen (a dim `restored <time>` row between), editors' screens included. `respawn-pane` does the same.
   - `set -s vtmux-persist-respawn auto` restarts every restored shell at once, after the config; panes that ran anything else wait for Enter. `off` keeps panes dead until `respawn-pane`.
   - `send-keys` (but `send-keys -K`, a client key), pastes and synchronized panes never restart one.
+  - A restart that exits at once (a program gone since the checkpoint, a missing shell) no longer closes the pane and its saved screen: it stays restored, the hint saying the restart failed with its status, and Enter tries again.
+  - An editor's screen kept by a restart keeps its links and its wrapped lines (`capture-pane -J`).
+  - An empty `remain-on-exit-format` draws nothing over a restored pane's last row, as tmux draws no dead line.
+  - A checkpoint holds a restored pane still waiting as one that ran, so an older vtmux restoring it draws its dead line.
   - The restored dead line is no longer written into the pane's screen: `capture-pane` and the next checkpoint show the saved screen as it was.
 
 ### Fixed

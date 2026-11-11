@@ -2000,6 +2000,7 @@ impl Server {
             ]),
             restored_from: x.restored_from,
             restored_hint: None,
+            restart_guard: None,
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,

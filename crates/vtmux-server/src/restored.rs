@@ -17,11 +17,17 @@ use vtmux_core::keys::Key;
 use vtmux_core::options::TreeId;
 use vtmux_core::style::CellStyle;
 use vtmux_core::styled;
-use vtmux_vt::{Cell, ExtendedKeys, PaneTerm, Row, Style};
+use vtmux_vt::{CaptureOpts, Cell, ExtendedKeys, LineRef, PaneTerm, Row, Style};
 
 use crate::model::Pane;
 use crate::server::{ClientId, PaneSpawn, Server, spawn_failed};
 use crate::target::Found;
+
+/// How long the program a restored pane was respawned into must run for
+/// its exit to be an ordinary one (decision 31, *A restart that does not
+/// run*): a missing binary or shell, or a command that fails at once,
+/// exits well within it.
+pub(crate) const RESTART_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// `vtmux-persist-respawn`'s values (decision 32).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +67,36 @@ impl Server {
             .filter(|_| pane.exited && pane.io.is_none())
     }
 
+    /// Pane `p`'s program went and its status is in (`server_destroy_pane`
+    /// is about to decide): true when the pane stays as it is, whatever
+    /// `remain-on-exit` says (decision 31, *A restart that does not run*).
+    /// A pane still waiting as restored stays; one respawned from a
+    /// restored pane whose program ran less than [`RESTART_GRACE`] goes
+    /// back to waiting: dead, restored from the same checkpoint, its
+    /// screen (the old one, the marker, what the program wrote) kept,
+    /// `pane-died` fired as for a pane `remain-on-exit` keeps, no dead
+    /// line written (the hint says the restart failed).
+    pub(crate) fn keep_restored(&mut self, p: PaneId) -> bool {
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return false;
+        };
+        if pane.restored_from.is_some() {
+            return true;
+        }
+        let Some((from, at)) = pane.restart_guard.take() else {
+            return false;
+        };
+        if at.elapsed() >= RESTART_GRACE {
+            return false;
+        }
+        pane.restored_from = Some(from);
+        pane.dead_time = Some(crate::model::now_epoch());
+        self.fire_pane_exit("pane-died", p);
+        self.hide_restored_cursor(p);
+        self.model.redraw_panes.insert(p);
+        true
+    }
+
     /// A restored pane's cursor is hidden as a dead pane's is
     /// (server-fn.c:417, `MODE_CURSOR` off): a mode, not grid content.
     pub(crate) fn hide_restored_cursor(&mut self, p: PaneId) {
@@ -75,8 +111,12 @@ impl Server {
     /// restored pane*, *The hint*): with `key` or `auto`,
     /// `Restored <time>: Enter restarts <command>`; with `off`,
     /// `remain-on-exit-format`'s dead line, drawn as tmux draws it
-    /// (`format_draw` on the default cell). Every column is the line's.
-    fn restored_hint(&self, p: PaneId, from: i64) -> Vec<styled::Cell> {
+    /// (`format_draw` on the default cell), and none for an empty format
+    /// (server-fn.c `server_destroy_pane` draws nothing for it). Every
+    /// column is the line's. After a restart that did not run (its status
+    /// known), `Restored <time>: restart failed (status N); Enter restarts
+    /// <command>`.
+    fn restored_hint(&self, p: PaneId, from: i64) -> Option<Vec<styled::Cell>> {
         let pane = &self.model.panes[&p];
         let sx = usize::from(pane.term.cols());
         let text = if self.respawn_setting() == Respawn::Off {
@@ -86,6 +126,9 @@ impl Server {
                 .get(TreeId::Pane(p), "remain-on-exit-format")
                 .map(|e| e.value.to_text(e.def, None, false))
                 .unwrap_or_default();
+            if template.is_empty() {
+                return None;
+            }
             let found = Found {
                 window: Some(pane.window),
                 pane: Some(p),
@@ -100,9 +143,16 @@ impl Server {
             } else {
                 command
             };
+            let failed = match pane.status {
+                Some(crate::jobs::JobStatus::Exited(n)) => format!("restart failed (status {n}); "),
+                Some(crate::jobs::JobStatus::Signaled(n)) => {
+                    format!("restart failed (signal {n}); ")
+                }
+                _ => String::new(),
+            };
             // `#[...]` in a command is text, not a style.
             format!(
-                "Restored {}: Enter restarts {}",
+                "Restored {}: {failed}Enter restarts {}",
                 self.restored_time(from),
                 command.replace('#', "##")
             )
@@ -115,7 +165,7 @@ impl Server {
             };
             sx
         ];
-        styled::draw_onto(&CellStyle::default(), under, &text, false, false).cells
+        Some(styled::draw_onto(&CellStyle::default(), under, &text, false, false).cells)
     }
 
     /// A checkpoint's write time as the hint and the marker show it, in
@@ -140,9 +190,9 @@ impl Server {
             .map(|(&p, _)| p)
             .collect();
         for p in panes {
-            let hint = self.waits_restored(p).map(|from| {
+            let hint = self.waits_restored(p).and_then(|from| {
                 let cols = self.model.panes[&p].term.cols();
-                (cols, self.restored_hint(p, from))
+                Some((cols, self.restored_hint(p, from)?))
             });
             let pane = self.model.panes.get_mut(&p).expect("listed above");
             if pane.restored_hint != hint {
@@ -312,6 +362,7 @@ impl Server {
         pane.dead_time = None;
         pane.changed = true;
         pane.restored_from = None;
+        pane.restart_guard = Some((from, Instant::now()));
         pane.io = fresh.io;
         pane.empty = fresh.empty;
         pane.last_rename = fresh.last_rename;
@@ -334,15 +385,40 @@ impl Server {
 /// of a blank screen); the cursor at the start of the next row, a line
 /// feed scrolling at the bottom.
 fn keep_screen(term: &mut PaneTerm, extended_keys: ExtendedKeys, marker: &str) {
-    // The alternate screen's visible rows, as they show.
-    let alternate: Vec<Vec<u8>> = if term.alternate_on() {
-        let h = term.history_size();
-        let rows: Vec<Row> = term.rows_in(h..h + usize::from(term.rows())).collect();
-        let used = rows.iter().rposition(row_occupied).map_or(0, |y| y + 1);
-        rows[..used].iter().map(row_bytes).collect()
-    } else {
-        Vec::new()
-    };
+    // The alternate screen's visible rows as `capture-pane -e -J` gives
+    // them: styles, charsets and links, a wrapped row joined to the next
+    // so the main screen (the same width) wraps it again.
+    let alternate: Option<Vec<u8>> = term
+        .alternate_on()
+        .then(|| {
+            let h = term.history_size();
+            let used = term
+                .rows_in(h..h + usize::from(term.rows()))
+                .collect::<Vec<_>>()
+                .iter()
+                .rposition(row_occupied)?;
+            let captured = vtmux_vt::capture(
+                term,
+                CaptureOpts {
+                    escapes: true,
+                    join: true,
+                    start: LineRef::Line(0),
+                    end: LineRef::Line(i64::try_from(used).ok()?),
+                    ..CaptureOpts::default()
+                },
+            );
+            let captured = captured.strip_suffix(b"\n").unwrap_or(&captured);
+            let mut out = Vec::with_capacity(captured.len() + 16);
+            for (i, line) in captured.split(|&b| b == b'\n').enumerate() {
+                if i > 0 {
+                    out.extend_from_slice(b"\r\n");
+                }
+                out.extend_from_slice(line);
+            }
+            out.extend_from_slice(b"\x1b[m\x0f\x1b]8;;\x1b\\");
+            Some(out)
+        })
+        .flatten();
     term.reset_input();
     term.stop_sync();
     term.reset_kitty_keys();
@@ -401,35 +477,6 @@ fn cell_occupied(c: &Cell) -> bool {
     !c.text.is_empty() || c.style != Style::default() || c.link.is_some() || c.acs || c.tab
 }
 
-/// A row written back as it shows: each cell's style and text up to its
-/// last occupied cell, a blank as a space, the second column of a wide
-/// character skipped.
-fn row_bytes(row: &Row) -> Vec<u8> {
-    let used = row
-        .cells
-        .iter()
-        .rposition(cell_occupied)
-        .map_or(0, |x| x + 1);
-    let mut out = Vec::new();
-    let mut style = None;
-    for c in &row.cells[..used] {
-        if c.width == 0 {
-            continue;
-        }
-        if style != Some(&c.style) {
-            out.extend_from_slice(crate::remain::cell_sgr(&c.style).as_bytes());
-            style = Some(&c.style);
-        }
-        if c.text.is_empty() {
-            out.push(b' ');
-        } else {
-            out.extend_from_slice(c.text.as_str().as_bytes());
-        }
-    }
-    out.extend_from_slice(b"\x1b[m");
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +528,36 @@ mod tests {
         assert_eq!(rows, ["$ vi", "~ x", "restored 2", ""]);
         assert!(!t.row(h + 2).wrapped && t.row(h + 2).cells[0].style.faint);
         assert_eq!(t.cursor(), (0, 3));
+    }
+
+    /// The alternate screen's rows keep what `capture-pane -J` and `-e`
+    /// read of them (cmd-capture-pane.c `cmd_capture_pane_history`): a
+    /// soft wrap (`GRID_LINE_WRAPPED`) and a hyperlink with its id.
+    #[test]
+    fn an_alternate_screen_keeps_its_wraps_and_links() {
+        let mut t = PaneTerm::new(10, 5, 100);
+        t.feed(
+            b"$ vi\r\n\x1b[?1049h\x1b[Habcdefghij\x1b]8;id=x;https://example.com/\x1b\\ABCDEFGHIJ\x1b]8;;\x1b\\",
+        );
+        keep_screen(&mut t, ExtendedKeys::Off, "restored 2026-11-11 09:00");
+        let rows: Vec<String> = t.rows_in(0..5).map(|r| r.text()).collect();
+        assert_eq!(rows, ["$ vi", "abcdefghij", "ABCDEFGHIJ", "restored 2", ""]);
+        assert!(t.row(1).wrapped && !t.row(2).wrapped);
+        assert_eq!(t.hyperlink(0, 2).as_deref(), Some("https://example.com/"));
+        assert_eq!(t.hyperlink(0, 1), None);
+        assert_eq!(t.hyperlink(0, 3), None, "the marker has no link");
+        let all = vtmux_vt::capture(
+            &t,
+            vtmux_vt::CaptureOpts {
+                escapes: true,
+                join: true,
+                ..vtmux_vt::CaptureOpts::default()
+            },
+        );
+        let all = String::from_utf8_lossy(&all);
+        assert!(
+            all.contains("abcdefghij\x1b]8;id=x;https://example.com/\x1b\\ABCDEFGHIJ"),
+            "{all:?}"
+        );
     }
 }

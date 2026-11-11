@@ -1661,3 +1661,139 @@ fn a_restored_pane_stays_restored_across_a_restart_and_an_upgrade() {
     assert!(rows[2].starts_with("restored "), "{rows:?}");
     assert_eq!(w.dead(), "%0=0 ");
 }
+
+/// A restart that does not run (decision 31, *A restart that does not
+/// run*): Enter respawns a restored pane into a program that is gone
+/// since the checkpoint; it exits at once, and under the default
+/// `remain-on-exit off` the pane stays, dead and restored again, its
+/// saved screen and history kept, the hint saying the restart failed.
+/// Enter retries; once the program is back the pane runs it.
+#[test]
+fn a_restart_that_exits_at_once_keeps_the_restored_pane() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    let prog = w.dir.path().join("prog");
+    let script = "#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26; do echo old; done\necho 'precious output'\nexec cat -\n";
+    std::fs::write(&prog, script).unwrap();
+    std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let prog = prog.to_str().unwrap().to_owned();
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["set", "-g", "status-right", "pinned"]);
+    let command = format!("exec {prog}");
+    w.ok(&["respawn-pane", "-k", "-t", "a:0", &command]);
+    w.ok(&["new-window", "-d", "-t", "a:1", "cat", "-"]);
+    common::wait("the pane's output", || {
+        w.rows("a:0").iter().any(|r| r == "precious output")
+    });
+    assert_ne!(
+        w.ok(&["display", "-p", "-t", "a:0", "#{history_size}"]),
+        "0\n"
+    );
+    w.wait_saved();
+    w.kill_9();
+    std::fs::remove_file(&prog).unwrap();
+
+    let mut client = Attached::new(&w, &["attach", "-t", "a"]);
+    common::wait("the hint over the restored pane", || {
+        let screen = client.screen();
+        screen.contains("precious output") && screen.contains(": Enter restarts \"exec ")
+    });
+    w.repid();
+    client.keys(b"\r");
+    common::wait("the hint saying the restart failed", || {
+        client
+            .screen()
+            .contains(": restart failed (status 127); Enter restarts \"exec ")
+    });
+    assert_eq!(w.dead(), "%0=1 %1=1 ");
+    let rows = w.rows("a:0");
+    let at = rows
+        .iter()
+        .position(|r| r == "precious output")
+        .expect("kept");
+    assert!(rows[at + 1].starts_with("restored "), "{rows:?}");
+    assert!(rows[at + 2].contains("prog"), "the shell's error: {rows:?}");
+    assert_eq!(
+        w.ok(&["display", "-p", "-t", "a:0", "#{pane_dead_status}"]),
+        "127\n"
+    );
+    // The history too.
+    let all = w.ok(&["capture-pane", "-p", "-S", "-", "-t", "a:0"]);
+    assert_eq!(all.lines().filter(|l| *l == "old").count(), 26, "{all}");
+    // The program back, Enter restarts the pane.
+    std::fs::write(&prog, script).unwrap();
+    std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+    client.keys(b"\r");
+    common::wait("the pane respawned", || w.dead() == "%0=0 %1=1 ");
+    w.echo("a:0", "again");
+}
+
+/// The same for `respawn-pane` into a command that exits at once, under
+/// `remain-on-exit on` too (no dead line written into the screen), and
+/// for `vtmux-persist-respawn auto` restarting a shell that exits at once:
+/// each pane stays dead and restored, its screen kept.
+#[test]
+fn respawn_pane_and_auto_into_a_program_that_exits_keep_the_pane() {
+    let mut w = World::start_with(
+        &["cat", "-"],
+        &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
+        None,
+        Some("set -s vtmux-persist-respawn auto\n"),
+    );
+    let shell = w.dir.path().join("shell");
+    let write_shell = |text: &str| {
+        std::fs::write(&shell, text).unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    write_shell("#!/bin/sh\nunset ENV\nexport PS1='$ '\nexec /bin/sh -i\n");
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["set", "-g", "default-shell", shell.to_str().unwrap()]);
+    w.echo("a:0", "kept0");
+    w.ok(&["new-window", "-d", "-t", "a:1"]);
+    w.ok(&["send-keys", "-t", "a:1", "echo be''fore", "Enter"]);
+    common::wait("the shell's output", || {
+        w.rows("a:1").iter().any(|r| r == "before")
+    });
+    w.ok(&["new-window", "-d", "-t", "a:2", "cat", "-"]);
+    w.echo("a:2", "kept2");
+    w.wait_saved();
+    w.kill_9();
+    write_shell("#!/bin/sh\nexit 3\n");
+    w.ok(&["start-server"]);
+    w.repid();
+    // `auto`'s restart of the shell exited at once.
+    common::wait("the shell's restart failed", || {
+        w.dead() == "%0=1 %1=1 %2=1 "
+    });
+    assert!(w.rows("a:1").iter().any(|r| r == "before"));
+    assert_eq!(
+        w.ok(&["display", "-p", "-t", "a:1", "#{pane_dead_status}"]),
+        "3\n"
+    );
+    // The shell missing altogether (its `exec` fails: status 1, as
+    // spawn.c's child `_exit(1)`): the pane stays too.
+    std::fs::remove_file(&shell).unwrap();
+    w.ok(&["respawn-pane", "-t", "a:1"]);
+    common::wait("the missing shell's restart failed", || {
+        w.dead() == "%0=1 %1=1 %2=1 "
+            && w.ok(&["display", "-p", "-t", "a:1", "#{pane_dead_status}"]) == "1\n"
+    });
+    assert!(w.rows("a:1").iter().any(|r| r == "before"));
+    w.ok(&["respawn-pane", "-t", "a:0", "sh", "-c", "exit 5"]);
+    w.ok(&["set", "-g", "remain-on-exit", "on"]);
+    w.ok(&["respawn-pane", "-t", "a:2", "sh", "-c", "exit 4"]);
+    common::wait("both restarts failed", || {
+        w.ok(&["list-panes", "-a", "-F", "#{pane_dead_status}"]) == "5\n1\n4\n"
+    });
+    for (pane, kept) in [("a:0", "kept0"), ("a:2", "kept2")] {
+        let rows = w.rows(pane);
+        assert_eq!(rows[..2], [kept, kept], "{rows:?}");
+        assert!(rows[2].starts_with("restored "), "{rows:?}");
+        assert!(rows.iter().all(|r| !r.contains("Pane is dead")), "{rows:?}");
+    }
+    // Restored again, the pane survives a further checkpoint and restart.
+    w.kill_server();
+    w.ok(&["start-server"]);
+    w.repid();
+    let rows = w.rows("a:0");
+    assert_eq!(rows[..2], ["kept0", "kept0"], "{rows:?}");
+}

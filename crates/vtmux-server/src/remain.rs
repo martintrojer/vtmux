@@ -60,10 +60,15 @@ impl Server {
     pub(crate) fn destroy_exited_pane(&mut self, p: PaneId, notify: bool) {
         self.hangup_pane(p);
         self.pipe_close(p);
-        let Some(pane) = self.model.panes.get(&p) else {
+        let Some(status) = self.model.panes.get(&p).and_then(|x| x.status) else {
             return;
         };
-        let Some(status) = pane.status else { return };
+        // vtmux (decision 31): a restored pane's screen is never lost to
+        // a restart that did not run.
+        if notify && self.keep_restored(p) {
+            return;
+        }
+        let pane = &self.model.panes[&p];
         let remain =
             Remain::from_option(self.model.number_option(TreeId::Pane(p), "remain-on-exit"));
         if remain.keeps(status.success()) {

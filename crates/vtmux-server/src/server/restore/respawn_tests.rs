@@ -16,10 +16,30 @@ use super::{ConfigSays, prepare, rebuild};
 /// The checkpoint's write time in these tests (epoch seconds).
 const WRITTEN: i64 = 1_790_000_000;
 
+/// A test's directory (its sockets, its config, its shell), removed when
+/// the value goes, however many one test makes.
+struct TestDir(PathBuf);
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A server with session `a` (40x6, `cat -`, `status off`) set up by
 /// `setup`, each pane fed its bytes, checkpointed `full`, then rebuilt from
-/// that checkpoint as a cold restore builds it.
-fn restored(tag: &str, setup: &[&[&str]], feed: &[(u32, &[u8])]) -> (Server, PathBuf) {
+/// that checkpoint as a cold restore builds it. Its `default-shell` is a
+/// script running `cat -`: a login shell would read the host's
+/// `/etc/profile`.
+fn restored(tag: &str, setup: &[&[&str]], feed: &[(u32, &[u8])]) -> (Server, TestDir) {
     restored_with(tag, setup, feed, None)
 }
 
@@ -29,12 +49,16 @@ fn restored_with(
     setup: &[&[&str]],
     feed: &[(u32, &[u8])],
     conf: Option<&str>,
-) -> (Server, PathBuf) {
-    let dir = temp_dir(tag);
+) -> (Server, TestDir) {
+    let dir = TestDir(temp_dir(tag));
+    let shell = dir.join("shell");
+    std::fs::write(&shell, "#!/bin/sh\nexec cat -\n").unwrap();
+    std::fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let shell = shell.to_str().unwrap().to_owned();
     let (l, socket) = listener(&dir, "s");
     let mut server = Server::new(l, socket, ServerConfig::default()).unwrap();
     for words in [
-        &["set", "-g", "default-shell", "/bin/sh"][..],
+        &["set", "-g", "default-shell", &shell][..],
         &["set", "-g", "status", "off"],
         &[
             "new-session",
@@ -162,6 +186,12 @@ fn a_restored_pane_carries_the_checkpoint_time_it_came_from() {
     let from: Vec<_> = s.panes.iter().map(|p| (p.id, p.restored_from)).collect();
     // The empty pane (`split-window ''`) never had a process.
     assert_eq!(from, [(0, Some(WRITTEN)), (1, Some(WRITTEN)), (2, None)]);
+    // A waiting pane goes with no dead time, as one that ran: a build
+    // before the provenance (3.8.0-beta.2's `rebuild`) skips the dead line
+    // of a pane with a dead time and a screen, so it draws this one's.
+    let older_reader_draws = |p: &snap::Pane| !(p.dead_time.is_some() && p.term.is_some());
+    assert!(s.panes[..2].iter().all(older_reader_draws));
+    assert!(s.panes[..2].iter().all(|p| p.exited));
     // A second restart keeps the first checkpoint's time, not its own.
     let (l, socket) = listener(&dir, "s3");
     let mut again = s.clone();
@@ -175,6 +205,8 @@ fn a_restored_pane_carries_the_checkpoint_time_it_came_from() {
     assert_eq!(again.panes[0].restored_from, Some(WRITTEN));
     let rebuilt = rebuild(l, ServerConfig::default(), &again).unwrap();
     assert_eq!(rebuilt.model.panes[&PaneId(0)].restored_from, Some(WRITTEN));
+    assert!(rebuilt.model.panes[&PaneId(0)].dead_time.is_some());
+    assert_eq!(rebuilt.waits_restored(PaneId(0)), Some(WRITTEN));
     drop(rebuilt);
     // An upgrade's snapshot carries it, and requires nothing for it.
     let up = server.to_snapshot(snap::Meta {
@@ -189,7 +221,6 @@ fn a_restored_pane_carries_the_checkpoint_time_it_came_from() {
     ok(&mut server, &dir, &["kill-pane", "-t", "%1"]);
     assert!(!server.model.panes.contains_key(&PaneId(1)));
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The hint (decision 31): drawn by the renderer over the restored pane's
@@ -241,7 +272,6 @@ fn the_hint_is_drawn_over_the_bottom_row_not_written_into_the_grid() {
     let shown = screen.rows(&mut server);
     assert!(shown[23].starts_with("Restored "), "{shown:?}");
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Respawning a restored pane (`respawn-pane`, decision 31) keeps its
@@ -282,7 +312,6 @@ fn respawn_keeps_the_screen_above_a_marker_and_the_new_program() {
     ok(&mut server, &dir, &["respawn-pane", "-k", "-t", "%0"]);
     assert!(rows(&mut server, &dir, "%0").iter().all(String::is_empty));
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// From an alternate screen (an editor): its visible rows are copied
@@ -331,7 +360,6 @@ fn respawn_from_an_alternate_screen_keeps_what_it_showed() {
     assert_eq!(shown[..2], ["x", "restored"], "{shown:?}");
     assert!(!server.model.panes[&PaneId(0)].term.row(1).wrapped);
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `respawn-pane -E` keeps the provenance and writes nothing; a respawn
@@ -377,7 +405,6 @@ fn a_failed_or_empty_respawn_keeps_the_pane_restored() {
     );
     assert_eq!(server.model.panes[&PaneId(0)].restored_from, None);
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The key (decision 32): Enter from a client respawns the active
@@ -447,7 +474,6 @@ fn enter_from_a_client_respawns_and_send_keys_does_not() {
     screen.keys(&mut server, b"\r");
     assert_eq!(display(&mut server, &dir, "%0", "#{pane_dead}"), "1");
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Synchronized panes (decision 32): Enter respawns the active restored
@@ -478,7 +504,6 @@ fn enter_never_respawns_a_synchronized_peer() {
     );
     assert_eq!(server.model.panes[&PaneId(1)].restored_from, Some(WRITTEN));
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `remain-on-exit key` (server-client.c `server_client_handle_dead_key`)
@@ -502,7 +527,6 @@ fn remain_on_exit_key_does_not_close_a_restored_pane_under_key() {
     screen.keys(&mut server, b"x");
     assert!(!server.model.panes.contains_key(&PaneId(0)));
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `auto` (decision 32): once the config has run, every restored pane
@@ -563,8 +587,6 @@ fn auto_respawns_only_restored_shells_after_the_config() {
     assert_eq!(markers, 1);
     drop(server);
 
-    let _ = std::fs::remove_dir_all(&dir);
-
     // Under `key` (the default) the pass respawns nothing.
     let setup: &[&[&str]] = &[&["new-window", "-d", "-t", "a:1"]];
     let (mut server, dir) = restored("auto-key", setup, &[]);
@@ -575,7 +597,6 @@ fn auto_respawns_only_restored_shells_after_the_config() {
     );
     assert!(out.contains("%1 1\n"), "{out}");
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `respawn-window` (spawn.c `spawn_window`): the other panes go; the
@@ -594,5 +615,82 @@ fn respawn_window_respawns_the_first_pane_as_restored() {
     assert_eq!(shown.len(), 6, "{shown:?}");
     assert_eq!(shown[..3], ["top", &format!("restored {time}"), ""]);
     drop(server);
-    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// From an alternate screen, what `capture-pane` reads of the copied rows
+/// stays (cmd-capture-pane.c `cmd_capture_pane_history`): `-J` joins a
+/// soft-wrapped row to the next, also after the pane is widened, and
+/// `-e` gives a hyperlink back with its id and URI.
+#[test]
+fn respawn_from_an_alternate_screen_keeps_its_wraps_and_links() {
+    let (mut server, dir) = restored(
+        "respawn-alt-wrap",
+        &[],
+        &[(
+            0,
+            b"$ vi\r\n\x1b[?1049h\x1b[H\x1b]8;id=k;https://example.com/\x1b\\LINK\x1b]8;;\x1b\\\r\nabcdefghijklmnopqrstABCDEFGHIJKLMNOPQRSTuvwxyz",
+        )],
+    );
+    let joined = |server: &mut Server| {
+        run(server, &dir, &["capture-pane", "-p", "-J", "-t", "%0"])
+            .lines()
+            .skip(1)
+            .take(4)
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let wrapped = "abcdefghijklmnopqrstABCDEFGHIJKLMNOPQRSTuvwxyz";
+    assert_eq!(joined(&mut server)[..2], ["LINK", wrapped]);
+    ok(&mut server, &dir, &["respawn-pane", "-t", "%0"]);
+    let out = run(&mut server, &dir, &["capture-pane", "-p", "-e", "-t", "%0"]);
+    assert!(
+        out.contains("\x1b]8;id=k;https://example.com/\x1b\\LINK"),
+        "{out:?}"
+    );
+    let shown = joined(&mut server);
+    assert_eq!(shown[..3], ["$ vi", "LINK", wrapped], "{shown:?}");
+    assert!(shown[3].starts_with("restored "), "{shown:?}");
+    ok(
+        &mut server,
+        &dir,
+        &["resize-window", "-t", "a", "-x", "50", "-y", "6"],
+    );
+    let shown = joined(&mut server);
+    assert_eq!(shown[..3], ["$ vi", "LINK", wrapped], "{shown:?}");
+}
+
+/// `vtmux-persist-respawn off` with an empty `remain-on-exit-format`: the
+/// attached client shows the restored pane's saved bottom row, nothing
+/// drawn over it, as tmux draws no dead line for an empty format
+/// (server-fn.c `server_destroy_pane`).
+#[test]
+fn an_empty_dead_line_format_draws_nothing_over_the_bottom_row() {
+    let (mut server, dir) = restored("hint-empty", &[], &[]);
+    let mut screen = Screen::attach(&mut server, &dir);
+    let _ = screen.rows(&mut server);
+    let pane = server.model.panes.get_mut(&PaneId(0)).unwrap();
+    let bottom = pane.term.rows();
+    pane.term
+        .feed(format!("top\x1b[{bottom};1HBOTTOM-SAVED\x1b[?25l").as_bytes());
+    ok(
+        &mut server,
+        &dir,
+        &["set", "-s", "vtmux-persist-respawn", "off"],
+    );
+    ok(
+        &mut server,
+        &dir,
+        &["set", "-g", "remain-on-exit-format", ""],
+    );
+    let shown = screen.rows(&mut server);
+    assert_eq!(shown[0], "top", "{shown:?}");
+    assert_eq!(shown[usize::from(bottom) - 1], "BOTTOM-SAVED", "{shown:?}");
+    // A format again, its line over the row.
+    ok(
+        &mut server,
+        &dir,
+        &["set", "-g", "remain-on-exit-format", "dead"],
+    );
+    let shown = screen.rows(&mut server);
+    assert_eq!(shown[usize::from(bottom) - 1], "dead", "{shown:?}");
 }

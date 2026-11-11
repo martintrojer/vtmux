@@ -341,6 +341,11 @@ pub struct Pane {
     /// restored and dead, at the width it was made for
     /// ([`crate::remain`]); never in its grid.
     pub restored_hint: Option<(u16, Vec<vtmux_core::styled::Cell>)>,
+    /// Respawned from a restored pane: the checkpoint time it came from
+    /// and when its program started, so a program that exits within
+    /// [`crate::restored::RESTART_GRACE`] puts it back as restored
+    /// instead of closing it. Not carried by a snapshot.
+    pub restart_guard: Option<(i64, std::time::Instant)>,
 }
 
 /// D33: a pane's kitty graphics as the server keeps them
