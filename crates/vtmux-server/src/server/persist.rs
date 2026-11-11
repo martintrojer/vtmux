@@ -174,6 +174,9 @@ pub struct Persist {
     /// `vtmux-persist` was `full` and no `layout` checkpoint has replaced
     /// what it may have written ([`Server::persist_timers`]).
     full_may_be_on_disk: bool,
+    /// When that `layout` checkpoint is tried again, its directory's lock
+    /// refused ([`Server::persist_timers`]).
+    prune_retry: Option<Instant>,
     /// Why the checkpoint was not restored at start, until the starting
     /// client is told ([`Server::tell_starter`]).
     pub(super) refusal: Option<String>,
@@ -209,6 +212,7 @@ impl Default for Persist {
             known: Known::default(),
             exited: false,
             full_may_be_on_disk: false,
+            prune_retry: None,
             refusal: None,
             dir: None,
             lock: None,
@@ -240,7 +244,10 @@ impl Server {
         if self.persist.writing.is_some() {
             return Some(Instant::now());
         }
-        self.persist.due
+        match (self.persist.due, self.persist.prune_retry) {
+            (Some(due), Some(prune)) => Some(due.min(prune)),
+            (due, prune) => due.or(prune),
+        }
     }
 
     /// The periodic checkpoint: armed while `vtmux-persist` is on, started
@@ -252,15 +259,37 @@ impl Server {
         }
         if self.persist.exited || mode.is_none() {
             self.persist.due = None;
+            self.persist.prune_retry = None;
             self.persist.writing = None;
             self.persist.lock = None;
             self.persist.lock_retry = None;
             return;
         }
         // `full` set to `layout`: the screens and history of the full
-        // checkpoints must not stay on disk until something changes.
-        if mode == Some(Mode::Layout) && std::mem::take(&mut self.persist.full_may_be_on_disk) {
-            self.checkpoint_layout_now();
+        // checkpoints must not stay on disk until something changes. The
+        // loop never sleeps on the lock for it: refused, it is tried again
+        // as a periodic checkpoint is ([`Server::persist_lock`]), a moment
+        // later while the refusals are young, else at the next interval.
+        if mode == Some(Mode::Full) {
+            self.persist.prune_retry = None;
+        } else if self.persist.full_may_be_on_disk
+            && self.persist.prune_retry.is_none_or(|at| now >= at)
+        {
+            self.persist.prune_retry = None;
+            if let Some((dir, mode)) = self.checkpoint_target() {
+                self.checkpoint_run(&dir, mode, true, false);
+            }
+            let refused = self.persist.lock.is_none()
+                && (self.persist.lock_retry.is_some() || self.persist.refused);
+            if refused {
+                self.persist.prune_retry = Some(if self.persist.lock_retry.is_some() {
+                    now + LOCK_RETRY
+                } else {
+                    now + interval()
+                });
+            } else {
+                self.persist.full_may_be_on_disk = false;
+            }
         }
         self.persist_step();
         let due = *self.persist.due.get_or_insert(now + interval());
@@ -348,7 +377,7 @@ impl Server {
     /// wrote count as on disk). A failure goes to the message log
     /// (`show-messages`); the next one tries again.
     pub(crate) fn checkpoint_to(&mut self, dir: &Path, mode: Mode) -> Option<Written> {
-        self.checkpoint_run(dir, mode, false)
+        self.checkpoint_run(dir, mode, false, true)
     }
 
     /// The `layout` checkpoint at once when `vtmux-persist` goes from
@@ -359,15 +388,22 @@ impl Server {
     /// the next change, a minute or an hour away.
     fn checkpoint_layout_now(&mut self) {
         if let Some((dir, mode)) = self.checkpoint_target() {
-            self.checkpoint_run(&dir, mode, true);
+            self.checkpoint_run(&dir, mode, true, true);
         }
     }
 
     /// [`Server::checkpoint_to`]; `prune`: written whether changed or not,
-    /// and not keeping the previous checkpoint ([`Writer::replacing_prev`]).
-    fn checkpoint_run(&mut self, dir: &Path, mode: Mode, prune: bool) -> Option<Written> {
+    /// and not keeping the previous checkpoint ([`Writer::replacing_prev`]);
+    /// `wait`: for the lock, as [`Server::persist_lock`] says.
+    fn checkpoint_run(
+        &mut self,
+        dir: &Path,
+        mode: Mode,
+        prune: bool,
+        wait: bool,
+    ) -> Option<Written> {
         self.persist_drop_writer();
-        let (mut w, print) = self.checkpoint_writer(dir, mode, prune, true)?;
+        let (mut w, print) = self.checkpoint_writer(dir, mode, prune, wait)?;
         let stepped = w.step(None, &mut |_| Ok(()));
         let written = w.written().clone();
         self.persist.known = w.into_known();
@@ -490,9 +526,10 @@ impl Server {
     /// it does.
     ///
     /// With `wait` (a checkpoint written at once, once: the shutdown's,
-    /// or `full` set to `layout`) this waits up to
+    /// or `checkpoint_to`'s) this waits up to
     /// [`crate::persist::LOCK_WAIT`] for it ([`Lock::take`]): there is no
-    /// later turn to retry on. Without (the periodic one) the loop never sleeps
+    /// later turn to retry on. Without (the periodic one, and `full` set
+    /// to `layout`) the loop never sleeps
     /// on it: a refused attempt is retried [`LOCK_RETRY`] later, from the
     /// loop, for as long, so a moment's holder (`cargo xtask reap`'s probe)
     /// neither costs the checkpoint nor gets reported; after that it is

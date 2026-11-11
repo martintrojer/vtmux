@@ -502,6 +502,78 @@ fn full_set_to_layout_then_shut_down_at_once_prunes() {
     }
 }
 
+/// `full` set to `layout` while another holds the directory's lock (the
+/// server let it go at `off`): the loop never sleeps on it (`Lock::take`'s
+/// wait), the pruning checkpoint is tried again a moment later, unreported,
+/// then said once and left until the next interval; once the lock is free,
+/// it is written and prunes.
+#[test]
+fn full_set_to_layout_retries_a_locked_directory_from_the_loop() {
+    use std::time::Duration;
+    let (mut server, dir) = server("ckpt-prune-lock");
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "full"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    server.persist_timers(Instant::now());
+    assert!(server.checkpoint().is_some());
+    let out = run(&mut server, &dir, &["rename-window", "-t", "a:0", "next"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    assert!(server.checkpoint().is_some());
+    let load = |name| crate::persist::load_file(&state, name).unwrap().0;
+    assert!(shows_secret(&load(MANIFEST_PREV)));
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "off"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    server.persist_timers(Instant::now());
+    assert!(server.persist.lock.is_none());
+    let held = crate::persist::Lock::take(&state).unwrap();
+    let said = |server: &mut Server| {
+        run(server, &dir, &["show-messages"])
+            .lines()
+            .filter(|t| t.contains("in use by another server"))
+            .count()
+    };
+
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "layout"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let start = Instant::now();
+    server.persist_timers(start);
+    let took = start.elapsed();
+    assert!(took < crate::persist::LOCK_WAIT, "the loop slept {took:?}");
+    assert_eq!(said(&mut server), 0);
+    assert!(server.persist_deadline().unwrap() <= Instant::now() + super::LOCK_RETRY);
+    let give_up = Instant::now() + Duration::from_secs(10);
+    loop {
+        let due = server.persist_deadline().unwrap();
+        if due > Instant::now() + Duration::from_secs(1) {
+            break;
+        }
+        assert!(Instant::now() < give_up, "retried for good");
+        std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        server.persist_timers(Instant::now());
+    }
+    assert_eq!(said(&mut server), 1);
+    assert!(shows_secret(&load(MANIFEST_PREV)));
+
+    // A pane another test thread is spawning may hold the lock's
+    // descriptor until it execs (`a_locked_directory_is_not_written`).
+    drop(held);
+    let give_up = Instant::now() + Duration::from_secs(60);
+    while shows_secret(&load(MANIFEST_PREV)) {
+        assert!(Instant::now() < give_up, "never pruned");
+        server.persist.prune_retry = Some(Instant::now());
+        server.persist_timers(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for name in [MANIFEST, MANIFEST_PREV] {
+        let s = load(name);
+        assert_eq!(s.meta.purpose, snap::Purpose::CheckpointLayout, "{name}");
+        assert!(s.panes.iter().all(|p| p.term.is_none()), "{name}");
+    }
+    assert!(server.persist.prune_retry.is_none());
+    assert!(!server.persist.full_may_be_on_disk);
+}
+
 /// Two servers whose checkpoints would share a directory: the first to
 /// write holds its lock, the other writes nothing and says why once.
 #[test]
