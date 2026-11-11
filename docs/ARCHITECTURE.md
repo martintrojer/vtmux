@@ -135,7 +135,7 @@ vtmux passes through a protocol tmux 3.8 drops only when libghostty-vt implement
 
 libghostty-vt runs inside the server, once per pane: the "grid follows Ghostty" half of D4. Where the two emulators differ, the difference is recorded with evidence in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md).
 
-It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, with 41 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
+It is vendored in `third_party/libghostty-rs`, pinned to ghostty `3bd54e025`, with 42 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
 
 - **tmux's grid shape:** wrap and pending-wrap bookkeeping, cells used, reflow as tmux does it, the alternate screen, clusters and widths, hyperlink ids, line flags, DECAWM, DECALN.
 - **Memory:** bounded, resumable page compression and resize without faulting blank pages; grid-reference bounds checked before native reads.
@@ -166,7 +166,7 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 ```
 
 - **Regress:** tmux's test suite from the 3.8 tag, unchanged, scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
-- **Oracle:** 437 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
+- **Oracle:** 438 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 
 `scripts/check.sh` runs all of it on Linux and macOS in CI. Numbers against tmux: [PERFORMANCE.md](PERFORMANCE.md).
