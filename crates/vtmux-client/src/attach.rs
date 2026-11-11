@@ -64,7 +64,7 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
     match run(stream, how.sent_size, sys) {
         Ok(Leave::Exit { code, message, hup }) => {
             if let Some(message) = message {
-                println!("[{message}]");
+                crate::say(&format!("[{message}]"));
             }
             // client.c:414-416: MSG_DETACHKILL hangs up the parent (the
             // login shell, normally) once the reason is printed.
@@ -83,7 +83,7 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
         // process becomes the new binary, on the same terminal.
         Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how),
         Err(e) => {
-            eprintln!("{e}");
+            crate::say_err(&e.to_string());
             1
         }
     }
@@ -133,7 +133,7 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
         .arg(command)
         .env("SHELL", shell)
         .exec();
-    eprintln!("{}: {err}", shell.display());
+    crate::say_err(&format!("{}: {err}", shell.display()));
     1
 }
 
@@ -158,11 +158,11 @@ pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
         command.env(REATTACH_LOGIN_ENV, "1");
     }
     let err = command.exec();
-    eprintln!(
+    crate::say_err(&format!(
         "can't follow the server's upgrade: {}: {err}",
         binary.display()
-    );
-    println!("[{UPGRADED_DETACH}]");
+    ));
+    crate::say(&format!("[{UPGRADED_DETACH}]"));
     1
 }
 

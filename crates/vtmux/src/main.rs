@@ -273,13 +273,19 @@ fn parse_cli(
         Err(cli::Early::Version) => {
             // D21, D25.
             match invocation {
-                Invocation::Tmux => println!("tmux {}", vtmux_core::version::TMUX_VERSION),
-                Invocation::Vtmux => println!("vtmux {}", vtmux_core::version::display()),
+                Invocation::Tmux => {
+                    vtmux_client::say(&format!("tmux {}", vtmux_core::version::TMUX_VERSION));
+                }
+                Invocation::Vtmux => {
+                    vtmux_client::say(&format!("vtmux {}", vtmux_core::version::display()));
+                }
             }
             Err(ExitCode::SUCCESS)
         }
         Err(cli::Early::Help) => {
-            print!("{}", cli::usage(progname));
+            let _ = io::stdout()
+                .lock()
+                .write_all(cli::usage(progname).as_bytes());
             Err(ExitCode::SUCCESS)
         }
         Err(cli::Early::Usage(msg)) => {
@@ -460,7 +466,7 @@ fn reattach_main(
         .filter(|t| protocol::is_upgrade_token(t))
     else {
         write_err(b"can't re-attach after the server's upgrade: no valid token");
-        println!("[{}]", protocol::UPGRADED_DETACH);
+        vtmux_client::say(&format!("[{}]", protocol::UPGRADED_DETACH));
         return ExitCode::from(1);
     };
     let mut stream = match connect(socket) {
@@ -512,7 +518,7 @@ fn reattach_main(
             message: Some(m),
             ..
         })) => {
-            println!("[{m}]");
+            vtmux_client::say(&format!("[{m}]"));
             ExitCode::from(u8::try_from(code).unwrap_or(1))
         }
         Ok(Some(first)) => relay(&mut stream, Some(first), &how),
@@ -546,7 +552,7 @@ fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
     };
     match words.as_slice() {
         [flag] if *flag == PATCH_STACK_FLAG => {
-            println!("{}", vtmux_server::snapshot_term::PATCH_STACK);
+            vtmux_client::say(vtmux_server::snapshot_term::PATCH_STACK);
             Some(ExitCode::SUCCESS)
         }
         [flag, n] if *flag == RESUME_FLAG => resume(n, false),

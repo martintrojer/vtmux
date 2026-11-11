@@ -456,6 +456,9 @@ fn signal_exit_restores_terminal_modes() {
 /// (tty.c:181-189 `tty_read_callback` -> `server_client_lost`): client-detached
 /// fires, with no `window_update_focus` and so no pane-focus-out. Only
 /// `MSG_EXITING` (C-b d, detach-client, SIGHUP) takes the focus away first.
+/// The client exits 1 and says nothing: its `[lost tty]` can't reach the
+/// terminal, and tmux's `printf` fails silently (client.c
+/// `client_exit_message`), where a Rust `println!` panics.
 #[test]
 fn closing_the_tty_fires_no_focus_out() {
     use rustix::fs::{Mode, OFlags, open};
@@ -495,7 +498,7 @@ fn closing_the_tty_fires_no_focus_out() {
         };
         // macOS refuses TIOCSWINSZ on a master whose slave was never
         // opened (ENOTTY): open one first, then set the size.
-        let (stdin, stdout, stderr) = (slave(), slave(), slave());
+        let (stdin, stdout) = (slave(), slave());
         tcsetwinsize(
             &master,
             Winsize {
@@ -513,7 +516,7 @@ fn closing_the_tty_fires_no_focus_out() {
             .envs(w.env())
             .stdin(Stdio::from(stdin))
             .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr))
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         let log = || {
@@ -532,8 +535,21 @@ fn closing_the_tty_fires_no_focus_out() {
             thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(log(), "|pane-focus-in:%0|client-detached:%0");
+        let end = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
         let _ = child.kill();
-        let _ = child.wait();
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            (
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).as_ref()
+            ),
+            (Some(1), ""),
+            "{}",
+            w.bin.display()
+        );
     });
 }
 
