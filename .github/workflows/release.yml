@@ -5,8 +5,10 @@ name: release
 #
 # To cut one (D25: the version is the tmux release it is tested against):
 # set `version` in Cargo.toml (3.8.0-beta.1 displays as 3.8-beta1), add its
-# `## 3.8-beta1` section to CHANGELOG.md, try `scripts/release-tarball.sh
-# x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`. The build
+# `## 3.8-beta1` section to CHANGELOG.md and the release page's short text
+# to docs/release-notes/3.8-beta1.md (without it the CHANGELOG section is the
+# text), try `scripts/release-tarball.sh x86_64-unknown-linux-gnu v3.8-beta1`
+# locally, then push the tag `v3.8-beta1`. The build
 # fails when the tag is not `v` + what `vtmux -V` prints.
 # crates.io is a separate step: docs/RELEASING.md.
 on:
@@ -92,11 +94,17 @@ jobs:
           cd dist
           cat ./*.sha256 >SHA256SUMS
           sha256sum -c SHA256SUMS
-          # The release notes are the tag's CHANGELOG.md section.
-          awk -v h="## $version" '$0 == h || index($0, h " ") == 1 { on = 1; next } on && /^## / { exit } on' \
-            ../CHANGELOG.md >notes.md
+          # The release notes: docs/release-notes/<version>.md (short, written
+          # for the release page) when the release commit has one, else the
+          # tag's CHANGELOG.md section.
+          if [ -f "../docs/release-notes/$version.md" ]; then
+            cp "../docs/release-notes/$version.md" notes.md
+          else
+            awk -v h="## $version" '$0 == h || index($0, h " ") == 1 { on = 1; next } on && /^## / { exit } on' \
+              ../CHANGELOG.md >notes.md
+          fi
           if ! grep -q '[^[:space:]]' notes.md; then
-            echo "CHANGELOG.md has no section for $version" >&2
+            echo "no release notes for $version: docs/release-notes/$version.md or a CHANGELOG.md section" >&2
             exit 1
           fi
           # Not a draft and not a prerelease: mise's github backend installs

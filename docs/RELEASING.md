@@ -10,11 +10,11 @@ vtmux's version is the tmux release it is tested against (D25): `version` in `[w
 - `version` of the two forks and the `=` requirements on them (`third_party/libghostty-rs/libghostty-vt-sys/Cargo.toml`, `libghostty-vt/Cargo.toml`, `crates/vtmux-vt/Cargo.toml`);
 - `Cargo.lock` (any cargo build rewrites it).
 
-Add the version's section to `CHANGELOG.md`.
+Add the version's section to `CHANGELOG.md`, and the release page's text to `docs/release-notes/<version>.md` (e.g. `3.8-beta2.md`): short, about 1,500 characters, what is new and how to install. The release uses it as its notes; without it, the CHANGELOG section.
 
 ## GitHub release
 
-Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64) and macOS (Apple silicon) and publishes the release with the tag's CHANGELOG section as its notes. `mise use -g github:martintrojer/vtmux` installs from it.
+Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it.
 
 ## crates.io
 
