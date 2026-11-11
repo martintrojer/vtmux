@@ -416,7 +416,10 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             control_chars: tty_control_chars(),
         },
     };
-    if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
+    // A SIGTERM or SIGHUP may have shut the connection down already: the
+    // relay below reads its EOF and ends as for the signal.
+    if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() && !signals::terminated()
+    {
         restore_tty(saved_tio.as_ref());
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);

@@ -454,11 +454,12 @@ fn signal_exit_restores_terminal_modes() {
 
 /// A SIGTERM or SIGHUP as the client attaches ends it as an attached one:
 /// `[terminated]` or `[lost tty]`, status 1, never "server exited
-/// unexpectedly", nor left attached. A test hook puts it in each order
-/// that once went wrong: once the attached client's handlers are in place
-/// but before the pre-attach watcher is closed, the watcher taking it
-/// first; and before those handlers, the watcher's thread not yet run
-/// when the attach takes over (`-early`). vtmux only: the hook is its.
+/// unexpectedly", nor left attached, and with `MSG_EXITING`, so the server
+/// takes it out of its session and the pane gets its focus-out (client.c
+/// `client_signal`, server-client.c:2733-2739). A test hook puts it in
+/// each order that once went wrong: once the attached client's handlers
+/// are in place but before the pre-attach watcher is closed; and on
+/// `Ready`, before those handlers (`-early`). vtmux only: the hook is its.
 #[test]
 fn a_signal_as_the_client_attaches_ends_it_as_attached() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
@@ -469,8 +470,15 @@ fn a_signal_as_the_client_attaches_ends_it_as_attached() {
         ("HUP-early", "[lost tty]"),
     ] {
         let w = World::new(bin.clone());
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
+        ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
+        ok(&["set", "-g", "focus-events", "on"]);
+        ok(&["set", "-g", "@log", ""]);
+        for hook in ["pane-focus-out", "client-detached"] {
+            ok(&["set-hook", "-g", hook, "set -agF @log '|#{hook}'"]);
+        }
         let mut a = w.attach_env(
-            &["new", "-s", "a", "cat"],
+            &["attach", "-t", "a"],
             40,
             10,
             &[("VTMUX_TEST_ATTACH_SIGNAL", signal)],
@@ -480,6 +488,16 @@ fn a_signal_as_the_client_attaches_ends_it_as_attached() {
         assert!(text.contains(says), "{signal}: {text:?}");
         assert!(!text.contains("unexpectedly"), "{signal}: {text:?}");
         assert!(w.cli(&["has", "-t", "a"]).status.success());
+        let log = common::wait_for(
+            "client-detached",
+            || String::from_utf8_lossy(&w.cli(&["show", "-gv", "@log"]).stdout).into_owned(),
+            |log| log.contains("client-detached"),
+        );
+        assert_eq!(
+            log.trim_end(),
+            "|pane-focus-out|client-detached",
+            "{signal}"
+        );
     }
 }
 

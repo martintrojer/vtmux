@@ -387,6 +387,56 @@ fn signals_of_a_client_that_is_not_attached() {
     });
 }
 
+/// A SIGTERM or SIGHUP that comes as the client starts watching for them
+/// (its flag handlers in, the watcher's not yet: a test hook raises it
+/// there) still ends a client that is not attached, as client.c
+/// `client_signal` does: a command client blocked in `wait-for` exits 0,
+/// a control client prints `%exit`. They once stayed blocked. vtmux only:
+/// the hook is its.
+#[test]
+fn a_signal_as_the_client_starts_watching_ends_it() {
+    let w = World::new(&PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    assert_eq!(w.run(&["new", "-d", "-s", "a", "cat"]).2, 0);
+    let ended = |child: &mut Child| {
+        let end = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < end {
+            if let Some(status) = child.try_wait().unwrap() {
+                return Some(status.code());
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    };
+    for signal in ["TERM", "HUP"] {
+        let mut child = w
+            .command(&["wait-for", "foo"])
+            .env("VTMUX_TEST_WATCH_SIGNAL", signal)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        assert_eq!(ended(&mut child), Some(Some(0)), "wait-for, SIG{signal}");
+        let mut child = w
+            .command(&["-C", "attach", "-t", "a"])
+            .env("VTMUX_TEST_WATCH_SIGNAL", signal)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let code = ended(&mut child);
+        let mut out = String::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            let _ = std::io::Read::read_to_string(&mut stdout, &mut out);
+        }
+        assert_eq!(code, Some(Some(0)), "control client, SIG{signal}: {out:?}");
+        assert!(out.ends_with("%exit\n"), "SIG{signal}: {out:?}");
+    }
+    assert_eq!(w.run(&["has", "-t", "a"]).2, 0);
+}
+
 /// `display` without -p on a control client prints `%message <msg>`
 /// inside the guard (cmd-display-message.c:163-169).
 #[test]

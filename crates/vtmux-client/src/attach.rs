@@ -55,9 +55,18 @@ pub struct Sys {
     pub defaults: fn(),
     /// The client's signals are its own from here on: the binary drops
     /// those it caught before the attach (`client_attached`). Returns the
-    /// SIGTERM or SIGHUP it caught, if one came (it may have shut the
-    /// connection down): the client leaves as for it.
-    pub attached: fn() -> Option<i32>,
+    /// SIGTERM or SIGHUP it caught, if one came: the client leaves as for
+    /// it.
+    pub attached: fn() -> Option<Caught>,
+}
+
+/// A SIGTERM or SIGHUP the binary caught before the attach's handlers.
+#[derive(Clone, Copy, Debug)]
+pub struct Caught {
+    pub sig: i32,
+    /// It shut the connection down (it came before `Ready`, when the client
+    /// was not attached), so no `Detach` can go.
+    pub cut: bool,
 }
 
 /// Called after Ready; the server owns startup and teardown escapes.
@@ -175,20 +184,25 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     // them while attached (proc.c proc_set_signals:254-276).
     let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGCONT, SIGUSR1, SIGUSR2])?;
     // These handlers go in before the binary's are dropped. A SIGTERM or
-    // SIGHUP the binary's caught before then (which may have cut the
-    // connection, so no `Detach` can go) ends the client here, as client.c
-    // `client_signal` does once attached: status 1, the terminal still
-    // untouched.
-    if let Some(sig) = (sys.attached)() {
-        return Ok(Leave::exit(
-            1,
-            if sig == SIGTERM {
-                "terminated"
-            } else {
-                "lost tty"
-            },
-        ));
-    }
+    // SIGHUP the binary's caught before then ends the client as client.c
+    // `client_signal` does once attached: with `Detach` (`MSG_EXITING`),
+    // so the server takes the client out of its session (focus-out and
+    // all, server-client.c:2733-2739); or, when it cut the connection
+    // before `Ready`, at once: status 1, the terminal still untouched.
+    let pending = match (sys.attached)() {
+        Some(Caught { sig, cut: true }) => {
+            return Ok(Leave::exit(
+                1,
+                if sig == SIGTERM {
+                    "terminated"
+                } else {
+                    "lost tty"
+                },
+            ));
+        }
+        Some(Caught { sig, cut: false }) => Some(sig),
+        None => None,
+    };
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut signals, SIGNALS, Interest::READABLE)?;
@@ -214,6 +228,7 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
         &raw,
         sent_size,
         sys,
+        pending,
     );
     // Teardown escapes are in the buffer: deliver them before the guard
     // restores termios.
@@ -463,6 +478,7 @@ fn lock(
     read_stdin(stream)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn relay(
     stream: &mut UnixStream,
     poll: &mut Poll,
@@ -471,12 +487,18 @@ fn relay(
     raw: &RawTty,
     sent_size: Option<(u32, u32)>,
     sys: Sys,
+    pending: Option<i32>,
 ) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
     out.high_water = high_water();
     if sent_size.is_none() || sent_size != size().ok() {
         send_size(stream);
+    }
+    if let Some(sig) = pending
+        && let Some(exit) = socket.exit_signal(stream, sig)
+    {
+        return Ok(exit);
     }
     loop {
         match poll.poll(&mut events, None) {
@@ -501,21 +523,10 @@ fn relay(
                                 out.high_water = high_water();
                                 send_size(stream);
                             }
-                            // Closing the terminal raises SIGHUP as well as
-                            // EOF on stdin; with the tty already hung up
-                            // it is the same loss as EOF.
-                            SIGHUP if tty_hung_up() => {
-                                return Ok(Leave::exit(1, "lost tty"));
-                            }
                             SIGTERM | SIGHUP => {
-                                let _ = send(stream, &ClientMsg::Detach);
-                                // client.c:543-544: a suspended client
-                                // leaves with no reason on SIGTERM.
-                                socket.signal_exit = match sig {
-                                    SIGTERM if socket.suspended => None,
-                                    SIGTERM => Some("terminated".to_owned()),
-                                    _ => Some("lost tty".to_owned()),
-                                };
+                                if let Some(exit) = socket.exit_signal(stream, sig) {
+                                    return Ok(exit);
+                                }
                             }
                             // client.c:551-559: back from the stop, the
                             // terminal is raw again and the server told.
@@ -592,6 +603,26 @@ struct Socket {
 }
 
 impl Socket {
+    /// SIGTERM or SIGHUP while attached (client.c `client_signal`):
+    /// `Detach` (`MSG_EXITING`), and the reason kept for the server's
+    /// `Exit`.
+    fn exit_signal(&mut self, stream: &mut UnixStream, sig: i32) -> Option<Leave> {
+        // Closing the terminal raises SIGHUP as well as EOF on stdin; with
+        // the tty already hung up it is the same loss as EOF.
+        if sig == SIGHUP && tty_hung_up() {
+            return Some(Leave::exit(1, "lost tty"));
+        }
+        let _ = send(stream, &ClientMsg::Detach);
+        // client.c:543-544: a suspended client leaves with no reason on
+        // SIGTERM.
+        self.signal_exit = match sig {
+            SIGTERM if self.suspended => None,
+            SIGTERM => Some("terminated".to_owned()),
+            _ => Some("lost tty".to_owned()),
+        };
+        None
+    }
+
     /// Read and dispatch until `WouldBlock`, the high-water mark or Exit.
     fn pump(&mut self, stream: &mut UnixStream, out: &mut Output) -> io::Result<Option<Leave>> {
         let mut bytes = [0; 16384];
