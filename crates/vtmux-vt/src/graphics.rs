@@ -797,8 +797,11 @@ thread_local! {
     static DECODER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Install the PNG decoder on this thread, once (Ghostty keeps it per
-/// thread, and only a granted screen decodes).
+/// Install the PNG decoder on this thread, once. Ghostty's hook is one
+/// for the process (`sys.zig` `global.decode_png`), but the wrapper keeps
+/// the decoder in a thread-local (`kitty/graphics.rs` `DECODE_PNG`), so a
+/// terminal on a thread that never installed one refuses PNGs. Only a
+/// granted screen decodes.
 pub(crate) fn install_png_decoder() {
     if !DECODER.get() {
         DECODER.set(kg::set_png_decoder(Some(Box::new(PngDecoder))).is_ok());
