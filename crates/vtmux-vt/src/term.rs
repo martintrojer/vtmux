@@ -1031,6 +1031,15 @@ impl PaneTerm {
                     if self.alternate_on() != alternate && std::mem::take(&mut self.kitty_stale) {
                         self.term.vt_write(KITTY_EMPTY);
                     }
+                    // D33: Ghostty starts the alternate screen with the
+                    // primary's storage limit (`Terminal.switchScreen`); a
+                    // screen not granted has none.
+                    if self.alternate_on()
+                        && !self.graphics_granted[1]
+                        && self.graphics_storage(true) != (0, 0)
+                    {
+                        let _ = self.term.vtmux_set_kitty_limit(1, 0);
+                    }
                 }
                 if self.scan.take_resync() {
                     self.sync_pen();

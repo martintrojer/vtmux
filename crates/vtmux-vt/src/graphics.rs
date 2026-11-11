@@ -963,6 +963,59 @@ mod tests {
         assert_eq!(t.take_replies(), b"", "an APC is a title again");
     }
 
+    /// D33: a screen not granted, with the option off, takes a graphics
+    /// command as tmux takes an APC however it ends: one ending in 0x9c
+    /// (Ghostty's C1 ST) runs nothing. The alternate screen, which Ghostty
+    /// starts with the primary's limit (`Terminal.switchScreen`), has none
+    /// until granted.
+    #[test]
+    fn a_screen_not_granted_stores_nothing_whatever_ends_the_command() {
+        let mut t = term_with(true);
+        t.feed(format!("\x1b_Ga=T,f=24,s=1,v=1,i=1;{RED}\x1b\\").as_bytes());
+        t.take_replies();
+        t.set_graphics(false);
+        t.feed(b"\x1b[?1049h");
+        assert_eq!(t.graphics_storage(true), (0, 0));
+        t.feed(
+            &[
+                format!("\x1b_Ga=T,f=24,s=1,v=1,i=7;{RED}").as_bytes(),
+                b"\x9c\x1b\\",
+            ]
+            .concat(),
+        );
+        t.feed(
+            &[
+                format!("\x1b_Ga=T,f=24,s=1,v=1,i=8;{RED}").as_bytes(),
+                b"\x9c",
+            ]
+            .concat(),
+        );
+        t.feed(b"\x1b\\");
+        assert_eq!(t.take_replies(), b"");
+        assert_eq!(t.graphics_grants(), [true, false]);
+        assert_eq!(t.graphics_storage(true), (0, 0));
+        assert_eq!(t.graphics_placements(), []);
+        // A primary whose grant ended (its owner died) keeps its limit
+        // and images, and stores no more.
+        t.feed(b"\x1b[?1049l");
+        t.set_graphics_grant(false, false);
+        t.feed(
+            &[
+                format!("\x1b_Ga=T,f=24,s=1,v=1,i=10;{RED}").as_bytes(),
+                b"\x9c\x1b\\",
+            ]
+            .concat(),
+        );
+        assert_eq!(t.take_replies(), b"");
+        assert_eq!(t.graphics_storage(false), (3, 1_000_000));
+        assert_eq!(t.graphics_placements().len(), 1);
+        t.feed(b"\x1b[?1049h");
+        t.set_graphics(true);
+        t.feed(format!("\x1b_Ga=T,f=24,s=1,v=1,i=9;{RED}\x1b\\").as_bytes());
+        assert_eq!(t.take_replies(), b"\x1b_Gi=9;OK\x1b\\", "granted now");
+        assert_eq!(t.graphics_storage(true), (3, 1_000_000));
+    }
+
     /// A private directory for a test's files, removed by the caller.
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("vtmux-gfx-{name}-{}", std::process::id()));
