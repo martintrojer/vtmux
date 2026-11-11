@@ -1255,26 +1255,22 @@ mod tests {
             [] as [PathBuf; 0]
         );
         drop(lock);
-        // A parallel test's fork between the lock's open and its drop holds
+        // A parallel test's fork between a lock's open and its drop holds
         // the lock too until its child execs (`CLOEXEC` acts at exec, as
-        // `dead_socket` says): wait until it is free.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while !std::fs::File::open(held.join("lock")).is_ok_and(|f| {
-            rustix::fs::flock(&f, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_ok()
-        }) {
-            assert!(std::time::Instant::now() < deadline, "the lock stays held");
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, false),
-            std::slice::from_ref(&held),
-            "unlocked"
-        );
-        assert_eq!(
-            sweep_checkpoints(&root, &dirs, InUse::default, false),
-            [starting],
-            "its process gone"
-        );
+        // `dead_socket` says), this test's lock or an earlier sweep's: a
+        // sweep keeps the directory until it is free.
+        let sweep_until = |in_use: &dyn Fn() -> InUse| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                let gone = sweep_checkpoints(&root, &dirs, in_use, false);
+                if !gone.is_empty() || std::time::Instant::now() >= deadline {
+                    break gone;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        assert_eq!(sweep_until(&in_use), [held], "unlocked");
+        assert_eq!(sweep_until(&InUse::default), [starting], "its process gone");
     }
 
     /// A server between opening its directory's lock file and taking the
@@ -1292,8 +1288,9 @@ mod tests {
         let dir = root.join(format!("rv1-{hash}"));
         std::fs::create_dir_all(dir.join("chunks")).unwrap();
         std::fs::write(dir.join("manifest"), "m").unwrap();
-        drop(Lock::take(&dir).unwrap());
-        let opened = std::fs::File::open(dir.join(LOCK)).unwrap();
+        // Made, not taken: a parallel test's fork would hold a taken lock
+        // until its child execs (`sweep_empties_test_checkpoints_of_gone_servers_only`).
+        let opened = std::fs::File::create(dir.join(LOCK)).unwrap();
         let inode = opened.metadata().unwrap().ino();
 
         assert_eq!(
@@ -1302,11 +1299,18 @@ mod tests {
         );
         assert_eq!(entries(&dir), [LOCK]);
         assert_eq!(std::fs::metadata(dir.join(LOCK)).unwrap().ino(), inode);
-        rustix::fs::flock(
+        // The sweep's own descriptor may live on a moment in a parallel
+        // test's fork, until its child execs.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while rustix::fs::flock(
             &opened,
             rustix::fs::FlockOperation::NonBlockingLockExclusive,
         )
-        .unwrap();
+        .is_err()
+        {
+            assert!(std::time::Instant::now() < deadline, "the lock stays held");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(
             Lock::take(&dir).unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock,
