@@ -215,6 +215,12 @@ pub struct Runner<'a> {
     /// upgrade, as a loaded host can hold it.
     #[cfg(test)]
     stall_after_upgrade: Option<Duration>,
+    /// How long a re-attached client may take to redraw ([`REDRAW_LIMIT`]).
+    redraw_limit: Duration,
+    /// Tests: an attached client's terminal gets nothing after the
+    /// [`REATTACHED`] that follows this event, as if the redraw were lost.
+    #[cfg(test)]
+    lose_redraw: std::cell::RefCell<HashMap<String, usize>>,
 }
 
 impl Drop for Runner<'_> {
@@ -288,6 +294,9 @@ impl<'a> Runner<'a> {
             baseline: 0,
             #[cfg(test)]
             stall_after_upgrade: None,
+            redraw_limit: REDRAW_LIMIT,
+            #[cfg(test)]
+            lose_redraw: std::cell::RefCell::default(),
         })
     }
 
@@ -616,17 +625,24 @@ impl<'a> Runner<'a> {
             return true;
         }
         for ((id, at), shown) in marks.into_iter().zip(shown) {
-            if !self.reattached(&id, at) {
-                self.items.push(Item {
-                    step,
-                    observation: Observation::Timeout {
-                        what: format!("{what}: attached client {id:?} re-attaching"),
-                    },
-                    divergence: None,
-                });
-            } else if let Some(shown) = shown {
-                self.redrawn(&id, &shown);
+            #[cfg(test)]
+            if self.lose_redraw.borrow().contains_key(&id) {
+                self.lose_redraw.borrow_mut().insert(id.clone(), at);
             }
+            let lost = if !self.reattached(&id, at) {
+                "re-attaching"
+            } else if shown.is_some_and(|shown| !self.redrawn(&id, at, &shown)) {
+                "redrawing"
+            } else {
+                continue;
+            };
+            self.items.push(Item {
+                step,
+                observation: Observation::Timeout {
+                    what: format!("{what}: attached client {id:?} {lost}"),
+                },
+                divergence: None,
+            });
         }
         self.settle(DEFAULT_QUIET);
         true
@@ -690,14 +706,28 @@ impl<'a> Runner<'a> {
     /// the upgrade (decision 13). Its redraw comes a round trip after
     /// [`REATTACHED`]: the server holds a frame until the client has
     /// acknowledged the one before (D14), here the restart frame, so under
-    /// load a quiet time can end before the redraw comes. Gives up after
-    /// [`REDRAW_LIMIT`] without a word: what the screen shows then (a `#()`
-    /// job run again by the new image) is the next observation's to judge.
-    fn redrawn(&self, id: &str, shown: &Observation) {
+    /// load a quiet time can end before the redraw comes.
+    ///
+    /// After [`REDRAW_LIMIT`] without it, the screen may still differ for
+    /// good from before (a `#()` job the new image ran again, its output
+    /// changed since), which is the next observation's to judge; but one
+    /// that nothing drew on since the restart (event `at` on, up to its
+    /// [`REATTACHED`]) lost its redraw, and that is false, which the run
+    /// records: a later step may not look at the screen at all.
+    fn redrawn(&self, id: &str, at: usize, shown: &Observation) -> bool {
         let start = Instant::now();
-        while start.elapsed() < REDRAW_LIMIT {
+        loop {
             if self.screen(id).is_ok_and(|now| now == *shown) {
-                return;
+                return true;
+            }
+            if start.elapsed() >= self.redraw_limit {
+                let restarted = self
+                    .client_term_cut(id, Some(at))
+                    .map(|t| self.screen_of(&t));
+                return !matches!(
+                    (self.screen(id), restarted),
+                    (Ok(now), Ok(restarted)) if now == restarted
+                );
             }
             thread::sleep(Duration::from_millis(20));
         }
@@ -956,14 +986,33 @@ impl<'a> Runner<'a> {
     /// compared, never the raw bytes (spec, *Behaviour oracle*).
     /// The attached client's output so far, fed into a terminal of its size.
     fn client_term(&self, id: &str) -> Result<PaneTerm> {
+        #[cfg(test)]
+        let lost = self.lose_redraw.borrow().get(id).copied();
+        #[cfg(not(test))]
+        let lost = None;
+        self.client_term_cut(id, lost)
+    }
+
+    /// Attached client `id`'s terminal, fed what it was sent; with
+    /// `restart`, only up to the first [`REATTACHED`] from event
+    /// `restart` on ([`reattach_cut`]), if there is one.
+    fn client_term_cut(&self, id: &str, restart: Option<usize>) -> Result<PaneTerm> {
         let a = self
             .attaches
             .get(id)
             .ok_or_else(|| format!("no attached client {id:?}"))?;
         let mut term = PaneTerm::new(self.sc.size[0], self.sc.size[1], HISTORY_LIMIT);
-        for e in a.events.lock().unwrap().iter() {
+        let events = a.events.lock().unwrap();
+        let cut = restart.and_then(|at| reattach_cut(at, &events));
+        for (n, e) in events.iter().enumerate() {
             match e {
-                Event::Bytes(b) => term.feed(b),
+                Event::Bytes(b) => match cut {
+                    Some((at, end)) if n == at => {
+                        term.feed(&b[..end]);
+                        break;
+                    }
+                    _ => term.feed(b),
+                },
                 Event::Resize(c, r) => term.resize(*c, *r),
             }
         }
@@ -1097,9 +1146,12 @@ impl<'a> Runner<'a> {
     }
 
     fn screen(&self, id: &str) -> Result<Observation> {
-        let term = self.client_term(id)?;
+        Ok(self.screen_of(&self.client_term(id)?))
+    }
+
+    fn screen_of(&self, term: &PaneTerm) -> Observation {
         let bytes = capture(
-            &term,
+            term,
             CaptureOpts {
                 escapes: true,
                 ..CaptureOpts::default()
@@ -1111,11 +1163,27 @@ impl<'a> Runner<'a> {
             rows.pop();
         }
         let (x, y) = term.cursor();
-        Ok(Observation::Screen {
+        Observation::Screen {
             rows,
             cursor: [x, y],
-        })
+        }
     }
+}
+
+/// The event holding the first [`REATTACHED`] at or after event `after`,
+/// and the end of that marker in it: the restart, before any redraw.
+fn reattach_cut(after: usize, events: &[Event]) -> Option<(usize, usize)> {
+    events
+        .iter()
+        .enumerate()
+        .skip(after)
+        .find_map(|(n, e)| match e {
+            Event::Bytes(b) => b
+                .windows(REATTACHED.len())
+                .position(|w| w == REATTACHED)
+                .map(|at| (n, at + REATTACHED.len())),
+            Event::Resize(..) => None,
+        })
 }
 
 /// Tests: stop process `pid` now and let it go on after `stall`.
@@ -1322,6 +1390,45 @@ steps = [
             "{screens:#?}"
         );
         assert_eq!(screens[0], screens[1]);
+    }
+
+    /// A re-attached client whose redraw never comes (its terminal gets
+    /// nothing after the restart) fails the run, even when no later step
+    /// looks at the screen.
+    #[test]
+    fn a_lost_redraw_after_an_upgrade_is_recorded() {
+        let bin = crate::build_vtmux(&super::super::workspace_root()).unwrap();
+        let sc: Scenario = toml::from_str(
+            r#"
+name = "upgrade-redraw-lost"
+size = [30, 5]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "sh", "-c", "printf hi; tmux wait-for -S up; exec sleep 1000"] },
+  { wait_for = "up" },
+  { run = ["set", "-g", "status-right", "R"] },
+  { attach = { session = "a" } },
+  { wait_screen = { has = ["hi", "R"] } },
+  { upgrade = {} },
+  { run = ["display", "-p", "after"] },
+]
+"#,
+        )
+        .unwrap();
+        let opts = Opts {
+            vtmux: true,
+            upgrade_every: None,
+        };
+        let mut runner = Runner::new(&bin, &sc, opts).unwrap();
+        runner.redraw_limit = Duration::from_secs(1);
+        runner
+            .lose_redraw
+            .borrow_mut()
+            .insert(String::new(), usize::MAX);
+        runner.run_steps().unwrap();
+        let lost: Vec<_> = (runner.items.iter())
+            .filter(|i| matches!(&i.observation, Observation::Timeout { what } if what.contains("redrawing")))
+            .collect();
+        assert_eq!(lost.len(), 1, "{:#?}", runner.items);
     }
 
     #[test]
