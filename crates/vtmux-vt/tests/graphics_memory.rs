@@ -99,4 +99,9 @@ fn an_image_past_the_limit_is_refused_before_it_is_decoded() {
         peak_cost(format!("\x1b_Ga=t,f=32,o=z,s={SIDE},v={SIDE},i=1;{zlib}\x1b\\").as_bytes());
     assert_eq!(reply, b"\x1b_Gi=1;ENOMEM: out of memory\x1b\\");
     assert!(kib < 64 * 1024, "zlib: the peak rose {kib} KiB");
+
+    let png = base64(&grey_png());
+    let (kib, reply) = peak_cost(format!("\x1b_Ga=t,f=100,i=2;{png}\x1b\\").as_bytes());
+    assert_eq!(reply, b"\x1b_Gi=2;ENOMEM: out of memory\x1b\\");
+    assert!(kib < 64 * 1024, "PNG: the peak rose {kib} KiB");
 }

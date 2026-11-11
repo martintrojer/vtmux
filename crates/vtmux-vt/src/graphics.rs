@@ -720,19 +720,24 @@ impl kg::DecodePng for PngDecoder {
         alloc: &'alloc Allocator<'_>,
         data: &[u8],
     ) -> Option<kg::DecodedImage<'alloc>> {
-        let rgba = decode_png(data)?;
-        let mut bytes = Bytes::new_with_alloc(alloc, rgba.data.len()).ok()?;
-        bytes.copy_from_slice(&rgba.data);
+        // Ghostty's allocator refuses what the screen's limit could not
+        // store (patch 0044), before anything is decoded.
+        let (width, height, data) =
+            decode_png_into(data, |len| Bytes::new_with_alloc(alloc, len).ok())?;
         Some(kg::DecodedImage {
-            width: rgba.width,
-            height: rgba.height,
-            data: bytes,
+            width,
+            height,
+            data,
         })
     }
 }
 
-/// A PNG as 8-bit RGBA.
-fn decode_png(data: &[u8]) -> Option<Pixels> {
+/// A PNG as 8-bit RGBA, in `out(len)`: asked for once the header gives
+/// the size, before decoding, so a size `out` refuses costs nothing more.
+fn decode_png_into<B: std::ops::DerefMut<Target = [u8]>>(
+    data: &[u8],
+    out: impl FnOnce(usize) -> Option<B>,
+) -> Option<(u32, u32, B)> {
     use png::{ColorType, Transformations};
     let mut d =
         png::Decoder::new_with_limits(std::io::Cursor::new(data), png::Limits { bytes: PNG_LIMIT });
@@ -745,29 +750,44 @@ fn decode_png(data: &[u8]) -> Option<Pixels> {
     if rgba > PNG_LIMIT {
         return None;
     }
+    let mut pixels = out(rgba)?;
+    // At most as large: 8-bit, at most 4 channels after the transformations.
     let mut buf = vec![0; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
-    buf.truncate(info.buffer_size());
-    let data = match info.color_type {
-        ColorType::Rgba => buf,
-        ColorType::Rgb => buf
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|&[r, g, b]| [r, g, b, 255])
-            .collect(),
-        ColorType::GrayscaleAlpha => buf
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .flat_map(|&[v, a]| [v, v, v, a])
-            .collect(),
-        ColorType::Grayscale => buf.iter().flat_map(|&v| [v, v, v, 255]).collect(),
+    if (info.width, info.height) != (width, height) {
+        return None;
+    }
+    let buf = &buf[..info.buffer_size()];
+    let px = pixels.as_chunks_mut::<4>().0.iter_mut();
+    match info.color_type {
+        ColorType::Rgba => pixels.copy_from_slice(buf),
+        ColorType::Rgb => {
+            for (p, &[r, g, b]) in px.zip(buf.as_chunks::<3>().0) {
+                *p = [r, g, b, 255];
+            }
+        }
+        ColorType::GrayscaleAlpha => {
+            for (p, &[v, a]) in px.zip(buf.as_chunks::<2>().0) {
+                *p = [v, v, v, a];
+            }
+        }
+        ColorType::Grayscale => {
+            for (p, &v) in px.zip(buf) {
+                *p = [v, v, v, 255];
+            }
+        }
         ColorType::Indexed => return None,
-    };
+    }
+    Some((width, height, pixels))
+}
+
+/// [`decode_png_into`] a `Vec`.
+#[cfg(test)]
+fn decode_png(data: &[u8]) -> Option<Pixels> {
+    let (width, height, data) = decode_png_into(data, |len| Some(vec![0; len]))?;
     Some(Pixels {
-        width: info.width,
-        height: info.height,
+        width,
+        height,
         alpha: true,
         data,
     })
