@@ -738,6 +738,13 @@ fn decode_png(data: &[u8]) -> Option<Pixels> {
         png::Decoder::new_with_limits(std::io::Cursor::new(data), png::Limits { bytes: PNG_LIMIT });
     d.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
     let mut r = d.read_info().ok()?;
+    // The size its header names, as RGBA, before anything is allocated:
+    // the decoder's limit leaves out the frame it decodes into.
+    let (width, height) = r.info().size();
+    let rgba = usize::try_from(u64::from(width) * u64::from(height) * 4).ok()?;
+    if rgba > PNG_LIMIT {
+        return None;
+    }
     let mut buf = vec![0; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
@@ -885,6 +892,28 @@ mod tests {
         let rgba = decode_png(&encode(png::ColorType::Rgba, &[1, 2, 3, 4, 5, 6, 7, 8])).unwrap();
         assert_eq!((rgba.width, rgba.height, rgba.data.len()), (2, 1, 8));
         assert!(decode_png(b"not a png").is_none());
+    }
+
+    /// A PNG's header names its size: one of 2^26 x 2^26 pixels (4 PB of
+    /// output), a few bytes long, is refused before anything that size is
+    /// allocated (the allocation failed and aborted the server).
+    #[test]
+    fn a_png_too_large_to_decode_is_refused_before_allocating() {
+        for (side, ct) in [
+            (1 << 26, png::ColorType::Grayscale),
+            (1 << 16, png::ColorType::Rgba),
+            (20_000, png::ColorType::Grayscale),
+        ] {
+            let mut out = Vec::new();
+            let mut e = png::Encoder::new(&mut out, side, side);
+            e.set_color(ct);
+            e.set_depth(png::BitDepth::Eight);
+            let mut w = e.write_header().unwrap();
+            w.write_chunk(png::chunk::IDAT, &[0x78, 0x9c, 0x03, 0x00])
+                .unwrap();
+            drop(w);
+            assert!(decode_png(&out).is_none(), "{side}");
+        }
     }
 
     /// One RGB pixel, red, as base64.
