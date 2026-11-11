@@ -2172,7 +2172,9 @@ impl PaneTerm {
         }
         let from = self.pending.iter().rposition(|&b| b == 0x1b).unwrap_or(0);
         let keep = |b: u8| match state {
-            ScanState::Str | ScanState::Apc => true,
+            ScanState::Str => true,
+            // What the scanner skipped ([`AltModeScanner::push_state`]).
+            ScanState::Apc => !(0x80..=0x9f).contains(&b),
             ScanState::Csi => b == 0x1b || (0x20..0x7f).contains(&b),
             _ => b == 0x1b || b >= 0x20,
         };
@@ -4194,6 +4196,12 @@ impl AltModeScanner {
         match (self.state, b) {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
+            // A C1 byte is text in an APC, PM or SOS, as all of 0x20-0xff
+            // are in tmux (`input_state_apc_string_table`); Ghostty would
+            // end the string or start a sequence at it (`consumeApcString`),
+            // and ignores the bytes it keeps none of (0xa0-0xff) anyway.
+            #[allow(clippy::match_same_arms)] // the CSI arm below, kept by state
+            (ScanState::Apc, 0x80..=0x9f) => return Some(ScanEvent::Skip),
             // Strings are skipped; further intermediates change nothing we track.
             (ScanState::Str | ScanState::Apc | ScanState::Dcs | ScanState::Rename, _) => {}
             (ScanState::EscIntermediate(_), 0x20..=0x2f) => {
@@ -6297,6 +6305,30 @@ mod tests {
         assert!(!t.set_title("a\tb"));
         assert!(!t.set_title("a\x7fb"));
         assert_eq!(t.title(), "next");
+    }
+
+    /// Reference (tmux 3.8 on the same input): an APC, PM or SOS takes
+    /// every byte from 0x20 to 0xff as text (input.c
+    /// `input_state_apc_string_table` and the others), so a C1 byte inside
+    /// (0x9c, a continuation byte of "本") neither ends it nor starts
+    /// anything. Ghostty would take it as ST, a CSI or an OSC
+    /// (`consumeApcString`) and print the rest.
+    #[test]
+    fn a_c1_byte_inside_an_apc_pm_or_sos_is_text() {
+        // Invalid UTF-8 is refused as a title (`utf8_isvalid`).
+        for (input, title) in [
+            (&b"\x1b_\xe6\x97\xa5\xe6\x9c\xac\x1b\\X"[..], "日本"),
+            (b"\x1b_abc\x9cdef\x1b\\X", ""),
+            (b"\x1b_a\x9b31mb\x9d2;c\x1b\\X", ""),
+            (b"\x1b^\xe6\x9c\xac\x1b\\X", ""),
+            (b"\x1bX\xe6\x9c\xac\x1b\\X", ""),
+        ] {
+            let mut t = PaneTerm::new(20, 5, 100);
+            t.feed(input);
+            assert_eq!(t.row(0).text(), "X", "{input:?}");
+            assert_eq!(t.cursor(), (1, 0), "{input:?}");
+            assert_eq!(t.title(), title, "{input:?}");
+        }
     }
 
     /// Reference (tmux 3.8 on the same input): the OSC number is read as

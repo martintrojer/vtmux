@@ -1,0 +1,14 @@
+# An APC, PM or SOS takes every byte from 0x20 to 0xff as text (input.c
+# `input_state_apc_string_table`, `input_state_consume_st_table`), so a C1
+# byte inside one (0x9c is the middle byte of "本" in UTF-8, 0x9b a CSI,
+# 0x9d an OSC) neither ends it nor starts a sequence, and only the letters
+# after each string reach the screen. The first APC, valid UTF-8, names the
+# pane; the others are refused as titles (`utf8_isvalid`) or are PM and SOS.
+name = "apc_c1_text"
+size = [40, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "printf '\\033_\\346\\227\\245\\346\\234\\254\\033\\\\A\\033_abc\\234def\\033\\\\B\\033_a\\23331mb\\2352;c\\033\\\\C\\033^\\346\\234\\254\\033\\\\D\\033X\\346\\234\\254\\033\\\\E'; tmux wait-for -S rdy; exec cat"] },
+  { wait_for = "rdy" },
+  { run = ["display", "-p", "-t", "%0", "#{pane_title}"] },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]
