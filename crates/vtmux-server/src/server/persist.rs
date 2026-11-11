@@ -174,6 +174,9 @@ pub struct Persist {
     /// `vtmux-persist` was `full` and no `layout` checkpoint has replaced
     /// what it may have written ([`Server::persist_timers`]).
     full_may_be_on_disk: bool,
+    /// `vtmux-persist` as the last loop turn saw it, while on
+    /// ([`Server::persist_turned_off`]).
+    seen_on: Option<Mode>,
     /// When that `layout` checkpoint is tried again, its directory's lock
     /// refused ([`Server::persist_timers`]).
     prune_retry: Option<Instant>,
@@ -212,6 +215,7 @@ impl Default for Persist {
             known: Known::default(),
             exited: false,
             full_may_be_on_disk: false,
+            seen_on: None,
             prune_retry: None,
             refusal: None,
             dir: None,
@@ -256,6 +260,11 @@ impl Server {
         let mode = self.persist_mode();
         if mode == Some(Mode::Full) {
             self.persist.full_may_be_on_disk = true;
+        }
+        if mode.is_some() {
+            self.persist.seen_on = mode;
+        } else if !self.persist.exited && self.persist.seen_on.take().is_some() {
+            self.persist_turned_off();
         }
         if self.persist.exited || mode.is_none() {
             self.persist.due = None;
@@ -355,12 +364,49 @@ impl Server {
             return;
         }
         self.persist.due = None;
-        if self.persist_mode() == Some(Mode::Layout)
+        if self.persist_mode().is_none() && self.persist.seen_on.take().is_some() {
+            self.persist_turned_off();
+        } else if self.persist_mode() == Some(Mode::Layout)
             && std::mem::take(&mut self.persist.full_may_be_on_disk)
         {
             self.checkpoint_layout_now();
         } else {
             self.checkpoint();
+        }
+    }
+
+    /// `vtmux-persist` turned off while the server runs (a loop turn saw
+    /// it on): the checkpoint in its directory is marked `off`
+    /// ([`crate::persist::mark_off`]), so the next start restores it only
+    /// if its config turns the option on again (`super::restore`, a config
+    /// that does not set it going by the checkpoint's value); the files
+    /// stay. Left alone as a checkpoint is never written there: a newer
+    /// binary's, or one a restore refused.
+    fn persist_turned_off(&mut self) {
+        self.persist_drop_writer();
+        // Written again once the option is back on, changed or not: the
+        // manifest says `off` now.
+        self.persist.last = None;
+        let Some(dir) = self.persist_dir() else {
+            return;
+        };
+        let free = match self.persist.kept {
+            Kept::No => {
+                self.persist.lock.is_some() || super::restore::written_by_newer(&dir).is_none()
+            }
+            Kept::Always | Kept::WhileThere => false,
+        };
+        if !free || !self.persist_lock(&dir, true) {
+            return;
+        }
+        match crate::persist::mark_off(&dir) {
+            Ok(true) => self.add_message(format!(
+                "vtmux-persist: off: {} is kept, and the next start restores it only if \
+                 its config turns vtmux-persist on",
+                dir.display()
+            )),
+            Ok(false) => {}
+            Err(e) => self.persist_error(&e),
         }
     }
 

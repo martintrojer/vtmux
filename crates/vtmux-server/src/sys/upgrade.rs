@@ -58,6 +58,29 @@ pub const PATCH_STACK_LIMIT: Duration = Duration::from_secs(1);
 /// that passes, so either side may be the older.
 pub const TAKES_SOCKET: &str = "vtmux-resume takes -S\n";
 
+/// What a dry run that read and rebuilt the snapshot writes on stderr, a
+/// line of its own: this, the hash of the snapshot's body its header
+/// records (`vtmux_snapshot::digest`) in lowercase hex, and a newline
+/// ([`acknowledgement`]). A dry run passes only with that exact line: an
+/// exit status of 0 alone is any program's (`/bin/echo`, `true`, a
+/// script), and the exec that follows would replace the server with it.
+/// A vtmux from before it (3.8-beta2 and older) writes no such line, so
+/// it is refused too.
+pub const CHECKED: &str = "vtmux-snapshot-checked ";
+
+/// The line a dry run of the stream whose body hashes to `digest` answers
+/// with ([`CHECKED`]).
+#[must_use]
+pub fn acknowledgement(digest: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    let mut line = String::from(CHECKED);
+    for b in digest {
+        let _ = write!(line, "{b:02x}");
+    }
+    line.push('\n');
+    line
+}
+
 /// A dry run that passed: what the image it checked takes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Checked {
@@ -302,6 +325,9 @@ pub struct DryRun {
     said: Vec<u8>,
     end: Instant,
     limit: Duration,
+    /// The [`acknowledgement`] of the snapshot it was given, `None` when
+    /// that is no stream (nothing passes then).
+    expect: Option<String>,
     /// How it went, once it has ended and been reaped.
     outcome: Option<Result<Checked, String>>,
 }
@@ -317,6 +343,7 @@ impl DryRun {
         // Before the flag is cleared: an error here must not leave the
         // snapshot inheritable.
         let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
+        let expect = expected_acknowledgement(snapshot)?;
         let flags = inheritable(snapshot)?;
         let mut command = Command::new(binary);
         command
@@ -367,6 +394,7 @@ impl DryRun {
             said: Vec::new(),
             end: Instant::now() + limit,
             limit,
+            expect,
             outcome: None,
         })
     }
@@ -436,11 +464,23 @@ impl DryRun {
             drain(e, &mut self.said);
         }
         if status.success() {
-            let takes_socket = self
-                .said
-                .windows(TAKES_SOCKET.len())
-                .any(|w| w == TAKES_SOCKET.as_bytes());
-            return Ok(Ok(Checked { takes_socket }));
+            let line = |want: &str| {
+                let want = want.as_bytes();
+                self.said
+                    .split_inclusive(|&b| b == b'\n')
+                    .any(|l| l == want)
+            };
+            if !self.expect.as_deref().is_some_and(line) {
+                return Ok(Err(format!(
+                    "{} is not a vtmux that can take over: its {CHECK_FLAG} exited 0 \
+                     without saying it read the snapshot (another program, or a vtmux \
+                     3.8-beta2 or older)",
+                    self.binary.display()
+                )));
+            }
+            return Ok(Ok(Checked {
+                takes_socket: line(TAKES_SOCKET),
+            }));
         }
         let message = String::from_utf8_lossy(&self.said);
         let message = message.trim_end();
@@ -467,6 +507,26 @@ impl Drop for DryRun {
             let _ = self.child.wait();
         }
     }
+}
+
+/// The [`acknowledgement`] a dry run of the stream in `snapshot` must
+/// answer with, read from its header; `None` when it has none. The file
+/// is left at offset 0, so a dry run that reads it from its descriptor
+/// (a script's `/dev/fd/<n>`, which macOS opens as a `dup`) reads it
+/// whole; the images read it by offset (`read_all`).
+fn expected_acknowledgement(snapshot: BorrowedFd<'_>) -> io::Result<Option<String>> {
+    let mut head = [0; vtmux_snapshot::HEADER_LEN];
+    let mut got = 0;
+    while got < head.len() {
+        match rustix::io::pread(snapshot, &mut head[got..], got as u64) {
+            Ok(0) => break,
+            Ok(n) => got += n,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    rustix::fs::seek(snapshot, rustix::fs::SeekFrom::Start(0))?;
+    Ok(vtmux_snapshot::digest(&head[..got]).map(|d| acknowledgement(&d)))
 }
 
 /// A child of this process that a signal has stopped, and the signal;
@@ -1010,6 +1070,70 @@ mod tests {
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
+    }
+
+    /// A dry run passes only with the acknowledgement of the snapshot it
+    /// was given, a line of its own: exit 0 alone, an old vtmux's
+    /// `TAKES_SOCKET`, another stream's digest or the line run into
+    /// other output are refused. The snapshot is left at offset 0 for a
+    /// script that reads its descriptor.
+    #[test]
+    fn a_dry_run_passes_only_with_the_snapshots_acknowledgement() {
+        let d = dir();
+        let stream = vtmux_snapshot::encode(&vtmux_snapshot::Snapshot::default());
+        let other = vtmux_snapshot::encode(&vtmux_snapshot::Snapshot {
+            sessions: vec![vtmux_snapshot::Session::default()],
+            ..vtmux_snapshot::Snapshot::default()
+        });
+        let snapshot = memfile(&d.0, &stream).unwrap();
+        let ack = acknowledgement(&vtmux_snapshot::digest(&stream).unwrap());
+        let wrong = acknowledgement(&vtmux_snapshot::digest(&other).unwrap());
+        assert_ne!(ack, wrong);
+        assert_eq!(ack.len(), CHECKED.len() + 64 + 1);
+        let says = |name: &str, what: &str| {
+            let path = d.0.join(format!("{name}.txt"));
+            std::fs::write(&path, what).unwrap();
+            script(&d, name, &format!("cat '{}' >&2", path.display()))
+        };
+        let refused = [
+            script(&d, "zero", "exit 0"),
+            says("old", TAKES_SOCKET),
+            says("wrong", &wrong),
+            says("run-in", &format!("x{ack}")),
+            says("unended", ack.trim_end()),
+        ];
+        for binary in &refused {
+            let message = dry_run(binary, snapshot.as_fd(), DRY_RUN_LIMIT)
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                message.ends_with("or a vtmux 3.8-beta2 or older)"),
+                "{}: {message}",
+                binary.display()
+            );
+        }
+        let passes = says("new", &format!("{TAKES_SOCKET}{ack}"));
+        assert_eq!(
+            dry_run(&passes, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
+            Ok(Checked { takes_socket: true })
+        );
+        let no_socket = says("bare", &ack);
+        assert_eq!(
+            dry_run(&no_socket, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
+            Ok(Checked {
+                takes_socket: false
+            })
+        );
+        // Read through its descriptor, as a script does: the whole stream.
+        let reads = script(
+            &d,
+            "reads",
+            "cat /dev/fd/$2 | wc -c | tr -d ' ' >&2; exit 1",
+        );
+        assert_eq!(
+            dry_run(&reads, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
+            Err(stream.len().to_string())
+        );
     }
 
     /// Decision 23: the hash a binary prints for `--vtmux-patch-stack`,

@@ -646,6 +646,10 @@ impl Server {
             // size every reader takes.
             let since = c.decoder.held_since();
             let held = c.decoder.take_held();
+            // Decoded again from the first key given back: the decoder's
+            // paste goes back to where the keys run so far left it (a
+            // paste mark among the keys is decoded again).
+            c.decoder.set_pasting(c.pasting);
             let input = |chunk: &[u8]| {
                 vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
                     chunk.to_vec(),

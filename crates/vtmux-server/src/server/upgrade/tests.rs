@@ -57,13 +57,22 @@ fn execs() -> Vec<Exec> {
     EXECS.with(|e| std::mem::take(&mut *e.borrow_mut()))
 }
 
-/// An executable `sh` script `name` in `dir`.
+/// An executable `sh` script `name` in `dir`. Its dry run, when it exits
+/// 0, says it read the snapshot (`sys::upgrade::CHECKED`, [`ACK`]), as a
+/// vtmux does.
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::write(&path, format!("#!/bin/sh\n{ACK}\n{body}\n")).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     path
 }
+
+/// What makes a script's dry run say it read the snapshot when it exits
+/// 0, as a vtmux does: the digest from the stream's header, on stderr at
+/// the exit.
+const ACK: &str = "case \"$1\" in --vtmux-check-snapshot) ACK_FD=$2; trap '[ $? = 0 ] && printf \
+                   \"vtmux-snapshot-checked %s\\n\" \"$(od -An -v -tx1 -j20 -N32 /dev/fd/$ACK_FD \
+                   | tr -d \" \\n\")\" >&2' EXIT;; esac";
 
 /// A dry run that passes, keeping its arguments in `dir/args`.
 fn passing(dir: &Path) -> PathBuf {
@@ -509,6 +518,52 @@ fn keys_typed_after_a_bound_upgrade_do_not_refuse_it() {
     assert!(server.upgrade.pending.is_none());
     let shown = st::run(&mut server, &dir, &["show", "-gv", "@x"]);
     assert!(shown.contains("\nran\n"), "{shown}");
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A bracketed paste typed behind a key bound to `vtmux-upgrade` (the same
+/// read) goes back to the client's input whole, its marks as the bytes
+/// they came in, and does not refuse the upgrade; the decoder's paste is
+/// back to where the keys run so far left it. (Before: refused with `keys
+/// pressed meanwhile after vtmux-upgrade would not run`.)
+#[test]
+fn a_paste_typed_after_a_bound_upgrade_goes_back_whole() {
+    let (mut server, dir) = setup("paste");
+    let binary = passing(&dir);
+    let bind = format!("vtmux-upgrade -b {}", binary.to_str().unwrap());
+    st::ok(&mut server, &dir, &["bind", "-n", "F5", &bind]);
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    server
+        .on_client_input(term, b"\x1b[15~\x1b[200~xa\x1b[201~y\x1b[200~p")
+        .unwrap();
+    for _ in 0..5 {
+        turns(&mut server, Instant::now());
+        server.cmdq_process();
+    }
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let frames: Vec<u8> = [
+        &b"\x1b[200~"[..],
+        b"x",
+        b"a",
+        b"\x1b[201~",
+        b"y",
+        b"\x1b[200~",
+        b"p",
+    ]
+    .iter()
+    .flat_map(|k| {
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(k.to_vec())).unwrap()
+    })
+    .collect();
+    assert_eq!(client.inbuf, frames);
+    assert!(!client.pasting, "the paste starts again from its mark");
     drop(server);
     std::fs::remove_dir_all(dir).unwrap();
 }

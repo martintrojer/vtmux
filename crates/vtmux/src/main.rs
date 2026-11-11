@@ -544,7 +544,8 @@ fn reattach_main(
 /// The images a live upgrade starts (vtmux-server `sys::upgrade`): the new
 /// server, `[-S <socket>] --vtmux-resume <fd> [--vtmux-switched-back]`,
 /// the dry run, `--vtmux-check-snapshot <fd>`, which says on stderr that
-/// this binary takes the `-S` (`TAKES_SOCKET`), and the old image's
+/// this binary takes the `-S` (`TAKES_SOCKET`) and that it read and
+/// rebuilt the snapshot (`CHECKED`, without which nothing passes), and the old image's
 /// question before it, `--vtmux-patch-stack`. `None` for any other command
 /// line.
 fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
@@ -573,8 +574,9 @@ fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
         [flag, n] if *flag == RESUME_FLAG => resume(n, false),
         [flag, n, back] if *flag == RESUME_FLAG && *back == SWITCHED_BACK_FLAG => resume(n, true),
         [flag, n] if *flag == CHECK_FLAG => Some(match resume::check_snapshot(fd(n)?) {
-            Ok(()) => {
+            Ok(checked) => {
                 write_err(TAKES_SOCKET.as_bytes());
+                write_err(checked.as_bytes());
                 ExitCode::SUCCESS
             }
             Err(message) => {

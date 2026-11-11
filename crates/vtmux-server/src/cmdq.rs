@@ -334,9 +334,12 @@ impl Cmdq {
 
     /// The keys queued behind step `id` taken out of its queue, as the
     /// bytes each came in, in order: `Some` (empty when there are none)
-    /// only if nothing else is behind it (batch ends excepted) and every key still has its bytes (not a
-    /// mouse event or a paste mark, whose handling is not repeated from
-    /// bytes, nor one `send-keys -K` gave). A key waits behind a command
+    /// only if nothing else is behind it (batch ends excepted) and every
+    /// key still has its bytes (not a mouse event, whose handling is not
+    /// repeated from bytes, nor one `send-keys -K` gave). A bracketed
+    /// paste's marks come only from the bytes `\e[200~` and `\e[201~`
+    /// (tty-keys.c `tty_keys_next`), so they are given back as those, and
+    /// a paste typed behind the key goes back whole. A key waits behind a command
     /// that waits, and has done nothing yet: given back as input, it is
     /// read again later.
     pub fn take_keys_after(&mut self, id: StepId) -> Option<Vec<Vec<u8>>> {
@@ -356,6 +359,14 @@ impl Cmdq {
                     ..
                 })) if s.batch != own && !raw.is_empty() => {
                     bytes.push(raw.clone());
+                    keys.push(s.batch);
+                }
+                Some(Work::Key(KeyEvent {
+                    kind: KeyKind::Paste(start),
+                    ..
+                })) if s.batch != own => {
+                    let mark: &[u8] = if *start { b"\x1b[200~" } else { b"\x1b[201~" };
+                    bytes.push(mark.to_vec());
                     keys.push(s.batch);
                 }
                 // The end of a batch that has no more to run (the key whose

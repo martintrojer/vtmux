@@ -538,3 +538,37 @@ fn a_restored_checkpoint_is_not_read_back_at_the_next() {
     assert!(w.step(None, &mut ok()).unwrap());
     assert_eq!(w.written().chunks_checked, 20);
 }
+
+/// `vtmux-persist` turned off at run time ([`mark_off`]): both manifests
+/// say `off`, everything else as it was (pages by name, the chunks on
+/// disk), a second mark changes nothing, and a manifest that does not
+/// decode is left as it is.
+#[test]
+fn marking_off_rewrites_only_the_option() {
+    let dir = temp_dir("mark-off");
+    let with = |s: &mut snap::Snapshot, value: &str| {
+        s.server.server_options = vec![snap::OptionEntry {
+            name: "vtmux-persist".into(),
+            value: snap::OptionValue::Single(snap::Value::Choice(value.into())),
+        }];
+    };
+    let (mut s1, mut s2) = (snapshot("one", &["alpha"]), snapshot("two", &["beta"]));
+    with(&mut s1, "full");
+    with(&mut s2, "full");
+    write(&dir, &s1, &mut ok()).unwrap();
+    write(&dir, &s2, &mut ok()).unwrap();
+    let chunks = on_disk(&dir);
+    assert!(mark_off(&dir).unwrap());
+    for (name, mut s) in [(MANIFEST, s2), (MANIFEST_PREV, s1)] {
+        with(&mut s, "off");
+        assert_eq!(load_file(&dir, name).unwrap().0, s, "{name}");
+        assert_eq!(mode(&dir.join(name)), 0o600, "{name}");
+    }
+    assert_eq!(on_disk(&dir), chunks);
+    assert!(!mark_off(&dir).unwrap(), "already off");
+    fs::write(dir.join(MANIFEST), b"torn").unwrap();
+    let prev = fs::read(dir.join(MANIFEST_PREV)).unwrap();
+    assert!(!mark_off(&dir).unwrap());
+    assert_eq!(fs::read(dir.join(MANIFEST)).unwrap(), b"torn");
+    assert_eq!(fs::read(dir.join(MANIFEST_PREV)).unwrap(), prev);
+}

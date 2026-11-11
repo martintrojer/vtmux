@@ -102,7 +102,9 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
  ask B --vtmux-patch-stack; same Ghostty stack?
    yes: compress all history first (threads)
  snapshot ─► memfd ─► B --vtmux-check-snapshot  (dry run: decode + rebuild,
- serve on meanwhile                             at most 3 s + 1 s per 100k rows)
+ serve on meanwhile                             at most 3 s + 1 s per 100k rows;
+                                                passes only if B answers the
+                                                snapshot's digest on stderr)
  passed: quiesce, flush clients, snapshot again
  UpgradeNotice + token ─► attached clients
  execve(B --vtmux-resume <fd>) ──────────────────────────► decode, adopt the fds,

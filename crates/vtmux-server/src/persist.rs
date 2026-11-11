@@ -715,6 +715,51 @@ fn full_sync(f: &File) -> io::Result<()> {
 }
 
 /// `bytes` at `path`, through `tmp`: never a partial `path`.
+/// Record in `dir`'s checkpoint that `vtmux-persist` was turned off while
+/// the server ran: `manifest` and `manifest.prev` rewritten with the
+/// option `off`, nothing else changed (pages by name, `chunks/` as it
+/// is), so the next start, whose config does not set the option, goes by
+/// the checkpoint's value and restores nothing (`server::restore`), and
+/// the files stay. A file that is missing, does not decode (corrupt, a
+/// newer binary's), names no `vtmux-persist` or says `off` already is
+/// left as it is. The caller holds the lock. Whether a file was
+/// rewritten.
+///
+/// # Errors
+/// A read other than a missing file's, or the write, failed.
+pub fn mark_off(dir: &Path) -> io::Result<bool> {
+    let mut marked = false;
+    for (name, tmp) in [(MANIFEST, MANIFEST_TMP), (MANIFEST_PREV, MANIFEST_PREV_TMP)] {
+        let bytes = match fs::read(dir.join(name)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        let Ok(mut s) = snap::decode_partial(&bytes, &snap::Features::default(), |_| None) else {
+            continue;
+        };
+        let off = snap::OptionValue::Single(snap::Value::Choice("off".to_owned()));
+        let Some(e) = s
+            .server
+            .server_options
+            .iter_mut()
+            .find(|e| e.name == "vtmux-persist")
+        else {
+            continue;
+        };
+        if e.value == off {
+            continue;
+        }
+        e.value = off;
+        replace(&dir.join(tmp), &dir.join(name), &snap::encode_manifest(&s))?;
+        marked = true;
+    }
+    if marked {
+        sync_dir(dir)?;
+    }
+    Ok(marked)
+}
+
 fn replace(tmp: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_file(tmp, bytes, Flush::Data)?;
     fs::rename(tmp, path)

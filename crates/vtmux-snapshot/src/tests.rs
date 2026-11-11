@@ -1250,3 +1250,19 @@ fn bench_ten_panes_of_100k_lines() {
         bytes.len() / 1_000_000
     );
 }
+
+/// The digest a dry run answers with is the body's hash its header
+/// records; bytes with no header have none.
+#[test]
+fn a_streams_digest_is_its_bodys_hash() {
+    let bytes = encode(&Snapshot::default());
+    assert_eq!(
+        digest(&bytes),
+        Some(*blake3::hash(&bytes[HEADER_LEN..]).as_bytes())
+    );
+    assert_eq!(digest(&bytes[..HEADER_LEN - 1]), None);
+    assert_eq!(
+        digest(b"not a vtmux snapshot, but long enough for a header."),
+        None
+    );
+}

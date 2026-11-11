@@ -1034,6 +1034,82 @@ fn a_config_with_persist_off_restores_nothing() {
     );
 }
 
+/// `vtmux-persist` turned off at run time is not undone by the next start:
+/// a config that does not set the option goes by the checkpoint's value,
+/// and the checkpoint on disk said `full` (written before the option went
+/// off), so the next server restored it. Now the checkpoint is marked
+/// `off`, its files kept: the next start restores nothing, in a loop turn
+/// or in the same command line as `kill-server`, and a config that turns
+/// the option on gets it back.
+#[test]
+fn persist_turned_off_at_run_time_is_not_restored_at_the_next_start() {
+    let mut w = World::start_with(
+        &["cat", "-"],
+        &[("VTMUX_PERSIST_INTERVAL_MS", "50")],
+        None,
+        Some(""),
+    );
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.wait_saved();
+    w.kill_server();
+    // Restored, as the checkpoint says `full`.
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.ok(&["ls", "-F", "#{session_name}"]), "a\n");
+    let names = |w: &World| {
+        let mut names: Vec<String> = w
+            .ok(&["ls", "-F", "#{session_name}"])
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        names.sort();
+        names
+    };
+    for (turned_off, at_once) in [
+        (&["set", "-s", "vtmux-persist", "off"][..], false),
+        (
+            &["set", "-s", "vtmux-persist", "off", ";", "kill-server"][..],
+            true,
+        ),
+    ] {
+        if at_once {
+            // Back on, and restored once more, before the second way.
+            w.ok(&["set", "-s", "vtmux-persist", "full"]);
+            w.wait_saved();
+            w.kill_server();
+            w.ok(&["start-server"]);
+            w.repid();
+            assert_eq!(names(&w), ["a"], "restored again once back on");
+            w.ok(turned_off);
+            w.gone();
+        } else {
+            w.ok(turned_off);
+            w.kill_server();
+        }
+        w.wait_no_server();
+        let dir = w.state();
+        assert!(dir.join(persist::MANIFEST).is_file(), "the files stay");
+        w.ok(&["new", "-d", "-s", "fresh", "cat", "-"]);
+        w.repid();
+        assert_eq!(names(&w), ["fresh"], "at_once {at_once}");
+        assert!(
+            !w.ok(&["show-messages"]).contains("restored"),
+            "at_once {at_once}"
+        );
+        w.ok(&["kill-server"]);
+        w.gone();
+        w.wait_no_server();
+        if !at_once {
+            // The checkpoint is still there for a config that wants it.
+            std::fs::write(&w.config, "set -s vtmux-persist full\n").unwrap();
+            w.ok(&["start-server"]);
+            w.repid();
+            assert_eq!(names(&w), ["a"], "a config turning it on restores it");
+            std::fs::write(&w.config, "").unwrap();
+        }
+    }
+}
+
 /// `vtmux-persist-drop` (decision 30): the user options matching its
 /// globs are not restored. A session's own value applies to it; the
 /// others go by the global one, the config's when it sets it (here only

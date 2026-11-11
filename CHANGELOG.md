@@ -18,6 +18,9 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 
 ### Fixed
 
+- Live upgrade: `vtmux-upgrade -b` onto a program that is not a vtmux (`/bin/echo`, `true`, a script that exits 0) is refused with exit 1, the server and its panes untouched; before, it passed the dry run and replaced the server, losing every session. The new binary must answer the dry run with the digest of the snapshot it read, so a vtmux 3.8-beta2 or older is refused too.
+- `set -s vtmux-persist off` at run time is remembered: the next start restores nothing unless its config turns persistence on again, and the checkpoint files stay.
+- Live upgrade: a bracketed paste typed right after a key bound to `vtmux-upgrade` no longer refuses it; the paste lands in the new image as a paste.
 - A client that vanishes while a live upgrade tells clients to re-attach no longer fails the upgrade with `Bad file descriptor`.
 - `SIGTERM` or `SIGHUP` as a client attaches says `[terminated]` or `[lost tty]`, not `server exited unexpectedly`, and detaches as tmux does (the pane gets its focus-out). One that arrives as a command or control client starts no longer leaves it blocked. One that arrives as an attached client follows a live upgrade ends it the same way instead of being lost (the client stayed attached), and one that lands just before the client is attached ends it quietly with status 0, as tmux does.
 - `tmux` run in a pane with `TMUX_PANE` unset (a cleaned environment) finds its pane by its tty, as tmux does, instead of acting on the newest session.

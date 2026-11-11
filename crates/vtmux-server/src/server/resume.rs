@@ -100,16 +100,22 @@ fn decode_unchecked(bytes: &[u8]) -> Result<snap::Snapshot, String> {
 /// descriptors it names ([`check_bytes`]). No descriptor it names is
 /// touched, and nothing is left behind.
 ///
+/// Passed, the line that says so on stderr: the acknowledgement of the
+/// stream checked (`sys::CHECKED`), without which the image that
+/// asked refuses the binary.
+///
 /// # Errors
 /// Why the snapshot can't be resumed from, as a message for the
 /// requester.
-pub fn check_snapshot(fd: RawFd) -> Result<(), String> {
+pub fn check_snapshot(fd: RawFd) -> Result<String, String> {
     // A panic is reported as the message, not printed on the stderr the
     // message is read from.
     std::panic::set_hook(Box::new(|_| {}));
     let fd = sys::inherited(fd).map_err(|e| format!("snapshot descriptor {fd}: {e}"))?;
     let bytes = sys::read_all(fd.as_fd()).map_err(|e| format!("reading the snapshot: {e}"))?;
-    check_bytes(&bytes)
+    check_bytes(&bytes)?;
+    let digest = snap::digest(&bytes).ok_or_else(|| "no snapshot header".to_owned())?;
+    Ok(sys::acknowledgement(&digest))
 }
 
 /// [`check_snapshot`] on the stream's bytes: decode, then the rebuild

@@ -399,6 +399,17 @@ pub fn version(bytes: &[u8]) -> Result<u32, Error> {
     Ok(u32::from_le_bytes(head[8..12].try_into().expect("4 bytes")))
 }
 
+/// The BLAKE3 hash of a stream's body, as its header records it, without
+/// checking it: `None` when `bytes` do not start with a header. A live
+/// upgrade's dry run that has read and rebuilt the stream answers with it
+/// (`sys::upgrade::CHECKED` in vtmux-server), and the image asking
+/// compares it with the one of the stream it wrote.
+#[must_use]
+pub fn digest(bytes: &[u8]) -> Option<[u8; 32]> {
+    let head = bytes.get(..HEADER_LEN)?;
+    (&head[..8] == MAGIC).then(|| head[20..].try_into().expect("32 bytes"))
+}
+
 /// The body of a stream of a version this build reads, checked against
 /// the length and hash in its header.
 fn body(bytes: &[u8]) -> Result<(u32, &[u8]), Error> {
