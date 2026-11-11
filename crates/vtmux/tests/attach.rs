@@ -613,7 +613,9 @@ fn typist(a: &mut Attached, chunk: usize, pause: Duration) -> (Arc<AtomicBool>, 
     let mut writer = std::mem::replace(&mut a.writer, Box::new(std::io::sink()));
     let (go, count) = (Arc::clone(&typing), Arc::clone(&typed));
     thread::spawn(move || {
-        let bytes = vec![b'x'; chunk];
+        // A letter that is not in "[exited]": the terminal's echo of it
+        // can land inside the message (below).
+        let bytes = vec![b'q'; chunk];
         while go.load(Ordering::Relaxed) && writer.write_all(&bytes).is_ok() {
             count.fetch_add(chunk, Ordering::Relaxed);
             thread::sleep(pause);
@@ -696,11 +698,16 @@ fn input_failing_as_the_server_closes_still_tears_down() {
     a.exited(0);
     typing.store(false, Ordering::Relaxed);
     let text = a.text();
-    // The typist's keys the terminal echoed meanwhile may sit between the
-    // frame and the message on a loaded host.
-    let after = text
-        .split_once("DOWN")
-        .map(|(_, rest)| rest.trim_start_matches('x'));
+    // Once the client restores the terminal, the typist's keys still queued
+    // there are echoed, anywhere in the output, even inside the message, and
+    // macOS rings BEL for each one past a full input queue (IMAXBEL): CI
+    // check-macos on fc7ca978 showed "DOWNqq…\x07…[eqq…xited]". Leave out
+    // the echo and check what the client wrote.
+    let after = text.split_once("DOWN").map(|(_, rest)| {
+        rest.chars()
+            .filter(|&c| c != 'q' && c != '\x07')
+            .collect::<String>()
+    });
     assert!(
         after.is_some_and(|rest| rest.starts_with("[exited]")),
         "{text:?}"
