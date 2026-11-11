@@ -13,6 +13,14 @@
 //! often tools poll it, and a field added to the snapshot is noticed
 //! without anyone remembering to mark it dirty.
 //!
+//! A `full` checkpoint is compared first on a [`Precheck`]: the
+//! checkpoint without its terminals, and each pane's output count,
+//! history size and terminal state outside its rows. Building it exports
+//! no history, so an idle server with a long one does not hold the loop
+//! each interval to find nothing changed (8 ms at 10 panes x 100k lines
+//! in a release build, where the export takes 1.7 s). Only when it differs is every
+//! terminal exported and the whole checkpoint compared.
+//!
 //! `vtmux-persist` set from `full` to `layout` writes a `layout`
 //! checkpoint at the next loop turn (or the shutdown checkpoint, if that
 //! comes first) whether anything changed or not, with
@@ -43,10 +51,10 @@
 //!   go to `chunks/`, a few per loop turn
 //!   ([`crate::persist::Writer`]), so a first `full` checkpoint of
 //!   hundreds of new pages never holds the loop for long; the shutdown
-//!   checkpoint is written at once. Not yet incremental: building the
-//!   snapshot exports every terminal on the loop, unchanged ones too
-//!   (the fingerprint compares the whole export), 1.4 s at 10 panes x
-//!   100k lines in a release build (`bench_checkpoint_ten_panes_of_100k_lines`).
+//!   checkpoint is written at once. Not yet incremental: once anything
+//!   changed, building the snapshot exports every terminal on the loop,
+//!   unchanged ones too, 1.4 s at 10 panes x 100k lines in a release
+//!   build (`bench_checkpoint_ten_panes_of_100k_lines`).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -56,6 +64,7 @@ use vtmux_snapshot as snap;
 
 use super::Server;
 use crate::persist::{Known, Lock, MANIFEST, MANIFEST_PREV, Writer, Written};
+use crate::snapshot_term::Form;
 
 /// What a checkpoint holds (`vtmux-persist`; module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,13 +131,36 @@ impl Kept {
     }
 }
 
+/// What a checkpoint is compared on.
+#[derive(Debug)]
+struct Print {
+    /// [`fingerprint`] of the checkpoint.
+    whole: Vec<u8>,
+    /// [`Precheck`] of the server it was built from, for a `full` one.
+    pre: Option<Precheck>,
+}
+
+/// A `full` checkpoint's stand-in for the export of its terminals (module
+/// docs): whatever changes a terminal's rows moves its output count, its
+/// history size, its geometry or its state outside the rows, or else
+/// something the rest of the checkpoint holds (a pane respawned or dead,
+/// a title, an option, copy mode).
+#[derive(Debug, PartialEq)]
+struct Precheck {
+    /// [`fingerprint`] of the checkpoint without its terminals.
+    rest: Vec<u8>,
+    /// Each pane's output count, history size and terminal state outside
+    /// its pages.
+    terms: Vec<(u32, u64, usize, vtmux_vt::TermState)>,
+}
+
 /// The checkpoint timer and what was last written.
 #[derive(Debug)]
 pub struct Persist {
     /// The next periodic checkpoint, while `vtmux-persist` is on.
     due: Option<Instant>,
-    /// [`fingerprint`] of the last checkpoint written.
-    last: Option<Vec<u8>>,
+    /// What the last checkpoint written is compared on.
+    last: Option<Print>,
     /// What this process knows of the checkpoint directory: what it
     /// wrote there, or read back (a restore's read too).
     pub(super) known: Known,
@@ -151,9 +183,12 @@ pub struct Persist {
     /// Another server holds the lock: said once in the message log.
     refused: bool,
     /// A periodic checkpoint being written, and its fingerprint.
-    writing: Option<(Writer, Vec<u8>)>,
+    writing: Option<(Writer, Print)>,
     /// How long a loop turn writes its chunks ([`STEP`]).
     pub(crate) step: Duration,
+    /// Checkpoint snapshots built ([`Server::checkpoint_snapshot`]).
+    #[cfg(test)]
+    pub(super) built: u32,
 }
 
 impl Default for Persist {
@@ -171,6 +206,8 @@ impl Default for Persist {
             refused: false,
             writing: None,
             step: STEP,
+            #[cfg(test)]
+            built: 0,
         }
     }
 }
@@ -395,13 +432,33 @@ impl Server {
         dir: &Path,
         mode: Mode,
         prune: bool,
-    ) -> Option<(Writer, Vec<u8>)> {
+    ) -> Option<(Writer, Print)> {
         if !self.persist_lock(dir) {
             return None;
         }
+        let pre = (mode == Mode::Full).then(|| self.precheck());
+        if !prune
+            && let (Some(pre), Some(last)) = (&pre, &self.persist.last)
+            && last.pre.as_ref() == Some(pre)
+        {
+            return None;
+        }
         let s = self.checkpoint_snapshot(mode);
-        let print = fingerprint(&s);
-        if !prune && self.persist.last.as_ref() == Some(&print) {
+        #[cfg(test)]
+        {
+            self.persist.built += 1;
+        }
+        let print = Print {
+            whole: fingerprint(&s),
+            pre,
+        };
+        if !prune
+            && let Some(last) = &mut self.persist.last
+            && last.whole == print.whole
+        {
+            // Unchanged after all (a terminal's state moved outside what
+            // a checkpoint holds): compared on this precheck from now on.
+            last.pre = print.pre;
             return None;
         }
         match Writer::new(dir, &s, &self.persist.known) {
@@ -472,9 +529,39 @@ impl Server {
         self.persist.dir.clone()
     }
 
+    /// The [`Precheck`] of a `full` checkpoint now.
+    fn precheck(&self) -> Precheck {
+        Precheck {
+            rest: fingerprint(&self.checkpoint_snapshot_with(Mode::Full, None)),
+            terms: self
+                .model
+                .panes
+                .iter()
+                .map(|(id, p)| {
+                    (
+                        id.0,
+                        p.output_generation,
+                        p.term.history_size(),
+                        p.term.export_state_head(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
     /// The snapshot a checkpoint of `mode` writes (module docs).
     #[must_use]
     pub fn checkpoint_snapshot(&self, mode: Mode) -> snap::Snapshot {
+        let form = match mode {
+            Mode::Layout => None,
+            Mode::Full => Some(Form::Rows),
+        };
+        self.checkpoint_snapshot_with(mode, form)
+    }
+
+    /// [`Server::checkpoint_snapshot`] with the terminals in `form`, or
+    /// none.
+    fn checkpoint_snapshot_with(&self, mode: Mode, form: Option<Form>) -> snap::Snapshot {
         let written_us = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
@@ -490,7 +577,7 @@ impl Server {
             written_us,
             ..snap::Meta::default()
         };
-        let mut s = self.to_snapshot(meta);
+        let mut s = self.to_snapshot_with(meta, form);
         // The process: gone with it.
         s.descriptors.clear();
         s.clients.clear();

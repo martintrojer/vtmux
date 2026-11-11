@@ -542,6 +542,45 @@ fn a_locked_directory_is_not_written() {
     );
 }
 
+/// An idle server is not exported again to find it unchanged: the
+/// precheck stands in for its terminals, and anything that changes one
+/// (output, a resize, `clear-history`, a title, copy mode) still makes
+/// the next checkpoint.
+#[test]
+fn an_unchanged_full_checkpoint_exports_no_terminal() {
+    let (mut server, dir) = server("ckpt-idle");
+    let state = dir.join("state");
+    assert!(server.checkpoint_to(&state, Mode::Full).is_some());
+    assert_eq!(server.persist.built, 1);
+    for _ in 0..3 {
+        assert_eq!(server.checkpoint_to(&state, Mode::Full), None);
+    }
+    assert_eq!(server.persist.built, 1, "exported to find nothing changed");
+    // Output that leaves the cursor, history and modes as they were, then
+    // commands.
+    let commands: [&[&str]; 4] = [
+        &["resize-pane", "-t", "%1", "-y", "5"],
+        &["select-pane", "-t", "%1", "-T", "t"],
+        &["send-keys", "-t", "%0", "-X", "cursor-up"],
+        &["clear-history", "-t", "%0"],
+    ];
+    for n in 0..=commands.len() {
+        if n == 0 {
+            server.pane_input(PaneId(1), b"\x1b7\x1b[5;5HZ\x1b8", false);
+        } else {
+            let out = run(&mut server, &dir, commands[n - 1]);
+            assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+        }
+        assert!(
+            server.checkpoint_to(&state, Mode::Full).is_some(),
+            "change {n}"
+        );
+        assert_eq!(server.checkpoint_to(&state, Mode::Full), None, "change {n}");
+    }
+    // Each change exported once, to write it.
+    assert_eq!(server.persist.built, 6);
+}
+
 #[test]
 fn the_fingerprint_ignores_the_clock_alone() {
     let (server, _dir) = server("ckpt-print");
@@ -573,8 +612,8 @@ fn the_fingerprint_ignores_the_clock_alone() {
 /// --lib bench_checkpoint -- --ignored --nocapture`): 10 panes x 100k
 /// lines of history. `layout` on the real model (terminal state is never
 /// exported for it, so its cost must not grow with history); `full` on
-/// the real model (every terminal exported, the unchanged one too, as the
-/// fingerprint needs it), then with the history as synthetic pages of
+/// the real model (every terminal exported; an unchanged one compared on
+/// its precheck alone), then with the history as synthetic pages of
 /// 1000 rows: the first checkpoint, an unchanged one, and one with a new
 /// page per pane.
 #[test]
