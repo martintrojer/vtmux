@@ -20,17 +20,21 @@
 //!   *Open questions*). Copy and clock mode and the other popups (geometry,
 //!   styles, the pty and its process, the terminal state) are carried. The
 //!   editor a tree mode's `e` opened stays a modal pane, but its edit goes
-//!   with the mode (as `spawn_cancel_editor`) and its temporary file stays
-//!   behind.
+//!   with the mode (as `spawn_cancel_editor`); its temporary file is
+//!   removed right before the exec (`exec_upgrade`, which puts it back if
+//!   the exec returns).
 //! - Work in flight: command queues, jobs and file operations. The upgrade
-//!   preflight refuses while any is pending (decisions 10 and 26).
+//!   preflight refuses while any is pending (decisions 10 and 26), but
+//!   keys queued behind a key-bound `vtmux-upgrade` go back to their
+//!   client's input, which is carried (`upgrade_behind`).
 //! - Caches and timers the loop rebuilds: compositor state, frames not yet
 //!   acknowledged, `#()` job output, pane queries waiting on a terminal.
-//! - Not yet carried: bytes still queued for a client socket the quiesce
-//!   couldn't flush (the upgrade's quiesce must flush them or carry them,
-//!   phase 2).
+//! - Bytes queued for a client socket: the upgrade flushes them first and
+//!   refuses while a client is not taking them (`upgrade_flush`).
 //!
-//! Carried runtime state that is easy to miss: each pane's size changes
+//! Carried runtime state that is easy to miss: input a pane or popup
+//! program has not read yet (`input_queued`), each client's partly read
+//! frame (`inbuf`), each pane's size changes
 //! the program hasn't been told yet (`wp->resize_queue`), output a
 //! `pipe-pane` command hasn't taken yet, each client's
 //! `terminal-features`/`terminal-overrides` as its terminal opened with

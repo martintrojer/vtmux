@@ -20,7 +20,8 @@ use vtmux_core::ids::SessionId;
 use crate::server::{ClientId, Server};
 use crate::sys;
 
-/// Job tokens are `JOB_BASE + id`, between the panes' and the clients'.
+/// Job tokens are `JOB_BASE + id`, after the panes' and before the pipes'
+/// (then the popups' and the clients').
 pub(crate) const JOB_BASE: usize = 1 << 31;
 
 /// How many job IDs there are before the pipes' tokens begin: IDs wrap

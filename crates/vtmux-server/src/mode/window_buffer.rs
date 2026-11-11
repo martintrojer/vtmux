@@ -70,6 +70,17 @@ pub struct Edit {
     order: u64,
 }
 
+#[cfg(test)]
+impl Edit {
+    /// An edit of buffer `name`, for tests that need an editor pane.
+    pub(crate) fn of(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            order: 0,
+        }
+    }
+}
+
 /// `sort_get_buffers` (sort.c:429-449) with `sort_buffer_cmp`: the time
 /// list (oldest first, `paste_walk`), sorted.
 fn sorted<'a>(server: &'a Server, sort: &Sort) -> Vec<&'a PasteBuffer> {

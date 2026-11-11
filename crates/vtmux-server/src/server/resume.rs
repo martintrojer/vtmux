@@ -743,7 +743,7 @@ impl Server {
             Form::Rows
         };
         let (snapshot, file) = self.upgrade_snapshot(form, requester)?;
-        self.check_on(binary, &snapshot, &file, form, 1)
+        self.check_on(binary, &snapshot, &file, form, (1, &[]))
     }
 
     /// The dry run of `binary` on `snapshot` (in `file`, of `form`)
@@ -754,13 +754,21 @@ impl Server {
         snapshot: &snap::Snapshot,
         file: &OwnedFd,
         form: Form,
-        round: u8,
+        (round, checked): (u8, &[String]),
     ) -> Result<Check, String> {
+        // What the earlier dry runs of this upgrade checked still holds:
+        // the binary is the same one.
+        let mut requires = checked.to_vec();
+        for r in &snapshot.meta.requires {
+            if !requires.contains(r) {
+                requires.push(r.clone());
+            }
+        }
         match sys::DryRun::start(binary, file.as_fd(), dry_run_limit(snapshot)) {
             Ok(run) => Ok(Check {
                 run,
                 form,
-                requires: snapshot.meta.requires.clone(),
+                requires,
                 round,
             }),
             Err(e) => {
@@ -814,7 +822,8 @@ impl Server {
                      requires {need}, which no dry run checked: run vtmux-upgrade again"
                 ));
             }
-            return match self.check_on(binary, &snapshot, &file, passed.form, passed.round + 1) {
+            let next = (passed.round + 1, &passed.requires[..]);
+            return match self.check_on(binary, &snapshot, &file, passed.form, next) {
                 Ok(check) => Exec::Again(check),
                 Err(message) => Exec::Failed(message),
             };
@@ -823,9 +832,18 @@ impl Server {
         // as a plain modal pane): their 0600 temp files would outlive the
         // exec (no destructor runs), so they go now, the last moment before
         // it. Not at `to_snapshot`'s export: that runs for each dry run and
-        // for persistence checkpoints too, with the server serving on.
-        for editor in self.model.panes.values().filter_map(|p| p.editor.as_ref()) {
-            let _ = std::fs::remove_file(&editor.path);
+        // for persistence checkpoints too, with the server serving on. An
+        // exec that returns puts them back as they were, for the editors
+        // still running.
+        let edits: Vec<(PathBuf, Option<Vec<u8>>)> = self
+            .model
+            .panes
+            .values()
+            .filter_map(|p| p.editor.as_ref())
+            .map(|e| (e.path.clone(), std::fs::read(&e.path).ok()))
+            .collect();
+        for (path, _) in &edits {
+            let _ = std::fs::remove_file(path);
         }
         // 6. Attached clients told to re-execute and re-attach. A client
         // lost meanwhile (its socket fails) is held, not dropped, until the
@@ -843,6 +861,11 @@ impl Server {
             .collect();
         let socket = passed.checked.takes_socket.then_some(self.socket.as_path());
         let e = (self.upgrade.exec)(binary, file, &keep, socket);
+        for (path, bytes) in edits {
+            if let Some(bytes) = bytes {
+                put_back(&path, &bytes);
+            }
+        }
         for id in self.upgrade.held.take().unwrap_or_default() {
             self.drop_client(id);
         }
@@ -941,6 +964,21 @@ impl Check {
     }
 }
 
+/// An editor's temp file removed for an exec that returned, written again
+/// as `spawn_editor` made it: a new file, mode 0600.
+fn put_back(path: &Path, bytes: &[u8]) {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path);
+    if let Ok(mut f) = file {
+        let _ = f.write_all(bytes);
+    }
+}
+
 /// A dry run that passed, for [`Server::exec_upgrade`].
 #[derive(Debug)]
 pub(crate) struct Passed {
@@ -951,11 +989,13 @@ pub(crate) struct Passed {
 }
 
 /// How many dry runs an upgrade may take, when the snapshot after each
-/// requires a feature the one before did not ([`Server::exec_upgrade`]).
-/// There are four such features (Ghostty's history pages, a very visible
-/// cursor, the auto-hide scrollbar, a mode 2048 grant), so five is one
-/// more than ever needed.
-pub(crate) const CHECK_ROUNDS: u8 = 5;
+/// requires a feature no dry run before it checked
+/// ([`Server::exec_upgrade`]). A round counts every feature checked in
+/// the rounds before, so each one adds a feature, and five can come up
+/// while the server serves (Ghostty's history pages, a very visible
+/// cursor, the auto-hide scrollbar, a mode 2048 grant, a graphics grant):
+/// six is the most ever needed.
+pub(crate) const CHECK_ROUNDS: u8 = 6;
 
 /// What [`Server::exec_upgrade`] came to, when the exec did not happen.
 #[derive(Debug)]

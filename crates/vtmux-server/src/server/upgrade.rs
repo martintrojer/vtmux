@@ -580,17 +580,33 @@ impl Server {
     /// would end it, and the program holding it stopped handling
     /// `SIGWINCH` (neovim), so it would draw at the old size: the
     /// snapshot requires [`snap::INBAND_RESIZE_FEATURE`], and the refusal
-    /// says which panes and what to do.
+    /// says which panes and what to do. Likewise a kitty graphics grant
+    /// (D33, [`snap::GRAPHICS_GRANT_FEATURE`]): a build without it would
+    /// take the program's next images as titles.
     fn dry_run_refusal(&self, binary: &Path, message: String) -> String {
-        let lacks = snap::Error::Unsupported(snap::INBAND_RESIZE_FEATURE.into()).to_string();
-        if !message.contains(&lacks) {
-            return message;
-        }
+        let lacks =
+            |feature: &str| message.contains(&snap::Error::Unsupported(feature.into()).to_string());
+        let (held, why): (fn(&vtmux_vt::PaneTerm) -> bool, &str) =
+            if lacks(snap::INBAND_RESIZE_FEATURE) {
+                (
+                    |t| t.inband_resize_granted(),
+                    "relies on in-band resize{held}: {binary} can't keep it, so the program \
+                     would draw at its old size; once it turns mode 2048 off or exits",
+                )
+            } else if lacks(snap::GRAPHICS_GRANT_FEATURE) {
+                (
+                    |t| t.graphics_grants().contains(&true),
+                    "uses kitty graphics{held}: {binary} can't keep its grant, so its next \
+                     images would show as pane titles; once it exits",
+                )
+            } else {
+                return message;
+            };
         let panes: Vec<String> = self
             .model
             .panes
             .values()
-            .filter(|p| p.term.inband_resize_granted())
+            .filter(|p| held(&p.term))
             .map(|p| format!("%{}", p.id.0))
             .collect();
         let held = if panes.is_empty() {
@@ -598,12 +614,10 @@ impl Server {
         } else {
             format!(" in {}", panes.join(", "))
         };
-        format!(
-            "a program relies on in-band resize{held}: {} can't keep it, so the program \
-             would draw at its old size; once it turns mode 2048 off or exits, run \
-             vtmux-upgrade again ({message})",
-            binary.display()
-        )
+        let why = why
+            .replace("{held}", &held)
+            .replace("{binary}", &binary.display().to_string());
+        format!("a program {why}, run vtmux-upgrade again ({message})")
     }
 
     /// Why the work queued behind a `vtmux-upgrade` refuses it: the
@@ -624,8 +638,16 @@ impl Server {
             && !bytes.is_empty()
         {
             // Frames as a client sends them, of a size every reader takes.
+            // The bytes the decoder still holds came after the keys, so
+            // they go back behind them.
+            let held = self
+                .clients
+                .get_mut(&id)
+                .map(|c| c.decoder.take_held())
+                .unwrap_or_default();
             let frames: Vec<u8> = bytes
                 .chunks(16 * 1024)
+                .chain((!held.is_empty()).then_some(&held[..]))
                 .flat_map(|chunk| {
                     vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
                         chunk.to_vec(),

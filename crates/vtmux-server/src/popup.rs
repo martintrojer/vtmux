@@ -26,8 +26,8 @@ use crate::render::popup::BoxLines;
 use crate::server::{ClientId, Server};
 use crate::sys;
 
-/// Popup PTY tokens: `POPUP_BASE + client id`, between the jobs' and the
-/// clients'.
+/// Popup PTY tokens: `POPUP_BASE + client id`, after the jobs' and the
+/// pipes' and before the clients'.
 pub(crate) const POPUP_BASE: usize = (1 << 31) + (1 << 30);
 
 /// When the popup closes by itself (`POPUP_CLOSEEXIT`,

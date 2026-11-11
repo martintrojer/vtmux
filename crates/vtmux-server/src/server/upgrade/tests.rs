@@ -513,6 +513,72 @@ fn keys_typed_after_a_bound_upgrade_do_not_refuse_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Keys given back to the client's input go ahead of the bytes typed
+/// after them that the key decoder still holds (an ESC waiting out
+/// `escape-time`): F5 (the upgrade), `ab`, ESC in one read leave the
+/// input as `ab` then ESC, not ESC then `ab` (M-a).
+#[test]
+fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
+    let (mut server, dir) = setup("order");
+    let binary = passing(&dir);
+    let bind = format!("vtmux-upgrade -b {}", binary.to_str().unwrap());
+    st::ok(&mut server, &dir, &["bind", "-n", "F5", &bind]);
+    st::ok(&mut server, &dir, &["set", "-s", "escape-time", "10000"]);
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    server.on_client_input(term, b"\x1b[15~ab\x1b").unwrap();
+    for _ in 0..5 {
+        turns(&mut server, Instant::now());
+        server.cmdq_process();
+    }
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let input = |b: &[u8]| {
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b.to_vec())).unwrap()
+    };
+    assert_eq!(client.inbuf, [input(b"ab"), input(b"\x1b")].concat());
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A dry run refused for a feature a program holds names the panes and
+/// what to do: mode 2048 (D31) and a kitty graphics grant (D33).
+#[test]
+fn a_refused_grant_names_its_panes() {
+    let (mut server, dir) = setup("grants");
+    let p = *server.model.panes.keys().next().unwrap();
+    let older = Path::new("/old/vtmux");
+    let lacks = |f: &str| snap::Error::Unsupported(f.into()).to_string();
+    server
+        .model
+        .panes
+        .get_mut(&p)
+        .unwrap()
+        .term
+        .set_graphics_grant(false, true);
+    let said = server.dry_run_refusal(older, lacks(snap::GRAPHICS_GRANT_FEATURE));
+    assert!(
+        said.starts_with(&format!(
+            "a program uses kitty graphics in %{}: /old/vtmux can't keep its grant",
+            p.0
+        )) && said.contains("once it exits, run vtmux-upgrade again (")
+            && said.ends_with(&format!("({})", lacks(snap::GRAPHICS_GRANT_FEATURE))),
+        "{said}"
+    );
+    let said = server.dry_run_refusal(older, lacks(snap::INBAND_RESIZE_FEATURE));
+    assert!(
+        said.starts_with("a program relies on in-band resize: /old/vtmux can't keep it")
+            && said.contains("once it turns mode 2048 off or exits, run vtmux-upgrade again ("),
+        "{said}"
+    );
+    assert_eq!(server.dry_run_refusal(older, "other".into()), "other");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Decision 10: a `run-shell` job still running holds the upgrade; at the
 /// end of the wait it is refused, naming the job.
 #[test]
@@ -1631,6 +1697,72 @@ fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
         "x\nx\nx\nx\n"
     );
     assert_eq!(notices(&mut server, f, &mut f_peer).len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An editor's temp file goes before the exec (no destructor runs after
+/// it), and comes back as it was when the exec returns: the editor still
+/// runs and its edit is read from it when it exits.
+#[test]
+fn an_exec_that_returns_puts_the_editors_file_back() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (mut server, dir) = setup("editor");
+    let path = dir.join("tmux.edit");
+    std::fs::write(&path, "the edit").unwrap();
+    let p = *server.model.panes.keys().next().unwrap();
+    server.model.panes.get_mut(&p).unwrap().editor = Some(crate::editor::Editor {
+        path: path.clone(),
+        pane: p,
+        edit: crate::editor::Edit::Buffer(crate::mode::window_buffer::Edit::of("b")),
+    });
+    let binary = passing(&dir);
+    let a = upgrade(&mut server, &dir, &binary);
+    assert_eq!(a.exit, Some(1), "{a:?}");
+    assert!(execs().pop().is_some(), "the exec ran");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "the edit");
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+    server.model.panes.get_mut(&p).unwrap().editor = None;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A feature one dry run checked counts for every later snapshot of the
+/// upgrade: an auto-hide scrollbar shown, hidden and shown again costs
+/// no third dry run (the bound of [`super::resume::CHECK_ROUNDS`] holds).
+#[test]
+fn a_feature_checked_once_needs_no_dry_run_when_it_comes_back() {
+    let (mut server, dir) = setup("again");
+    let p = *server.model.panes.keys().next().unwrap();
+    server.model.panes.get_mut(&p).unwrap().sb.visible = true;
+    let (id, mut peer) = checking(&mut server, &dir);
+    server.model.panes.get_mut(&p).unwrap().sb.visible = false;
+    let term = &mut server.model.panes.get_mut(&p).unwrap().term;
+    term.set_inband_resize(true);
+    term.feed(b"\x1b[?2048h");
+    release(&dir, 1);
+    started(&mut server, &dir, 2);
+    server.model.panes.get_mut(&p).unwrap().sb.visible = true;
+    release(&dir, 2);
+    turns(&mut server, Instant::now());
+    let binary = dir.join("gated");
+    assert_eq!(
+        results(&mut server, id, &mut peer),
+        [(false, format!("{}: test exec", binary.display()))]
+    );
+    let s = snap::decode_for(
+        &execs().pop().expect("exec").bytes,
+        &crate::snapshot_term::reader_features(),
+        |_| None,
+    )
+    .unwrap();
+    assert!(
+        s.meta
+            .requires
+            .contains(&snap::SCROLLBAR_FEATURE.to_string()),
+        "{:?}",
+        s.meta.requires
+    );
+    assert_eq!(std::fs::read_to_string(dir.join("runs")).unwrap(), "x\nx\n");
     std::fs::remove_dir_all(dir).unwrap();
 }
 

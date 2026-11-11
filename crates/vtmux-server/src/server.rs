@@ -2095,6 +2095,30 @@ impl Server {
         self.flush_client(id);
     }
 
+    /// cmd-find.c `cmd_find_inside_pane`: the live pane whose tty is the
+    /// client's, else the one its `TMUX_PANE` names.
+    fn inside_pane(&self, hello: &Hello) -> Option<PaneId> {
+        let tty = hello
+            .tty
+            .as_ref()
+            .map(|t| t.name.as_str())
+            .filter(|n| !n.is_empty());
+        tty.and_then(|name| {
+            self.model
+                .panes
+                .iter()
+                .find(|(_, p)| p.io.is_some() && p.tty == name)
+                .map(|(&id, _)| id)
+        })
+        .or_else(|| {
+            hello
+                .env
+                .iter()
+                .find(|(k, _)| k == "TMUX_PANE")
+                .and_then(|(_, v)| v.parse().ok())
+        })
+    }
+
     fn on_hello(&mut self, id: ClientId, mut hello: Hello) {
         if let Some(tty) = hello.tty.as_mut() {
             (tty.cols, tty.rows) = tty_size(tty.cols, tty.rows);
@@ -2130,29 +2154,9 @@ impl Server {
             self.reattach(id, &hello, &token);
             return;
         }
-        // cmd-find.c `cmd_find_inside_pane`: the live pane whose tty is
-        // the client's, else the one `TMUX_PANE` names.
-        let tty = hello
-            .tty
-            .as_ref()
-            .map(|t| t.name.as_str())
-            .filter(|n| !n.is_empty());
-        let by_tty = tty.and_then(|name| {
-            self.model
-                .panes
-                .iter()
-                .find(|(_, p)| p.io.is_some() && p.tty == name)
-                .map(|(&id, _)| id)
-        });
         let origin = Origin {
             attached: None,
-            inside_pane: by_tty.or_else(|| {
-                hello
-                    .env
-                    .iter()
-                    .find(|(k, _)| k == "TMUX_PANE")
-                    .and_then(|(_, v)| v.parse().ok())
-            }),
+            inside_pane: self.inside_pane(&hello),
             current: None,
             mouse: None,
         };

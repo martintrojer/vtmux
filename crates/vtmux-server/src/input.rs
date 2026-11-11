@@ -315,6 +315,12 @@ impl Decoder {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
     }
+    /// The bytes fed and not decoded yet (an ESC waiting out
+    /// `escape-time`, a split sequence), taken out to be fed again later.
+    pub fn take_held(&mut self) -> Vec<u8> {
+        self.pending = None;
+        std::mem::take(&mut self.bytes)
+    }
     /// The last mouse report held a button down (no release, no wheel):
     /// the next report's `lb` says so (a popup starts its drag from it).
     #[must_use]
