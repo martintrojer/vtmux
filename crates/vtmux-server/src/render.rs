@@ -288,11 +288,19 @@ pub fn lock_screen(term: &Term) -> Vec<u8> {
 /// terminal was given goes back to its default first. `csr` and `sgr0`
 /// are xterm's forms; bracketed paste, the application escape mode, focus
 /// reports and extended keys go off as `Dsbp`, `Dsesc`, `Dsfcs` and
-/// `Dseks` say.
+/// `Dseks` say. A synchronized update is ended first (vtmux's frames, not
+/// tmux's).
 #[must_use]
 pub fn teardown(term: &Term, clear: bool, cursor: &crate::outer_cursor::OuterCursor) -> Vec<u8> {
     let s = |name| term.string(name).unwrap_or_default();
-    let mut out = String::from("\x1b[r\x1b[0m");
+    // A frame cut short by the client's discard at its exit may have left
+    // a synchronized update open (frames are written inside one).
+    let mut out = String::from(if term.has(Cap::Sync) {
+        "\x1b[?2026l"
+    } else {
+        ""
+    });
+    out.push_str("\x1b[r\x1b[0m");
     out.push_str(s("rmkx"));
     if clear {
         out.push_str(s("clear"));
@@ -1497,6 +1505,21 @@ mod tests {
             ..Attrs::XTERM
         });
         assert!(palette.contains("\x1b[4:2m\x1b[58:5:196md"), "{palette:?}");
+    }
+
+    /// A teardown first ends a synchronized update on a terminal that has
+    /// them: a detach that dropped the end of a frame (the client discards
+    /// unwritten output at its exit) must not leave the shell's screen
+    /// frozen. Nothing for a terminal without them.
+    #[test]
+    fn a_teardown_ends_a_synchronized_update() {
+        let cursor = crate::outer_cursor::OuterCursor::default();
+        let with = Term::open("xterm-256color", &["sync".to_owned()], None, &[], &[]).unwrap();
+        assert!(with.has(Cap::Sync));
+        assert!(teardown(&with, true, &cursor).starts_with(b"\x1b[?2026l\x1b[r"));
+        let without = Term::open("vt100", &[], None, &[], &[]).unwrap();
+        assert!(!without.has(Cap::Sync));
+        assert!(teardown(&without, true, &cursor).starts_with(b"\x1b[r"));
     }
 
     /// `tty_update_cursor` hides the cursor with `civis` (tty.c:805), which

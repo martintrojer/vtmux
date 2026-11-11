@@ -282,9 +282,16 @@ unsafe fn forkpty(master: &mut libc::c_int, ws: &libc::winsize) -> libc::pid_t {
     }
 }
 
+/// The search path `execvp` takes when there is no `PATH`: glibc's
+/// `CS_PATH` (posix/execvpe.c), macOS's `_PATH_DEFPATH` (paths.h).
+#[cfg(target_vendor = "apple")]
+const EXEC_DEFAULT_PATH: &str = "/usr/bin:/bin";
+#[cfg(not(target_vendor = "apple"))]
+const EXEC_DEFAULT_PATH: &str = "/bin:/usr/bin";
+
 /// The paths `execvp` would try for a directly executed command: the
 /// program itself when it holds a `/` (or for the shell cases), else
-/// `$PATH` (the pane's, defaulting like `confstr(_CS_PATH)`) joined with it.
+/// `$PATH` (the pane's, else [`EXEC_DEFAULT_PATH`]) joined with it.
 fn exec_candidates(
     program: &CString,
     env: &[(String, String)],
@@ -297,7 +304,7 @@ fn exec_candidates(
     let path = env
         .iter()
         .find(|(k, _)| k == "PATH")
-        .map_or("/usr/bin:/bin", |(_, v)| v.as_str());
+        .map_or(EXEC_DEFAULT_PATH, |(_, v)| v.as_str());
     path.split(':')
         .map(|dir| {
             // glibc execvpe tries the bare name for an empty PATH component
@@ -648,6 +655,21 @@ pub fn tty_name(master: &OwnedFd) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With no `PATH`, the search is `execvp`'s own: glibc's `/bin` first,
+    /// macOS's `/usr/bin` first.
+    #[test]
+    fn no_path_searches_as_execvp_does() {
+        let program = CString::new("prog").unwrap();
+        let got = exec_candidates(&program, &[], true).unwrap();
+        let want: &[&str] = if cfg!(target_vendor = "apple") {
+            &["/usr/bin/prog", "/bin/prog"]
+        } else {
+            &["/bin/prog", "/usr/bin/prog"]
+        };
+        let got: Vec<_> = got.iter().map(|c| c.to_str().unwrap()).collect();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn shell_argv_follows_spawn_c() {
