@@ -1091,7 +1091,9 @@ fn escape_escape_arrow_is_escape_then_arrow() {
 /// callbacks a wait returns before the timers it finds expired, and
 /// `tty_keys_next` takes the ESC and `x` in its buffer as M-x whether or
 /// not the timer is out (tty-keys.c: only a partial key looks at it).
-/// vtmux decoded the ESC alone first, as Escape then `x`. F6, read with
+/// vtmux decoded the ESC alone first, as Escape then `x` (and on macOS,
+/// where kqueue woken past its timeout reports no readable socket, its
+/// key timer fired before the read). F6, read with
 /// the ESC, runs first; F7 marks the end. tmux is held by a binding's
 /// `save-buffer` to a FIFO (an attached client's file is opened by the
 /// server, file.c `file_write`), which blocks it until the test opens the

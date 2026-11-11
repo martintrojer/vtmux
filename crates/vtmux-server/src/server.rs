@@ -1155,10 +1155,7 @@ impl Server {
             self.status_timers(Instant::now());
             self.model.alerts_timers(Instant::now());
             self.run_alerts();
-            let ids: Vec<_> = self.clients.keys().copied().collect();
-            for id in ids {
-                let _ = self.on_client_input(id, &[]);
-            }
+            self.key_timers(Instant::now());
             self.jobs_timers(Instant::now());
             self.copy_refresh_timers(Instant::now());
             self.copy_drag_timers(Instant::now());
@@ -1634,6 +1631,37 @@ impl Server {
         stream.set_nonblocking(true)?;
         self.add_client(mio::net::UnixStream::from_std(stream));
         Ok(())
+    }
+
+    /// The key timers (`tty_keys_callback`): what each client's decoder
+    /// holds is decoded at `now`, an ESC whose `escape-time` is out as
+    /// Escape. A client whose wait is out has its socket read first, as
+    /// tmux reads before it fires the timer (libevent runs the read
+    /// callbacks a wait returns before the timers it finds expired), so an
+    /// `x` that came while the loop was held joins the ESC as M-x
+    /// ([`crate::input::Decoder::take_in`]) whatever the platform's poll
+    /// reports: kqueue on macOS, woken past its timeout (a server stopped
+    /// in it, then continued), returns no event for a socket that became
+    /// readable meanwhile, where epoll does.
+    pub(crate) fn key_timers(&mut self, now: Instant) {
+        let due: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| {
+                !c.dead
+                    && !c.closing
+                    && c.reattach.is_none_or(|r| !r.gone)
+                    && c.decoder.deadline().is_some_and(|t| now >= t)
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in due {
+            self.client_readable(id);
+        }
+        let ids: Vec<_> = self.clients.keys().copied().collect();
+        for id in ids {
+            let _ = self.on_client_input(id, &[]);
+        }
     }
 
     fn client_readable(&mut self, id: ClientId) {
@@ -6893,6 +6921,53 @@ mod tests {
 
     /// D33: what a Ghostty client is sent of panes' kitty graphics.
     mod graphics;
+
+    /// An ESC held past `escape-time` and an `x` waiting on the client's
+    /// socket, which no poll event reported (kqueue after the server was
+    /// stopped in it): the key timers read the socket first, so the keys
+    /// are M-x, as tmux's read callback comes before its expired key timer.
+    /// Before, the timer fired the ESC alone, then `x` came on the next
+    /// turn.
+    #[test]
+    fn key_timers_read_what_waits_before_firing_an_escape() {
+        use super::super::server::snapshot::tests as st;
+        use vtmux_core::protocol::{self, ClientMsg};
+        let dir = st::temp_dir("key-timers");
+        let mut server = st::server(&dir);
+        st::ok(
+            &mut server,
+            &dir,
+            &["new-session", "-d", "-s", "a", "cat", "-"],
+        );
+        st::ok(&mut server, &dir, &["set", "-s", "escape-time", "10"]);
+        st::ok(&mut server, &dir, &["set", "-g", "@log", ""]);
+        for (key, says) in [("Escape", "ESC,"), ("x", "x,"), ("M-x", "MX,")] {
+            st::ok(
+                &mut server,
+                &dir,
+                &["bind", "-n", key, "set", "-ga", "@log", says],
+            );
+        }
+        let (term, mut peer) = st::attach(&mut server, &dir, "a", &[]);
+        server.on_client_input(term, b"\x1b").unwrap();
+        let deadline = server.clients[&term].decoder.deadline().unwrap();
+        std::io::Write::write_all(
+            &mut peer,
+            &protocol::encode(&ClientMsg::Input(b"x".to_vec())).unwrap(),
+        )
+        .unwrap();
+        while std::time::Instant::now() <= deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        server.key_timers(std::time::Instant::now());
+        server.cmdq_process();
+        assert_eq!(
+            st::run(&mut server, &dir, &["show", "-gv", "@log"]),
+            "$ show -gv @log\nMX,\n--stderr--\n--exit Some(0)--\n"
+        );
+        drop(server);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn passthrough_titles_are_found() {
