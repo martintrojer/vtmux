@@ -1557,6 +1557,17 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // A window sized by a client whose terminal gave its cell size in
     // pixels (D-014).
     a.clients.get_mut(&client).unwrap().cell_pixels = (10, 20);
+    // A client in the middle of a bracketed paste, with keys a waiting
+    // upgrade gave back and an ESC held (`pasting`, `given_back_*`).
+    {
+        let c = a.clients.get_mut(&client).unwrap();
+        c.pasting = true;
+        c.given_back = crate::server::GivenBack {
+            whole: 1,
+            held: 1,
+            since: Some(Instant::now()),
+        };
+    }
     ok(&mut a, &dir, &["set", "-g", "status", "off"]);
     a.check_window_resizes();
     assert_eq!(

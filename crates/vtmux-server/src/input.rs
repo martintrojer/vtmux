@@ -326,15 +326,75 @@ impl Decoder {
         self.pending = None;
         std::mem::take(&mut self.bytes)
     }
+    /// Since when the bytes [`Self::held`] have waited, while some are.
+    #[must_use]
+    pub fn held_since(&self) -> Option<Instant> {
+        self.pending.filter(|_| !self.bytes.is_empty())
+    }
+    /// Bytes held before, given back ([`Self::take_held`]) with the
+    /// instant their wait started, which runs on from there.
+    pub fn feed_held(&mut self, bytes: &[u8], since: Instant) {
+        if self.bytes.is_empty() {
+            self.pending = Some(since);
+        }
+        self.bytes.extend_from_slice(bytes);
+    }
+    /// Bytes read at `now`: the events in them and in what was held. Bytes
+    /// held past their wait (`escape-time`) are decoded first, alone, as
+    /// the key timer would have done before these came (tty-keys.c
+    /// `tty_keys_callback`): an ESC whose wait is out and an `x` read after
+    /// it are Escape and `x`, not M-x, however late the server reads them
+    /// (a loop busy for longer than `escape-time`, a live upgrade).
+    pub fn take_in(&mut self, bytes: &[u8], now: Instant) -> Vec<(Event, Vec<u8>)> {
+        let mut events = if self.deadline().is_some_and(|t| now >= t) {
+            self.drain_with_bytes(now)
+        } else {
+            Vec::new()
+        };
+        self.bytes.extend_from_slice(bytes);
+        events.extend(self.drain_with_bytes(now));
+        events
+    }
+    /// The bytes of one key decoded before, given back: decoded again as
+    /// that one key, its wait out (an ESC decoded alone once is Escape
+    /// again, not the Meta of what comes after it), apart from what is
+    /// held, which stays held.
+    pub fn take_whole(&mut self, bytes: &[u8], now: Instant) -> Vec<(Event, Vec<u8>)> {
+        let held = std::mem::replace(&mut self.bytes, bytes.to_vec());
+        let pending = self.pending.take();
+        let mut events = self.drain_with_bytes(now);
+        while !self.bytes.is_empty() {
+            let left = self.bytes.len();
+            let at = self.deadline().map_or(now, |t| t.max(now));
+            events.extend(self.drain_with_bytes(at));
+            if self.bytes.len() == left {
+                break;
+            }
+        }
+        self.bytes = held;
+        self.pending = pending;
+        events
+    }
+    /// Inside a bracketed paste (`TTY_BRACKETPASTE`).
+    #[must_use]
+    pub fn pasting(&self) -> bool {
+        self.pasting
+    }
+    /// A paste carried across a live upgrade goes on.
+    pub fn set_pasting(&mut self, pasting: bool) {
+        self.pasting = pasting;
+    }
     /// The bytes held (an ESC waiting out `escape-time`, a split sequence)
-    /// moved to `next` with their wait, which runs on there, and the
-    /// `escape-time` it is measured by (a live upgrade's re-attach gives
-    /// the client a new decoder: the ESC still fires alone once its wait
-    /// is out, or combines with the key that comes before then).
+    /// moved to `next` with their wait, which runs on there, the
+    /// `escape-time` it is measured by, and whether a bracketed paste is
+    /// open (a live upgrade's re-attach gives the client a new decoder:
+    /// the ESC still fires alone once its wait is out, or combines with
+    /// the key that comes before then, and the paste goes on).
     pub fn hand_held_to(&mut self, next: &mut Self) {
         next.bytes = std::mem::take(&mut self.bytes);
         next.pending = self.pending.take();
         next.escape_time = self.escape_time;
+        next.pasting = self.pasting;
     }
     /// The last mouse report held a button down (no release, no wheel):
     /// the next report's `lb` says so (a popup starts its drag from it).
@@ -1164,6 +1224,65 @@ mod tests {
                 ..key(Base::Char('x'))
             })]
         );
+    }
+
+    /// Bytes read after what is held has waited out `escape-time` do not
+    /// join it: an ESC whose wait is out and an `x` read late are Escape
+    /// and `x` (the key timer would have fired before the `x` came); one
+    /// read in time is M-x.
+    #[test]
+    fn bytes_read_after_the_wait_do_not_join_what_is_held() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        let held = || {
+            let mut d = Decoder {
+                escape_time: Some(ms(10)),
+                ..Decoder::default()
+            };
+            assert_eq!(d.take_in(b"\x1b", now), Vec::new());
+            d
+        };
+        let keys = |events: Vec<(Event, Vec<u8>)>| -> Vec<Event> {
+            events.into_iter().map(|(e, _)| e).collect()
+        };
+        assert_eq!(
+            keys(held().take_in(b"x", now + ms(15))),
+            vec![
+                Event::Key(key(Base::Char('\x1b'))),
+                Event::Key(key(Base::Char('x')))
+            ]
+        );
+        assert_eq!(
+            keys(held().take_in(b"x", now + ms(5))),
+            vec![Event::Key(Key {
+                meta: true,
+                esc_prefix: true,
+                ..key(Base::Char('x'))
+            })]
+        );
+    }
+
+    /// A key given back is decoded again as the key it was: a lone ESC is
+    /// Escape at once, and what the decoder holds stays held, its wait
+    /// unchanged; bytes held given back keep their wait.
+    #[test]
+    fn a_key_given_back_decodes_as_it_was() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        let mut d = Decoder {
+            escape_time: Some(ms(10)),
+            ..Decoder::default()
+        };
+        d.feed_held(b"\x1b", now);
+        assert_eq!(d.drain(now + ms(5)), Vec::new());
+        let events: Vec<Event> = d
+            .take_whole(b"\x1b", now + ms(5))
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(events, vec![Event::Key(key(Base::Char('\x1b')))]);
+        assert_eq!(d.held(), b"\x1b");
+        assert_eq!(d.deadline(), Some(now + ms(10)));
     }
 
     /// `tty_keys_next` (tty-keys.c:900-933): after an Escape only the key

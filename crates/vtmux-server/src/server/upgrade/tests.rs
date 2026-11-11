@@ -516,7 +516,7 @@ fn keys_typed_after_a_bound_upgrade_do_not_refuse_it() {
 /// Keys given back to the client's input go ahead of the bytes typed
 /// after them that the key decoder still holds (an ESC waiting out
 /// `escape-time`): F5 (the upgrade), `ab`, ESC in one read leave the
-/// input as `ab` then ESC, not ESC then `ab` (M-a).
+/// input as `a`, `b`, then ESC, not ESC then `ab` (M-a).
 #[test]
 fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
     let (mut server, dir) = setup("order");
@@ -540,7 +540,12 @@ fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
     let input = |b: &[u8]| {
         vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b.to_vec())).unwrap()
     };
-    assert_eq!(client.inbuf, [input(b"ab"), input(b"\x1b")].concat());
+    // A frame for each key, decoded again as that key (`GivenBack`).
+    assert_eq!(
+        client.inbuf,
+        [input(b"a"), input(b"b"), input(b"\x1b")].concat()
+    );
+    assert_eq!((client.given_back_keys, client.given_back_held), (2, 1));
     drop(server);
     std::fs::remove_dir_all(dir).unwrap();
 }

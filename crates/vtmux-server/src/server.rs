@@ -165,6 +165,67 @@ impl PaneInputCache {
     }
 }
 
+/// Keys a waiting live upgrade gave back to a client's input (live-upgrade
+/// spec, *Sequence*, step 1), each as it was decoded: the first `whole`
+/// `Input` frames of `inbuf` are one key each, and the `held` after them the
+/// bytes the decoder held, waiting since `since`. So they decode again as
+/// the keys they were, however late they are read: an ESC whose wait ran
+/// out is Escape again, not the Meta of the next key.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct GivenBack {
+    pub(crate) whole: usize,
+    pub(crate) held: usize,
+    pub(crate) since: Option<Instant>,
+}
+
+impl GivenBack {
+    /// How the next `Input` frame read is to be taken.
+    fn next(&mut self) -> Fed {
+        if self.whole > 0 {
+            self.whole -= 1;
+            return Fed::Whole;
+        }
+        match self.since {
+            Some(since) if self.held > 0 => {
+                self.held -= 1;
+                Fed::Held(since)
+            }
+            _ => Fed::Read,
+        }
+    }
+}
+
+/// How the bytes of an `Input` frame came ([`GivenBack`]).
+#[derive(Clone, Copy, Debug)]
+enum Fed {
+    /// Read from the client now.
+    Read,
+    /// One key given back.
+    Whole,
+    /// Bytes the decoder held, waiting since then.
+    Held(Instant),
+}
+
+impl Fed {
+    /// The events in `bytes`, come as `self` says, and in what `decoder`
+    /// holds.
+    fn decode(
+        self,
+        decoder: &mut crate::input::Decoder,
+        bytes: &[u8],
+        now: Instant,
+    ) -> Vec<(crate::input::Event, Vec<u8>)> {
+        match self {
+            Self::Read => decoder.take_in(bytes, now),
+            Self::Whole => decoder.take_whole(bytes, now),
+            Self::Held(since) => {
+                decoder.feed_held(bytes, since);
+                decoder.drain_with_bytes(now)
+            }
+        }
+    }
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent per-client states"
@@ -237,6 +298,9 @@ pub(crate) struct Client {
     /// Frame bytes sent to the client (`c->written`).
     pub(crate) written: usize,
     pub(crate) pasting: bool,
+    /// What the first `Input` frames of `inbuf` are, when a waiting live
+    /// upgrade gave keys back to them ([`GivenBack`]).
+    pub(crate) given_back: GivenBack,
     /// Mouse drag, click and outer-mode state (`c->tty.mouse_*`).
     pub(crate) mouse: crate::mouse::ClientMouse,
     /// The terminal's cursor style and colour as last written.
@@ -378,6 +442,7 @@ impl Client {
             term_replies: Vec::new(),
             written: 0,
             pasting: false,
+            given_back: GivenBack::default(),
             mouse: crate::mouse::ClientMouse::default(),
             cursor: crate::outer_cursor::OuterCursor::default(),
             decoder: crate::input::Decoder::default(),
@@ -1976,7 +2041,11 @@ impl Server {
         match msg {
             ClientMsg::Hello(hello) => self.on_hello(id, hello),
             ClientMsg::Input(bytes) => {
-                if let Err(e) = self.on_client_input(id, &bytes) {
+                let fed = self
+                    .clients
+                    .get_mut(&id)
+                    .map_or(Fed::Read, |c| c.given_back.next());
+                if let Err(e) = self.client_input(id, &bytes, fed) {
                     self.fail_client(id, &e);
                 }
             }
@@ -2943,6 +3012,11 @@ impl Server {
     /// (tty-keys.c) and hand each to the key tables
     /// ([`Server::handle_key`], `server_client_key_callback`).
     pub fn on_client_input(&mut self, id: ClientId, bytes: &[u8]) -> Result<(), EdgeError> {
+        self.client_input(id, bytes, Fed::Read)
+    }
+
+    /// [`Self::on_client_input`], for bytes read now or given back.
+    fn client_input(&mut self, id: ClientId, bytes: &[u8], fed: Fed) -> Result<(), EdgeError> {
         // CLIENT_UNATTACHEDFLAGS (server-client.c:1460): a suspended
         // client's keys go nowhere.
         let Some(s) = self
@@ -2967,9 +3041,8 @@ impl Server {
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
         c.decoder.escape_time = Some(escape_time);
-        c.decoder.feed(bytes);
         let now = Instant::now();
-        let events = c.decoder.drain_with_bytes(now);
+        let events = fed.decode(&mut c.decoder, bytes, now);
         if !events.is_empty() {
             // The repeat timer fires before keys that arrive after it.
             self.expire_repeat(now);

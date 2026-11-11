@@ -351,6 +351,21 @@ fn a_frame_read_in_part_round_trips() {
 }
 
 #[test]
+fn given_back_input_round_trips() {
+    let mut s = sample();
+    s.clients[0].pasting = true;
+    s.clients[0].given_back_keys = 2;
+    s.clients[0].given_back_held = 1;
+    s.clients[0].held_ago_ms = 12;
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| !c.pasting
+        && c.given_back_keys == 0
+        && c.given_back_held == 0
+        && c.held_ago_ms == 0));
+}
+
+#[test]
 fn a_stopped_client_round_trips() {
     let mut s = sample();
     s.clients[0].stopped = true;

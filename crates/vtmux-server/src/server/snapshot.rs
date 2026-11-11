@@ -34,8 +34,9 @@
 //!
 //! Carried runtime state that is easy to miss: input a pane or popup
 //! program has not read yet (`input_queued`), each client's partly read
-//! frame (`inbuf`) with the key bytes its decoder holds ahead of it
-//! (`carried_input`), each pane's size changes
+//! frame (`inbuf`) with the key bytes its decoder holds ahead of it and
+//! the keys given back to it, each as the key it was (`carried_input`),
+//! whether it is inside a bracketed paste, each pane's size changes
 //! the program hasn't been told yet (`wp->resize_queue`), output a
 //! `pipe-pane` command hasn't taken yet, each client's
 //! `terminal-features`/`terminal-overrides` as its terminal opened with
@@ -1390,6 +1391,7 @@ impl Server {
             ControlMode::Control => 1,
             ControlMode::ControlControl => 2,
         };
+        let input = carried_input(c, now);
         snap::Client {
             id: small(id.0),
             name: self.client_name(id),
@@ -1399,7 +1401,11 @@ impl Server {
             argv: hello.argv.clone(),
             cwd: hello.cwd.to_string_lossy().into_owned(),
             cwd_bytes: path_bytes(&hello.cwd),
-            inbuf: carried_input(c),
+            inbuf: input.bytes,
+            pasting: c.pasting,
+            given_back_keys: input.keys,
+            given_back_held: input.held,
+            held_ago_ms: input.held_ago_ms,
             environment: hello.env.clone(),
             term_name: tty.map(|t| t.term.clone()).unwrap_or_default(),
             term_features: tty.map(|t| t.features.clone()).unwrap_or_default(),
@@ -2098,6 +2104,13 @@ impl Server {
         c.flags = flags_in(&x.flags);
         c.suspended = x.suspended;
         c.stopped = x.stopped;
+        c.pasting = x.pasting;
+        c.decoder.set_pasting(x.pasting);
+        c.given_back = crate::server::GivenBack {
+            whole: usize::try_from(x.given_back_keys).unwrap_or(0),
+            held: usize::try_from(x.given_back_held).unwrap_or(0),
+            since: (x.given_back_held > 0).then(|| before(now, x.held_ago_ms)),
+        };
         c.title.clone_from(&x.title);
         c.terminal_title.clone_from(&x.terminal_title);
         c.pan = x.pan.as_ref().map(|p| crate::view::Pan {
@@ -2228,17 +2241,42 @@ impl Server {
     }
 }
 
-/// A client's input as the next image reads it: the bytes its key decoder
-/// holds (an ESC waiting out `escape-time`, a split sequence) as `Input`
-/// frames, then the frames not read yet (`inbuf`), in the order they came.
-/// The next image's decoder starts the ESC's wait again, and the re-attach
-/// hands it on to the new connection's decoder.
-fn carried_input(c: &Client) -> Vec<u8> {
+/// A client's input as the next image reads it ([`carried_input`]).
+struct Carried {
+    bytes: Vec<u8>,
+    keys: u32,
+    held: u32,
+    held_ago_ms: u64,
+}
+
+/// A client's input as the next image reads it: the keys a waiting upgrade
+/// gave back and the bytes its key decoder holds (an ESC waiting out
+/// `escape-time`, a split sequence) as `Input` frames, then the frames not
+/// read yet (`inbuf`), in the order they came, with what the first frames
+/// are (`GivenBack`): the next image decodes each key given back as the
+/// key it was, and the held bytes' wait runs on from when it started. The
+/// re-attach hands what its decoder then holds on to the new connection's
+/// decoder.
+fn carried_input(c: &Client, now: Instant) -> Carried {
+    // Bytes held now were read after any keys given back had been read
+    // again: those were decoded, so `inbuf` starts with no key given back.
+    let Some(held_since) = c.decoder.held_since() else {
+        return Carried {
+            bytes: c.inbuf.clone(),
+            keys: u32::try_from(c.given_back.whole).unwrap_or(0),
+            held: u32::try_from(c.given_back.held).unwrap_or(0),
+            held_ago_ms: c
+                .given_back
+                .since
+                .filter(|_| c.given_back.held > 0)
+                .map_or(0, |t| since(now, t)),
+        };
+    };
     // In chunks of the size `upgrade_behind` gives keys back in: each fits
     // a frame (16 KiB, far under `MAX_FRAME`), so `encode` refuses none and
     // nothing held is dropped; were one refused, it would be skipped rather
     // than the snapshot lost to a panic.
-    let mut out: Vec<u8> = c
+    let frames: Vec<Vec<u8>> = c
         .decoder
         .held()
         .chunks(16 * 1024)
@@ -2246,8 +2284,14 @@ fn carried_input(c: &Client) -> Vec<u8> {
             vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(chunk.to_vec()))
                 .ok()
         })
-        .flatten()
         .collect();
-    out.extend_from_slice(&c.inbuf);
-    out
+    let held = u32::try_from(frames.len()).unwrap_or(0);
+    let mut bytes = frames.concat();
+    bytes.extend_from_slice(&c.inbuf);
+    Carried {
+        bytes,
+        keys: 0,
+        held,
+        held_ago_ms: since(now, held_since),
+    }
 }

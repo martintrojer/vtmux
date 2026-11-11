@@ -333,13 +333,13 @@ impl Cmdq {
     }
 
     /// The keys queued behind step `id` taken out of its queue, as the
-    /// bytes they came in, in order: `Some` (empty when there are none)
+    /// bytes each came in, in order: `Some` (empty when there are none)
     /// only if nothing else is behind it (batch ends excepted) and every key still has its bytes (not a
     /// mouse event or a paste mark, whose handling is not repeated from
     /// bytes, nor one `send-keys -K` gave). A key waits behind a command
     /// that waits, and has done nothing yet: given back as input, it is
     /// read again later.
-    pub fn take_keys_after(&mut self, id: StepId) -> Option<Vec<u8>> {
+    pub fn take_keys_after(&mut self, id: StepId) -> Option<Vec<Vec<u8>>> {
         use crate::key_dispatch::{KeyEvent, KeyKind};
         let steps = self
             .queues
@@ -355,7 +355,7 @@ impl Cmdq {
                     kind: KeyKind::Key(_, raw),
                     ..
                 })) if s.batch != own && !raw.is_empty() => {
-                    bytes.extend_from_slice(raw);
+                    bytes.push(raw.clone());
                     keys.push(s.batch);
                 }
                 // The end of a batch that has no more to run (the key whose

@@ -992,6 +992,120 @@ fn an_escape_held_behind_keys_given_back_fires_in_the_new_image() {
     assert_eq!(world.pid(), pid);
 }
 
+/// A world whose keys log what they ran: F5 upgrades, Escape, `x`, M-x
+/// and F7 (the end mark) each append to `@log`, at the default
+/// `escape-time` (10 ms).
+fn key_log_world() -> (World, Attached) {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    // The terminal's answers to the attach's queries: while one is out an
+    // ESC waits at least 500 ms (tty-keys.c `tty_keys_next`).
+    attached.keys(concat!(
+        "\x1b[?62;22c",
+        "\x1b[>0;10;1c",
+        "\x1bP>|xterm(400)\x1b\\",
+        "\x1b[?2026;2$y",
+        "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+        "\x1b]11;rgb:0000/0000/0000\x1b\\",
+        "\x1b[8;24;80t",
+        "\x1b[4;480;800t",
+    ));
+    world.run(&["set", "-s", "escape-time", "10"]);
+    world.run(&["set", "-g", "@log", ""]);
+    world.run(&[
+        "bind",
+        "-n",
+        "F5",
+        "vtmux-upgrade",
+        "-b",
+        &bin().display().to_string(),
+    ]);
+    for (key, says) in [
+        ("F6", "F6,"),
+        ("Escape", "ESC,"),
+        ("x", "x,"),
+        ("M-x", "MX,"),
+        ("F7", "end"),
+    ] {
+        world.run(&["bind", "-n", key, "set", "-ga", "@log", says]);
+    }
+    (world, attached)
+}
+
+/// The log [`key_log_world`] keeps, once F7 has marked its end.
+fn key_log(world: &World) -> String {
+    let mut log = Vec::new();
+    wait("the end mark", || {
+        log = show_global(world, "@log");
+        log.ends_with(b"end\n")
+    });
+    String::from_utf8_lossy(&log).trim_end().to_owned()
+}
+
+/// Escape, then `x` 50 ms later (more than `escape-time`), typed behind a
+/// key bound to `vtmux-upgrade`: they run as Escape and `x`, as they do
+/// with no upgrade (F6 first, the control), whether the server still held
+/// the ESC at the exec or had decoded it already, its wait out, and given
+/// it back while the upgrade waited for a job (`sleep`). (Before: the keys
+/// given back were decoded again at one instant, as M-x.)
+#[test]
+fn escape_then_a_key_behind_a_bound_upgrade_keep_their_escape_time() {
+    for (first, upgrades, job, want) in [
+        ("\x1b[17~", false, false, "F6,ESC,x,end"),
+        ("\x1b[15~", true, false, "ESC,x,end"),
+        ("\x1b[15~", true, true, "ESC,x,end"),
+        ("\x1b[15~\x1b[17~", true, true, "F6,ESC,x,end"),
+    ] {
+        let (world, mut attached) = key_log_world();
+        let pid = world.pid();
+        if job {
+            world.run(&["run-shell", "-b", "sleep 1"]);
+        }
+        attached.keys(&format!("{first}\x1b"));
+        std::thread::sleep(Duration::from_millis(50));
+        attached.keys("x");
+        if upgrades {
+            wait("the upgrade", || {
+                world.server_args().contains("--vtmux-resume")
+            });
+        }
+        attached.keys("\x1b[18~");
+        assert_eq!(key_log(&world), want, "{first:?}, job {job}");
+        assert_eq!(world.pid(), pid);
+    }
+}
+
+/// A bracketed paste that an upgrade comes in the middle of stays a
+/// paste: the keys pasted after it, and an ESC pasted before it and still
+/// held, go to the pane as they are, not to their bindings
+/// (server-client.c `server_client_is_bracket_paste`). (Before: the
+/// re-attach forgot the paste, and `x` or Escape ran its binding.)
+#[test]
+fn a_paste_an_upgrade_comes_in_the_middle_of_stays_a_paste() {
+    for before in ["a", "a\x1b"] {
+        let (world, mut attached) = key_log_world();
+        attached.keys(&format!("\x1b[200~{before}"));
+        wait("the paste's first key", || {
+            world
+                .run(&["capture-pane", "-p", "-t", "a:w1"])
+                .contains('a')
+        });
+        let out = world.run(&["vtmux-upgrade", "-b", &bin().display().to_string()]);
+        assert!(world.server_args().contains("--vtmux-resume"), "{out}");
+        attached.keys("x\x1b[201~\x1b[18~");
+        assert_eq!(key_log(&world), "end", "{before:?}");
+        if before == "a" {
+            wait("the pasted keys", || {
+                world
+                    .run(&["capture-pane", "-p", "-t", "a:w1"])
+                    .contains("ax")
+            });
+        }
+    }
+}
+
 /// `vtmux-upgrade` from a control client (mu, murmur): its guard closes
 /// as for any waiting command, and the line it sent behind it, held while
 /// the upgrade ran, runs in the new image.

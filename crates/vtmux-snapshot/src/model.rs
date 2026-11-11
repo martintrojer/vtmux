@@ -910,6 +910,20 @@ record! {
         /// reaches it before it wakes, so it gets no teardown. Ignorable:
         /// a reader before tears it down again, as every build did.
         50 => one stopped: bool,
+        /// Inside a bracketed paste (`TTY_BRACKETPASTE`): the keys after
+        /// the upgrade go to the pane as they are, up to the paste's end.
+        /// Ignorable: a reader before ends the paste, as every build did.
+        51 => one pasting: bool,
+        /// Keys a waiting upgrade gave back: the first `given_back_keys`
+        /// `Input` frames of [`Self::inbuf`] are one key each, decoded
+        /// again as that key whenever they are read; the `given_back_held`
+        /// frames after them are bytes the key decoder held, which have
+        /// waited `held_ago_ms` (their `escape-time` runs on from there).
+        /// Ignorable: a reader before decodes the frames as bytes read at
+        /// once, as every build did.
+        52 => one given_back_keys: u32,
+        53 => one given_back_held: u32,
+        54 => one held_ago_ms: u64,
     }
 }
 
@@ -1638,6 +1652,11 @@ pub(crate) mod tests {
             inbuf: Vec::new(),
             // Added within v1 too (a_stopped_client_round_trips).
             stopped: false,
+            // Added within v1 too (given_back_input_round_trips).
+            pasting: false,
+            given_back_keys: 0,
+            given_back_held: 0,
+            held_ago_ms: 0,
         }
     }
 

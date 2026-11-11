@@ -634,30 +634,37 @@ impl Server {
         };
         if let Some(id) = client
             && self.clients.contains_key(&id)
-            && let Some(bytes) = self.cmdq.take_keys_after(step)
-            && !bytes.is_empty()
+            && let Some(keys) = self.cmdq.take_keys_after(step)
+            && !keys.is_empty()
+            && let Some(c) = self.clients.get_mut(&id)
         {
-            // Frames as a client sends them, of a size every reader takes.
-            // The bytes the decoder still holds came after the keys, so
-            // they go back behind them.
-            let held = self
-                .clients
-                .get_mut(&id)
-                .map(|c| c.decoder.take_held())
-                .unwrap_or_default();
-            let frames: Vec<u8> = bytes
-                .chunks(16 * 1024)
-                .chain((!held.is_empty()).then_some(&held[..]))
-                .flat_map(|chunk| {
-                    vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
-                        chunk.to_vec(),
-                    ))
-                    .expect("a chunk of keys fits a frame")
-                })
+            // A frame for each key, so each is decoded again as the key it
+            // was, then the bytes the decoder still holds, which came after
+            // the keys, with the instant their wait started: an ESC whose
+            // `escape-time` ran out stays Escape, and one still held keeps
+            // its wait (`GivenBack`). Frames as a client sends them, of a
+            // size every reader takes.
+            let since = c.decoder.held_since();
+            let held = c.decoder.take_held();
+            let input = |chunk: &[u8]| {
+                vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
+                    chunk.to_vec(),
+                ))
+                .expect("a chunk of keys fits a frame")
+            };
+            let held_frames: Vec<Vec<u8>> = held.chunks(16 * 1024).map(input).collect();
+            let frames: Vec<u8> = keys
+                .iter()
+                .map(|key| input(key))
+                .chain(held_frames.iter().cloned())
+                .flatten()
                 .collect();
-            if let Some(c) = self.clients.get_mut(&id) {
-                c.inbuf.splice(0..0, frames);
-            }
+            c.inbuf.splice(0..0, frames);
+            c.given_back = crate::server::GivenBack {
+                whole: keys.len(),
+                held: held_frames.len(),
+                since,
+            };
             self.upgrade.replay = Some(id);
         }
         let mut what: Vec<&str> = Vec::new();
@@ -1150,7 +1157,10 @@ impl Server {
             Token(super::CLIENT_BASE + old.0),
             Interest::READABLE,
         );
+        // The old connection's input, given-back keys and all, was read
+        // just now: the new one's is read as it comes.
         c.inbuf = fresh.inbuf;
+        c.given_back = super::GivenBack::default();
         c.out = super::Outbox::default();
         c.unacked = super::Unacked::default();
         c.peer = fresh.peer;
@@ -1166,7 +1176,7 @@ impl Server {
         // live upgrade asks the terminal nothing, so it changes nothing).
         // The key bytes the old one holds (an ESC carried across the exec
         // and fed just now by `client_readable`) go on to it with their
-        // `escape-time` wait.
+        // `escape-time` wait, and so does a bracketed paste it is in.
         let queries = c.decoder.queries();
         let mut decoder = crate::input::Decoder::default();
         c.decoder.hand_held_to(&mut decoder);
@@ -1183,7 +1193,9 @@ impl Server {
         // into the passthrough, so the two go together.
         c.passthrough.clear();
         c.notifications.clear();
-        c.pasting = false;
+        // A bracketed paste the upgrade came in the middle of goes on
+        // (`pasting`, and the decoder's handed on above): the terminal
+        // sends the rest of it and its end whatever the teardown said.
         c.window_cache = crate::render::WindowCache::default();
         c.compositor.invalidate();
         // The terminal was reset by the teardown sent before the notice,
