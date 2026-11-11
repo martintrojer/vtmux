@@ -6212,24 +6212,52 @@ fn choose_tree_without_a_client() {
     });
 }
 
-/// How many processes have `marker` in their command line, once it is `want`
-/// or 5 s have passed.
-fn procs_with(marker: &str, want: usize) -> usize {
+/// How many processes have a command line that matches `pattern`, by the pids
+/// `pgrep -f` lists (`-c` is not on every host): `pgrep` exits 0 with
+/// matches, 1 with none, and anything else is a failure to count, not zero.
+fn count_procs(mut pgrep: Command, pattern: &str) -> usize {
+    let out = pgrep.args(["-f", pattern]).output().expect("pgrep");
+    assert!(
+        matches!(out.status.code(), Some(0 | 1)),
+        "pgrep failed: {} {:?}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).lines().count()
+}
+
+/// [`count_procs`] until it is `want` or 5 s have passed.
+fn procs_with(pattern: &str, want: usize) -> usize {
     let start = Instant::now();
     loop {
-        let out = Command::new("pgrep")
-            .args(["-f", "-c", marker])
-            .output()
-            .expect("pgrep");
-        let n = String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse()
-            .unwrap_or(0);
+        let n = count_procs(Command::new("pgrep"), pattern);
         if n == want || start.elapsed() > Duration::from_secs(5) {
             return n;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn count_procs_counts_matches() {
+    let pid = std::process::id();
+    let pattern = format!("^sleep 600[.]{pid}7");
+    let mut job = Command::new("sh")
+        .args(["-c", &format!("exec sleep 600.{pid}7")])
+        .spawn()
+        .unwrap();
+    assert_eq!(procs_with(&pattern, 1), 1);
+    job.kill().unwrap();
+    job.wait().unwrap();
+    assert_eq!(procs_with(&pattern, 0), 0);
+}
+
+#[test]
+#[should_panic(expected = "pgrep failed")]
+fn count_procs_does_not_read_a_failure_as_zero() {
+    let mut pgrep = Command::new("sh");
+    pgrep.args(["-c", "echo 'illegal option -- c' >&2; exit 2", "sh"]);
+    count_procs(pgrep, "x");
 }
 
 /// `#()` in formats (format.c `format_job_get`): each client has its own job
@@ -6316,21 +6344,37 @@ fn format_jobs_do_not_leak() {
         let marker = format!("sleep 600.{tag}");
         let cmd = format!("#(exec {marker})");
         let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
-        let count = |want: usize| Run {
-            stdout: format!("{}\n", procs_with(&marker, want)),
-            stderr: String::new(),
-            code: 0,
+        // The job's own command line, not a client's that names it.
+        let pattern = format!("^sleep 600[.]{tag}");
+        let count = |want: usize| {
+            let n = procs_with(&pattern, want);
+            assert_eq!(n, want, "processes matching {pattern:?}");
+            Run {
+                stdout: format!("{n}\n"),
+                stderr: String::new(),
+                code: 0,
+            }
         };
         // A client's job lives while the client does. `[.]` keeps the
         // counting shell's own command line out of the match.
-        let alive = format!("pgrep -fc 'sleep 600[.]{tag}'");
+        let alive = format!("pgrep -f '^sleep 600[.]{tag}' | wc -l | tr -d ' '");
         runs.push(w.run(&[
             "display", "-p", &cmd, ";", "run", "-d1", "", ";", "run", &alive,
         ]));
+        // `run` printed what the shell counted: the one job.
+        assert_eq!(
+            runs[1].stdout.lines().last(),
+            Some("1"),
+            "{:?}",
+            runs[1].stdout
+        );
         runs.push(count(0));
         // One with no client (a window name's) goes with the server.
         runs.push(w.run(&["set", "-g", "automatic-rename-format", &cmd]));
-        runs.push(w.run(&["new-window", "-d", "-n", "x", "cat"]));
+        // The window's name is formatted when its pane prints something
+        // (`-n` would turn the automatic rename off).
+        runs.push(w.run(&["new-window", "-d", "cat"]));
+        runs.push(w.run(&["send-keys", "-t", "s:1", "hi", "Enter"]));
         runs.push(count(1));
         runs.push(w.run(&["kill-server"]));
         runs.push(count(0));
