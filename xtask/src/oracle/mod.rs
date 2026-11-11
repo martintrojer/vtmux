@@ -109,7 +109,7 @@ fn glob(pat: &str, text: &str) -> bool {
     pat.split(',').any(|p| go(p.as_bytes(), text.as_bytes()))
 }
 
-fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("xtask lives one level below the workspace root")
