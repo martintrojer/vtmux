@@ -64,10 +64,10 @@ pub fn exec(
             && src_idx >= start
             && (start..=src_idx).all(|i| server.model.sessions[&dst_s].windows.contains_key(&i));
         // winlink_shuffle_up failing returns an error without a message.
-        let Some(i) = server.model.shuffle_up(dst_s, from, before) else {
-            item.status = 1;
-            return Ok(());
-        };
+        let i = server
+            .model
+            .shuffle_up(dst_s, from, before)
+            .ok_or(CmdError::Quiet)?;
         if shifted {
             src_idx += 1;
         }

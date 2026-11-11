@@ -106,8 +106,6 @@ pub fn exec(
     if server.model.windows[&w].active() == wp {
         return Ok(());
     }
-    // cmd-select-pane.c:283-285: the hook's target is the new pane when
-    // it became active, else the queue's current state.
     // cmd-select-pane.c:283-285: the new pane becomes the queue's current
     // state when it became active (the commands after this one start from
     // it); the hook's target is that state.

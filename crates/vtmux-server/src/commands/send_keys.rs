@@ -225,7 +225,7 @@ fn mode_command(
     if slider.is_some()
         && let Some(w) = server.model.panes.get(&p).map(|x| x.window)
     {
-        server.model.set_active(w, p);
+        server.model.set_active_quietly(w, p);
     }
     let dragging = tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.mouse.drag_held()));
     let result = server

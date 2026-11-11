@@ -2130,13 +2130,29 @@ impl Server {
             self.reattach(id, &hello, &token);
             return;
         }
+        // cmd-find.c `cmd_find_inside_pane`: the live pane whose tty is
+        // the client's, else the one `TMUX_PANE` names.
+        let tty = hello
+            .tty
+            .as_ref()
+            .map(|t| t.name.as_str())
+            .filter(|n| !n.is_empty());
+        let by_tty = tty.and_then(|name| {
+            self.model
+                .panes
+                .iter()
+                .find(|(_, p)| p.io.is_some() && p.tty == name)
+                .map(|(&id, _)| id)
+        });
         let origin = Origin {
             attached: None,
-            inside_pane: hello
-                .env
-                .iter()
-                .find(|(k, _)| k == "TMUX_PANE")
-                .and_then(|(_, v)| v.parse().ok()),
+            inside_pane: by_tty.or_else(|| {
+                hello
+                    .env
+                    .iter()
+                    .find(|(k, _)| k == "TMUX_PANE")
+                    .and_then(|(_, v)| v.parse().ok())
+            }),
             current: None,
             mouse: None,
         };

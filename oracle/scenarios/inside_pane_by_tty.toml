@@ -1,0 +1,11 @@
+name = "inside_pane_by_tty"
+# A command from inside a pane finds that pane by the client's tty before
+# TMUX_PANE (cmd-find.c cmd_find_inside_pane): with TMUX_PANE unset, the
+# current session is still the pane's, not the newest one.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "tmux wait-for go; env -u TMUX_PANE tmux display -p 'S=#{session_name}'; tmux wait-for -S done; exec cat"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "cat", "-"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a:0.0", "-S", "0", "-E", "0"] },
+]

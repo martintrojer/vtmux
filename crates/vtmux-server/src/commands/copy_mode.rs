@@ -87,7 +87,7 @@ pub fn exec(
             .is_some_and(|x| !x.modes.is_empty())
             && let Some(w) = server.model.panes.get(&p).map(|x| x.window)
         {
-            server.model.set_active(w, p);
+            server.model.set_active_quietly(w, p);
         }
         if with_copy(server, p, |m, env| {
             m.scroll_slider(env, slider, args.flag('e'))

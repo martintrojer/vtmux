@@ -911,17 +911,24 @@ impl Model {
     /// floating pane made active goes to the top of the z-order
     /// (window.c:833-838). False when `p` already is active.
     pub fn switch_active(&mut self, w: WindowId, p: PaneId) -> bool {
-        self.set_active_inner(w, p, true)
+        self.set_active_inner(w, p, true, true)
     }
 
     /// `window_set_active_pane` (window.c:755-791) without the zoom part:
     /// stamps the active point; the z-order stays (swap-pane, a new pane,
     /// attach-session). False when `p` already is active.
     pub fn set_active(&mut self, w: WindowId, p: PaneId) -> bool {
-        self.set_active_inner(w, p, false)
+        self.set_active_inner(w, p, false, true)
     }
 
-    fn set_active_inner(&mut self, w: WindowId, p: PaneId, raise: bool) -> bool {
+    /// [`Self::set_active`] with no window-pane-changed
+    /// (`window_set_active_pane(..., 0)`): copy mode's scroll to the
+    /// mouse, window-copy.c `window_copy_scroll`.
+    pub fn set_active_quietly(&mut self, w: WindowId, p: PaneId) -> bool {
+        self.set_active_inner(w, p, false, false)
+    }
+
+    fn set_active_inner(&mut self, w: WindowId, p: PaneId, raise: bool, notify: bool) -> bool {
         let Some(window) = self.windows.get(&w) else {
             return false;
         };
@@ -958,7 +965,9 @@ impl Model {
         // window.c:781-782: tty_update_window_offset, server_redraw_window.
         self.update_offset(w);
         self.redraw(Redraw::Window(w));
-        self.fire_pane_changed(w, p, old);
+        if notify {
+            self.fire_pane_changed(w, p, old);
+        }
         true
     }
 

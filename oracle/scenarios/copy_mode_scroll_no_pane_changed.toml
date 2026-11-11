@@ -1,0 +1,17 @@
+name = "copy_mode_scroll_no_pane_changed"
+# copy-mode -S makes its pane active through window_copy_scroll, which
+# calls window_set_active_pane(..., 0) (window-copy.c:771): no
+# window-pane-changed hook and no %window-pane-changed for it.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["set", "-g", "@h", "none"] },
+  { run = ["set-hook", "-g", "window-pane-changed", "set -g @h fired"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "copy-mode -S -t a:0.1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "display -p -t a:0.1 '#{pane_active} #{@h}'" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["display", "-p", "-t", "a:0.1", "#{pane_active} #{pane_in_mode} #{@h}"] },
+]

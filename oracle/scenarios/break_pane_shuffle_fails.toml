@@ -1,0 +1,13 @@
+name = "break_pane_shuffle_fails"
+# break-pane -a/-b whose winlink_shuffle_up fails (a window at INT_MAX)
+# returns CMD_RETURN_ERROR with no message (cmd-break-pane.c:120-125): the
+# rest of the command list is not run and command-error fires.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["split-window", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["new-window", "-d", "-t", "a:2147483647", "-n", "w", "cat", "-"] },
+  { run = ["set-hook", "-g", "command-error", "set -gaF @e '|#{hook}'"] },
+  { run = ["break-pane", "-a", "-s", "a:0.1", "-t", "a:2147483647", ";", "display", "-p", "after"] },
+  { run = ["show", "-gv", "@e"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_panes}"] },
+]
