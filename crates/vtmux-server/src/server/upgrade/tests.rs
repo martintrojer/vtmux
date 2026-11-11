@@ -545,6 +545,37 @@ fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A lone ESC waiting out `escape-time` at the exec, with no keys queued
+/// behind the upgrade, is carried in the client's input too: F5 (the
+/// upgrade) then ESC leave the input as ESC.
+#[test]
+fn a_lone_held_escape_is_carried_across_the_exec() {
+    let (mut server, dir) = setup("lone");
+    let binary = passing(&dir);
+    let bind = format!("vtmux-upgrade -b {}", binary.to_str().unwrap());
+    st::ok(&mut server, &dir, &["bind", "-n", "F5", &bind]);
+    st::ok(&mut server, &dir, &["set", "-s", "escape-time", "10000"]);
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    server.on_client_input(term, b"\x1b[15~\x1b").unwrap();
+    for _ in 0..5 {
+        turns(&mut server, Instant::now());
+        server.cmdq_process();
+    }
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let input =
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b"\x1b".to_vec()))
+            .unwrap();
+    assert_eq!(client.inbuf, input);
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A dry run refused for a feature a program holds names the panes and
 /// what to do: mode 2048 (D31) and a kitty graphics grant (D33).
 #[test]

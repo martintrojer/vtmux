@@ -316,7 +316,12 @@ impl Decoder {
         self.bytes.extend_from_slice(bytes);
     }
     /// The bytes fed and not decoded yet (an ESC waiting out
-    /// `escape-time`, a split sequence), taken out to be fed again later.
+    /// `escape-time`, a split sequence).
+    #[must_use]
+    pub fn held(&self) -> &[u8] {
+        &self.bytes
+    }
+    /// [`Self::held`], taken out to be fed again later.
     pub fn take_held(&mut self) -> Vec<u8> {
         self.pending = None;
         std::mem::take(&mut self.bytes)

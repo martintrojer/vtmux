@@ -34,7 +34,8 @@
 //!
 //! Carried runtime state that is easy to miss: input a pane or popup
 //! program has not read yet (`input_queued`), each client's partly read
-//! frame (`inbuf`), each pane's size changes
+//! frame (`inbuf`) with the key bytes its decoder holds ahead of it
+//! (`carried_input`), each pane's size changes
 //! the program hasn't been told yet (`wp->resize_queue`), output a
 //! `pipe-pane` command hasn't taken yet, each client's
 //! `terminal-features`/`terminal-overrides` as its terminal opened with
@@ -1398,7 +1399,7 @@ impl Server {
             argv: hello.argv.clone(),
             cwd: hello.cwd.to_string_lossy().into_owned(),
             cwd_bytes: path_bytes(&hello.cwd),
-            inbuf: c.inbuf.clone(),
+            inbuf: carried_input(c),
             environment: hello.env.clone(),
             term_name: tty.map(|t| t.term.clone()).unwrap_or_default(),
             term_features: tty.map(|t| t.features.clone()).unwrap_or_default(),
@@ -2225,4 +2226,20 @@ impl Server {
         }
         Ok(c)
     }
+}
+
+/// A client's input as the next image reads it: the bytes its key decoder
+/// holds (an ESC waiting out `escape-time`, a split sequence) as one
+/// `Input` frame, then the frames not read yet (`inbuf`), in the order they
+/// came. The next image's decoder starts the ESC's wait again.
+fn carried_input(c: &Client) -> Vec<u8> {
+    let held = c.decoder.held();
+    let mut out = if held.is_empty() {
+        Vec::new()
+    } else {
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(held.to_vec()))
+            .expect("held key bytes fit a frame")
+    };
+    out.extend_from_slice(&c.inbuf);
+    out
 }

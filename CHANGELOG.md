@@ -20,7 +20,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - `copy-mode -S` on another pane makes it active without firing `window-pane-changed`.
 - `#{<:...}`, `#{>:...}`, `#{<=:...}` and `#{>=:...}` order bytes that are not UTF-8 as tmux does.
 - A detach during a flood no longer leaves your terminal frozen in a synchronized update.
-- Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order; an upgrade refused for a program's kitty graphics says which pane and what to do.
+- Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order, and an Esc still waiting out `escape-time` is kept; an upgrade refused for a program's kitty graphics says which pane and what to do.
 - Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
 
 ## 3.8-beta2
