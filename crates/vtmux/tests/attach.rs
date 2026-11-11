@@ -3236,15 +3236,22 @@ fn leaving_the_alternate_screen_waits_for_the_timer() {
     alternate_flush_shows("\\033[?1049h", "\\033[?1049l", "SLOW.");
 }
 /// A switch that is not to the alternate screen, released while the resize
-/// timer is still running or after it has fired, is void: the timer's expiry
-/// is not a flush.
+/// timer is still running or after it has fired, is void. Released at
+/// 400 ms the timer has fired before the switch, so nothing can come after
+/// it: not FAST either. Released at 200 ms the timer's expiry (250 ms) can
+/// fall into the script's window after the switch (the poll's `sleep 0.01`
+/// plus `sleep 0.03`; on a macOS runner each fork and exec of `sleep` takes
+/// 20-30 ms), so the script may print FAST: the expiry, not a flush, and
+/// that is why such a run is VOID (CI check-macos on 0831f68 and 69d90321).
 #[test]
 fn a_late_release_is_void_not_fast() {
     par::each(&bins(), |bin| {
         for delay in [200, 400] {
             let shown = alternate_flush(bin, "", "\\033[m", Duration::from_millis(delay));
             assert!(shown.contains("VOID."), "{delay} ms: {shown:?}");
-            assert!(!shown.contains("FAST."), "{delay} ms: {shown:?}");
+            if delay > 250 {
+                assert!(!shown.contains("FAST."), "{delay} ms: {shown:?}");
+            }
         }
     });
 }
