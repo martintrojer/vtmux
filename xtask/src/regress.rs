@@ -861,17 +861,7 @@ fn resolve_tmux(root: &Path, target: &Target) -> Result<PathBuf> {
     match target {
         Target::Reference => Ok(ref_tmux::reference_tmux()?),
         Target::Path(p) => Ok(fs::canonicalize(p).map_err(|e| format!("{}: {e}", p.display()))?),
-        Target::Vtmux => {
-            let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-            let st = Command::new(cargo)
-                .args(["build", "-q", "-p", "vtmux"])
-                .current_dir(root)
-                .status()?;
-            if !st.success() {
-                return fail("cargo build -p vtmux failed");
-            }
-            Ok(fs::canonicalize(root.join("target/debug/vtmux"))?)
-        }
+        Target::Vtmux => Ok(crate::build_vtmux(root)?),
     }
 }
 

@@ -26,7 +26,7 @@ use std::error::Error;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::sync::Mutex;
 use std::thread;
 
@@ -182,18 +182,6 @@ fn upgrade_skips(root: &Path) -> Result<BTreeMap<String, String>> {
         }
     }
     Ok(skips.skip)
-}
-
-fn build_vtmux(root: &Path) -> Result<PathBuf> {
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let st = Command::new(cargo)
-        .args(["build", "-q", "-p", "vtmux"])
-        .current_dir(root)
-        .status()?;
-    if !st.success() {
-        return fail("cargo build -p vtmux failed");
-    }
-    Ok(fs::canonicalize(root.join("target/debug/vtmux"))?)
 }
 
 /// Scenarios run at once: one per CPU up to 6 (what the pool always had),
@@ -367,7 +355,7 @@ fn run_inner() -> Result<ExitCode> {
     match opts.mode {
         Mode::Record => record(&root, &scenarios),
         Mode::Replay => {
-            let bin = build_vtmux(&root)?;
+            let bin = crate::build_vtmux(&root)?;
             let mode = what("replay");
             let (results, took) = timed(&root, &mode, &scenarios, |sc| {
                 let trace = read_trace(&root, sc)?;
@@ -385,7 +373,7 @@ fn run_inner() -> Result<ExitCode> {
             let other = if opts.self_check {
                 ref_bin.clone()
             } else {
-                build_vtmux(&root)?
+                crate::build_vtmux(&root)?
             };
             let mode = what(if opts.self_check {
                 "live --self"
