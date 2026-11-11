@@ -3123,16 +3123,30 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
 /// Both answers hang on wall-clock windows that a loaded host can miss, for
 /// tmux 3.8 as much as for us: the second resize reaching the server late
 /// (nothing queued to flush), the timer firing before the pane looks, or
-/// the 60 ms loop outlasting the timer. A miss always lands on the other
-/// answer, so a run that shows the wrong one is repeated: the behaviour
-/// holds if some run in `TRIES` shows `want`, and a binary that does the
-/// opposite never will (task `flake_resize_timer_window`).
-fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static str) -> String {
+/// the 60 ms loop outlasting the timer. A miss lands on the other answer,
+/// so a run that shows the wrong one is repeated: the behaviour holds if
+/// some run in `TRIES` shows `want`. A run in which the timer could have
+/// fired first, which would show FAST for any sequence, is `VOID.`, never
+/// an answer: the script did not see exactly two resize signals before it
+/// switched (the attach's status line takes a row; the first resize, which
+/// tmux applies at once; the second waits on the timer), or the harness
+/// released `go` over `GO_WITHIN` after the second resize (the timer is
+/// 250 ms). What is left is the 30 ms after a switch that the timer's expiry
+/// must fall into by chance: a binary that does not flush on entering shows
+/// FAST only then (task `flake_resize_timer_window`).
+fn alternate_flush(
+    bin: &std::path::Path,
+    before: &'static str,
+    seq: &'static str,
+    go_delay: Duration,
+) -> String {
+    const GO_WITHIN: Duration = Duration::from_millis(120);
     let script = format!(
         "w=0; trap 'w=$((w+1))' WINCH; printf '{before}P '; \
-         while [ ! -e go ]; do sleep 0.01; done; printf '{seq}'; n=$w; \
+         while [ ! -e go ]; do sleep 0.01; done; n=$w; printf '{seq}'; \
          sleep 0.03; \
-         if [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
+         if [ $n -ne 2 ]; then printf 'VOID.'; \
+         elif [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
          sleep 100000 & while :; do wait; done"
     );
     let w = World::new(bin.to_path_buf());
@@ -3152,6 +3166,7 @@ fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static st
     a.resize(61, 20);
     thread::sleep(Duration::from_millis(50));
     a.resize(62, 20);
+    let resized = Instant::now();
     // The server has the second size once the window has it.
     common::wait("the window's second size", || {
         String::from_utf8_lossy(
@@ -3161,10 +3176,17 @@ fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static st
         .trim()
             == "62"
     });
+    thread::sleep(go_delay);
+    let late = resized.elapsed() > GO_WITHIN;
     std::fs::write(&go, b"").unwrap();
     thread::sleep(Duration::from_millis(600));
     let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
-    String::from_utf8_lossy(&o.stdout).into_owned()
+    let shown = String::from_utf8_lossy(&o.stdout).into_owned();
+    if late {
+        format!("{shown} VOID.")
+    } else {
+        shown
+    }
 }
 
 /// Every binary must show `want` in some run of [`alternate_flush`].
@@ -3172,7 +3194,8 @@ fn alternate_flush_shows(before: &'static str, seq: &'static str, want: &str) {
     const TRIES: usize = 10;
     par::each(&bins(), |bin| {
         let bin = bin.clone();
-        let shown = (0..TRIES).any(|_| alternate_flush(&bin, before, seq).contains(want));
+        let shown =
+            (0..TRIES).any(|_| alternate_flush(&bin, before, seq, Duration::ZERO).contains(want));
         assert!(
             shown,
             "{want} never shown in {TRIES} runs of {}",
@@ -3187,6 +3210,19 @@ fn entering_the_alternate_screen_flushes_resizes() {
 #[test]
 fn leaving_the_alternate_screen_waits_for_the_timer() {
     alternate_flush_shows("\\033[?1049h", "\\033[?1049l", "SLOW.");
+}
+/// A switch that is not to the alternate screen, released while the resize
+/// timer is still running or after it has fired, is void: the timer's expiry
+/// is not a flush.
+#[test]
+fn a_late_release_is_void_not_fast() {
+    par::each(&bins(), |bin| {
+        for delay in [200, 400] {
+            let shown = alternate_flush(bin, "", "\\033[m", Duration::from_millis(delay));
+            assert!(shown.contains("VOID."), "{delay} ms: {shown:?}");
+            assert!(!shown.contains("FAST."), "{delay} ms: {shown:?}");
+        }
+    });
 }
 
 /// The OSC 52 sequences in `text`, in order.
