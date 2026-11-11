@@ -58,6 +58,8 @@ fn an_unfinished_string_costs_what_tmux_holds_of_it() {
         ("OSC 2", b"\x1b]2;"),
         ("APC", b"\x1b_"),
         ("APC G (kitty graphics)", b"\x1b_G"),
+        // Its payload, which Ghostty buffers to 65 MiB unless told less.
+        ("APC G payload (kitty graphics)", b"\x1b_Ga=T,f=24,s=1,v=1;"),
     ] {
         let kib = cost(4, lead, 9);
         assert!(kib < 4 * 5 * 1024, "{what}: {kib} KiB for 4 panes");

@@ -702,6 +702,9 @@ impl PaneTerm {
             links: Rc::default(),
         };
         pane.retain();
+        // D33: a graphics command is held to what no screen can store yet
+        // (Ghostty's default would keep 65 MiB of one with no end).
+        pane.bound_graphics_command();
         Some(pane)
     }
 
