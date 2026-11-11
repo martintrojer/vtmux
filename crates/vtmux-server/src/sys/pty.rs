@@ -344,10 +344,14 @@ fn exec_candidates(
         .map_or(exec_default_path(), |(_, v)| v.as_str());
     path.split(':')
         .map(|dir| {
-            // glibc execvpe tries the bare name for an empty PATH component
-            // (leading, trailing or `::`), not `./name`; the difference shows
-            // in a script's $0 and /proc/<pid>/cmdline.
-            if dir.is_empty() {
+            // An empty PATH component (leading, trailing or `::`) is the
+            // current directory. glibc's and musl's execvpe try the bare
+            // name for it; the BSDs' (macOS's, FreeBSD's: gen/exec.c
+            // `execvPe`) try `./name`. The difference shows in a script's
+            // $0 and /proc/<pid>/cmdline.
+            if dir.is_empty() && cfg!(any(target_vendor = "apple", target_os = "freebsd")) {
+                cstring(&[b"./", name].concat())
+            } else if dir.is_empty() {
                 Ok(program.clone())
             } else {
                 cstring(&[dir.as_bytes(), b"/", name].concat())
@@ -733,6 +737,37 @@ mod tests {
         let got = exec_candidates(&program, &[], true).unwrap();
         let got: Vec<_> = got.iter().map(|c| c.to_str().unwrap()).collect();
         assert_eq!(got, want);
+    }
+
+    /// An empty `PATH` entry runs the program from the current directory
+    /// by the name this libc's `execvp` gives it, as a script's `$0`
+    /// shows: `./prog` on macOS and FreeBSD, `prog` on glibc and musl.
+    #[test]
+    fn an_empty_path_entry_runs_the_name_execvp_gives() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("vtmux-emptypath-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("prog");
+        std::fs::write(&script, "#!/bin/sh\necho \"0=$0\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = output(&SpawnSpec {
+            program: Program::Argv(vec!["prog".into()]),
+            shell: PathBuf::from("/bin/sh"),
+            cwd: dir.clone(),
+            home: None,
+            env: vec![("PATH".into(), ":/usr/bin:/bin".into())],
+            cols: 40,
+            rows: 4,
+            pixels: (0, 0),
+            chars: PaneChars::default(),
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        let want = if cfg!(any(target_vendor = "apple", target_os = "freebsd")) {
+            "0=./prog\r\n"
+        } else {
+            "0=prog\r\n"
+        };
+        assert_eq!(out, want);
     }
 
     #[test]

@@ -5,10 +5,16 @@
 //!
 //! `cargo xtask reap` is the other half: servers nobody's harness owns, left by
 //! ad-hoc probe scripts (`-L rv*`, `att*`, ...) that never ran `kill-server`.
-//! It kills test-labelled `tmux`/`vtmux` servers that are old and orphaned
-//! (a server a live upgrade moved onto a binary of another name too: by its
-//! `-S <test socket> --vtmux-resume`), with their pane processes (a flood loop in a pane outlives the server's
-//! death otherwise). `check.sh` runs it first.
+//! It kills old, orphaned processes holding a test socket, with their pane
+//! processes (a flood loop in a pane outlives the server's death otherwise).
+//! `check.sh` runs it first. Which socket a server holds is asked of the
+//! kernel ([`held_sockets`]: `/proc/net/unix` and `/proc/<pid>/fd` on Linux,
+//! `lsof` on macOS), never read from its command line, which does not say:
+//! `-L rvpath/../default` is `default`'s socket, a server with neither `-L`
+//! nor `-S` takes `$TMUX`'s, and macOS's `ps` joins the words of a value
+//! with a space in it. A test socket is a real path `.../tmux-<uid>/<label>`
+//! or `vtmux-<uid>` with a test label, or an oracle run's
+//! ([`is_test_socket`]).
 //!
 //! A server leaves its socket file behind when it exits (tmux does too), so
 //! a harness that lets a server use the real socket directory strands one
@@ -20,12 +26,12 @@
 //! A server with `vtmux-persist` on keeps a checkpoint directory per socket,
 //! `$XDG_STATE_HOME/vtmux/<label>-<hash>/` (`vtmux_server::persist::state_dir`),
 //! which outlives it too. [`sweep_checkpoints`] empties the test-labelled
-//! ones whose server is gone: its socket in those directories missing or
-//! refusing, no server holding the directory's `lock` (the sweep holds it
-//! while it empties that one directory), and no running process naming
-//! the label (a server before it takes the lock, or one that does not
-//! hold it). The `lock` file itself stays, for a server that may have it
-//! open.
+//! ones whose server is gone: no socket held open whose path names the
+//! directory, none of those directories' socket files answering, no
+//! server holding the directory's `lock` (the sweep holds it while it
+//! empties that one directory), and nothing in it changed for `--min-age`.
+//! When any of that cannot be told, the directory stays. The `lock` file
+//! itself stays, for a server that may have it open.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -86,71 +92,19 @@ pub fn pids_where(ps: &str, own: u32, keep: impl Fn(&str) -> bool) -> Vec<u32> {
 
 /// Servers younger than this are left alone: a gate, a harness run or a
 /// reviewer's script may still be using them (the slow gate budget is 10 min).
+/// A checkpoint directory changed more recently than this stays too.
 const DEFAULT_MIN_AGE: Duration = Duration::from_hours(1);
 
-/// One row of `ps -o pid=,ppid=,etime=,args=`, with its arguments as
-/// [`Argv`].
+/// One row of `ps -o pid=,ppid=,etime=,args=`. The arguments are only
+/// shown (and tell init apart): nothing is decided from them, since a
+/// command line does not say which socket a server took (`-L` with path
+/// parts, `$TMUX`, macOS's `ps` joining the words of a value with a space).
 #[derive(Debug, PartialEq, Eq)]
 struct Proc {
     pid: u32,
     ppid: u32,
     age: Duration,
     args: String,
-    argv: Argv,
-}
-
-/// A process's arguments. Exact on Linux: `/proc/<pid>/cmdline`, one word
-/// per NUL-ended argument, so a value with a space in it (`-S "/a b/rv1"`,
-/// `-f "a b.conf"`) stays one word. Elsewhere (macOS, whose `ps` prints
-/// the arguments flattened, or a process gone before its `cmdline` was
-/// read) `ps`'s line split at whitespace, which may cut a value in two:
-/// such a line is `loose`, and a checkpoint any loose line could name is
-/// kept ([`InUse`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Argv {
-    words: Vec<String>,
-    loose: bool,
-}
-
-impl Argv {
-    /// `ps`'s flattened line, split at whitespace.
-    fn split(line: &str) -> Self {
-        Self {
-            words: line.split_whitespace().map(str::to_owned).collect(),
-            loose: true,
-        }
-    }
-
-    /// The exact arguments of `pid` (Linux), if they read. A process that
-    /// rewrote its arguments into one string with spaces (a
-    /// `setproctitle`) reads as that string split, loose.
-    #[cfg(target_os = "linux")]
-    fn of(pid: u32) -> Option<Self> {
-        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-        let raw = raw.strip_suffix(b"\0").unwrap_or(&raw);
-        if raw.is_empty() {
-            return None;
-        }
-        let words: Vec<String> = raw
-            .split(|&b| b == 0)
-            .map(|w| String::from_utf8_lossy(w).into_owned())
-            .collect();
-        if let [one] = words.as_slice()
-            && one.contains(char::is_whitespace)
-        {
-            return Some(Self::split(one));
-        }
-        Some(Self {
-            words,
-            loose: false,
-        })
-    }
-
-    /// No exact arguments off Linux.
-    #[cfg(not(target_os = "linux"))]
-    fn of(_pid: u32) -> Option<Self> {
-        None
-    }
 }
 
 fn ps_full() -> String {
@@ -189,47 +143,298 @@ fn parse_procs(ps: &str) -> Vec<Proc> {
             let pid = field()?.parse().ok()?;
             let parent = field()?.parse().ok()?;
             let age = parse_etime(field()?)?;
-            let args = rest.trim().to_string();
             Some(Proc {
                 pid,
                 ppid: parent,
                 age,
-                argv: Argv::split(&args),
-                args,
+                args: rest.trim().to_string(),
             })
         })
         .collect()
 }
 
-/// Every process, with its exact arguments where they read
-/// ([`Argv::of`]).
-fn procs() -> Vec<Proc> {
-    let mut procs = parse_procs(&ps_full());
-    for p in &mut procs {
-        if let Some(argv) = Argv::of(p.pid) {
-            p.argv = argv;
-        }
-    }
-    procs
+/// A Unix socket bound to a path, as the kernel lists it. The kernel
+/// keeps a socket only while some process holds it open, so each is a
+/// running server's (or probe's), whatever its command line says; a socket
+/// file nobody holds any more is not listed.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Held {
+    /// The process holding it, when that can be read (on Linux, a process
+    /// of another user, or one exiting, does not show its descriptors).
+    pid: Option<u32>,
+    /// The path as it was bound: relative for a relative `-S`.
+    path: PathBuf,
+    /// The holder's working directory, which a relative `path` is from.
+    cwd: Option<PathBuf>,
 }
 
-/// The arguments of every process but `skip`'s: on Linux read from
-/// `/proc` alone (fast, so a sweep holding checkpoint locks holds them a
-/// short while), else from `ps`.
-fn all_argv(skip: &[u32]) -> Vec<Argv> {
-    #[cfg(target_os = "linux")]
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        return entries
-            .filter_map(Result::ok)
-            .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
-            .filter(|pid| !skip.contains(pid))
-            .filter_map(Argv::of)
-            .collect();
+impl Held {
+    /// The absolute path the server of this socket names its checkpoint
+    /// directory by (`std::path::absolute` in its own directory, which it
+    /// keeps: `Server::persist_dir`, `daemon(1, 0)`): `..` stays, as it
+    /// does there. `None` for a relative path whose holder is unknown.
+    fn absolute(&self) -> Option<PathBuf> {
+        let path = if self.path.is_absolute() {
+            self.path.clone()
+        } else {
+            self.cwd.as_ref()?.join(&self.path)
+        };
+        std::path::absolute(path).ok()
     }
-    procs()
+
+    /// The socket's real path: its directory's `realpath` with its name,
+    /// so `-L rvpath/../default` is `<dir>/default`.
+    fn canonical(&self) -> Option<PathBuf> {
+        let path = self.absolute()?;
+        let name = path.file_name()?;
+        Some(path.parent()?.canonicalize().ok()?.join(name))
+    }
+
+    /// Whether this may be the socket of checkpoint directory
+    /// `<label>-<hash>` (`vtmux_server::persist::state_dir`): its name is
+    /// `label`, and its absolute path hashes to `hash` or is unknown.
+    fn may_own(&self, label: &str, hash: &str) -> bool {
+        self.path.file_name() == Some(label.as_ref())
+            && self
+                .absolute()
+                .is_none_or(|p| vtmux_server::persist::path_hash(&p) == hash)
+    }
+}
+
+/// The sockets bound to a path and held open now, with their holders.
+/// `None` when that cannot be told: then nothing is killed and every
+/// checkpoint directory stays.
+#[cfg(target_os = "linux")]
+pub fn held_sockets() -> Option<Vec<Held>> {
+    held_in_proc(Path::new("/proc"))
+}
+
+/// The sockets bound to a path and held open now (`lsof -U`), with their
+/// holders and, for a relative path, their directories (`lsof -d cwd`).
+#[cfg(target_os = "macos")]
+pub fn held_sockets() -> Option<Vec<Held>> {
+    let lsof = |args: &[&str]| {
+        let out = Command::new("lsof")
+            .args(["-n", "-w", "-F", "pftn"])
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        (out.status.success() || !out.stdout.is_empty()).then_some(out.stdout)
+    };
+    let mut held = parse_lsof_sockets(&lsof(&["-U"])?);
+    let relative: Vec<String> = held
+        .iter()
+        .filter(|h| h.path.is_relative())
+        .filter_map(|h| h.pid.map(|p| p.to_string()))
+        .collect();
+    if !relative.is_empty() {
+        let list = relative.join(",");
+        let cwds = parse_lsof_cwds(&lsof(&["-a", "-d", "cwd", "-p", list.as_str()])?);
+        for h in &mut held {
+            h.cwd = h.pid.and_then(|p| cwds.get(&p).cloned());
+        }
+    }
+    Some(held)
+}
+
+/// No way to tell elsewhere.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn held_sockets() -> Option<Vec<Held>> {
+    None
+}
+
+/// `net/unix` of a `/proc` tree: the inode and path of every socket bound
+/// to a path (not an abstract one, `@...`). A line is `Num: RefCount
+/// Protocol Flags Type St Inode`, then a space and the path as bound, if
+/// any (`unix_seq_show`, `net/unix/af_unix.c`): the rest of the line, spaces
+/// and all.
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "Linux reads `/proc`; the tests read a fake one everywhere"
+    )
+)]
+fn parse_net_unix(table: &[u8]) -> Vec<(u64, PathBuf)> {
+    use std::os::unix::ffi::OsStrExt as _;
+    table
+        .split(|&b| b == b'\n')
+        .skip(1)
+        .filter_map(|line| {
+            let mut rest = line;
+            let mut field = || {
+                rest = &rest[rest.iter().position(|&b| b != b' ')?..];
+                let end = rest.iter().position(|&b| b == b' ')?;
+                let f = &rest[..end];
+                rest = &rest[end + 1..];
+                Some(f)
+            };
+            for _ in 0..6 {
+                field()?;
+            }
+            let inode = std::str::from_utf8(field()?).ok()?.parse().ok()?;
+            (!rest.is_empty() && rest[0] != b'@')
+                .then(|| (inode, PathBuf::from(std::ffi::OsStr::from_bytes(rest))))
+        })
+        .collect()
+}
+
+/// The sockets of `proc`'s table (`net/unix`), each with the processes
+/// holding it (`<pid>/fd/*` linking to `socket:[<inode>]`) and their
+/// directories (`<pid>/cwd`); one no readable process holds is listed
+/// with none. `proc` is `/proc`, or a test's fake of it. `None` when the
+/// table does not read.
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "Linux reads `/proc`; the tests read a fake one everywhere"
+    )
+)]
+fn held_in_proc(proc: &Path) -> Option<Vec<Held>> {
+    let table = parse_net_unix(&std::fs::read(proc.join("net/unix")).ok()?);
+    let by_inode: HashMap<u64, &PathBuf> = table.iter().map(|(i, p)| (*i, p)).collect();
+    let mut held = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in std::fs::read_dir(proc).ok()?.filter_map(Result::ok) {
+        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse().ok()) else {
+            continue;
+        };
+        let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else {
+            continue;
+        };
+        let mut cwd = None;
+        for fd in fds.filter_map(Result::ok) {
+            let Some(inode) = std::fs::read_link(fd.path()).ok().and_then(|t| {
+                t.to_str()?
+                    .strip_prefix("socket:[")?
+                    .strip_suffix(']')?
+                    .parse::<u64>()
+                    .ok()
+            }) else {
+                continue;
+            };
+            let Some(&path) = by_inode.get(&inode) else {
+                continue;
+            };
+            seen.insert(inode);
+            let cwd = cwd
+                .get_or_insert_with(|| std::fs::read_link(entry.path().join("cwd")).ok())
+                .clone();
+            held.push(Held {
+                pid: Some(pid),
+                path: path.clone(),
+                cwd,
+            });
+        }
+    }
+    held.extend(
+        table
+            .iter()
+            .filter(|(i, _)| !seen.contains(i))
+            .map(|(_, path)| Held {
+                pid: None,
+                path: path.clone(),
+                cwd: None,
+            }),
+    );
+    held.sort();
+    held.dedup();
+    Some(held)
+}
+
+/// Whether a socket that may be checkpoint directory `<label>-<hash>`'s
+/// ([`Held::may_own`]) is bound now, as far as a cheap look can tell: on
+/// Linux the kernel's table (`/proc/net/unix`), whoever holds it (a
+/// relative path counts by its name), true when the table does not read;
+/// elsewhere false (the sweep asks the socket files then:
+/// `sweep_checkpoints`).
+fn bound_now(label: &str, hash: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read("/proc/net/unix").map_or(true, |t| {
+            parse_net_unix(&t).into_iter().any(|(_, path)| {
+                Held {
+                    pid: None,
+                    path,
+                    cwd: None,
+                }
+                .may_own(label, hash)
+            })
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (label, hash);
+        false
+    }
+}
+
+/// `lsof -F pftn` output: `p<pid>` starts a process, `f<fd>` one of its
+/// files, `t<type>` and `n<name>` describe it.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "macOS reads `lsof`; the tests read it everywhere")
+)]
+fn parse_lsof(out: &[u8]) -> Vec<(u32, String, String, String)> {
+    let out = String::from_utf8_lossy(out);
+    let mut files: Vec<(u32, String, String, String)> = Vec::new();
+    let mut pid = None;
+    for line in out.lines() {
+        let Some(tag) = line.chars().next() else {
+            continue;
+        };
+        let value = &line[tag.len_utf8()..];
+        match tag {
+            'p' => pid = value.parse().ok(),
+            'f' => {
+                if let Some(pid) = pid {
+                    files.push((pid, value.to_owned(), String::new(), String::new()));
+                }
+            }
+            't' | 'n' => {
+                if let Some(file) = files.last_mut().filter(|f| Some(f.0) == pid) {
+                    value.clone_into(if tag == 't' { &mut file.2 } else { &mut file.3 });
+                }
+            }
+            _ => {}
+        }
+    }
+    files
+}
+
+/// The sockets bound to a path in `lsof -U -F pftn` output: a `unix` file
+/// whose name is a path, not a peer (`->0x...`) or nothing.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "macOS reads `lsof`; the tests read it everywhere")
+)]
+fn parse_lsof_sockets(out: &[u8]) -> Vec<Held> {
+    let mut held: Vec<Held> = parse_lsof(out)
         .into_iter()
-        .filter(|p| !skip.contains(&p.pid))
-        .map(|p| p.argv)
+        .filter(|(_, _, kind, name)| kind == "unix" && !name.is_empty() && !name.starts_with("->"))
+        .map(|(pid, _, _, name)| Held {
+            pid: Some(pid),
+            path: PathBuf::from(name),
+            cwd: None,
+        })
+        .collect();
+    held.sort();
+    held.dedup();
+    held
+}
+
+/// Each process's directory in `lsof -d cwd -F pftn` output.
+#[cfg_attr(
+    all(not(target_os = "macos"), not(test)),
+    expect(dead_code, reason = "macOS reads `lsof`; the tests read it everywhere")
+)]
+fn parse_lsof_cwds(out: &[u8]) -> HashMap<u32, PathBuf> {
+    parse_lsof(out)
+        .into_iter()
+        .filter(|(_, fd, _, name)| fd == "cwd" && !name.is_empty())
+        .map(|(pid, _, _, name)| (pid, PathBuf::from(name)))
         .collect()
 }
 
@@ -251,171 +456,33 @@ pub fn is_test_label(l: &str) -> bool {
         || numbered("i")
 }
 
-/// Is this a `tmux`/`vtmux` command line whose socket is a test one: a
-/// global `-L` label from [`is_test_label`], an oracle run's
-/// `-S /tmp/vto-*/s`, or `-S` a test label's socket
-/// (`.../tmux-<uid>/<label>` or `vtmux-<uid>`). The socket is the one
-/// tmux takes ([`server_socket`]): `-uL rv1 -L default` is `default`'s
-/// server, not a test one.
-///
-/// A server a live upgrade re-executed runs as `<binary> -S <its socket>
-/// --vtmux-resume <fd>` with `argv[0]` the binary it was upgraded onto, so
-/// whatever that is called (`vtmux-new`, a copy, `old`), a command line with
-/// `--vtmux-resume` and a test `-S` is a test server. Any other `argv0` that
-/// is not `tmux` or `vtmux` is not. An image of a binary from before the `-S`
-/// form is started as `<binary> --vtmux-resume <fd>` alone: nothing on its
-/// command line says whose it is, so it is not matched at any `argv0`.
-fn is_test_server(argv: &Argv) -> bool {
-    let Some((named, flags)) = socket_flags(&argv.words, false) else {
+/// Whether real socket path `socket` is a test one: `<dir>/tmux-<uid>/<label>`
+/// or `<dir>/vtmux-<uid>/<label>` with a test label ([`is_test_label`]),
+/// where `-L <label>` puts it under any `TMUX_TMPDIR`, or an oracle run's
+/// `<tmp>/vto-*/s` (`tmp` is `/tmp`'s real path). The path is real
+/// ([`Held::canonical`]), so its name has no path parts and its directory
+/// is the one it is in: `-L rvpath/../default` is `default`'s socket.
+fn is_test_socket(socket: &Path, uid: u32, tmp: &Path) -> bool {
+    let name = |p: &Path| p.file_name().and_then(|n| n.to_str()).map(str::to_owned);
+    let Some(dir) = socket.parent() else {
         return false;
     };
-    match server_socket(&flags) {
-        Socket::Label(l) => named && is_test_label(l),
-        Socket::Path(p) => p.starts_with("/tmp/vto-") || is_label_socket(p),
-    }
+    let (Some(label), Some(dir_name)) = (name(socket), name(dir)) else {
+        return false;
+    };
+    let socket_dir = dir_name == format!("tmux-{uid}") || dir_name == format!("vtmux-{uid}");
+    let oracle = label == "s" && dir_name.starts_with("vto-") && dir.parent() == Some(tmp);
+    oracle || (socket_dir && is_test_label(&label))
 }
 
-/// The socket a command line's global flags name.
-#[derive(Debug, PartialEq, Eq)]
-enum Socket<'a> {
-    /// `-L`, or none (`default`).
-    Label(&'a str),
-    /// `-S`.
-    Path(&'a str),
-}
-
-/// The socket tmux takes from global flags `flags`: the last `-S`, else
-/// the last `-L`, else `default` (`main`, tmux.c: each `-L` and `-S`
-/// replaces the one before, and `-S` wins over `-L`). `$TMUX` is not
-/// looked at: a server's own is its starter's, which may be another
-/// server's.
-fn server_socket<'a>(flags: &[(char, &'a str)]) -> Socket<'a> {
-    let last = |f| flags.iter().rev().find(|&&(g, _)| g == f).map(|&(_, v)| v);
-    last('S').map_or_else(
-        || Socket::Label(last('L').unwrap_or("default")),
-        Socket::Path,
-    )
-}
-
-/// The global `-L` and `-S` values of command line `words`, in order, with
-/// whether `argv0` is `tmux` or `vtmux`. `None` for a command line of
-/// another program, unless it has `--vtmux-resume` (a server a live upgrade
-/// re-executed, whatever its `argv0`) or `any` is set. Global flags only,
-/// read as tmux's `getopt` does (`main`, tmux.c:
-/// `"2c:CDdf:hlL:NqS:T:uUvV"`): bundled (`-uL rv1`, `-dLrv1`), a value
-/// attached or the next word, up to `--` or the command.
-/// `--vtmux-resume <fd>` is skipped with its value.
-fn socket_flags(words: &[String], any: bool) -> Option<(bool, Vec<(char, &str)>)> {
-    let mut words = words.iter().map(String::as_str);
-    let argv0 = words.next()?;
-    let named = matches!(argv0.rsplit('/').next(), Some("tmux" | "vtmux"));
-    if !named && !any && !words.clone().any(|w| w == "--vtmux-resume") {
-        return None;
-    }
-    let mut found = Vec::new();
-    while let Some(w) = words.next() {
-        if w == "--" {
-            break;
-        }
-        if let Some(long) = w.strip_prefix("--") {
-            if long == "vtmux-resume" {
-                words.next();
-            }
-            continue;
-        }
-        let Some(bundle) = w.strip_prefix('-').filter(|b| !b.is_empty()) else {
-            break;
-        };
-        for (i, f) in bundle.char_indices() {
-            if !matches!(f, 'c' | 'f' | 'L' | 'S' | 'T') {
-                continue;
-            }
-            // The rest of the word, else the next one, is the value.
-            let rest = &bundle[i + f.len_utf8()..];
-            let value = if rest.is_empty() {
-                words.next()
-            } else {
-                Some(rest)
-            };
-            if let Some(v) = value
-                && matches!(f, 'L' | 'S')
-            {
-                found.push((f, v));
-            }
-            break;
-        }
-    }
-    Some((named, found))
-}
-
-/// The test labels running processes may be using: a server of one may be
-/// about to take its checkpoint directory's lock (at its restore, or at
-/// its first checkpoint), or not hold it at all (`vtmux-persist` off, a
-/// refused restore, the moment after a live upgrade).
-///
-/// Errs on keeping. Every `-L` and `-S` socket name of an exact command
-/// line counts, not only the one tmux takes, whatever its `argv0` (a
-/// binary run under another name, a copy). A loose one ([`Argv`]) may have
-/// a value cut at a space, so it keeps every label it holds anywhere as
-/// text.
-///
-/// A server a live upgrade re-executed from a binary before the `-S` form
-/// runs as `<binary> --vtmux-resume <fd>` alone, which names no label
-/// ([`is_test_server`]): its directory is kept by the other checks of
-/// [`sweep_checkpoints`], its socket answering (in the default socket
-/// directories) or its lock, which it takes again at its first checkpoint
-/// after the exec.
-#[derive(Debug, Default)]
-pub struct InUse {
-    labels: HashSet<String>,
-    loose: Vec<String>,
-}
-
-impl InUse {
-    fn of<'a>(argvs: impl IntoIterator<Item = &'a Argv>) -> Self {
-        let mut in_use = Self::default();
-        for argv in argvs {
-            if argv.loose {
-                in_use.loose.push(argv.words.join(" "));
-            }
-            let Some((_, flags)) = socket_flags(&argv.words, true) else {
-                continue;
-            };
-            in_use.labels.extend(
-                flags
-                    .into_iter()
-                    .filter_map(|(flag, value)| match flag {
-                        'L' => Some(value),
-                        _ => Path::new(value).file_name()?.to_str(),
-                    })
-                    .filter(|l| is_test_label(l))
-                    .map(str::to_owned),
-            );
-        }
-        in_use
-    }
-
-    /// Whether a server of `label` may be running.
-    fn contains(&self, label: &str) -> bool {
-        self.labels.contains(label) || self.loose.iter().any(|l| l.contains(label))
-    }
-}
-
-/// `path` is `<dir>/tmux-<uid>/<label>` or `<dir>/vtmux-<uid>/<label>` with a
-/// test label: where `-L <label>` puts the socket.
-fn is_label_socket(path: &str) -> bool {
-    let p = Path::new(path);
-    let dir = p
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(|d| d.to_str());
-    let label = p.file_name().and_then(|l| l.to_str());
-    let socket_dir = dir.is_some_and(|d| {
-        d.strip_prefix("tmux-")
-            .or_else(|| d.strip_prefix("vtmux-"))
-            .is_some_and(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()))
-    });
-    socket_dir && label.is_some_and(is_test_label)
+/// The processes holding a test socket ([`is_test_socket`]).
+fn test_servers(held: &[Held], uid: u32, tmp: &Path) -> HashSet<u32> {
+    held.iter()
+        .filter_map(|h| {
+            let pid = h.pid?;
+            is_test_socket(&h.canonical()?, uid, tmp).then_some(pid)
+        })
+        .collect()
 }
 
 /// A parent that adopts orphans: init, or the per-user/subreaper manager.
@@ -463,10 +530,11 @@ fn descendants(procs: &[Proc], set: &mut HashSet<u32>) {
     }
 }
 
-/// Pids to kill: every orphaned (parent is init-like), old enough,
-/// test-labelled server, then everything below it (pane programs). Never
-/// `own`'s process tree or ancestors ([`protected`]).
-fn orphans(procs: &[Proc], min_age: Duration, own: u32) -> Vec<u32> {
+/// Pids to kill: every orphaned (parent is init-like), old enough test
+/// server (one of `servers`, [`test_servers`]), then everything below it
+/// (pane programs). Never `own`'s process tree or ancestors
+/// ([`protected`]).
+fn orphans(procs: &[Proc], servers: &HashSet<u32>, min_age: Duration, own: u32) -> Vec<u32> {
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let keep = protected(procs, own);
     let mut hit: HashSet<u32> = procs
@@ -474,7 +542,7 @@ fn orphans(procs: &[Proc], min_age: Duration, own: u32) -> Vec<u32> {
         .filter(|p| {
             !keep.contains(&p.pid)
                 && p.age >= min_age
-                && is_test_server(&p.argv)
+                && servers.contains(&p.pid)
                 && by_pid
                     .get(&p.ppid)
                     .is_some_and(|parent| is_init_like(parent))
@@ -546,19 +614,14 @@ fn socket_dirs(tmux_tmpdir: Option<&Path>, uid: u32) -> Vec<PathBuf> {
         .collect()
 }
 
-fn current_uid() -> Option<u32> {
-    let out = Command::new("id")
-        .arg("-u")
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+fn current_uid() -> u32 {
+    rustix::process::getuid().as_raw()
 }
 
 /// [`socket_dirs`] for this user and environment.
 pub fn default_socket_dirs() -> Vec<PathBuf> {
     let tmpdir = std::env::var_os("TMUX_TMPDIR").map(PathBuf::from);
-    current_uid().map_or_else(Vec::new, |uid| socket_dirs(tmpdir.as_deref(), uid))
+    socket_dirs(tmpdir.as_deref(), current_uid())
 }
 
 /// Test-labelled entries of `dirs`, sorted: what a harness added is what a
@@ -677,23 +740,40 @@ fn empty_checkpoint(dir: &Path, dry: bool) -> bool {
     found && all
 }
 
+/// How long since checkpoint directory `dir` changed: since the newest
+/// change to it or an entry in it (a checkpoint renames its `manifest`
+/// into place, which changes the directory). `None` if any of it does not
+/// read.
+fn unchanged_for(dir: &Path) -> Option<Duration> {
+    let mut newest = dir.metadata().ok()?.modified().ok()?;
+    for e in std::fs::read_dir(dir).ok()? {
+        newest = newest.max(e.ok()?.metadata().ok()?.modified().ok()?);
+    }
+    Some(newest.elapsed().unwrap_or(Duration::ZERO))
+}
+
 /// Empty the checkpoint directories in `root` (`<label>-<hash>`) whose
 /// label is a test one ([`is_test_label`]) and whose server is gone, as
 /// far as can be told; when in doubt, a directory stays.
 ///
-/// `in_use` lists the processes running first ([`InUse`]), with no lock
-/// held: a label any of them names is kept (a server starting, before its
-/// restore takes the lock; one with its socket elsewhere, or that does
-/// not hold its lock), and its lock never touched. A directory is a
-/// candidate when no socket `<dir>/<label>` of `socket_dirs` that hashes
-/// to `<hash>` answers a `connect()`. Then one at a time: its lock is
-/// taken, exclusive and without waiting ([`take_checkpoint_lock`]), one a
-/// server holds kept; its socket is asked again under it (a server
-/// started since binds it before its restore takes the lock); and it is
-/// emptied, all but the lock file ([`empty_checkpoint`]), and let go. So
-/// no lock is held longer than one directory's emptying, far short of the
-/// 50 ms a restore's `Lock::take` waits, and a server that starts then
-/// finds no checkpoint, never one half removed.
+/// `held` lists the sockets held open now ([`held_sockets`]), with no lock
+/// held; `None` (it cannot be told) keeps every directory. A directory is
+/// kept when a held socket may be its own ([`Held::may_own`]: its name,
+/// its absolute path hashing as the server's does), whatever command line
+/// its server has (a `-L` with path parts, a socket from `$TMUX`), and its
+/// lock is never touched; a server binds its socket before it restores,
+/// so one starting is held already. Kept too: a directory with a socket
+/// `<dir>/<label>` of `socket_dirs` hashing to `<hash>` that answers a
+/// `connect()`, and one changed within `min_age`. Then one at a time: its
+/// lock is taken, exclusive and without waiting ([`take_checkpoint_lock`]),
+/// one a server holds kept; its socket is asked again under it (a socket of
+/// its name bound now, [`bound_now`], or a file of `socket_dirs` that
+/// answers: a server started since the list binds before its restore takes
+/// the lock); and it is emptied, all but the lock file
+/// ([`empty_checkpoint`]), and let go. So no lock is held longer than one
+/// directory's emptying, far short of the 50 ms a restore's `Lock::take`
+/// waits, and a server that starts then finds no checkpoint, never one
+/// half removed.
 ///
 /// An emptied directory keeps its `lock` for good (a server may have it
 /// open), so it stays, holding that empty file; a later sweep does not
@@ -704,7 +784,8 @@ fn empty_checkpoint(dir: &Path, dry: bool) -> bool {
 pub fn sweep_checkpoints(
     root: &Path,
     socket_dirs: &[PathBuf],
-    in_use: impl FnOnce() -> InUse,
+    held: impl FnOnce() -> Option<Vec<Held>>,
+    min_age: Duration,
     dry: bool,
 ) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -723,7 +804,9 @@ pub fn sweep_checkpoints(
     if candidates.is_empty() {
         return Vec::new();
     }
-    let in_use = in_use();
+    let Some(held) = held() else {
+        return Vec::new();
+    };
     let live = |label: &str, hash: &str| {
         socket_dirs
             .iter()
@@ -738,13 +821,17 @@ pub fn sweep_checkpoints(
     let mut gone: Vec<PathBuf> = candidates
         .into_iter()
         .filter(|(dir, label, hash)| {
-            if in_use.contains(label) || live(label, hash) {
+            if held.iter().any(|h| h.may_own(label, hash))
+                || live(label, hash)
+                || unchanged_for(dir).is_none_or(|age| age < min_age)
+            {
                 return false;
             }
             let Some(lock) = take_checkpoint_lock(dir, dry) else {
                 return false;
             };
-            let emptied = !live(label, hash) && empty_checkpoint(dir, dry);
+            let emptied =
+                !bound_now(label, hash) && !live(label, hash) && empty_checkpoint(dir, dry);
             drop(lock);
             emptied
         })
@@ -761,6 +848,14 @@ pub fn list_sockets() -> ExitCode {
         println!("{}", p.display());
     }
     ExitCode::SUCCESS
+}
+
+/// `/tmp`'s real path (`/private/tmp` on macOS), where an oracle run's
+/// sockets are.
+fn real_tmp() -> PathBuf {
+    Path::new("/tmp")
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
 }
 
 /// `cargo xtask reap [--min-age <minutes>] [--dry-run]`.
@@ -784,8 +879,11 @@ pub fn run() -> ExitCode {
             }
         }
     }
-    let procs = procs();
-    let pids = orphans(&procs, min_age, std::process::id());
+    let procs = parse_procs(&ps_full());
+    let servers = held_sockets().map_or_else(HashSet::new, |held| {
+        test_servers(&held, current_uid(), &real_tmp())
+    });
+    let pids = orphans(&procs, &servers, min_age, std::process::id());
     for p in procs.iter().filter(|p| pids.contains(&p.pid)) {
         let head: String = p.args.chars().take(100).collect();
         eprintln!("reap {} ({}s old): {head}", p.pid, p.age.as_secs());
@@ -808,12 +906,16 @@ pub fn run() -> ExitCode {
         if dry { "would remove" } else { "removed" },
         socks.len()
     );
-    // The processes running once the kill and the socket sweep are done
-    // (a server started meanwhile too), but those just killed, which may
-    // linger a moment.
-    let in_use = || InUse::of(&all_argv(&pids));
+    // The sockets held once the kill and the socket sweep are done (a
+    // server started meanwhile too), but those of the processes just
+    // killed, which may linger a moment.
+    let held = || {
+        let mut held = held_sockets()?;
+        held.retain(|h| h.pid.is_none_or(|p| !pids.contains(&p)));
+        Some(held)
+    };
     let checkpoints = default_state_root()
-        .map(|root| sweep_checkpoints(&root, &default_socket_dirs(), in_use, dry))
+        .map(|root| sweep_checkpoints(&root, &default_socket_dirs(), held, min_age, dry))
         .unwrap_or_default();
     for p in &checkpoints {
         eprintln!("checkpoint {}", p.display());
@@ -863,22 +965,12 @@ mod tests {
         parse_procs(&rows.join("\n"))
     }
 
-    /// `line` as exact arguments, one word each (`/proc/<pid>/cmdline`).
-    fn exact(line: &str) -> Argv {
-        Argv {
-            loose: false,
-            ..Argv::split(line)
+    fn hold(pid: Option<u32>, path: impl Into<PathBuf>, cwd: Option<&Path>) -> Held {
+        Held {
+            pid,
+            path: path.into(),
+            cwd: cwd.map(Path::to_path_buf),
         }
-    }
-
-    fn in_use_of(lines: &[&str]) -> InUse {
-        InUse::of(&lines.iter().map(|l| exact(l)).collect::<Vec<_>>())
-    }
-
-    fn labels(in_use: &InUse) -> Vec<&str> {
-        let mut found: Vec<&str> = in_use.labels.iter().map(String::as_str).collect();
-        found.sort_unstable();
-        found
     }
 
     #[test]
@@ -891,121 +983,196 @@ mod tests {
         assert_eq!(parse_etime("x"), None);
     }
 
+    /// The kernel's table as Linux prints it: the inode padded, the path
+    /// the rest of the line (spaces and all), none for an unbound socket,
+    /// `@` for an abstract one.
     #[test]
-    fn test_servers_are_told_from_the_owners() {
-        for yes in [
-            "/w/target/debug/vtmux -L rv1 -f /dev/null new -d",
-            "tmux -Lrv_probe -f/dev/null new",
-            "/c/tmux -LtestA42 -f/dev/null new -d",
-            "vtmux -L att99-3 -f /dev/null attach",
-            "vtmux -L cli7 -f /dev/null start",
-            "vtmux -L ctl7-0 -f /dev/null -C new",
-            "tmux -2 -L i42 new",
-            "tmux -uL rv2 new",
-            "vtmux -2dS/tmp/vto-a1b2c3/s new",
-            "tmux -S /tmp/vto-a1b2c3/s -f /dev/null new",
-            "tmux -S /tmp/vto-a1b2c3/s --vtmux-resume 9",
-            "/w/vtmux -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9 --vtmux-switched-back",
-            "tmux -S /tmp/t1/tmux-1000/testA42 --vtmux-resume 9",
-            // Upgraded onto a binary of another name (argv[0] is its path).
-            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9",
-            "/h/old -S /tmp/vto-a1b2c3/s --vtmux-resume 9 --vtmux-switched-back",
-            "vtmux-new -S /tmp/t1/vtmux-1000/testA42 --vtmux-resume 9",
-            // The last `-L` is the one, and `-S` wins over `-L`.
-            "tmux -L default -uL rv1 new",
-            "vtmux -L work -L rv2",
-            "vtmux -L work -S /tmp/vto-a1b2c3/s new",
-            "vtmux -S /run/user/1/sock -S /tmp/vto-a1b2c3/s new",
-        ] {
-            assert!(is_test_server(&exact(yes)), "{yes}");
-        }
-        for no in [
-            "tmux new-session -d -s dotfiles",
-            "tmux -L work new",
-            "tmux -L cliff new",
-            "tmux -f /dev/null -L other new",
-            "vtmux new -s rv1 -L rv1",
-            "tmux -S /run/user/1/sock new",
-            "tmux -S /tmp/t1/vtmux-1000/default --vtmux-resume 9",
-            "tmux -S /tmp/t1/vtmux-1000/work --vtmux-resume 9",
-            "tmux -S /tmp/t1/x/rv1 --vtmux-resume 9",
-            "tmux --vtmux-resume 9",
-            "/x/vtmux-copy --vtmux-resume 9",
-            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/work --vtmux-resume 9",
-            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/rv1 new",
-            "/x/vtmux-copy -L rv1 --vtmux-resume 9",
-            "/x/vtmux-copy -S /run/user/1/sock --vtmux-resume 9",
-            "/usr/bin/python3 /tmp/rv_1/x.py -Lrv1",
-            "tmuxer -Lrv1 x",
-            "tmux -uL rvx -L default new",
-            "vtmux -uL rvbundled -L work new",
-            "vtmux -Lrv1 -Ldefault",
-            "vtmux -L rv1 -S /run/user/1/sock new",
-            "vtmux -S /tmp/vto-a1b2c3/s -L rv1 -S /run/x new",
-        ] {
-            assert!(!is_test_server(&exact(no)), "{no}");
-        }
-    }
-
-    #[test]
-    fn labels_in_use_are_the_test_sockets_named_on_command_lines() {
-        let found = in_use_of(&[
-            "/w/vtmux -L rv1 -f /dev/null new -d",
-            "tmux -LtestA2 new",
-            "/x/vtmux-copy -S /tmp/t1/vtmux-1000/cli3 --vtmux-resume 9",
-            "vtmux -S /tmp/p/att4-0 new",
-            "tmux -L work new",
-            "vtmux new -s rv5 -L rv5",
-            "/usr/bin/python3 x.py -L rv6",
-            // Any `argv0`: a binary run under another name.
-            "/x/vtmux-dev -L rv7 new",
-            // Every label named, not only the one tmux takes.
-            "tmux -L rv8 -L default new",
-        ]);
+    fn the_kernel_socket_table_reads_paths_whole() {
+        let table = b"Num       RefCount Protocol Flags    Type St Inode Path\n\
+            0000000000000000: 00000002 00000000 00010000 0001 01   812 /tmp/vtmux-7/rv1\n\
+            0000000000000000: 00000003 00000000 00000000 0001 03 99814\n\
+            0000000000000000: 00000002 00000000 00010000 0001 01 99815 @/tmp/.X11-unix/X0\n\
+            0000000000000000: 00000002 00000000 00010000 0001 01 99816 /tmp/with space/rv 2\n\
+            0000000000000000: 00000002 00000000 00010000 0001 01 99817 rel/rv3\n";
         assert_eq!(
-            labels(&found),
-            ["att4-0", "cli3", "rv1", "rv7", "rv8", "testA2"]
+            parse_net_unix(table),
+            [
+                (812, PathBuf::from("/tmp/vtmux-7/rv1")),
+                (99816, PathBuf::from("/tmp/with space/rv 2")),
+                (99817, PathBuf::from("rel/rv3")),
+            ]
         );
     }
 
-    /// An exact command line keeps a value with a space in it whole; a
-    /// loose one (macOS's `ps`) may have it cut in two, so every label it
-    /// holds as text is in use.
+    /// A fake `/proc`: each socket with the processes whose descriptors
+    /// link to it and their directories; one no readable process holds
+    /// (another user's, one exiting) with none.
     #[test]
-    fn labels_in_use_survive_spaces_in_values() {
-        let words = |w: &[&str]| w.iter().map(|&w| w.to_owned()).collect();
-        let exact = Argv {
-            words: words(&["vtmux", "-f", "/tmp/a b.conf", "-L", "rv1", "new"]),
-            loose: false,
+    fn held_sockets_come_from_the_kernel_table_and_fd_links() {
+        use std::os::unix::fs::symlink;
+        let s = Scratch::new("fakeproc");
+        let proc = s.0.join("proc");
+        std::fs::create_dir_all(proc.join("net")).unwrap();
+        std::fs::write(
+            proc.join("net/unix"),
+            "Num       RefCount Protocol Flags    Type St Inode Path\n\
+             0000000000000000: 00000002 00000000 00010000 0001 01 11 /t/vtmux-7/rv a\n\
+             0000000000000000: 00000002 00000000 00000000 0001 03 12 /t/vtmux-7/rv a\n\
+             0000000000000000: 00000002 00000000 00010000 0001 01 13 rel/rv2\n\
+             0000000000000000: 00000002 00000000 00010000 0001 01 14 /t/o/rv3\n\
+             0000000000000000: 00000003 00000000 00000000 0001 03 15\n",
+        )
+        .unwrap();
+        let pid = |n: u32, fds: &[&str], cwd: Option<&str>| {
+            let dir = proc.join(n.to_string());
+            std::fs::create_dir_all(dir.join("fd")).unwrap();
+            for (i, t) in fds.iter().enumerate() {
+                symlink(t, dir.join("fd").join(i.to_string())).unwrap();
+            }
+            if let Some(c) = cwd {
+                symlink(c, dir.join("cwd")).unwrap();
+            }
         };
-        let path = Argv {
-            words: words(&["vtmux", "-S", "/tmp/with space/rv2", "new"]),
-            loose: false,
-        };
-        let found = InUse::of(&[exact, path]);
-        assert_eq!(labels(&found), ["rv1", "rv2"]);
-        let loose = InUse::of(&[Argv::split("vtmux -f /tmp/a b.conf -L rv3 new")]);
-        assert_eq!(labels(&loose), [] as [&str; 0]);
-        assert!(loose.contains("rv3"));
-        assert!(!loose.contains("rv4"));
+        // A server: its listener and an accepted connection, which the
+        // table lists under the listener's path.
+        pid(
+            100,
+            &["/dev/null", "socket:[11]", "socket:[12]", "pipe:[3]"],
+            Some("/w"),
+        );
+        pid(200, &["socket:[13]", "socket:[15]"], Some("/home/u"));
+        // A process whose descriptors do not read (no `fd/`).
+        std::fs::create_dir_all(proc.join("300")).unwrap();
+        std::fs::create_dir_all(proc.join("self")).unwrap();
+        assert_eq!(
+            held_in_proc(&proc).unwrap(),
+            [
+                hold(None, "/t/o/rv3", None),
+                hold(Some(100), "/t/vtmux-7/rv a", Some(Path::new("/w"))),
+                hold(Some(200), "rel/rv2", Some(Path::new("/home/u"))),
+            ]
+        );
+        assert_eq!(held_in_proc(&s.0.join("missing")), None);
     }
 
-    /// Global flags as tmux's `getopt` reads them: bundled, a value
-    /// attached or the next word, up to `--` or the first non-option.
+    /// `lsof -F pftn` as macOS prints it: a process's files after its
+    /// `p` line, a socket's path whole (spaces too), a peer (`->0x...`) or
+    /// an unbound one not a path.
     #[test]
-    fn labels_in_use_read_bundled_flags_as_getopt_does() {
-        let found = in_use_of(&[
-            "tmux -uL rv1 new",
-            "/w/vtmux -2dLrv2",
-            "vtmux -vS /tmp/t/tmux-1/cli3 ls",
-            "vtmux -S /tmp/t/vtmux-1/ctl4 --vtmux-resume 3 --vtmux-switched-back",
-            "vtmux -uf /dev/null -L rv5 new",
-            "vtmux -f -L rv6 new",
-            "vtmux -- -L rv7",
-            "vtmux - -L rv8",
-            "vtmux -Tfeatures -L rv9",
-        ]);
-        assert_eq!(labels(&found), ["cli3", "ctl4", "rv1", "rv2", "rv5", "rv9"]);
+    fn held_sockets_come_from_lsof_on_macos() {
+        let sockets = b"p501\nfcwd\ntDIR\nn/Users/u\nf3u\ntunix\nn/private/tmp/vtmux-501/rv a\n\
+            f4u\ntunix\nn->0x1f2e3d4c5b6a7980\nf5u\ntunix\nn\n\
+            p77\nf6u\ntunix\nnrel/rv2\nf7u\ntunix\nn/private/tmp/vtmux-501/rv a\n";
+        assert_eq!(
+            parse_lsof_sockets(sockets),
+            [
+                hold(Some(77), "/private/tmp/vtmux-501/rv a", None),
+                hold(Some(77), "rel/rv2", None),
+                hold(Some(501), "/private/tmp/vtmux-501/rv a", None),
+            ]
+        );
+        let cwds = b"p77\nfcwd\ntDIR\nn/Users/u/a b\np78\nfcwd\ntDIR\nn/\n";
+        assert_eq!(
+            parse_lsof_cwds(cwds),
+            HashMap::from([
+                (77, PathBuf::from("/Users/u/a b")),
+                (78, PathBuf::from("/")),
+            ])
+        );
+    }
+
+    /// Which held sockets are test ones, from their real paths: a test
+    /// label in a `tmux-<uid>`/`vtmux-<uid>` directory, or an oracle run's
+    /// `<tmp>/vto-*/s`. `-L rvpath/../default` reaches `default`; a socket
+    /// from `$TMUX` elsewhere, another user's directory, or a relative
+    /// path whose holder's directory is unknown are not test ones.
+    #[test]
+    fn test_servers_are_told_by_the_real_socket_path() {
+        use std::os::unix::fs::symlink;
+        let s = Scratch::new("realpath");
+        let base = s.0.canonicalize().unwrap();
+        let socks = base.join("vtmux-7");
+        let spaced = base.join("with space/tmux-7");
+        for d in [
+            socks.join("rvpath"),
+            spaced.clone(),
+            base.join("o"),
+            base.join("vtmux-8"),
+            base.join("vto-ab12"),
+        ] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        symlink(&socks, base.join("link")).unwrap();
+        let cases = [
+            (socks.join("rv1"), None, true),
+            (socks.join("testA4"), None, true),
+            (socks.join("att3-0"), None, true),
+            (socks.join("rvpath/../rv2"), None, true),
+            (socks.join("rvpath/../default"), None, false),
+            (socks.join("rvpath/../work"), None, false),
+            (socks.join("default"), None, false),
+            (socks.join("cliff"), None, false),
+            (spaced.join("rv s"), None, true),
+            (base.join("link/rv5"), None, true),
+            (PathBuf::from("vtmux-7/rv6"), Some(base.as_path()), true),
+            (PathBuf::from("vtmux-7/rv7"), None, false),
+            (base.join("o/rvT"), None, false),
+            (base.join("vtmux-8/rv8"), None, false),
+            (base.join("vto-ab12/s"), None, false),
+            (base.join("rvloose"), None, false),
+            (socks.join("rvpath/.."), None, false),
+        ];
+        let list: Vec<Held> = cases
+            .iter()
+            .zip(1..)
+            .map(|((path, cwd, _), pid)| hold(Some(pid), path, *cwd))
+            .chain([hold(None, socks.join("rv9"), None)])
+            .collect();
+        let mut want: Vec<u32> = cases
+            .iter()
+            .zip(1..)
+            .filter(|((_, _, test), _)| *test)
+            .map(|(_, pid)| pid)
+            .collect();
+        want.sort_unstable();
+        let mut got: Vec<u32> = test_servers(&list, 7, Path::new("/nowhere"))
+            .into_iter()
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, want, "{cases:#?}");
+        // The oracle's, in the real `/tmp` only.
+        let oracle = [hold(Some(1), base.join("vto-ab12/s"), None)];
+        assert_eq!(test_servers(&oracle, 7, &base), HashSet::from([1]));
+    }
+
+    /// A held socket keeps the checkpoint directory its server names
+    /// (`state_dir`: the name, and the hash of the absolute path, `..`
+    /// kept); one whose absolute path is unknown keeps every directory of
+    /// its name.
+    #[test]
+    fn a_held_socket_keeps_the_directory_its_server_names() {
+        let dir_of = |socket: &str| {
+            let dir =
+                vtmux_server::persist::state_dir(Path::new(socket), Some("/st".as_ref()), None)
+                    .unwrap();
+            let name = dir.file_name().unwrap().to_str().unwrap().to_owned();
+            let (label, hash) = name.rsplit_once('-').unwrap();
+            (label.to_owned(), hash.to_owned())
+        };
+        let owns = |h: &Held, socket: &str| {
+            let (label, hash) = dir_of(socket);
+            h.may_own(&label, &hash)
+        };
+        let dotted = hold(Some(1), "/t/vtmux-7/rvp/../rv1", None);
+        assert!(owns(&dotted, "/t/vtmux-7/rvp/../rv1"));
+        assert!(!owns(&dotted, "/t/vtmux-7/rv1"));
+        let relative = hold(Some(2), "rel/rv2", Some(Path::new("/w")));
+        assert!(owns(&relative, "/w/rel/rv2"));
+        assert!(!owns(&relative, "/x/rel/rv2"));
+        let unknown = hold(None, "rel/rv3", None);
+        assert!(owns(&unknown, "/w/rel/rv3"));
+        assert!(owns(&unknown, "/x/rv3"));
+        assert!(!owns(&unknown, "/x/rv4"));
     }
 
     #[test]
@@ -1023,127 +1190,39 @@ mod tests {
             // A live harness: the parent is the test, not init.
             "130 200 05:00:00 vtmux -L cli9 new",
             "200 300 05:00:00 test-binary",
-            // The owner's server.
-            "140 1 05:00:00 tmux new-session -d -s dotfiles",
+            // The owner's server, whatever its command line says.
+            "140 1 05:00:00 tmux -L rvpath/../default new",
             // Our own pid is never picked.
             "150 1 05:00:00 xtask -L rv3",
-            // A later `-L` names the owner's servers (tmux.c `main`).
-            "160 1 05:00:00 tmux -uL rvx -L default new",
-            "161 1 05:00:00 vtmux -uL rvbundled -L work new",
         ]);
+        let servers = HashSet::from([100, 110, 120, 130, 150]);
         let hour = Duration::from_secs(3600);
-        assert_eq!(orphans(&procs, hour, 150), [100, 101, 102, 110]);
+        assert_eq!(orphans(&procs, &servers, hour, 150), [100, 101, 102, 110]);
         assert_eq!(
-            orphans(&procs, Duration::ZERO, 150),
+            orphans(&procs, &servers, Duration::ZERO, 150),
             [100, 101, 102, 110, 120]
         );
     }
 
     /// The reaper must never pick its own ancestors or descendants, even when
-    /// their command lines look like old orphaned test servers (a shell whose
-    /// command line mentions `-L rv1`, a harness run from init).
+    /// they hold a test socket (a harness run from init).
     #[test]
     fn own_tree_is_never_picked() {
         let procs = ps(&[
             "1 0 99:00:00 /sbin/init",
-            // Ancestors: an agent under init whose argv embeds a probe command.
+            // Ancestors: an agent under init that holds a test socket.
             "10 1 05:00:00 tmux -L rv1 -f /dev/null new",
             "11 10 05:00:00 bash -c pkill -f rv1",
             "12 11 05:00:00 xtask reap",
-            // A descendant that looks like a server, and its child.
+            // A descendant that is a server, and its child.
             "13 12 05:00:00 vtmux -L rv2 new",
             "14 13 05:00:00 sleep 5",
             // A real orphan elsewhere.
             "20 1 05:00:00 vtmux -L rv3 new",
             "21 20 05:00:00 sleep 5",
         ]);
-        assert_eq!(orphans(&procs, Duration::ZERO, 12), [20, 21]);
-    }
-
-    /// Real processes: a daemonised fake server (its parent exits, so init or
-    /// the subreaper adopts it) is reaped, a live child of ours is not, nor
-    /// is an orphan whose later `-L` names the owner's `default` server.
-    #[test]
-    fn real_orphan_is_reaped_and_live_server_is_not() {
-        let tag = format!("rvunit{}", std::process::id());
-        let fake = |label: &str| format!("exec -a \"tmux -L{label} -f/dev/null new\" sleep 1000");
-        let orphan = format!("{tag}o");
-        let live = format!("{tag}l");
-        let owners = format!("{tag}d");
-        Command::new("sh")
-            .args(["-c", &format!("(bash -c '{}' &)", fake(&orphan))])
-            .status()
-            .unwrap();
-        let owners_fake = format!("exec -a \"tmux -uL{owners} -L default new\" sleep 1000");
-        Command::new("sh")
-            .args(["-c", &format!("(bash -c '{owners_fake}' &)")])
-            .status()
-            .unwrap();
-        let mut child = Command::new("bash")
-            .args(["-c", &fake(&live)])
-            .spawn()
-            .unwrap();
-        let mine = |args: &str| args.contains(&tag);
-        let picked = |procs: &[Proc]| -> Vec<String> {
-            let own = std::process::id();
-            orphans(procs, Duration::ZERO, own)
-                .into_iter()
-                .filter_map(|p| procs.iter().find(|q| q.pid == p))
-                .filter(|p| mine(&p.args))
-                .map(|p| p.args.clone())
-                .collect()
-        };
-        // Poll: under load the orphan takes a while to be adopted and exec.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let (procs, got) = loop {
-            thread::sleep(Duration::from_millis(100));
-            let mut procs = parse_procs(&ps_full());
-            // A subreaper above the test (muzzle, under the gate) adopts the
-            // orphan instead of init; show it to `orphans` as init's, which
-            // is what a dead agent's leftovers look like.
-            for p in procs
-                .iter_mut()
-                .filter(|p| p.args.contains(&orphan) || p.args.contains(&owners))
-            {
-                p.ppid = 1;
-            }
-            let ready = procs
-                .iter()
-                .any(|p| p.args.starts_with(&format!("tmux -uL{owners}")));
-            let got = picked(&procs);
-            if (ready && !got.is_empty()) || std::time::Instant::now() >= deadline {
-                break (procs, got);
-            }
-        };
-        let diag: Vec<_> = procs
-            .iter()
-            .filter(|p| p.args.contains(&tag))
-            .map(|p| {
-                (
-                    p.pid,
-                    p.ppid,
-                    p.args.clone(),
-                    procs
-                        .iter()
-                        .find(|q| q.pid == p.ppid)
-                        .map(|q| q.args.clone()),
-                )
-            })
-            .collect();
-        assert_eq!(got.len(), 1, "{got:?} DIAG {diag:#?}");
-        assert!(got[0].contains(&orphan), "{got:?}");
-        // Reap only ours (other worktrees' servers may be running).
-        let pids: Vec<u32> = procs
-            .iter()
-            .filter(|p| p.args.contains(&orphan) || p.args.contains(&owners))
-            .map(|p| p.pid)
-            .collect();
-        kill_pids(&pids);
-        let after = parse_procs(&ps_full());
-        assert!(!after.iter().any(|p| p.args.contains(&orphan)));
-        assert!(after.iter().any(|p| p.args.contains(&live)));
-        child.kill().unwrap();
-        child.wait().unwrap();
+        let servers = HashSet::from([10, 13, 20]);
+        assert_eq!(orphans(&procs, &servers, Duration::ZERO, 12), [20, 21]);
     }
 
     /// A scratch directory under `/tmp` (socket paths must stay short),
@@ -1202,7 +1281,7 @@ mod tests {
 
     /// A test-labelled checkpoint directory is emptied (all but its lock)
     /// when its server's socket is dead or missing, unless a server holds
-    /// its lock or a running process names its label; a live socket,
+    /// its lock or a socket held open names it; a live socket file,
     /// `default` and other labels keep theirs. A dry run lists the same
     /// and removes nothing; an emptied one is not listed again.
     #[test]
@@ -1232,18 +1311,18 @@ mod tests {
         checkpoint("default");
         checkpoint("mywork");
         std::fs::create_dir_all(root.join("rv5-nothex")).unwrap();
-        // A server starting (or with its socket elsewhere) that has not
-        // taken the lock yet.
+        // A socket held open (the kernel lists it) of a server that does
+        // not hold its lock: its file replaced by a dead one.
         dead_socket(&socks.join("rv6"));
         let starting = checkpoint("rv6");
-        let in_use = || in_use_of(&["/w/vtmux -L rv6 -f /dev/null new -d"]);
+        let in_use = || Some(vec![hold(None, socks.join("rv6"), None)]);
         let want = ["cli1", "rv2"].map(|l| {
             let hash = vtmux_server::persist::path_hash(&socks.join(l));
             root.join(format!("{l}-{hash}"))
         });
         let dirs = [socks.clone()];
         assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, true),
+            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, true),
             want,
             "dry run"
         );
@@ -1254,7 +1333,10 @@ mod tests {
                 "a dry run changes nothing"
             );
         }
-        assert_eq!(sweep_checkpoints(&root, &dirs, in_use, false), want);
+        assert_eq!(
+            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false),
+            want
+        );
         for d in &want {
             assert_eq!(entries(d), ["lock"]);
         }
@@ -1263,7 +1345,7 @@ mod tests {
         assert_eq!(entries(&starting), ["chunks", "manifest"]);
         assert_eq!(entries(&root).len(), 8, "no directory goes");
         assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, false),
+            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false),
             [] as [PathBuf; 0]
         );
         drop(lock);
@@ -1271,10 +1353,10 @@ mod tests {
         // the lock too until its child execs (`CLOEXEC` acts at exec, as
         // `dead_socket` says), this test's lock or an earlier sweep's: a
         // sweep keeps the directory until it is free.
-        let sweep_until = |in_use: &dyn Fn() -> InUse| {
+        let sweep_until = |in_use: &dyn Fn() -> Option<Vec<Held>>| {
             let deadline = std::time::Instant::now() + Duration::from_secs(30);
             loop {
-                let gone = sweep_checkpoints(&root, &dirs, in_use, false);
+                let gone = sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false);
                 if !gone.is_empty() || std::time::Instant::now() >= deadline {
                     break gone;
                 }
@@ -1282,7 +1364,43 @@ mod tests {
             }
         };
         assert_eq!(sweep_until(&in_use), [held], "unlocked");
-        assert_eq!(sweep_until(&InUse::default), [starting], "its process gone");
+        assert_eq!(
+            sweep_until(&|| Some(Vec::new())),
+            [starting],
+            "its socket gone"
+        );
+    }
+
+    /// When the held sockets cannot be listed, every directory stays; so
+    /// does one changed within `min_age`, until it is older.
+    #[test]
+    fn a_sweep_keeps_what_it_cannot_tell_and_what_is_recent() {
+        let s = Scratch::new("ckpt-doubt");
+        let root = s.0.join("state");
+        let hash = vtmux_server::persist::path_hash(&s.0.join("rv1"));
+        let dir = root.join(format!("rv1-{hash}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest"), "m").unwrap();
+        let none = || None;
+        assert_eq!(
+            sweep_checkpoints(&root, &[], none, Duration::ZERO, false),
+            [] as [PathBuf; 0]
+        );
+        let hour = Duration::from_secs(3600);
+        let nothing = || Some(Vec::new());
+        assert_eq!(
+            sweep_checkpoints(&root, &[], nothing, hour, false),
+            [] as [PathBuf; 0]
+        );
+        assert_eq!(entries(&dir), ["manifest"]);
+        let old = std::time::SystemTime::now() - 2 * hour;
+        for p in [dir.join("manifest"), dir.clone()] {
+            std::fs::File::open(&p).unwrap().set_modified(old).unwrap();
+        }
+        assert_eq!(
+            sweep_checkpoints(&root, &[], nothing, hour, false),
+            std::slice::from_ref(&dir)
+        );
     }
 
     /// The sweep holds no lock while it lists the processes, and never
@@ -1312,9 +1430,9 @@ mod tests {
                 restoring.is_ok(),
                 "the sweep holds rv1's lock: {restoring:?}"
             );
-            in_use_of(&["vtmux -L rv1 new"])
+            Some(vec![hold(Some(1), s.0.join("rv1"), None)])
         };
-        let gone = sweep_checkpoints(&root, &[], in_use, false);
+        let gone = sweep_checkpoints(&root, &[], in_use, Duration::ZERO, false);
         assert!(!gone.contains(&kept), "{gone:?}");
         assert_eq!(entries(&kept), ["chunks", LOCK, "manifest"]);
         let mut want = dead.clone();
@@ -1343,7 +1461,7 @@ mod tests {
         let inode = opened.metadata().unwrap().ino();
 
         assert_eq!(
-            sweep_checkpoints(&root, &[], InUse::default, false),
+            sweep_checkpoints(&root, &[], || Some(Vec::new()), Duration::ZERO, false),
             std::slice::from_ref(&dir)
         );
         assert_eq!(entries(&dir), [LOCK]);
@@ -1367,111 +1485,304 @@ mod tests {
         );
     }
 
-    /// End to end: a live server that does not hold its checkpoint's lock
-    /// (`vtmux-persist` off: a refused restore, or the moment after a live
-    /// upgrade, look the same), with a space in a value on its command
-    /// line, keeps its checkpoint, whether its socket is a custom `-S`
-    /// path or in a `TMUX_TMPDIR` the sweep does not look in. Once the
-    /// servers are gone, their checkpoints go too.
-    #[test]
-    fn a_live_server_with_spaces_in_its_arguments_keeps_its_checkpoint() {
-        /// Runs its closure when dropped: the servers go however the test ends.
-        struct Servers<F: Fn()>(F);
-        impl<F: Fn()> Drop for Servers<F> {
-            fn drop(&mut self) {
-                (self.0)();
+    /// A real server, started with `args` (and `$TMUX`, when set) from
+    /// directory `cwd` under `TMUX_TMPDIR` `tmpdir`, on `socket` (absolute,
+    /// as the server takes it); `test` when that is a test socket.
+    struct RealServer {
+        args: Vec<std::ffi::OsString>,
+        tmpdir: PathBuf,
+        tmux: Option<std::ffi::OsString>,
+        socket: PathBuf,
+        test: bool,
+    }
+
+    /// Where [`RealServer`]s run: the binary, their directory (`cwd`) and
+    /// `XDG_STATE_HOME`.
+    struct Place {
+        bin: PathBuf,
+        cwd: PathBuf,
+        state: PathBuf,
+    }
+
+    impl RealServer {
+        fn new(
+            args: &[&dyn AsRef<std::ffi::OsStr>],
+            tmpdir: &Path,
+            socket: PathBuf,
+            test: bool,
+        ) -> Self {
+            Self {
+                args: args.iter().map(|a| a.as_ref().to_owned()).collect(),
+                tmpdir: tmpdir.to_path_buf(),
+                tmux: None,
+                socket,
+                test,
             }
         }
-        let bin = crate::build_vtmux(&crate::oracle::workspace_root()).unwrap();
-        let s = Scratch::new("ckpt-space");
-        let state = s.0.join("st");
-        let tmpdir = s.0.join("t");
-        let spaced = s.0.join("with space");
-        std::fs::create_dir_all(&tmpdir).unwrap();
-        std::fs::create_dir_all(&spaced).unwrap();
-        let conf = s.0.join("a b.conf");
-        std::fs::write(&conf, "set -g status off\n").unwrap();
-        let tag = std::process::id();
-        let custom = spaced.join(format!("rvsp{tag}"));
-        let label = format!("rvsf{tag}");
-        let vtmux = |args: &[&std::ffi::OsStr]| {
-            Command::new(&bin)
-                .args(args)
-                .env("TMUX_TMPDIR", &tmpdir)
-                .env("XDG_STATE_HOME", &state)
+
+        fn run(&self, at: &Place, cmd: &[&str]) -> std::process::Output {
+            let mut command = Command::new(&at.bin);
+            command
+                .args(&self.args)
+                .args(cmd)
+                .current_dir(&at.cwd)
+                .env("TMUX_TMPDIR", &self.tmpdir)
+                .env("XDG_STATE_HOME", &at.state)
                 .env_remove("TMUX")
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-        };
-        let custom_args = |cmd: &[&str]| {
-            let mut a: Vec<std::ffi::OsString> = vec!["-S".into(), custom.clone().into()];
-            a.extend(cmd.iter().map(Into::into));
-            a
-        };
-        let label_args = |cmd: &[&str]| {
-            let mut a: Vec<std::ffi::OsString> = vec![
-                "-f".into(),
-                conf.clone().into(),
-                "-L".into(),
-                label.clone().into(),
-            ];
-            a.extend(cmd.iter().map(Into::into));
-            a
-        };
-        let run = |a: Vec<std::ffi::OsString>| {
-            vtmux(
-                &a.iter()
-                    .map(std::ffi::OsString::as_os_str)
-                    .collect::<Vec<_>>(),
-            )
-        };
-        let _servers = Servers(|| {
-            run(custom_args(&["kill-server"]));
-            run(label_args(&["kill-server"]));
-        });
-        let new = ["new", "-d", "sleep", "1000"];
-        assert!(run(custom_args(&new)).success());
-        assert!(run(label_args(&new)).success());
-        let uid = rustix::process::getuid().as_raw();
-        let socket = tmpdir
-            .canonicalize()
-            .unwrap()
-            .join(format!("vtmux-{uid}"))
-            .join(&label);
-        let root = state.join("vtmux");
-        let checkpoints = [custom.clone(), socket].map(|sock| {
-            let dir =
-                vtmux_server::persist::state_dir(&sock, Some(state.as_os_str()), None).unwrap();
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("manifest"), "m").unwrap();
-            dir
-        });
-        let in_use = || InUse::of(&all_argv(&[]));
-        assert_eq!(
-            sweep_checkpoints(&root, &[], in_use, false),
-            [] as [PathBuf; 0],
-            "a live server's checkpoint went"
-        );
-        for d in &checkpoints {
-            assert!(d.join("manifest").exists(), "{d:?}");
+                .stderr(Stdio::null());
+            if let Some(t) = &self.tmux {
+                command.env("TMUX", t);
+            }
+            command.output().unwrap()
         }
 
-        run(custom_args(&["kill-server"]));
-        run(label_args(&["kill-server"]));
-        let mut want = checkpoints.to_vec();
+        /// Its checkpoint directory, as the server names it.
+        fn dir(&self, at: &Place) -> PathBuf {
+            vtmux_server::persist::state_dir(&self.socket, Some(at.state.as_os_str()), None)
+                .unwrap()
+        }
+
+        fn pid(&self, at: &Place) -> u32 {
+            let out = self.run(at, &["display", "-p", "#{pid}"]);
+            String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+        }
+
+        /// Start it with a session, write a real checkpoint (at its
+        /// `kill-server`), start it again to restore it, turn
+        /// `vtmux-persist` off so it lets the lock go, and give it a pane
+        /// program.
+        fn start_restored(&self, at: &Place) {
+            let name = self.socket.display().to_string();
+            let ok = |cmd: &[&str]| assert!(self.run(at, cmd).status.success(), "{name}: {cmd:?}");
+            ok(&["new", "-d", "-s", "z", "sleep", "1000"]);
+            ok(&["kill-server"]);
+            until(&format!("{name} checkpoints"), || {
+                self.dir(at).join("manifest").exists()
+            });
+            ok(&["start"]);
+            until(&format!("{name} restores"), || {
+                self.run(at, &["has", "-t", "z"]).status.success()
+            });
+            ok(&["set", "-g", "vtmux-persist", "off"]);
+            until(&format!("{name} lets its lock go"), || {
+                vtmux_server::persist::Lock::try_take(&self.dir(at)).is_ok()
+            });
+            ok(&["neww", "-d", "sleep", "1000"]);
+        }
+    }
+
+    /// Poll `ok` for up to 30 s.
+    fn until(what: &str, ok: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !ok() {
+            assert!(std::time::Instant::now() < deadline, "never: {what}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Runs its closure when dropped: servers go however a test ends.
+    struct Teardown<F: Fn()>(F);
+    impl<F: Fn()> Drop for Teardown<F> {
+        fn drop(&mut self) {
+            (self.0)();
+        }
+    }
+
+    /// Servers on the sockets tmux would take for their command lines
+    /// (`main`, tmux.c: `-L` concatenated as given, `make_label`; `$TMUX`
+    /// with neither `-L` nor `-S`), the cases a command line misled the
+    /// reaper with: `-L rvpath/../default` (`default`'s socket),
+    /// `-L rvpath/../<label>`, `-L rvX -f "a b.conf" -L default` (macOS's
+    /// `ps` prints it flattened), bundled `-uLrvX`, a socket from `$TMUX`,
+    /// a `-S` with spaces, a relative `-S` (from `base`).
+    fn misleading_servers(base: &Path, uid: u32, tag: u32) -> Vec<RealServer> {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (t1, t2) = (base.join("t1"), base.join("t2"));
+        let socks = t1.join(format!("vtmux-{uid}"));
+        let spaced = base.join(format!("with space/vtmux-{uid}"));
+        for d in [
+            socks.join(format!("rvp{tag}")),
+            t2.clone(),
+            spaced.clone(),
+            base.join("o"),
+            base.join("rel"),
+        ] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::set_permissions(&socks, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let conf = base.join("a b.conf");
+        std::fs::write(&conf, "set -g vtmux-persist layout\nset -g status off\n").unwrap();
+        let (dotted_default, dotted) = (
+            format!("rvp{tag}/../default"),
+            format!("rvp{tag}/../rvH{tag}"),
+        );
+        let space_sock = spaced.join(format!("rvF {tag}"));
+        let rel_sock = format!("rel/rvG{tag}");
+        let mut from_tmux = RealServer::new(
+            &[&"-f", &conf],
+            &t1,
+            base.join(format!("o/rvE{tag}")),
+            false,
+        );
+        let mut tmux = from_tmux.socket.clone().into_os_string();
+        tmux.push(",1,0");
+        from_tmux.tmux = Some(tmux);
+        vec![
+            RealServer::new(
+                &[&"-f", &conf, &"-L", &format!("rvA{tag}")],
+                &t1,
+                socks.join(format!("rvA{tag}")),
+                true,
+            ),
+            RealServer::new(
+                &[&"-f", &conf, &"-L", &dotted_default],
+                &t1,
+                socks.join(&dotted_default),
+                false,
+            ),
+            RealServer::new(
+                &[&"-f", &conf, &"-L", &dotted],
+                &t1,
+                socks.join(&dotted),
+                true,
+            ),
+            RealServer::new(
+                &[&"-L", &format!("rvC{tag}"), &"-f", &conf, &"-L", &"default"],
+                &t2,
+                t2.join(format!("vtmux-{uid}/default")),
+                false,
+            ),
+            RealServer::new(
+                &[&format!("-uLrvD{tag}"), &"-f", &conf],
+                &t1,
+                socks.join(format!("rvD{tag}")),
+                true,
+            ),
+            from_tmux,
+            RealServer::new(
+                &[&"-f", &conf, &"-S", &space_sock],
+                &t1,
+                space_sock.clone(),
+                true,
+            ),
+            RealServer::new(
+                &[&"-f", &conf, &"-S", &rel_sock],
+                &t1,
+                base.join(&rel_sock),
+                false,
+            ),
+        ]
+    }
+
+    /// Sweep `root` until `want` are emptied, and only they.
+    fn sweep_until(root: &Path, want: Vec<PathBuf>) {
+        let mut want = want;
         want.sort();
         let mut gone = Vec::new();
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while gone.len() < 2 {
+        while gone.len() < want.len() {
             assert!(std::time::Instant::now() < deadline, "kept: {gone:?}");
-            gone.extend(sweep_checkpoints(&root, &[], in_use, false));
+            gone.extend(sweep_checkpoints(
+                root,
+                &[],
+                held_sockets,
+                Duration::ZERO,
+                false,
+            ));
             thread::sleep(Duration::from_millis(20));
         }
         gone.sort();
         assert_eq!(gone, want);
+    }
+
+    /// Real servers on [`misleading_servers`]' sockets. Each writes a real
+    /// checkpoint, restores it and turns `vtmux-persist` off, so it holds
+    /// no lock: while they run, a sweep empties none of their checkpoints.
+    /// The reaper picks exactly the test sockets' servers (and their
+    /// panes); killed, those are gone and the others still answer. Then
+    /// the gone servers' checkpoints are emptied, and once the rest are
+    /// killed theirs too; `default`'s never.
+    #[test]
+    fn real_servers_are_told_by_the_socket_they_hold() {
+        let s = Scratch::new("real");
+        let base = s.0.canonicalize().unwrap();
+        let at = Place {
+            bin: crate::build_vtmux(&crate::oracle::workspace_root()).unwrap(),
+            cwd: base.clone(),
+            state: base.join("st"),
+        };
+        let uid = current_uid();
+        let servers = misleading_servers(&base, uid, std::process::id());
+        let _teardown = Teardown(|| {
+            for srv in &servers {
+                srv.run(&at, &["kill-server"]);
+            }
+        });
+        for srv in &servers {
+            srv.start_restored(&at);
+        }
+        let root = at.state.join("vtmux");
+        let held = held_sockets().expect("the held sockets read");
+        assert_eq!(
+            sweep_checkpoints(&root, &[], || Some(held), Duration::ZERO, false),
+            [] as [PathBuf; 0],
+            "a live server's checkpoint went"
+        );
+
+        let pids: Vec<u32> = servers.iter().map(|srv| srv.pid(&at)).collect();
+        let found = test_servers(&held_sockets().unwrap(), uid, &real_tmp());
+        let picked: Vec<u32> = pids.iter().copied().filter(|p| found.contains(p)).collect();
+        let want: Vec<u32> = servers
+            .iter()
+            .zip(&pids)
+            .filter(|(srv, _)| srv.test)
+            .map(|(_, &p)| p)
+            .collect();
+        assert_eq!(picked, want, "servers {pids:?}");
+        // A subreaper above the test (muzzle, under the gate) may have
+        // adopted them instead of init: show them as init's, as a dead
+        // agent's leftovers are.
+        let mut procs = parse_procs(&ps_full());
+        for p in procs.iter_mut().filter(|p| pids.contains(&p.pid)) {
+            p.ppid = 1;
+        }
+        let mut ours: HashSet<u32> = pids.iter().copied().collect();
+        descendants(&procs, &mut ours);
+        let reaped: Vec<u32> = orphans(&procs, &found, Duration::ZERO, std::process::id())
+            .into_iter()
+            .filter(|p| ours.contains(p))
+            .collect();
+        let mut panes: HashSet<u32> = want.iter().copied().collect();
+        descendants(&procs, &mut panes);
+        let mut panes: Vec<u32> = panes.into_iter().collect();
+        panes.sort_unstable();
+        assert_eq!(reaped, panes);
+        assert!(reaped.len() > want.len(), "no pane picked: {reaped:?}");
+        kill_pids(&reaped);
+        for srv in &servers {
+            let alive = srv.run(&at, &["has", "-t", "z"]).status.success();
+            assert_eq!(alive, !srv.test, "{}", srv.socket.display());
+        }
+
+        // The killed servers' checkpoints go; the others' stay while they
+        // run, and go once they are killed too. `default`'s never.
+        let tested = |test: bool| {
+            servers
+                .iter()
+                .filter(|srv| srv.test == test)
+                .map(|srv| srv.dir(&at))
+                .filter(|d| d.file_name().unwrap().to_str().unwrap().starts_with("rv"))
+                .collect::<Vec<_>>()
+        };
+        sweep_until(&root, tested(true));
+        for srv in servers.iter().filter(|srv| !srv.test) {
+            assert!(srv.run(&at, &["kill-server"]).status.success());
+        }
+        sweep_until(&root, tested(false));
+        for srv in servers.iter().filter(|srv| srv.socket.ends_with("default")) {
+            assert!(srv.dir(&at).join("manifest").exists(), "{:?}", srv.dir(&at));
+        }
     }
 
     #[test]

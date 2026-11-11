@@ -26,7 +26,8 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
 - A detach during a flood no longer leaves your terminal frozen in a synchronized update.
 - Live upgrade: a failed exec keeps an open editor's file; keys typed right after a key-bound `vtmux-upgrade` keep their order and stay the keys they were (Esc then `x` is no longer read as M-x), an Esc still waiting out `escape-time` keeps its wait, and a paste the upgrade lands in stays a paste; an upgrade refused for a program's kitty graphics says which pane and what to do.
 - Kitty graphics: a placement under the text keeps wide characters whole, and the cursor after a full line sits on the pane's border as without images.
-- On Linux, a pane started with no `PATH` searches what glibc's `execvp` does (`getconf PATH`: `/usr/bin` on EL9), not `/usr/bin:/bin`.
+- On Linux, a job or popup command started with no `PATH` (a server started without one, and no `tmux` shim) searches what glibc's `execvp` does (`getconf PATH`: `/usr/bin` on EL9), not `/usr/bin:/bin`.
+- On macOS and FreeBSD, an empty `PATH` entry runs `./name`, as their `execvp` does, so a script sees that as its `$0`.
 - A server started with no `PATH` gives its panes, jobs and popups `/usr/bin:/bin` after the `tmux` shim, as tmux gives panes, not `/usr/bin:/bin:/usr/sbin:/sbin`.
 
 ## 3.8-beta2

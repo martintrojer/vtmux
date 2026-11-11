@@ -675,16 +675,7 @@ impl<'a> Runner<'a> {
     fn reattached(&self, id: &str, at: usize) -> bool {
         let start = Instant::now();
         loop {
-            let bytes: Vec<u8> = self.attaches[id].events.lock().unwrap()[at..]
-                .iter()
-                .filter_map(|e| match e {
-                    Event::Bytes(b) => Some(b.as_slice()),
-                    Event::Resize(..) => None,
-                })
-                .flatten()
-                .copied()
-                .collect();
-            if bytes.windows(REATTACHED.len()).any(|w| w == REATTACHED) {
+            if reattach_cut(at, &self.attaches[id].events.lock().unwrap()).is_some() {
                 return true;
             }
             if start.elapsed() > REATTACH_LIMIT {
@@ -1170,20 +1161,25 @@ impl<'a> Runner<'a> {
     }
 }
 
-/// The event holding the first [`REATTACHED`] at or after event `after`,
-/// and the end of that marker in it: the restart, before any redraw.
+/// The event holding the end of the first [`REATTACHED`] at or after
+/// event `after`, and that end's offset in it: the restart, before any
+/// redraw. The bytes are searched as one stream, so a marker split across
+/// two reads is found where it ends.
 fn reattach_cut(after: usize, events: &[Event]) -> Option<(usize, usize)> {
-    events
-        .iter()
-        .enumerate()
-        .skip(after)
-        .find_map(|(n, e)| match e {
-            Event::Bytes(b) => b
-                .windows(REATTACHED.len())
-                .position(|w| w == REATTACHED)
-                .map(|at| (n, at + REATTACHED.len())),
-            Event::Resize(..) => None,
-        })
+    let mut stream = Vec::new();
+    let mut ends = Vec::new();
+    for (n, e) in events.iter().enumerate().skip(after) {
+        if let Event::Bytes(b) = e {
+            stream.extend_from_slice(b);
+            ends.push((n, stream.len(), b.len()));
+        }
+    }
+    let end = stream
+        .windows(REATTACHED.len())
+        .position(|w| w == REATTACHED)?
+        + REATTACHED.len();
+    let &(n, event_end, len) = ends.iter().find(|&&(_, e, _)| e >= end)?;
+    Some((n, len - (event_end - end)))
 }
 
 /// Tests: stop process `pid` now and let it go on after `stall`.
@@ -1252,6 +1248,27 @@ impl ClientView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A restart marker split across two reads is found where it ends, as
+    /// [`Runner::reattached`] finds it, so the restart-only screen stops
+    /// before the redraw that follows.
+    #[test]
+    fn a_split_restart_marker_cuts_where_it_ends() {
+        let bytes = |b: &[u8]| Event::Bytes(b.to_vec());
+        let whole = [bytes(b"old"), bytes(b"x\x1b[?996nredraw")];
+        assert_eq!(reattach_cut(0, &whole), Some((1, 8)));
+        assert_eq!(reattach_cut(0, &whole[..1]), None);
+        let split = [
+            bytes(b"old\x1b[?99"),
+            Event::Resize(80, 24),
+            bytes(b"6nredraw"),
+            bytes(b"\x1b[?996n"),
+        ];
+        assert_eq!(reattach_cut(0, &split), Some((2, 2)));
+        // From event 3 on, only the later marker counts.
+        assert_eq!(reattach_cut(3, &split), Some((3, 7)));
+        assert_eq!(reattach_cut(2, &split), Some((3, 7)));
+    }
 
     #[test]
     fn run_root_ignores_tmpdir_and_stays_short() {

@@ -743,9 +743,10 @@ pub struct Lock {
 
 impl Lock {
     /// Take the lock on `dir` (made private first), waiting at most
-    /// [`LOCK_WAIT`]: long enough for a probe's shared lock (`cargo xtask
-    /// reap` asking whether a server holds the directory) to go, too short
-    /// for a server that holds it to matter.
+    /// [`LOCK_WAIT`]: long enough for `cargo xtask reap`'s lock to go (it
+    /// takes it exclusive, without waiting, and holds it only while it
+    /// empties that one dead directory), too short for a server that
+    /// holds it to matter.
     ///
     /// # Errors
     /// `WouldBlock` while another holds it (another process, or another
