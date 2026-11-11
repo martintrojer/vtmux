@@ -452,6 +452,30 @@ fn signal_exit_restores_terminal_modes() {
     });
 }
 
+/// A SIGTERM or SIGHUP once the attached client's handlers are in place,
+/// but before the pre-attach watcher is closed (a test hook puts it there
+/// and lets the watcher take it first), ends the client as an attached
+/// one: `[terminated]` or `[lost tty]`, status 1, never "server exited
+/// unexpectedly". vtmux only: the hook is its.
+#[test]
+fn a_signal_as_the_client_attaches_ends_it_as_attached() {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
+    for (signal, says) in [("TERM", "[terminated]"), ("HUP", "[lost tty]")] {
+        let w = World::new(bin.clone());
+        let mut a = w.attach_env(
+            &["new", "-s", "a", "cat"],
+            40,
+            10,
+            &[("VTMUX_TEST_ATTACH_SIGNAL", signal)],
+        );
+        a.exited(1);
+        let text = a.text();
+        assert!(text.contains(says), "{signal}: {text:?}");
+        assert!(!text.contains("unexpectedly"), "{signal}: {text:?}");
+        assert!(w.cli(&["has", "-t", "a"]).status.success());
+    }
+}
+
 /// A terminal client whose tty goes away is dropped by the server itself
 /// (tty.c:181-189 `tty_read_callback` -> `server_client_lost`): client-detached
 /// fires, with no `window_update_focus` and so no pane-focus-out. Only

@@ -882,13 +882,17 @@ fn put_back(restore: &[(BorrowedFd<'_>, FdFlags)]) {
 pub fn inherit_rest() -> Vec<OwnedFd> {
     let limit = super::pty::fd_limit();
     (3..limit)
-        .filter(|&fd| {
-            // SAFETY: `fcntl(F_GETFD)` on any number only reports whether
-            // it is open.
-            unsafe { libc::fcntl(fd, libc::F_GETFD) != -1 }
-        })
+        .filter(|&fd| is_open(fd))
         .filter_map(|fd| inherited(fd).ok())
         .collect()
+}
+
+/// Whether descriptor `fd` is open.
+#[must_use]
+pub fn is_open(fd: RawFd) -> bool {
+    // SAFETY: `fcntl(F_GETFD)` on any number only reports whether it is
+    // open.
+    unsafe { libc::fcntl(fd, libc::F_GETFD) != -1 }
 }
 
 /// The listening socket among `fds` and the path it is bound to: a Unix

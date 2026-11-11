@@ -827,7 +827,12 @@ impl Server {
         for editor in self.model.panes.values().filter_map(|p| p.editor.as_ref()) {
             let _ = std::fs::remove_file(&editor.path);
         }
-        // 6. Attached clients told to re-execute and re-attach.
+        // 6. Attached clients told to re-execute and re-attach. A client
+        // lost meanwhile (its socket fails) is held, not dropped, until the
+        // exec returns: the exec keeps the descriptors the snapshot names,
+        // so none of them may close (or its number be reused by a hook's
+        // job) before it, and no hook runs in the middle of it.
+        self.upgrade.held = Some(Vec::new());
         self.upgrade_notify(binary);
         let keep: Vec<RawFd> = snapshot
             .descriptors
@@ -838,6 +843,9 @@ impl Server {
             .collect();
         let socket = passed.checked.takes_socket.then_some(self.socket.as_path());
         let e = (self.upgrade.exec)(binary, file, &keep, socket);
+        for id in self.upgrade.held.take().unwrap_or_default() {
+            self.drop_client(id);
+        }
         Exec::Failed(format!(
             "{}: {}",
             binary.display(),

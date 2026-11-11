@@ -1640,8 +1640,23 @@ impl Server {
     /// client's queue).
     fn drop_client(&mut self, id: ClientId) {
         match self.clients.get_mut(&id) {
-            Some(c) if !c.dead => c.dead = true,
+            Some(c) if !c.dead => {}
             _ => return,
+        }
+        // Between an upgrade's snapshot and its exec the descriptors the
+        // snapshot names must stay open (`Upgrade::held`): the client
+        // waits, closing, for the exec to return.
+        if let Some(held) = self.upgrade.held.as_mut() {
+            if !held.contains(&id) {
+                held.push(id);
+            }
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.closing = true;
+            }
+            return;
+        }
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.dead = true;
         }
         self.turn_work += 1;
         // server_client_lost (server-client.c:508-514): client-detached for

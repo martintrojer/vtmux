@@ -11,6 +11,11 @@ vtmux's version is the tmux release it is tested against: `3.8-beta2` is the sec
   - `send-keys`, pastes and synchronized panes never restart one.
   - The restored dead line is no longer written into the pane's screen: `capture-pane` and the next checkpoint show the saved screen as it was.
 
+### Fixed
+
+- A client that vanishes while a live upgrade tells clients to re-attach no longer fails the upgrade with `Bad file descriptor`.
+- `SIGTERM` or `SIGHUP` as a client attaches says `[terminated]` or `[lost tty]`, not `server exited unexpectedly`.
+
 ## 3.8-beta2
 
 ### New

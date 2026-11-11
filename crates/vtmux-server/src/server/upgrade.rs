@@ -250,6 +250,11 @@ pub(crate) struct Upgrade {
     /// input ([`Server::upgrade_behind`]): read again once the upgrade
     /// has ended without an exec.
     replay: Option<ClientId>,
+    /// The clients lost between the snapshot and the exec, set (empty)
+    /// for that span ([`Server::exec_upgrade`]): their drop waits for the
+    /// exec to return, so every descriptor the snapshot names is still
+    /// open at the `execve`, and no hook runs in the middle of it.
+    pub(crate) held: Option<Vec<ClientId>>,
 }
 
 impl Default for Upgrade {
@@ -260,6 +265,7 @@ impl Default for Upgrade {
             warnings: Vec::new(),
             answer: None,
             replay: None,
+            held: None,
         }
     }
 }
@@ -1039,7 +1045,9 @@ impl Server {
             );
         }
         // A client that does not take a frame this small is stuck; it is
-        // given up on at its deadline like any other.
+        // given up on at its deadline like any other. One whose socket
+        // fails is lost, but dropped only once the exec has returned
+        // (`Upgrade::held`): the new image finds the same end of stream.
         let _ = self.upgrade_flush(FLUSH_WAIT);
     }
 

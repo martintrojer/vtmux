@@ -54,8 +54,10 @@ pub struct Sys {
     /// (client.c `client_exec`, `proc_clear_signals`).
     pub defaults: fn(),
     /// The client's signals are its own from here on: the binary drops
-    /// those it caught before the attach (`client_attached`).
-    pub attached: fn(),
+    /// those it caught before the attach (`client_attached`). Returns the
+    /// SIGTERM or SIGHUP it caught first, if one came: it has shut the
+    /// connection down, and the client leaves as for it.
+    pub attached: fn() -> Option<i32>,
 }
 
 /// Called after Ready; the server owns startup and teardown escapes.
@@ -172,7 +174,20 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     // SIGUSR1 and SIGUSR2 go to proc_signal_cb and client_signal ignores
     // them while attached (proc.c proc_set_signals:254-276).
     let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGCONT, SIGUSR1, SIGUSR2])?;
-    (sys.attached)();
+    // These handlers go in before the binary's are dropped, so no signal
+    // is missed. One the binary's took first cut the connection (no
+    // `Detach` can go): the client leaves as client.c `client_signal`
+    // does once attached, status 1, the terminal still untouched.
+    if let Some(sig) = (sys.attached)() {
+        return Ok(Leave::exit(
+            1,
+            if sig == SIGTERM {
+                "terminated"
+            } else {
+                "lost tty"
+            },
+        ));
+    }
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut signals, SIGNALS, Interest::READABLE)?;

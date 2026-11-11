@@ -23,6 +23,9 @@ struct Exec {
     /// The snapshot file's bytes, read from where the exec got it.
     bytes: Vec<u8>,
     keep: Vec<RawFd>,
+    /// Those of `keep` that were closed at the exec: `execve` would have
+    /// failed on them (EBADF).
+    closed: Vec<RawFd>,
 }
 
 thread_local! {
@@ -40,6 +43,11 @@ fn record_exec(binary: &Path, file: OwnedFd, keep: &[RawFd], _socket: Option<&Pa
             binary: binary.to_path_buf(),
             bytes,
             keep: keep.to_vec(),
+            closed: keep
+                .iter()
+                .copied()
+                .filter(|&fd| !crate::sys::upgrade::is_open(fd))
+                .collect(),
         });
     });
     io::Error::other("test exec")
@@ -898,6 +906,46 @@ fn followers_are_told_to_re_execute_with_the_token_the_snapshot_carries() {
     assert_eq!(notices(&mut server, o, &mut o_peer), []);
     let r = server.clients[&f].reattach.expect("waiting to re-attach");
     assert!(r.deadline.is_some() && !r.gone);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Client `id`'s peer has closed its end, as far as the server's socket
+/// shows (a child another test thread forks may hold a copy of the peer
+/// until it execs): a write to it fails now.
+fn closed(server: &Server, id: ClientId) {
+    use rustix::net::{RecvFlags, recv};
+    let end = Instant::now() + std::time::Duration::from_secs(10);
+    let stream = &server.clients[&id].stream;
+    while !matches!(
+        recv(stream, &mut [0u8; 1], RecvFlags::PEEK | RecvFlags::DONTWAIT),
+        Ok((0, _))
+    ) {
+        assert!(Instant::now() < end, "the peer is still open");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// A client lost during the notice (its socket takes no more: the
+/// teardown's write fails) is dropped only once the exec has returned:
+/// every descriptor the snapshot names is still open at the exec, which
+/// would otherwise fail on the closed one (EBADF), after the client's
+/// hooks had run in the middle of it.
+#[test]
+fn a_client_lost_during_the_notice_is_dropped_after_the_exec() {
+    let (mut server, dir) = setup("lostnotice");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    let fd = server.clients[&f].stream.as_raw_fd();
+    drop(f_peer);
+    closed(&server, f);
+    upgrade(&mut server, &dir, &passing(&dir));
+    let exec = execs().pop().expect("exec");
+    assert!(exec.keep.contains(&fd));
+    assert_eq!(exec.closed, [] as [RawFd; 0]);
+    assert!(
+        !server.clients.contains_key(&f),
+        "dropped once the exec failed"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
