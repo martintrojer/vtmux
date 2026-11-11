@@ -710,7 +710,8 @@ fn dispatch(
                 .map(|i| Found::from_winlink(&server.model, session, i));
             // cmd-attach-session.c:108-111: -c is the session's directory.
             if let Some(cwd) = args.value('c') {
-                let cwd = expand(server, found, cwd);
+                // format_single(item, cflag, c, s, wl, wp).
+                let cwd = expand_for_client(server, item, found, cwd);
                 if let Some(s) = server.model.sessions.get_mut(&session) {
                     s.cwd = vtmux_core::rawstr::to_os_string(&cwd).into();
                 }
@@ -946,6 +947,28 @@ pub fn expand_from_target(
     format::expand_str(template, &ctx)
 }
 
+/// [`expand_from_target`] with `item`'s target client
+/// (`cmdq_get_target_client`, cmd-queue.c:602-616): for a command with no
+/// `-c` / `-t` client, the current client.
+pub fn expand_for_target(server: &Server, item: &Item, found: Found, template: &str) -> String {
+    let tc = server.target_client(item.client, item.origin);
+    expand_from_target(server, found, tc, template)
+}
+
+/// `cmdq_get_client(item)`: the command's own client, attached or not (a
+/// shell command's too), else the current client (cmd-queue.c:597-598).
+/// `format_single(item, ..., c, ...)` expands for it.
+pub fn command_client(server: &Server, item: &Item) -> Option<ClientId> {
+    item.client
+        .or_else(|| server.target_client(None, item.origin))
+}
+
+/// `format_single(item, template, c, ...)` with `c` the command's own
+/// client ([`command_client`]).
+pub fn expand_for_client(server: &Server, item: &Item, found: Found, template: &str) -> String {
+    expand_from_target(server, found, command_client(server, item), template)
+}
+
 /// A `-c` directory (expanded text, which holds any byte tmux's C string
 /// can: [`vtmux_core::rawstr`]): as it is if absolute, else under `base`,
 /// the client's directory (spawn.c `spawn_window`, `spawn_pane`).
@@ -967,10 +990,11 @@ pub(super) fn start_path(base: &std::path::Path, c: &str) -> PathBuf {
 pub fn expand_as(
     server: &Server,
     found: Found,
+    client: Option<ClientId>,
     kind: crate::format_ctx::Kind,
     template: &str,
 ) -> String {
-    let mut ctx = server.format_ctx(found, None);
+    let mut ctx = server.format_ctx(found, client);
     ctx.kind = kind;
     format::expand_str(template, &ctx)
 }

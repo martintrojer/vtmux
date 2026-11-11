@@ -16,7 +16,7 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::layout::{AddFlags, PANE_MAXIMUM, SplitRequest};
 use vtmux_core::options::{TreeId, Value};
 
-use super::{Item, expand};
+use super::{Item, expand, expand_for_client, expand_for_target};
 use crate::server::{PaneSpawn, Server, client_path};
 use crate::target::Found;
 
@@ -254,7 +254,7 @@ pub fn exec(
                 session: Some(s),
                 ..Found::default()
             };
-            let c = expand(server, session_only, c);
+            let c = expand_for_client(server, item, session_only, c);
             super::start_path(&server.client_cwd(item.client, Some(s)), &c)
         }
         None => server.client_cwd(item.client, Some(s)),
@@ -364,7 +364,10 @@ pub fn exec(
             }
         }
     }
-    let title = args.value('T').map(|t| expand(server, found, t));
+    // format_single_from_target (cmd-split-window.c:265).
+    let title = args
+        .value('T')
+        .map(|t| expand_for_target(server, item, found, t));
     if let Some(title) = &title
         && let Some(p) = server.model.panes.get_mut(&new)
     {
@@ -421,7 +424,8 @@ pub fn exec(
     item.hook_target = Some(Some(new_found));
     if args.flag('P') {
         let template = args.value('F').unwrap_or(TEMPLATE);
-        let text = expand(server, new_found, template);
+        // format_single(item, template, tc, ...) (cmd-split-window.c:309).
+        let text = expand_for_target(server, item, new_found, template);
         item.print(&text);
     }
     // cmd-split-window.c:276-286, 320-321: -I reads the client's stdin into

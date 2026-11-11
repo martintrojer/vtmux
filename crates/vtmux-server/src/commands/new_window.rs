@@ -4,7 +4,7 @@
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 
-use super::{Item, expand};
+use super::{Item, expand_for_client, expand_for_target};
 use crate::names::{check_name, clean_name};
 use crate::server::{NewWindow, Server, client_path};
 use crate::target::Found;
@@ -32,7 +32,9 @@ pub fn exec(
     };
     let name = match args.value('n') {
         Some(n) => {
-            let n = expand(server, session_only, n);
+            // format_single(item, name, c, s, NULL, NULL)
+            // (cmd-new-window.c:85).
+            let n = expand_for_client(server, item, session_only, n);
             if !check_name(&n) {
                 return Err(EdgeError::InvalidWindowName(n).into());
             }
@@ -41,7 +43,7 @@ pub fn exec(
         None => None,
     };
     if args.flag('S')
-        && let Some(index) = select_existing(server, s, found.new_index, name.as_deref())?
+        && let Some(index) = select_existing(server, item, s, found.new_index, name.as_deref())?
     {
         if args.flag('d') {
             return Ok(());
@@ -67,7 +69,7 @@ pub fn exec(
         Some(c) => {
             // spawn.c:270-283: expanded against the target session,
             // relative to the client's directory.
-            let c = expand(server, session_only, c);
+            let c = expand_for_client(server, item, session_only, c);
             super::start_path(&server.client_cwd(item.client, Some(s)), &c)
         }
         None => server.client_cwd(item.client, Some(s)),
@@ -114,7 +116,8 @@ pub fn exec(
                 .map(crate::model::Window::active),
             new_index: None,
         };
-        let text = expand(server, new, args.value('F').unwrap_or(TEMPLATE));
+        // format_single(item, template, tc, ...) (cmd-new-window.c:175).
+        let text = expand_for_target(server, item, new, args.value('F').unwrap_or(TEMPLATE));
         item.print(&text);
     }
     Ok(())
@@ -124,6 +127,7 @@ pub fn exec(
 /// only window with that name.
 fn select_existing(
     server: &Server,
+    item: &Item,
     s: vtmux_core::ids::SessionId,
     index: Option<u32>,
     name: Option<&str>,
@@ -133,8 +137,10 @@ fn select_existing(
         return Ok(session.windows.contains_key(&i).then_some(i));
     }
     let Some(name) = name else { return Ok(None) };
-    let wanted = expand(
+    // format_single(item, wname, c, s, NULL, NULL) (cmd-new-window.c:98).
+    let wanted = expand_for_client(
         server,
+        item,
         Found {
             session: Some(s),
             ..Found::default()

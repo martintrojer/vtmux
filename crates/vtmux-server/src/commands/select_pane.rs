@@ -4,7 +4,7 @@ use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, WindowId};
 
-use super::{Item, expand};
+use super::{Item, expand_for_target};
 use crate::model::{Redraw, Side};
 use crate::server::Server;
 use crate::target::Found;
@@ -85,7 +85,8 @@ pub fn exec(
         return Ok(());
     }
     if let Some(t) = args.value('T') {
-        let title = expand(server, found, t);
+        // format_single_from_target (cmd-select-pane.c:258).
+        let title = expand_for_target(server, item, found, t);
         if let Some(p) = server.model.panes.get_mut(&wp) {
             // cmd-select-pane.c:259-269: a title screen_set_title takes,
             // changed or not, redraws the status and fires the hook.

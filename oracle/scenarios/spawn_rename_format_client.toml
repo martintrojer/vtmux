@@ -1,0 +1,25 @@
+name = "spawn_rename_format_client"
+size = [60, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "11", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-T", "p"] },
+  { attach = { session = "a" } },
+  { run = ["rename-window", "rw#{client_width}"] },
+  { run = ["display", "-p", "#{window_name}"] },
+  { run = ["select-pane", "-T", "sp#{client_width}"] },
+  { run = ["display", "-p", "#{pane_title}"] },
+  { run = ["split-window", "-d", "-c", "/spc#{client_control_mode}", "-P", "-F", "split:#{client_width}:#{pane_start_path}", "-T", "st#{client_width}", "cat", "-"] },
+  { run = ["display", "-p", "-t", ":.1", "#{pane_title}"] },
+  { run = ["break-pane", "-d", "-s", ":.1", "-P", "-F", "break:#{client_width}"] },
+  { run = ["new-window", "-d", "-n", "nw#{client_control_mode}", "-c", "/nwc#{client_control_mode}", "-P", "-F", "nw:#{client_width}:#{window_name}:#{pane_start_path}", "cat", "-"] },
+  { run = ["new-session", "-d", "-s", "ns#{client_control_mode}", "-n", "n#{client_control_mode}", "-c", "/nsc#{client_control_mode}", "-P", "-F", "ns:[#{client_control_mode}]:#{session_name}:#{window_name}:#{pane_start_path}", "cat", "-"] },
+  { run = ["respawn-pane", "-k", "-t", "a:0.0", "-c", "/rpc#{client_control_mode}", "cat", "-"] },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_start_path}"] },
+  { run = ["attach", "-t", "a", "-c", "/ac#{client_control_mode}"] },
+  { run = ["display", "-p", "-t", "a", "#{session_path}"] },
+  { run = ["new-session", "-A", "-s", "a", "-c", "/nac#{client_control_mode}"] },
+  { run = ["display", "-p", "-t", "a", "#{session_path}"] },
+  { run = ["rename-session", "-t", "a", "rs#{client_width}"] },
+  { run = ["ls", "-F", "#{session_name}"] },
+]

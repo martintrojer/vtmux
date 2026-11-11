@@ -11,7 +11,7 @@ use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 
-use super::{Item, expand};
+use super::{Item, expand_for_client};
 use crate::server::{PaneSpawn, Server, client_path};
 use crate::target::Found;
 
@@ -110,7 +110,8 @@ pub(super) fn start_dir(
             session: Some(s),
             ..Found::default()
         };
-        let c = expand(server, session_only, c);
+        // spawn.c:292: format_single(item, sc->cwd, c, ...).
+        let c = expand_for_client(server, item, session_only, c);
         super::start_path(&server.client_cwd(item.client, Some(s)), &c)
     })
 }

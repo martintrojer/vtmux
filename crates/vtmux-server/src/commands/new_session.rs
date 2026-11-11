@@ -7,7 +7,7 @@ use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::options::TreeId;
 
-use super::{Item, expand, expand_as};
+use super::{Item, command_client, expand_as, expand_for_client};
 use crate::format_ctx::Kind;
 use crate::names::{check_name, clean_name};
 use crate::server::{NewGroup, NewSession, Server};
@@ -87,7 +87,13 @@ pub fn exec(
         Some(n) => {
             // format_single(item, tmp, c, NULL, NULL, NULL)
             // (cmd-new-session.c:103, 113, 178).
-            let n = expand_as(server, found, Kind::Unknown, n);
+            let n = expand_as(
+                server,
+                found,
+                command_client(server, item),
+                Kind::Unknown,
+                n,
+            );
             if !check_name(&n) {
                 return Err(EdgeError::InvalidWindowName(n).into());
             }
@@ -97,7 +103,13 @@ pub fn exec(
     };
     let session_name = match args.value('s') {
         Some(n) => {
-            let n = expand_as(server, found, Kind::Unknown, n);
+            let n = expand_as(
+                server,
+                found,
+                command_client(server, item),
+                Kind::Unknown,
+                n,
+            );
             if !check_name(&n) {
                 return Err(EdgeError::InvalidSessionName(n).into());
             }
@@ -118,7 +130,7 @@ pub fn exec(
             }
             let found = Found::from_session(&server.model, s);
             if let Some(cwd) = args.value('c') {
-                let cwd = expand(server, found, cwd);
+                let cwd = expand_for_client(server, item, found, cwd);
                 if let Some(x) = server.model.sessions.get_mut(&s) {
                     x.cwd = vtmux_core::rawstr::to_os_string(&cwd).into();
                 }
@@ -151,7 +163,13 @@ pub fn exec(
     let detached = args.flag('d') || item.client.is_none();
     let cwd = match args.value('c') {
         Some(c) => {
-            let c = expand_as(server, found, Kind::Unknown, c);
+            let c = expand_as(
+                server,
+                found,
+                command_client(server, item),
+                Kind::Unknown,
+                c,
+            );
             // spawn.c:295-301: relative to the client's directory.
             super::start_path(&server.client_cwd(item.client, None), &c)
         }
@@ -235,6 +253,7 @@ pub fn exec(
         let text = expand_as(
             server,
             Found::from_session(&server.model, s),
+            command_client(server, item),
             Kind::Window,
             template,
         );

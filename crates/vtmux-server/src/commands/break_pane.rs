@@ -8,7 +8,7 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::layout::{Layout, WindowPanes};
 use vtmux_core::options::{TreeId, Value};
 
-use super::{Item, expand};
+use super::{Item, expand, expand_for_target};
 use crate::model::Window;
 use crate::names::{check_name, clean_name, parse_window_name, stringify_argv};
 use crate::server::Server;
@@ -144,7 +144,8 @@ pub fn exec(
             pane: Some(wp),
             new_index: None,
         };
-        let text = expand(server, at, args.value('F').unwrap_or(TEMPLATE));
+        // format_single(item, template, tc, ...) (cmd-break-pane.c:204).
+        let text = expand_for_target(server, item, at, args.value('F').unwrap_or(TEMPLATE));
         item.print(&text);
     }
     Ok(())

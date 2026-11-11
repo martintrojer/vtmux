@@ -3,7 +3,7 @@
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 
-use super::{Item, expand};
+use super::{Item, expand_for_target};
 use crate::model::Redraw;
 use crate::names::{check_name, clean_name};
 use crate::server::Server;
@@ -11,14 +11,20 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
     let Some(s) = found.session else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    let name = expand(server, found, &args.positional_text(0).unwrap_or_default());
+    // format_single_from_target.
+    let name = expand_for_target(
+        server,
+        item,
+        found,
+        &args.positional_text(0).unwrap_or_default(),
+    );
     if !check_name(&name) {
         return Err(EdgeError::InvalidSessionName(name).into());
     }
