@@ -16,6 +16,12 @@
 //! from `$TMUX_TMPDIR/{tmux,vtmux}-<uid>/` and `/tmp/{tmux,vtmux}-<uid>/`;
 //! `cargo xtask sockets` lists the test-labelled entries there, which is what
 //! `check.sh` diffs around the suites to catch a harness that leaks.
+//!
+//! A server with `vtmux-persist` on keeps a checkpoint directory per socket,
+//! `$XDG_STATE_HOME/vtmux/<label>-<hash>/` (`vtmux_server::persist::state_dir`),
+//! which outlives it too. [`sweep_checkpoints`] removes the test-labelled
+//! ones whose server is gone: its socket in those directories missing or
+//! refusing, and no server holding the directory's `lock`.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -394,6 +400,68 @@ pub fn sweep_sockets(dirs: &[PathBuf], also: impl Fn(&str) -> bool, dry: bool) -
         .collect()
 }
 
+/// `$XDG_STATE_HOME/vtmux` (else `~/.local/state/vtmux`), as a server of
+/// this environment would name it (`vtmux_server::persist::state_dir`).
+pub fn default_state_root() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    vtmux_server::persist::state_dir(
+        Path::new("/s"),
+        std::env::var_os("XDG_STATE_HOME").as_deref(),
+        home.as_deref(),
+    )
+    .and_then(|d| d.parent().map(Path::to_path_buf))
+}
+
+/// Whether a server holds the checkpoint directory `dir` (its `lock` is
+/// `flock`ed, `vtmux_server::persist::Lock`).
+fn checkpoint_locked(dir: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(dir.join(vtmux_server::persist::LOCK)) else {
+        return false;
+    };
+    matches!(
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockShared),
+        Err(rustix::io::Errno::WOULDBLOCK)
+    )
+}
+
+/// Remove the checkpoint directories in `root` (`<label>-<hash>`) whose
+/// label is a test one ([`is_test_label`]) and whose server is gone: no
+/// socket `<dir>/<label>` of `socket_dirs` hashes to `<hash>`, or that
+/// socket refuses a `connect()`, and no server holds the directory's
+/// `lock`. `default`, other labels, live servers and anything else stay.
+/// Returns the directories removed, or with `dry` the ones that would be.
+pub fn sweep_checkpoints(root: &Path, socket_dirs: &[PathBuf], dry: bool) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut gone: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let (label, hash) = name.rsplit_once('-')?;
+            let hashed = hash.len() == 12 && hash.bytes().all(|b| b.is_ascii_hexdigit());
+            (hashed && is_test_label(label)).then(|| (e.path(), label.to_owned(), hash.to_owned()))
+        })
+        .filter(|(dir, label, hash)| {
+            let live = socket_dirs
+                .iter()
+                .map(|d| d.join(label))
+                .filter(|p| vtmux_server::persist::path_hash(p) == *hash)
+                .any(|p| {
+                    p.symlink_metadata()
+                        .is_ok_and(|m| m.file_type().is_socket())
+                        && !matches!(probe_connect(&p), Err(rustix::io::Errno::CONNREFUSED))
+                });
+            !live && !checkpoint_locked(dir)
+        })
+        .map(|(dir, _, _)| dir)
+        .filter(|dir| dry || std::fs::remove_dir_all(dir).is_ok())
+        .collect();
+    gone.sort();
+    gone
+}
+
 /// `cargo xtask sockets`: the test-labelled entries of the default socket
 /// directories, one path per line, sorted.
 pub fn list_sockets() -> ExitCode {
@@ -447,6 +515,17 @@ pub fn run() -> ExitCode {
         "{} {} dead test socket(s)",
         if dry { "would remove" } else { "removed" },
         socks.len()
+    );
+    let checkpoints = default_state_root()
+        .map(|root| sweep_checkpoints(&root, &default_socket_dirs(), dry))
+        .unwrap_or_default();
+    for p in &checkpoints {
+        eprintln!("checkpoint {}", p.display());
+    }
+    eprintln!(
+        "{} {} dead test checkpoint dir(s)",
+        if dry { "would remove" } else { "removed" },
+        checkpoints.len()
     );
     ExitCode::SUCCESS
 }
@@ -706,6 +785,59 @@ mod tests {
         assert_eq!(socket_dirs(Some(&s.0.join("missing")), 7), tmp);
         assert_eq!(socket_dirs(Some(Path::new("/tmp")), 7), tmp);
         assert!(tmp.iter().all(|d| d.starts_with("/tmp")), "{tmp:?}");
+    }
+
+    /// A test-labelled checkpoint directory goes when its server's socket
+    /// is dead or missing, unless a server holds its lock; a live socket,
+    /// `default` and other labels keep theirs. A dry run lists the same
+    /// and removes nothing.
+    #[test]
+    fn sweep_removes_test_checkpoints_of_gone_servers_only() {
+        use std::os::unix::net::UnixListener;
+        let s = Scratch::new("ckpt");
+        let socks = s.0.join("vtmux-1");
+        let root = s.0.join("state");
+        std::fs::create_dir_all(&socks).unwrap();
+        let checkpoint = |label: &str| {
+            let hash = vtmux_server::persist::path_hash(&socks.join(label));
+            let dir = root.join(format!("{label}-{hash}"));
+            std::fs::create_dir_all(dir.join("chunks")).unwrap();
+            std::fs::write(dir.join("manifest"), "m").unwrap();
+            dir
+        };
+        dead_socket(&socks.join("cli1"));
+        checkpoint("cli1");
+        checkpoint("rv2");
+        let _live = UnixListener::bind(socks.join("att3-0")).unwrap();
+        checkpoint("att3-0");
+        let held = checkpoint("testA4");
+        let lock = std::fs::File::create(held.join("lock")).unwrap();
+        rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive).unwrap();
+        dead_socket(&socks.join("default"));
+        checkpoint("default");
+        checkpoint("mywork");
+        std::fs::create_dir_all(root.join("rv5-nothex")).unwrap();
+        let want = ["cli1", "rv2"].map(|l| {
+            let hash = vtmux_server::persist::path_hash(&socks.join(l));
+            root.join(format!("{l}-{hash}"))
+        });
+        let dirs = [socks.clone()];
+        assert_eq!(sweep_checkpoints(&root, &dirs, true), want, "dry run");
+        assert!(want.iter().all(|d| d.is_dir()), "a dry run removes nothing");
+        assert_eq!(sweep_checkpoints(&root, &dirs, false), want);
+        let mut left: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .map(|n| n.split('-').next().unwrap().to_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["att3", "default", "mywork", "rv5", "testA4"]);
+        drop(lock);
+        assert_eq!(
+            names(&sweep_checkpoints(&root, &dirs, false)).len(),
+            1,
+            "unlocked"
+        );
     }
 
     #[test]

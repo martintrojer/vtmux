@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
-rustix = { version = "1", features = ["net"] }
+rustix = { version = "1", features = ["fs", "net"] }
 portable-pty = "0.9.0"
 regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -18,4 +18,5 @@ serde_json = "1.0.154"
 similar = "3.2.1"
 toml = "1.1.8"
 vtmux-core.workspace = true
+vtmux-server.workspace = true
 vtmux-vt.workspace = true

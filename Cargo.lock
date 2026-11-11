@@ -909,6 +909,7 @@ dependencies = [
  "similar",
  "toml",
  "vtmux-core",
+ "vtmux-server",
  "vtmux-vt",
 ]
 
