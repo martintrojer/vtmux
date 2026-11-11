@@ -20,3 +20,6 @@ toml = "1.1.8"
 vtmux-core.workspace = true
 vtmux-server.workspace = true
 vtmux-vt.workspace = true
+
+[dev-dependencies]
+rustix = { version = "1", features = ["net", "process"] }

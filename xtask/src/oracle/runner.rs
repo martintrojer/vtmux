@@ -58,6 +58,10 @@ const POLL: Duration = Duration::from_millis(5);
 const UPGRADE_TIMEOUT: Duration = Duration::from_secs(30);
 /// The server gives a client 10 s to re-attach after its notice.
 const REATTACH_LIMIT: Duration = Duration::from_secs(15);
+/// How long a re-attached client may take to show again what it showed
+/// before the upgrade ([`Runner::redrawn`]): only ends a wait for a screen
+/// the upgrade changed.
+const REDRAW_LIMIT: Duration = Duration::from_secs(10);
 /// What a re-attached client is sent first (`Caps::restart`, as after
 /// `MSG_WAKEUP`): its terminal started again, ahead of the full redraw.
 const REATTACHED: &[u8] = b"\x1b[?996n";
@@ -207,6 +211,10 @@ pub struct Runner<'a> {
     /// Output total when the last settle returned: what `settle { react }`
     /// waits to exceed after a CLI step.
     baseline: usize,
+    /// Tests: the server stops for this long once it has answered an
+    /// upgrade, as a loaded host can hold it.
+    #[cfg(test)]
+    stall_after_upgrade: Option<Duration>,
 }
 
 impl Drop for Runner<'_> {
@@ -278,6 +286,8 @@ impl<'a> Runner<'a> {
             pending_div: None,
             expect_after: None,
             baseline: 0,
+            #[cfg(test)]
+            stall_after_upgrade: None,
         })
     }
 
@@ -543,10 +553,10 @@ impl<'a> Runner<'a> {
     /// The server moved onto `bin` again over the frozen handshake
     /// (`UpgradeRequest`, as `vtmux-upgrade -b <bin>` from a client of
     /// another version asks; unlike the command it leaves no line in
-    /// `show-messages`), then every attached client back from its re-exec
-    /// and the redraw it gets quiet. Observes nothing when that goes
-    /// through, and what went wrong otherwise (which no trace holds, so it
-    /// fails the step). Inserted (`auto`), it first lets what the steps
+    /// `show-messages`), then every attached client back from its re-exec,
+    /// showing what it showed before ([`Self::redrawn`]), and quiet.
+    /// Observes nothing when that goes through, and what went wrong
+    /// otherwise (which no trace holds, so it fails the step). Inserted (`auto`), it first lets what the steps
     /// before provoked settle, and is skipped while no server listens. Put
     /// off (false) when the server's strict hook (`--upgrade-every` runs
     /// only) says not now.
@@ -562,12 +572,21 @@ impl<'a> Runner<'a> {
                     .then(|| (id.clone(), a.events.lock().unwrap().len()))
             })
             .collect();
+        let shown: Vec<Option<Observation>> =
+            marks.iter().map(|(id, _)| self.screen(id).ok()).collect();
         let what = if auto {
             "the upgrade after this step"
         } else {
             "upgrade"
         };
-        let failed = match self.upgrade_request() {
+        #[cfg(test)]
+        let server = self.stall_after_upgrade.and_then(|_| self.server_pid());
+        let answer = self.upgrade_request();
+        #[cfg(test)]
+        if let (Some(pid), Some(stall)) = (server, self.stall_after_upgrade) {
+            stall_process(pid, stall);
+        }
+        let failed = match answer {
             Ok(None) if auto => return true,
             Ok(None) => Some(format!("{what}: no server")),
             Ok(Some((true, message))) if message.is_empty() => None,
@@ -596,7 +615,7 @@ impl<'a> Runner<'a> {
             });
             return true;
         }
-        for (id, at) in marks {
+        for ((id, at), shown) in marks.into_iter().zip(shown) {
             if !self.reattached(&id, at) {
                 self.items.push(Item {
                     step,
@@ -605,6 +624,8 @@ impl<'a> Runner<'a> {
                     },
                     divergence: None,
                 });
+            } else if let Some(shown) = shown {
+                self.redrawn(&id, &shown);
             }
         }
         self.settle(DEFAULT_QUIET);
@@ -654,6 +675,31 @@ impl<'a> Runner<'a> {
                 return false;
             }
             thread::sleep(POLL);
+        }
+    }
+
+    /// Tests: the server's pid.
+    #[cfg(test)]
+    fn server_pid(&self) -> Option<rustix::process::Pid> {
+        let argv = ["display", "-p", "#{pid}"].map(String::from);
+        let (out, _, _) = self.cli_raw(&argv, CLI_TIMEOUT).ok()??;
+        rustix::process::Pid::from_raw(out.trim().parse().ok()?)
+    }
+
+    /// Attached client `id`, re-attached, shows `shown` again, as before
+    /// the upgrade (decision 13). Its redraw comes a round trip after
+    /// [`REATTACHED`]: the server holds a frame until the client has
+    /// acknowledged the one before (D14), here the restart frame, so under
+    /// load a quiet time can end before the redraw comes. Gives up after
+    /// [`REDRAW_LIMIT`] without a word: what the screen shows then (a `#()`
+    /// job run again by the new image) is the next observation's to judge.
+    fn redrawn(&self, id: &str, shown: &Observation) {
+        let start = Instant::now();
+        while start.elapsed() < REDRAW_LIMIT {
+            if self.screen(id).is_ok_and(|now| now == *shown) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -1072,6 +1118,18 @@ impl<'a> Runner<'a> {
     }
 }
 
+/// Tests: stop process `pid` now and let it go on after `stall`.
+#[cfg(test)]
+fn stall_process(pid: rustix::process::Pid, stall: Duration) {
+    use rustix::process::{Signal, kill_process};
+    if kill_process(pid, Signal::STOP).is_ok() {
+        thread::spawn(move || {
+            thread::sleep(stall);
+            let _ = kill_process(pid, Signal::CONT);
+        });
+    }
+}
+
 /// The last title an OSC 0 or 2 in `bytes` set (`OSC Ps ; Pt`, ended by
 /// BEL or ESC), as a terminal keeps it.
 fn terminal_title(bytes: &[u8]) -> String {
@@ -1220,6 +1278,50 @@ mod tests {
                 exit: 0
             }
         );
+    }
+
+    /// A re-attached client's redraw waits for it to acknowledge the
+    /// restart frame (D14), so a host that holds the server for a moment
+    /// right after the upgrade's answer delays it past any quiet time: the
+    /// screen after the upgrade is the one before, not the blank one the
+    /// restart left (`flake_replay_upgrade_screen_blank`).
+    #[test]
+    fn the_screen_after_an_upgrade_waits_for_the_redraw() {
+        let bin = crate::build_vtmux(&super::super::workspace_root()).unwrap();
+        let sc: Scenario = toml::from_str(
+            r#"
+name = "upgrade-redraw"
+size = [30, 5]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "sh", "-c", "printf hi; tmux wait-for -S up; exec sleep 1000"] },
+  { wait_for = "up" },
+  { run = ["set", "-g", "status-right", "R"] },
+  { attach = { session = "a" } },
+  { wait_screen = { has = ["hi", "R"] } },
+  { screen = {} },
+  { upgrade = {} },
+  { screen = {} },
+]
+"#,
+        )
+        .unwrap();
+        let opts = Opts {
+            vtmux: true,
+            upgrade_every: None,
+        };
+        let mut runner = Runner::new(&bin, &sc, opts).unwrap();
+        runner.stall_after_upgrade = Some(Duration::from_secs(1));
+        runner.run_steps().unwrap();
+        let screens: Vec<_> = (runner.items.iter())
+            .map(|i| &i.observation)
+            .filter(|o| !matches!(o, Observation::Cli { exit: 0, .. }))
+            .collect();
+        assert_eq!(screens.len(), 2, "{screens:#?}");
+        assert!(
+            matches!(screens[0], Observation::Screen { rows, .. } if rows[0].starts_with("hi")),
+            "{screens:#?}"
+        );
+        assert_eq!(screens[0], screens[1]);
     }
 
     #[test]
