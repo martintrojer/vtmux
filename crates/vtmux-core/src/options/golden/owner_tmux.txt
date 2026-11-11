@@ -103,9 +103,13 @@ variation-selector-always-wide on
 @mu_crew_g_done 
 @mu_crew_g_error 
 @mu_crew_g_idle 
+@mu_crew_g_muzzle 
+@mu_crew_g_queued 
+@mu_crew_g_slow 
+@mu_crew_g_starved 
 @mu_crew_g_waiting 
 @mu_crew_g_working 
-@mu_crew_probes "murmur_remote memory cpu uptime"
+@mu_crew_probes "murmur_remote memory cpu uptime muzzle"
 @plugin mu-crew/tmux-session-picker
 @seg_cpu "#{?#{e|>=:#{@mu_crew_cpu},#{@load_high}},#{E:@load_style_high},#{?#{e|>=:#{@mu_crew_cpu},#{@load_warn}},#{E:@load_style_warn},#{E:@load_style_low}}} #{@glyph_cpu} #{@mu_crew_cpu_text} #[default]"
 @seg_ram "#{?#{e|>=:#{@mu_crew_mem},#{@load_high}},#{E:@load_style_high},#{?#{e|>=:#{@mu_crew_mem},#{@load_warn}},#{E:@load_style_warn},#{E:@load_style_low}}} #{@glyph_ram} #{@mu_crew_mem_text} #[default]"
@@ -158,7 +162,7 @@ status-left "#[fg=#{@color_sky},bg=#{@color_surface0},bold] #S #[default]   "
 status-left-length 40
 status-left-style default
 status-position top
-status-right "#{?client_prefix,#[fg=#{@color_yellow}]#[bg=#{@color_surface0}]#[bold] PREFIX #[default]#{E:@sep},}#{?#{e|>:#{E:@mu_crew_n_any},0},#[bg=#{@color_surface0}]#{E:@mu_crew_pill}#[default]#{E:@sep},}#{?#{@mu_crew_cpu_text},#{E:@seg_cpu}#{E:@sep},}#{?#{@mu_crew_mem_text},#{E:@seg_ram}#{E:@sep},}#{E:@status_hostname}#{?#{@mu_crew_uptime_text},#{E:@sep}#{E:@seg_uptime},}"
+status-right "#{?client_prefix,#[fg=#{@color_yellow}]#[bg=#{@color_surface0}]#[bold] PREFIX #[default]#{E:@sep},}#{?#{e|>:#{E:@mu_crew_n_any},0},#[bg=#{@color_surface0}]#{E:@mu_crew_pill}#[default]#{E:@sep},}#{?#{E:@mu_crew_muzzle_pill},#[bg=#{@color_surface0}]#{E:@mu_crew_muzzle_pill}#[default]#{E:@sep},}#{?#{@mu_crew_cpu_text},#{E:@seg_cpu}#{E:@sep},}#{?#{@mu_crew_mem_text},#{E:@seg_ram}#{E:@sep},}#{E:@status_hostname}#{?#{@mu_crew_uptime_text},#{E:@sep}#{E:@seg_uptime},}"
 status-right-length 210
 status-right-style default
 status-style "bg=default,fg=#{@color_text}"
@@ -285,7 +289,7 @@ other-pane-width 0
 pane-active-border-style "fg=#{@color_border},bg=default,bold"
 pane-base-index 1
 pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
-pane-border-indicators both
+pane-border-indicators colour
 pane-border-lines heavy
 pane-border-status off
 pane-border-style "fg=#{@color_overlay0},bg=default"
@@ -315,7 +319,7 @@ window-style default
 window-status-activity-style reverse
 window-status-bell-style reverse
 window-status-current-format "#[fg=#{@color_lavender}]#[bg=#{@color_surface2}]#[bold] #I #{E:@win_label}#{?window_zoomed_flag, #{@glyph_zoom},}#{E:@mu_crew_window_glyph} #[default]"
-window-status-current-style underscore
+window-status-current-style default
 window-status-format "#[fg=#{@color_overlay0}]#[bg=#{@color_surface0}] #I #[fg=#{@color_subtext0}]#[bg=#{@color_surface0}]#{E:@win_label}#{?window_zoomed_flag, #{@glyph_zoom},}#{E:@mu_crew_window_glyph} #[default]"
 window-status-last-style default
 window-status-separator "  "

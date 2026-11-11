@@ -2263,43 +2263,18 @@ fn default_command_spawns_panes() {
     });
 }
 
-/// Owner acceptance: strip only top-level run/run-shell/if-shell, the
-/// mu-crew source-file and vtmux-only options, preserving bindings and
-/// environment lines. Their
+/// Owner acceptance on the bundled copy of the owner's config
+/// (`vtmux-core/src/options/golden/owner_tmux.conf`, which
+/// `options_cases.sh` regenerates from the owner's file; never the host's
+/// own): strip only top-level run/run-shell/if-shell, the mu-crew
+/// source-file, vtmux-only options and the `%if` blocks on
+/// `#{vtmux_version}`, preserving bindings and environment lines. Their
 /// effects are later work; source still runs subsequent set lines.
 #[test]
 fn options_owner_config() {
     compare("options_owner_config", |w| {
-        let home = std::env::var_os("HOME").expect("HOME");
-        let original =
-            std::fs::read_to_string(PathBuf::from(home).join("dotfiles/tmux/.tmux.conf"))
-                .unwrap_or_else(|_| {
-                    include_str!("../../vtmux-core/src/options/golden/owner_tmux.conf").to_owned()
-                });
-        // A `%if` on `#{vtmux_version}` is false in tmux and true here:
-        // the block is vtmux's own, so not compared (the owner's 100k
-        // `history-limit` under vtmux, dotfiles 2026-11-11).
-        let mut in_vtmux_block = false;
-        let text = original
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with("%if") && line.contains("vtmux_version") {
-                    in_vtmux_block = true;
-                }
-                if in_vtmux_block {
-                    in_vtmux_block = !trimmed.starts_with("%endif");
-                    return false;
-                }
-                let command = line.split_whitespace().next().unwrap_or("");
-                // The `%if "#{vtmux_version}"` block (D23, D26) sets
-                // options tmux has not got: vtmux-only, so not compared.
-                !(matches!(command, "run" | "run-shell" | "if-shell")
-                    || line.contains("vtmux-")
-                    || command == "source-file" && line.contains("mu-crew.conf"))
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let original = include_str!("../../vtmux-core/src/options/golden/owner_tmux.conf");
+        let text = owner_config_for_both(original);
         let config = w.dir().join("owner.conf");
         std::fs::write(&config, text).expect("write owner copy");
         let started = w.run(&["new", "-d", "-s", "a", "cat"]);
@@ -2308,6 +2283,60 @@ fn options_owner_config() {
         let _source = w.run(&["source", config.to_str().expect("utf-8")]);
         vec![started, w.run(&["show", "-g"]), w.run(&["show", "-gw"])]
     });
+}
+
+/// What of the owner's config `options_owner_config` gives both servers.
+/// A `%if` on `#{vtmux_version}` is false in tmux and true in vtmux: the
+/// block (with any `%if` nested in it, to its own `%endif`) is vtmux's own,
+/// so neither server runs it. So are lines naming a `vtmux-` option, which
+/// tmux does not have.
+fn owner_config_for_both(original: &str) -> String {
+    // The depth of `%if` inside a vtmux block; 0 outside one.
+    let mut depth = 0usize;
+    original
+        .lines()
+        .filter(|line| {
+            let directive = line.split_whitespace().next().unwrap_or("");
+            if depth > 0 {
+                match directive {
+                    "%if" => depth += 1,
+                    "%endif" => depth -= 1,
+                    _ => {}
+                }
+                return false;
+            }
+            if directive == "%if" && line.contains("vtmux_version") {
+                depth = 1;
+                return false;
+            }
+            !(matches!(directive, "run" | "run-shell" | "if-shell")
+                || line.contains("vtmux-")
+                || directive == "source-file" && line.contains("mu-crew.conf"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The vtmux blocks go whole, nested `%if`s included; the rest stays.
+#[test]
+fn owner_config_for_both_drops_the_vtmux_blocks() {
+    let conf = "set -g a 1\n\
+                %if \"#{vtmux_version}\"\n\
+                set -g b 2\n\
+                %if \"#{x}\"\n\
+                set -g c 3\n\
+                %endif\n\
+                set -g d 4\n\
+                %endif\n\
+                %if \"#{y}\"\n\
+                set -g e 5\n\
+                %endif\n\
+                set -s vtmux-persist full\n\
+                run -b x";
+    assert_eq!(
+        owner_config_for_both(conf),
+        "set -g a 1\n%if \"#{y}\"\nset -g e 5\n%endif"
+    );
 }
 
 /// Twelve clients start a server at once (client.c `client_get_lock`):
