@@ -83,13 +83,19 @@ pub fn world_pids(tmux_tmpdir: &Path, label: &str) -> Vec<Pid> {
 /// recorded. The pid comes from `display`, else `known`; a server that
 /// answers `display` is told `kill-server` and reaped, one that does not
 /// (stopped, wedged) is killed with every other process of the world.
+///
+/// Then every process still running with the world's `TMUX_TMPDIR` in its
+/// environment (a server on another socket, `-S` in the world's dirs, a
+/// client, a pane program) gets a second to go and is killed: a world
+/// leaves nothing running, pass or fail. What had to be killed is
+/// returned, each process as its pid and command line.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn teardown(
     tmux_tmpdir: &Path,
     label: &str,
     known: Option<Pid>,
     mut command: impl FnMut(&[&str]) -> Command,
-) {
+) -> Vec<(Pid, String)> {
     let shown = output_within(&mut command(&["display", "-p", "#{pid}"]), TEARDOWN_LIMIT);
     let answered = shown.is_some();
     let pid = shown
@@ -103,6 +109,88 @@ pub fn teardown(
             let _ = kill_process(pid, Signal::KILL);
         }
     }
+    sweep(tmux_tmpdir)
+}
+
+/// The processes running with `TMUX_TMPDIR` `tmux_tmpdir` in their
+/// environment (`ps axeww`, as [`world_pids`]): every process a world
+/// starts has it, and the servers pass it on to their panes and jobs.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn tmpdir_processes(tmux_tmpdir: &Path) -> Vec<(Pid, String)> {
+    let Ok(ps) = Command::new("ps")
+        .args(["axeww", "-o", "pid=,command="])
+        .output()
+    else {
+        return Vec::new();
+    };
+    let var = format!("TMUX_TMPDIR={}", tmux_tmpdir.display());
+    String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter(|l| l.split_whitespace().any(|w| w == var))
+        .filter_map(|l| {
+            let l = l.trim_start();
+            let (pid, command) = l.split_once(' ')?;
+            Some((parse_pid(pid)?, command.trim_start().to_owned()))
+        })
+        .filter(|(pid, _)| pid.as_raw_nonzero().get() != std::process::id().cast_signed())
+        .collect()
+}
+
+/// Wait at most a second for the processes of [`tmpdir_processes`] to go,
+/// then kill those left: what was killed.
+fn sweep(tmux_tmpdir: &Path) -> Vec<(Pid, String)> {
+    let end = Instant::now() + Duration::from_secs(1);
+    loop {
+        let left = tmpdir_processes(tmux_tmpdir);
+        if left.is_empty() {
+            return left;
+        }
+        if Instant::now() >= end {
+            for (pid, _) in &left {
+                let _ = kill_process(*pid, Signal::KILL);
+            }
+            return left;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Kill what a test binary killed before its worlds' teardown left (a
+/// timeout, `kill -9`): every process of a world of `prefix` (`-L
+/// <prefix><pid>-...` with a `TMUX_TMPDIR` under `/tmp`) whose test
+/// process `<pid>` is gone. Once per test binary.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn reap_dead_owners(prefix: &str) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let Ok(ps) = Command::new("ps")
+            .args(["axeww", "-o", "pid=,command="])
+            .output()
+        else {
+            return;
+        };
+        let flag = format!(" -L {prefix}");
+        for line in String::from_utf8_lossy(&ps.stdout).lines() {
+            let Some(at) = line.find(&flag) else { continue };
+            if !line.contains(" TMUX_TMPDIR=/tmp/") {
+                continue;
+            }
+            let owner: String = line[at + flag.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let rest = &line[at + flag.len() + owner.len()..];
+            let (Some(owner), true) = (parse_pid(&owner), rest.starts_with('-')) else {
+                continue;
+            };
+            if test_kill_process(owner).is_ok() {
+                continue;
+            }
+            if let Some(pid) = line.split_whitespace().next().and_then(parse_pid) {
+                let _ = kill_process(pid, Signal::KILL);
+            }
+        }
+    });
 }
 
 /// How long a wait for a state lasts: it only ends a hang.

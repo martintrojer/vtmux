@@ -36,6 +36,7 @@ struct World {
 impl World {
     fn new(bin: PathBuf) -> Self {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        common::reap_dead_owners("att");
         Self {
             bin,
             label: format!(
@@ -184,10 +185,34 @@ impl World {
     }
 }
 impl Drop for World {
+    /// The world's server goes with `kill-server`, and anything else it
+    /// started is killed ([`common::teardown`]). A server or client of the
+    /// world that `kill-server` did not end (one on another socket, which
+    /// the test should have ended itself) fails a test that passed
+    /// otherwise.
     fn drop(&mut self) {
-        common::teardown(self.sockets.path(), &self.label, None, |args| {
+        let killed = common::teardown(self.sockets.path(), &self.label, None, |args| {
             self.command(args)
         });
+        let ours: Vec<_> = killed
+            .iter()
+            .filter(|(_, command)| {
+                let program = command.split_whitespace().next().unwrap_or_default();
+                matches!(
+                    std::path::Path::new(program)
+                        .file_name()
+                        .and_then(|n| n.to_str()),
+                    Some("vtmux" | "tmux")
+                )
+            })
+            .collect();
+        if !thread::panicking() {
+            assert!(
+                ours.is_empty(),
+                "{}: left running after kill-server (now killed): {ours:?}",
+                self.label
+            );
+        }
     }
 }
 struct Attached {
