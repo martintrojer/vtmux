@@ -1,0 +1,113 @@
+name = "reflow_kept_cells_edits"
+size = [40, 7]
+# The cells a line keeps past a narrower width (grid_reflow_move, its
+# cellsize) after edits at that width: what empties the line
+# (grid_empty_line: a clear of the whole width) drops them, what moves
+# lines (IL, DL, scroll regions) takes them along, what writes or moves
+# cells within the width keeps them. Each scene erases a line red on 40
+# columns, narrows to 30, edits, widens back to 40 and captures with -N.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "40", "-y", "6", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # dch: DCH over the whole width from column 0 empties the line (grid_view_delete_cells: grid_clear of the whole width, grid_empty_line)
+  { run = ["new", "-d", "-s", "dch", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S dcha; tmux wait-for dchb; printf '\\033[1;1H\\033[30P\\033[2;5H'; tmux wait-for -S dchc; exec cat"] },
+  { wait_for = "dcha" },
+  { run = ["resize-window", "-t", "dch", "-x", "30"] },
+  { run = ["wait-for", "-S", "dchb"] },
+  { wait_for = "dchc" },
+  { run = ["resize-window", "-t", "dch", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "dch:"] },
+  # dchpart: DCH from column 4: the cells past 30 stay
+  { run = ["new", "-d", "-s", "dchpart", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S dchparta; tmux wait-for dchpartb; printf '\\033[1;5H\\033[5P\\033[2;5H'; tmux wait-for -S dchpartc; exec cat"] },
+  { wait_for = "dchparta" },
+  { run = ["resize-window", "-t", "dchpart", "-x", "30"] },
+  { run = ["wait-for", "-S", "dchpartb"] },
+  { wait_for = "dchpartc" },
+  { run = ["resize-window", "-t", "dchpart", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "dchpart:"] },
+  # ichpart: ICH from column 1: the cells past 30 stay
+  { run = ["new", "-d", "-s", "ichpart", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S ichparta; tmux wait-for ichpartb; printf '\\033[1;2H\\033[3@\\033[2;5H'; tmux wait-for -S ichpartc; exec cat"] },
+  { wait_for = "ichparta" },
+  { run = ["resize-window", "-t", "ichpart", "-x", "30"] },
+  { run = ["wait-for", "-S", "ichpartb"] },
+  { wait_for = "ichpartc" },
+  { run = ["resize-window", "-t", "ichpart", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "ichpart:"] },
+  # il: IL above the line: it moves down with its cells, the inserted line has none
+  { run = ["new", "-d", "-s", "il", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S ila; tmux wait-for ilb; printf '\\033[1;1H\\033[L\\033[3;5H'; tmux wait-for -S ilc; exec cat"] },
+  { wait_for = "ila" },
+  { run = ["resize-window", "-t", "il", "-x", "30"] },
+  { run = ["wait-for", "-S", "ilb"] },
+  { wait_for = "ilc" },
+  { run = ["resize-window", "-t", "il", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "il:"] },
+  # dl: DL above the line: it moves up with its cells, the line added at the bottom has none
+  { run = ["new", "-d", "-s", "dl", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'top\\r\\nab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S dla; tmux wait-for dlb; printf '\\033[1;1H\\033[M\\033[3;5H'; tmux wait-for -S dlc; exec cat"] },
+  { wait_for = "dla" },
+  { run = ["resize-window", "-t", "dl", "-x", "30"] },
+  { run = ["wait-for", "-S", "dlb"] },
+  { wait_for = "dlc" },
+  { run = ["resize-window", "-t", "dl", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "dl:"] },
+  # dlself: DL of the line itself: its cells go with it
+  { run = ["new", "-d", "-s", "dlself", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext\\r\\nlast'; tmux wait-for -S dlselfa; tmux wait-for dlselfb; printf '\\033[1;1H\\033[M\\033[3;5H'; tmux wait-for -S dlselfc; exec cat"] },
+  { wait_for = "dlselfa" },
+  { run = ["resize-window", "-t", "dlself", "-x", "30"] },
+  { run = ["wait-for", "-S", "dlselfb"] },
+  { wait_for = "dlselfc" },
+  { run = ["resize-window", "-t", "dlself", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "dlself:"] },
+  # su: SU in a region: the line scrolls out, the line the region adds has none
+  { run = ["new", "-d", "-s", "su", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\n1\\r\\n2\\r\\n3\\r\\nbelow'; tmux wait-for -S sua; tmux wait-for sub; printf '\\033[1;4r\\033[S\\033[r\\033[5;6H'; tmux wait-for -S suc; exec cat"] },
+  { wait_for = "sua" },
+  { run = ["resize-window", "-t", "su", "-x", "30"] },
+  { run = ["wait-for", "-S", "sub"] },
+  { wait_for = "suc" },
+  { run = ["resize-window", "-t", "su", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "su:"] },
+  # sd: SD in a region: the line moves down with its cells, the line added at the top has none
+  { run = ["new", "-d", "-s", "sd", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\n1\\r\\n2\\r\\n3\\r\\nbelow'; tmux wait-for -S sda; tmux wait-for sdb; printf '\\033[1;4r\\033[T\\033[r\\033[5;6H'; tmux wait-for -S sdc; exec cat"] },
+  { wait_for = "sda" },
+  { run = ["resize-window", "-t", "sd", "-x", "30"] },
+  { run = ["wait-for", "-S", "sdb"] },
+  { wait_for = "sdc" },
+  { run = ["resize-window", "-t", "sd", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "sd:"] },
+  # sdout: SD in a region pushes the line out of its bottom: the cells go with it
+  { run = ["new", "-d", "-s", "sdout", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '1\\r\\n2\\r\\n3\\r\\nab\\033[41m\\033[K\\033[0m\\r\\nbelow'; tmux wait-for -S sdouta; tmux wait-for sdoutb; printf '\\033[1;4r\\033[T\\033[r\\033[5;6H'; tmux wait-for -S sdoutc; exec cat"] },
+  { wait_for = "sdouta" },
+  { run = ["resize-window", "-t", "sdout", "-x", "30"] },
+  { run = ["wait-for", "-S", "sdoutb"] },
+  { wait_for = "sdoutc" },
+  { run = ["resize-window", "-t", "sdout", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "sdout:"] },
+  # decaln: DECALN writes each cell of the width (screen_write_alignmenttest): the cells past it stay (no -N: the rows of Es end at their cellsize in tmux, D-027)
+  { run = ["new", "-d", "-s", "decaln", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S decalna; tmux wait-for decalnb; printf '\\033#8'; tmux wait-for -S decalnc; exec cat"] },
+  { wait_for = "decalna" },
+  { run = ["resize-window", "-t", "decaln", "-x", "30"] },
+  { run = ["wait-for", "-S", "decalnb"] },
+  { wait_for = "decalnc" },
+  { run = ["resize-window", "-t", "decaln", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "decaln:"] },
+  # ris: RIS clears the screen (screen_write_clearscreen)
+  { run = ["new", "-d", "-s", "ris", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S risa; tmux wait-for risb; printf '\\033c'; tmux wait-for -S risc; exec cat"] },
+  { wait_for = "risa" },
+  { run = ["resize-window", "-t", "ris", "-x", "30"] },
+  { run = ["wait-for", "-S", "risb"] },
+  { wait_for = "risc" },
+  { run = ["resize-window", "-t", "ris", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "ris:"] },
+  # rep: REP writes cells: the cells past 30 stay
+  { run = ["new", "-d", "-s", "rep", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S repa; tmux wait-for repb; printf '\\033[1;1Hx\\033[3b\\033[2;5H'; tmux wait-for -S repc; exec cat"] },
+  { wait_for = "repa" },
+  { run = ["resize-window", "-t", "rep", "-x", "30"] },
+  { run = ["wait-for", "-S", "repb"] },
+  { wait_for = "repc" },
+  { run = ["resize-window", "-t", "rep", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "rep:"] },
+  # dchwrap: DCH over the whole width on a wrapped line's second row unwraps the row above (grid_clear_lines), as ECH does
+  { run = ["new", "-d", "-s", "dchwrap", "-n", "w", "-x", "30", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbb\\033[2;1H\\033[30P\\033[3;1H'; tmux wait-for -S dchwrap; exec cat"] },
+  { wait_for = "dchwrap" },
+  { run = ["capture-pane", "-p", "-J", "-t", "dchwrap:"] },
+  { run = ["display", "-p", "-t", "dchwrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+]

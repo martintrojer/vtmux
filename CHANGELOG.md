@@ -34,7 +34,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 - `#{client_uid}` and `#{client_user}` name the client's own user, not the server's, as in tmux: `list-clients` shows `[user …]` for a client another user attached through `server-access`.
 - Live upgrade: a downgrade to 3.8-beta2 or 3.8-beta1 waits up to 5 s for the old binary's `-V`, not 1 s, so a loaded laptop or macOS checking the binary no longer gets it refused.
 - Commands answer while an attached client floods keys (a huge paste, a terminal that sends input without end): 13 ms in a release build, where tmux takes 24 ms. Before, each waited 1.8 s (4-6 s in a debug build), and a plugin's `tmux` calls stalled with it. The server reads a client's input 4 KB a loop turn, as tmux does, and writes keys to a pane in batches.
-- A line erased with a background colour and then narrowed keeps its coloured cells past the narrow width, as tmux does: widened again, the pane and `capture-pane -e` show them (`printf '\033[41m\033[K'`, 40 -> 30 -> 40 columns: red to column 40, not 30). They go into history with the line and through a live upgrade.
+- A line erased with a background colour and then narrowed keeps its coloured cells past the narrow width, as tmux does: widened again, the pane and `capture-pane -e` show them (`printf '\033[41m\033[K'`, 40 -> 30 -> 40 columns: red to column 40, not 30). They go into history with the line and through a live upgrade. DCH over a whole line (`\033[1;1H\033[<width>P`) empties it and unwraps the line above, as tmux does.
 
 ## 3.8-beta3
 

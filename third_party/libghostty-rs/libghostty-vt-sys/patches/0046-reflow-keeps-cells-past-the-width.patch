@@ -52,7 +52,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
                  !self.src_in_tab;
              if (@as(usize, self.x) + self.tab_extra - @intFromBool(padding_here) >=
                  self.page.size.cols) self.pending_wrap = true;
-@@ -2031,17 +2040,32 @@ const ReflowCursor = struct {
+@@ -2031,17 +2040,33 @@ const ReflowCursor = struct {
          // fit, tmux's dead-pane linefeed), which joins nothing to the line
          // after it (grid_reflow_join). Upstream kept every cell of a
          // wrapped row.
@@ -65,18 +65,19 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
 +        // background an erase left past the new width stays with it
 +        // (Row.tmux_kept, kept after the loop below), and the cells it
 +        // kept past the old width come back as far as the new one goes.
-+        const tmux_moved = !src_row.wrap and
++        // The cheap tests here; tmux's measure (tmuxReflowWidth) only for
++        // a row with cells past the new width, after the loop.
++        const tmux_may_move = !src_row.wrap and
 +            (dst_x == 0 or (prev_wrap and used == 0)) and
-+            used <= self.page.size.cols and
-+            self.tmuxReflowWidth(vis_cells[0..used]) <= self.page.size.cols;
-+        const cells = if (tmux_moved) row_cells else vis_cells;
++            used <= self.page.size.cols;
++        const cells = if (tmux_may_move and src_row.tmux_kept) row_cells else vis_cells;
  
          // Calculate the columns in this row. First up we trim non-semantic
          // rightmost blanks.
 -        var cols_len = src_page.size.cols;
 +        var cols_len: size.CellCountInt = @intCast(cells.len);
          if (src_row.wrap) cols_len = @intCast(used);
-+        // vtmux: how far the cells of a line moved whole go (tmux_moved).
++        // vtmux: how far the cells of a line moved whole go (tmux_may_move).
 +        var kept_len: usize = 0;
          if (!src_row.wrap) {
              while (cols_len > 0) {
@@ -87,7 +88,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
  
              // vtmux: see `used` above. A line that fits by its cells but
              // not by tmux's measure (tab_extra) is split, so it takes only
-@@ -2073,9 +2097,10 @@ const ReflowCursor = struct {
+@@ -2073,9 +2098,10 @@ const ReflowCursor = struct {
              self.page_row.wrap = true;
              self.new_rows += 1;
              if (src_row.semantic_prompt == .none) {
@@ -100,21 +101,24 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
              }
          }
  
-@@ -2560,6 +2585,13 @@ const ReflowCursor = struct {
+@@ -2560,6 +2586,16 @@ const ReflowCursor = struct {
              }
          }
  
 +        // vtmux: the cells of a line moved whole past the new width stay
-+        // with it (tmux_moved).
-+        if (tmux_moved and cols_len > 0) {
++        // with it (tmux_may_move). The destination row is new, so it keeps
++        // nothing unless they are put there.
++        {
 +            const w = self.page.size.cols;
-+            self.page.tmuxKeep(self.page_row, if (kept_len > w) cells[w..kept_len] else &.{});
++            if (tmux_may_move and kept_len > w and cols_len > 0 and
++                self.tmuxReflowWidth(vis_cells[0..used]) <= w)
++                self.page.tmuxKeep(self.page_row, cells[w..kept_len]);
 +        }
 +
          // If the source row isn't wrapped then we should scroll afterwards.
          if (!src_row.wrap) {
              self.new_rows += 1;
-@@ -2722,13 +2754,15 @@ const ReflowCursor = struct {
+@@ -2722,13 +2758,15 @@ const ReflowCursor = struct {
          self: *ReflowCursor,
          src_page: *const Page,
      ) Capacity {
@@ -132,7 +136,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
              // We're already a non-standard page. We don't want to
              // inherit a massive set of rows, so cap it at our std size.
              cap.rows = @min(src_page.size.rows, std_capacity.rows);
-@@ -3593,6 +3627,8 @@ const ReflowCursor = struct {
+@@ -3593,6 +3631,8 @@ const ReflowCursor = struct {
          const node = try list.createPage(.{ .cap = cap });
          errdefer comptime unreachable;
          node.page().size.rows = 1;
@@ -141,14 +145,19 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
          list.pages.insertAfter(self.node, node);
  
          self.* = .init(node);
-@@ -3667,6 +3703,27 @@ const ReflowCursor = struct {
+@@ -3667,6 +3707,33 @@ const ReflowCursor = struct {
      }
  };
  
 +/// vtmux: the capacity in columns a reflow to `cols` needs for the cells
 +/// `page`'s lines keep past the width (ReflowCursor.reflowRow,
-+/// tmux_moved): the furthest a line that fits `cols` by its used cells
-+/// has a background cell, or 0 when none goes past `cols`.
++/// tmux_may_move): the furthest a line that fits `cols` by its used cells
++/// has a background cell, or 0 when none goes past `cols`. A row is looked
++/// at past its last cell only when that cell is not empty (an erase with a
++/// background to the end of the line, EL or ED) or it keeps cells already,
++/// so a page of ordinary lines costs a cell a row; a line whose background
++/// stops short of its end (ECH) keeps its cells as far as the destination
++/// page holds them.
 +fn tmuxKeptCols(page: *const Page, cols: size.CellCountInt) size.CellCountInt {
 +    var need: size.CellCountInt = 0;
 +    const rows = page.rows.ptr(page.memory)[0..page.size.rows];
@@ -157,6 +166,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
 +        const len = if (row.tmux_kept) page.capacity.cols else page.size.cols;
 +        if (len <= cols or len <= need) continue;
 +        const cells = row.cells.ptr(page.memory)[0..len];
++        if (!row.tmux_kept and cells[len - 1].isEmpty()) continue;
 +        var end: usize = len;
 +        while (end > cols and end > need and cells[end - 1].isEmpty()) end -= 1;
 +        if (end <= cols or end <= need) continue;
@@ -169,7 +179,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
  /// vtmux: whether tmux holds a cell in its extended form
  /// (grid_need_extended_cell; Row.tmux_extended): a wide character or its
  /// padding, a non-ASCII character, more than one codepoint, a tab, a link,
-@@ -3916,6 +3973,14 @@ fn resizeWithoutReflowGrowCols(
+@@ -3916,6 +3983,14 @@ fn resizeWithoutReflowGrowCols(
              if (cells[old_cols - 1].wide == .spacer_head) break :fast;
          }
  
@@ -187,7 +197,57 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -17603,6 +17603,113 @@ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
+@@ -5039,6 +5039,15 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+     // Our row's soft-wrap is always reset.
+     self.screens.active.cursorResetWrap();
+ 
++    // vtmux: DCH over the whole line clears it whole (grid_view_delete_cells:
++    // grid_clear from column 0 over the width is grid_clear_lines), as ECH
++    // does: the line is emptied (cellused 0, no cells kept past the width)
++    // and the line above unwrapped.
++    if (self.screens.active.cursor.x == 0 and count >= self.cols) {
++        self.screens.active.cursor.page_row.tmuxEmptied();
++        self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++    }
++
+     // Our row is always dirty
+     self.screens.active.cursorMarkDirty();
+ }
+@@ -5542,18 +5551,25 @@ pub fn decaln(self: *Terminal) !void {
+     // so origin mode changes nothing here).
+     self.setCursorPos(1, 1);
+ 
+-    // Use clearRows instead of eraseDisplay because we must NOT respect
+-    // protected attributes here.
+-    self.screens.active.clearRows(
+-        .{ .active = .{} },
+-        null,
+-        false,
+-    );
+-
+     // Fill with Es by moving the cursor but reset it after.
+     while (true) {
+         const page = self.screens.active.cursor.page_pin.node.page();
+         const row = self.screens.active.cursor.page_row;
++
++        // Use clearRows instead of eraseDisplay because we must NOT
++        // respect protected attributes here.
++        //
++        // vtmux: a row at a time, keeping the cells the line keeps past
++        // the width (Row.tmux_kept): tmux writes each cell of the width
++        // (grid_view_set_cell) and leaves the rest of the line alone.
++        const kept = row.tmux_kept;
++        const y: size.CellCountInt = self.screens.active.cursor.y;
++        self.screens.active.clearRows(
++            .{ .active = .{ .y = y } },
++            .{ .active = .{ .y = y } },
++            false,
++        );
++        row.tmux_kept = kept;
+         const cells_multi: [*]Cell = row.cells.ptr(page.memory);
+         const cells = cells_multi[0..page.size.cols];
+         row.blank = false;
+@@ -17603,6 +17619,144 @@ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
      }
  }
  
@@ -260,6 +320,37 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
 +        try testing.expect(c4.cell.isEmpty());
 +        const c15 = t.screens.active.pages.getCell(.{ .active = .{ .x = 15, .y = 0 } }).?;
 +        try testing.expectEqual(partial, c15.cell.content_tag == .bg_color_rgb);
++    }
++
++    // DCH over the whole width from column 0 empties the line
++    // (grid_view_delete_cells, grid_clear_lines); from column 4 it keeps
++    // the cells past the width. DECALN writes the width and keeps them
++    // (screen_write_alignmenttest).
++    inline for (.{ .dch_whole, .dch_part, .decaln }) |op| {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        switch (op) {
++            .dch_whole => {
++                t.setCursorPos(1, 1);
++                t.deleteChars(10);
++            },
++            .dch_part => {
++                t.setCursorPos(1, 5);
++                t.deleteChars(3);
++            },
++            .decaln => try t.decaln(),
++            else => unreachable,
++        }
++        const row = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row;
++        try testing.expectEqual(op != .dch_whole, row.tmux_kept);
++        try t.resize(alloc, .{ .cols = 20, .rows = 8 });
++        const c15 = t.screens.active.pages.getCell(.{ .active = .{ .x = 15, .y = 0 } }).?;
++        try testing.expectEqual(op != .dch_whole, c15.cell.content_tag == .bg_color_rgb);
 +    }
 +
 +    // A line split by the narrowing (cellused past the new width) keeps

@@ -741,11 +741,12 @@ Closed (vtmux matches tmux):
 <a id="d-036"></a>
 ### D-036: closed (a line keeps its cells past the width it was narrowed to)
 
-- **Test:** oracle `reflow_keeps_cells_past_width` (a line erased red to its end from column 0 and after text, a wide character, red spaces written, two narrowings, history, a full-line and a partial erase at the narrow width, and the attached client's screen), `reflow_cells_used` scene `grow`.
+- **Test:** oracle `reflow_keeps_cells_past_width` (a line erased red to its end from column 0 and after text, a wide character, red spaces written, two narrowings, history, a full-line and a partial erase at the narrow width, and the attached client's screen), `reflow_kept_cells_edits` (DCH over the whole width and part of it, ICH, IL, DL, SU and SD in a region, DECALN, RIS and REP at the narrow width, and DCH unwrapping the line above), `reflow_cells_used` scene `grow`.
 - **tmux:** a line that fits the narrower width is moved as it is (`grid_reflow_move`, grid.c), so cells past the new width stay allocated (`cellsize`) and are drawn again when the pane widens. A line split by the narrowing (`grid_reflow_split`) or emptied at the narrow width (`grid_empty_line`) keeps none.
 - **vtmux:** as tmux (Ghostty patch 0046). Ghostty's rows are as wide as the pane, so the cells past it, erased ones only (a background or nothing), sit past the row's width in its page; a full-row clear drops them, writes and partial erases keep them, and they go with the row into history and through a live upgrade.
 - **Residual:**
   - A line that wraps at the narrow width keeps none (tmux joins the next line's cells over them and keeps the rest).
+  - A background past the new width that stops short of the line's end (ECH) is kept only as far as the reflowed page's capacity reaches, which an erase to the end of a line on the same page sets.
   - A capture after widening past the first width runs to the new width, where tmux stops at the line's `cellsize` (D-027): `printf '\033[42m\033[K\033[0mafter-bg-erase\r\n'`, 20 -> 15 -> 25 columns, `capture-pane -pe`: tmux `after-bg-erase\e[42m`, vtmux `after-bg-erase\e[42m      \e[49m` (the same six green cells, then the default background). Oracle `decawm_resize_alt` scene `bgerase`, annotated.
 
 <a id="d-037"></a>

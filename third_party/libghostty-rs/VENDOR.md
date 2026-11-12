@@ -1537,7 +1537,8 @@ Recorded per commit in git history; the list is kept current:
   `clonePartialRowFrom`, `Row.tmuxEmptied`; `PageList.zig`
   `ReflowCursor.reflowRow`, `computeAndMemoizeCap`, `cursorNewPage`,
   `resizeCols`, new `tmuxKeptCols`, `resizeWithoutReflowGrowCols`;
-  `c/vtmux_state.zig` `exportRows`, `capacityFor`, `importRows`): a line
+  `Terminal.zig` `deleteChars`, `decaln`; `c/vtmux_state.zig`
+  `exportRows`, `capacityFor`, `importRows`): a line
   that fits a narrower width keeps the cells past it, as tmux's
   `grid_reflow_move` keeps the line's `cellsize`. Those are erased cells
   (past `cellused`: a background or nothing, no style, text or link), so
@@ -1548,22 +1549,37 @@ Recorded per commit in git history; the list is kept current:
   the rest; a widening shows them again. Writes and partial erases keep
   them (`grid_set_cell`, `grid_clear` within the width), a full-row clear
   drops them (`grid_empty_line`: `Row.reset`, `tmuxEmptied`, and 1.0's
-  `Screen.clearRows`, which rewrites the row header), a row split
+  `Screen.clearRows`, which rewrites the row header; DCH over the whole
+  width from column 0 is such a clear, `grid_view_delete_cells`, and now
+  empties the row and unwraps the one above as ECH does), DECALN keeps
+  them (`screen_write_alignmenttest` writes the width only; `decaln`
+  clears row by row and keeps the mark), lines moved by IL, DL and
+  scroll regions take them along and the lines those add have none, a
+  row split
   or joined by a reflow keeps none (`grid_reflow_split`,
   `grid_reflow_join`), a row copied whole to a page of the same width
   takes them, and a widening without reflow (the alternate screen) clears
   the cells past the old width as before. The state export writes them as
   the row's cells past the width under row flag `0x40`, and the import
   reads them back (the page as wide as they need, erased cells only).
-  Residual: a wrapped line keeps none, and a reflow's destination page
-  holds them only as far as its capacity (the widest its source page
-  needed). Upstream tests unchanged; new tests `Terminal: reflow keeps
+  Cost: a reflow measures a row by tmux's measure (`tmuxReflowWidth`)
+  only when it has cells past the new width, and `tmuxKeptCols` looks
+  past a row's last cell only when that cell is not empty (an erase to
+  the end of the line) or the row keeps cells already, so a page of
+  ordinary lines costs one cell a row: 20 reflows of a 90,000-line
+  history take 130 ticks against main's 131 (a first version that
+  measured every row took 145). Residual: a wrapped line keeps none, and
+  a reflow's destination page holds them only as far as its capacity
+  (the widest its source page needed, so a background that stops short
+  of the line's end, ECH, can be cut there). Upstream tests unchanged; new tests `Terminal: reflow keeps
   erased cells past the width (vtmux)`, `Terminal: kept cells past the
   width survive a row copy and history (vtmux)`, `vtmux state: the cells a
   row keeps past the width go with it`; Rust `vtmux-snapshot`
   `cells_past_the_width_round_trip_and_require_nothing`, `vtmux-server`
   `an_ordinary_attached_client_requires_no_feature`; oracle
-  `reflow_keeps_cells_past_width`, `reflow_cells_used` scene `grow` (closes
+  `reflow_keeps_cells_past_width`, `reflow_kept_cells_edits` (DCH, ICH,
+  IL, DL, SU, SD, DECALN, RIS, REP at the narrow width),
+  `reflow_cells_used` scene `grow` (closes
   D-036). The row bit takes one of the three spare bits 0013, 0034 and
   1.0's `Row.blank` leave (`_padding: u3`); the paths that skip a blank
   row's cells (`Screen.clearRows`, `trimTrailingBlankRows`) rewrite its
