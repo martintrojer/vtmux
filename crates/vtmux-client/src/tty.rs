@@ -158,7 +158,7 @@ fn sane(mut now: Termios) -> Termios {
 }
 
 /// The settings [`handover_text`] wrote, over `now` (the terminal raw).
-#[allow(clippy::unnecessary_fallible_conversions)] // u64 -> u64 on macOS
+#[allow(clippy::unnecessary_fallible_conversions, clippy::useless_conversion)] // u64 -> u64 on macOS
 fn settings_over(text: &str, mut now: Termios) -> Option<Termios> {
     let words: Vec<&str> = text.split(',').collect();
     let [i, o, l, vmin, vtime] = words.as_slice() else {
