@@ -99,6 +99,9 @@ Applied before storing or diffing:
 - ctime-style dates (`Thu Oct 29 17:17:32 2026`, from `#{t:session_created}`) -> `<DATE>`
 - status-line clocks (`%H:%M %d-%b-%y`) -> `<CLOCK>`
 - tty names (`/dev/pts/3`) -> `<TTY>`
+- errno texts that differ between libcs, on both sides when diffing (traces keep the text): glibc's and
+  musl's `Input/output error`/`I/O error` -> `<EIO>`, `Inappropriate ioctl for device`/`Not a tty` ->
+  `<ENOTTY>` (`normalize::errno_tokens`), so a musl vtmux replays a glibc tmux's traces
 - hostnames: scenarios never depend on the hostname (pin pane titles with `select-pane -T`). Recording
   replaces the host name with `<HOST>` in the observations and stores `recorded_host: "<HOST>"`. Replay
   replaces the current name on the vtmux side with `<HOST>` (only in steps whose trace has one), whole token

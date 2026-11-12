@@ -149,6 +149,26 @@ impl Normalizer {
     }
 }
 
+/// The `strerror` texts that differ between libcs (glibc and Darwin say
+/// one thing, musl another), each errno's as one token. tmux prints the
+/// libc's text, so the traces (a glibc tmux 3.8's) and a vtmux on another
+/// libc (the static musl build) are compared by errno, not by libc.
+const ERRNO_TEXTS: &[(&str, &[&str])] = &[
+    ("<EIO>", &["Input/output error", "I/O error"]),
+    ("<ENOTTY>", &["Inappropriate ioctl for device", "Not a tty"]),
+];
+
+/// `s` with each libc's text for the errnos in [`ERRNO_TEXTS`] as its token.
+pub fn errno_tokens(s: &str) -> String {
+    let mut out = s.to_owned();
+    for (token, texts) in ERRNO_TEXTS {
+        for text in *texts {
+            out = out.replace(text, token);
+        }
+    }
+    out
+}
+
 /// Replace each of `hosts` with `<HOST>` where it is a whole token: not
 /// adjacent to `[A-Za-z0-9_.-]`, so a host called `server` leaves `no server
 /// running` alone only when it is part of a longer word, never inside one.
@@ -199,6 +219,23 @@ fn unescape_octal(s: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errno_tokens_name_the_errno_not_the_libc() {
+        let glibc =
+            "Input/output error: <TMP>/home/.\ntcgetattr failed: Inappropriate ioctl for device";
+        let musl = "I/O error: <TMP>/home/.\ntcgetattr failed: Not a tty";
+        assert_eq!(errno_tokens(glibc), errno_tokens(musl));
+        assert_eq!(
+            errno_tokens(glibc),
+            "<EIO>: <TMP>/home/.\ntcgetattr failed: <ENOTTY>"
+        );
+        // This libc's own texts are among them.
+        for (errno, token) in [(5, "<EIO>"), (25, "<ENOTTY>")] {
+            let own = std::io::Error::from_raw_os_error(errno).to_string();
+            assert!(errno_tokens(&own).starts_with(token), "{own}");
+        }
+    }
 
     fn norm() -> Normalizer {
         Normalizer::new("/tmp/r", "/tmp/r/s")

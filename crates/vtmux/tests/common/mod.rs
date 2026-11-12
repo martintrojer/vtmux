@@ -151,3 +151,24 @@ pub fn wait_gone(mut ls: impl FnMut() -> (bool, String)) {
         !ok && !stderr.contains("server exited unexpectedly")
     });
 }
+
+/// The `strerror` texts that differ between libcs (glibc and Darwin say
+/// one thing, musl another), each errno's as one token. tmux prints the
+/// libc's text, so a differential test compares the errno, not which libc
+/// named it: a static musl vtmux against a glibc tmux 3.8.
+const ERRNO_TEXTS: &[(&str, &[&str])] = &[
+    ("<EIO>", &["Input/output error", "I/O error"]),
+    ("<ENOTTY>", &["Inappropriate ioctl for device", "Not a tty"]),
+];
+
+/// `s` with each libc's text for the errnos in [`ERRNO_TEXTS`] as its token.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn errno_tokens(s: &str) -> String {
+    let mut out = s.to_owned();
+    for (token, texts) in ERRNO_TEXTS {
+        for text in *texts {
+            out = out.replace(text, token);
+        }
+    }
+    out
+}

@@ -99,7 +99,7 @@ mise use -g github:martintrojer/vtmux
 ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
 ```
 
-Older glibc than 2.35 (EL9, Debian 11)? Take the static Linux build: `mise use -g "github:martintrojer/vtmux[matching=musl]"` (Alpine gets it by default).
+On glibc hosts that's the gnu build. The static (musl) Linux build is for hosts it won't run on, a glibc older than 2.35 (EL9, Debian 11): `mise use -g "github:martintrojer/vtmux[matching=musl]"` (Alpine gets it by default). musl has no NSS, so with sssd or LDAP users and no nscd, user names (`#{user}`, `~user`, `server-access`) may not resolve.
 
 Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 

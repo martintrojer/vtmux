@@ -365,7 +365,7 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
                 let text = if e.raw_os_error() == Some(libc::EISDIR)
                     && !super::file_io::is_attached(server, item)
                 {
-                    "Input/output error".to_owned()
+                    strerror(&std::io::Error::from_raw_os_error(libc::EIO))
                 } else {
                     strerror(&e)
                 };

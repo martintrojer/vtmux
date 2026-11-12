@@ -341,8 +341,17 @@ fn compare(name: &str, scenario: impl Fn(&World) -> Vec<Run> + Sync) {
     });
     let (_keep, as_tmux) = vtmux_as_tmux();
     let mut runs = par::map(&[as_tmux, reference], 2, |bin| scenario(&World::new(bin)));
-    let theirs = runs.pop().unwrap();
-    let ours = runs.pop().unwrap();
+    let tokens = |runs: Vec<Run>| -> Vec<Run> {
+        runs.into_iter()
+            .map(|r| Run {
+                stdout: common::errno_tokens(&r.stdout),
+                stderr: common::errno_tokens(&r.stderr),
+                code: r.code,
+            })
+            .collect()
+    };
+    let theirs = tokens(runs.pop().unwrap());
+    let ours = tokens(runs.pop().unwrap());
     assert_eq!(ours.len(), theirs.len());
     for (i, (o, t)) in ours.iter().zip(&theirs).enumerate() {
         assert_eq!(
@@ -8532,4 +8541,26 @@ fn display_message_all() {
         out.push(w.run(&["kill-server"]));
         out
     });
+}
+
+/// The differential tests compare errnos across libcs (a musl vtmux
+/// against a glibc tmux 3.8), and this libc's own texts are among those
+/// the tokens cover.
+#[test]
+fn errno_tokens_name_the_errno_not_the_libc() {
+    let glibc = "Input/output error: /t/.\ntcgetattr failed: Inappropriate ioctl for device\n";
+    let musl = "I/O error: /t/.\ntcgetattr failed: Not a tty\n";
+    assert_eq!(common::errno_tokens(glibc), common::errno_tokens(musl));
+    assert_eq!(
+        common::errno_tokens(glibc),
+        "<EIO>: /t/.\ntcgetattr failed: <ENOTTY>\n"
+    );
+    // This libc's own text for each is one of them.
+    for (errno, token) in [
+        (rustix::io::Errno::IO, "<EIO>"),
+        (rustix::io::Errno::NOTTY, "<ENOTTY>"),
+    ] {
+        let own = std::io::Error::from_raw_os_error(errno.raw_os_error()).to_string();
+        assert!(common::errno_tokens(&own).starts_with(token), "{own}");
+    }
 }

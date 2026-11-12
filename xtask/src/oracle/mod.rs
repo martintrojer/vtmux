@@ -598,6 +598,22 @@ struct Outcome {
     no_upgrades: Option<String>,
 }
 
+/// `items` with errno texts by errno, not by libc (`normalize::errno_tokens`).
+fn errno_view(items: &[Item]) -> Vec<Item> {
+    let f = |o: &Observation| map_text(o, &normalize::errno_tokens);
+    items
+        .iter()
+        .map(|it| Item {
+            observation: f(&it.observation),
+            divergence: it.divergence.as_ref().map(|d| scenario::Divergence {
+                expect: f(&d.expect),
+                ..d.clone()
+            }),
+            ..it.clone()
+        })
+        .collect()
+}
+
 /// Diff `got` against `want`, matching observations by step (and by order
 /// within a step), so a missing or timed-out observation never shifts later
 /// diffs onto the wrong step. An item carrying a divergence annotation is
@@ -615,7 +631,8 @@ fn compare(want: &[Item], got: &[Item], ignore_divergence: bool) -> Outcome {
             })
             .collect()
     }
-    let (want, got) = (keyed(want), keyed(got));
+    let (want, got) = (errno_view(want), errno_view(got));
+    let (want, got) = (keyed(&want), keyed(&got));
     let keys: BTreeSet<_> = want.keys().chain(got.keys()).copied().collect();
     let mut out = Outcome {
         mismatches: Vec::new(),
@@ -850,6 +867,23 @@ mod tests {
         assert_eq!(o.mismatches[0].step, 1);
         assert!(o.mismatches[0].diff.contains("-out| b"));
         assert!(o.mismatches[0].diff.contains("+out| c"));
+    }
+
+    /// A trace's glibc errno text matches a musl vtmux's for the same errno.
+    #[test]
+    fn compare_matches_errno_texts_by_errno() {
+        let want = [cli(0, "Input/output error: x\n")];
+        assert!(
+            compare(&want, &[cli(0, "I/O error: x\n")], false)
+                .mismatches
+                .is_empty()
+        );
+        assert_eq!(
+            compare(&want, &[cli(0, "Is a directory: x\n")], false)
+                .mismatches
+                .len(),
+            1
+        );
     }
 
     #[test]

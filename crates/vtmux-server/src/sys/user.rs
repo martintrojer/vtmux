@@ -1,5 +1,13 @@
 //! The passwd database (through NSS, so `/usr/lib/passwd`, sssd and LDAP
-//! users resolve as tmux sees them).
+//! users resolve as tmux sees them). The static musl build has no NSS: its
+//! libc reads `/etc/passwd` and asks nscd, so an sssd or LDAP user with no
+//! nscd is not found, and each caller does what tmux does when `getpwuid`
+//! or `getpwnam` fails (no USER/LOGNAME fallback in tmux either):
+//! `$HOME` before the entry's home (tmux.c `find_home`, cmd-parse.c
+//! `yylex_token_tilde`), `$SHELL` before its shell (tmux.c
+//! `getshell`), an empty `#{user}`/`#{client_user}` (format.c
+//! `format_cb_user`, `format_cb_client_user`), `unknown user` from
+//! `server-access` (cmd-server-access.c).
 
 use std::ffi::{CStr, CString, OsStr};
 use std::os::unix::ffi::OsStrExt;

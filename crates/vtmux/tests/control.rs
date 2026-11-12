@@ -141,7 +141,7 @@ impl World {
         let dir = self.dir.path().to_string_lossy().into_owned();
         let canon = std::fs::canonicalize(self.dir.path())
             .map_or_else(|_| dir.clone(), |p| p.to_string_lossy().into_owned());
-        s.replace(&canon, "SOCKDIR").replace(&dir, "SOCKDIR")
+        common::errno_tokens(&s.replace(&canon, "SOCKDIR").replace(&dir, "SOCKDIR"))
     }
 }
 

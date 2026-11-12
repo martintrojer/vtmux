@@ -80,3 +80,9 @@ At load 15-20 the whole `scripts/check.sh` needed more than a 300 s command cap 
 - `cargo test --workspace --exclude vtmux`: 1,292 passed, 4 ignored. The wrapper's `--features allocator_api` tests: 39 passed, 3 ignored. `oracle replay`: 443/443. `--upgrade-every 1 --only …`: 9/9 (230 upgrades). 86 s.
 - `cargo test -p vtmux`: 472 passed, 4 ignored. `regress`: 171/174 (2 flaky passed, 1 xfail, 0 skipped). `--upgrade-every 3`: 443/443 (3,453 upgrades). 209 s.
 - `socket-guard.sh verify`: clean.
+
+## Review fixes
+
+- **Errno text.** `source-file .` from a command client printed glibc's `Input/output error` from a hardcoded string. It now prints the libc's `strerror(EIO)`: `I/O error` from the musl build, `Input/output error` from the gnu one, run here for both.
+- **Differential tests.** The cli and control comparisons and the oracle's `compare` turn the libc-specific errno texts (`EIO`, `ENOTTY`) into tokens on both sides. The traces are unchanged. Against the musl build: `buffers_stdin_and_file_errors` and `control_control_needs_a_tty` pass, and oracle replay is 443/443 (before: 442). On glibc: cli 164/164, control 33/33, replay 443/443, xtask 80, vtmux-server lib 456. clippy is clean.
+- **User lookups.** musl has no NSS. tmux has no USER/LOGNAME fallback when `getpwuid` or `getpwnam` fails: `HOME` and `SHELL` come first, `#{user}` is empty, and `server-access` says `unknown user`. vtmux already does the same, so only the docs change: README Install, RELEASING and the CHANGELOG say the gnu build is the default on glibc hosts, and that on sssd/LDAP hosts without nscd the musl build may not resolve user names.

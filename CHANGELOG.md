@@ -6,7 +6,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 
 ### New
 
-- **Static Linux builds.** The release adds `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` tarballs: one binary, no shared libraries, so vtmux runs on a glibc older than the gnu build's 2.35 (EL9, Debian 11) and on Alpine. mise keeps the gnu build on glibc hosts; `github:martintrojer/vtmux[matching=musl]` picks the static one. A live upgrade between the two works both ways. OS error messages read as musl's (`I/O error`, not `Input/output error`).
+- **Static Linux builds.** The release adds `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` tarballs: one binary, no shared libraries, so vtmux runs on a glibc older than the gnu build's 2.35 (EL9, Debian 11) and on Alpine. mise keeps the gnu build on glibc hosts; `github:martintrojer/vtmux[matching=musl]` picks the static one. A live upgrade between the two works both ways. OS error messages read as musl's (`I/O error`, not `Input/output error`), and musl has no NSS: with sssd or LDAP users and no nscd, user names may not resolve.
 
 ### Removed
 
