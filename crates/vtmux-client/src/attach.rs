@@ -67,6 +67,12 @@ pub struct Sys {
     /// if one came: read last thing before a live upgrade's re-exec, which
     /// would discard it, so the new image is told to end for it.
     pub caught: fn() -> Option<i32>,
+    /// `exec` of the command with the signals the new image catches
+    /// blocked across it, for a terminal handed over raw: the new image
+    /// lets them in once its handlers are in, and its settings back are
+    /// safe from their default actions. Returns only if the exec fails,
+    /// the signals let in again.
+    pub exec_blocked: fn(&mut std::process::Command) -> io::Error,
 }
 
 /// A SIGTERM or SIGHUP the binary caught before the attach's handlers.
@@ -105,7 +111,7 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
         // on the same terminal.
         Ok(Leave::Upgrade {
             binary, token, raw, ..
-        }) => reexec(&binary, &token, how, sys.caught, raw),
+        }) => reexec(&binary, &token, how, sys, raw),
         Err(e) => {
             crate::say_err(&e.to_string());
             1
@@ -190,15 +196,12 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
 /// carried too: the server may have read the notice's exec first. Only
 /// the few instructions of the exec itself are left, and in the new
 /// image those before its first handlers, where the signal's default
-/// action ends the process, as it does a tmux client starting up.
+/// action ends the process, as it does a tmux client starting up; with
+/// the terminal handed over raw, not even those: the signals are blocked
+/// across the exec ([`Sys::exec_blocked`]) until the new image has its
+/// handlers, so none ends it with the terminal still raw.
 #[must_use]
-fn reexec(
-    binary: &Path,
-    token: &str,
-    how: &Reattach,
-    caught: fn() -> Option<i32>,
-    raw: Option<RawTty>,
-) -> i32 {
+fn reexec(binary: &Path, token: &str, how: &Reattach, sys: Sys, raw: Option<RawTty>) -> i32 {
     use std::os::unix::process::CommandExt;
     let mut command = std::process::Command::new(binary);
     command
@@ -209,7 +212,7 @@ fn reexec(
     if how.login {
         command.env(REATTACH_LOGIN_ENV, "1");
     }
-    match caught() {
+    match (sys.caught)() {
         Some(SIGTERM) => {
             command.env(REATTACH_SIGNAL_ENV, "TERM");
         }
@@ -218,10 +221,12 @@ fn reexec(
         }
         _ => {}
     }
-    if let Some(raw) = &raw {
+    let err = if let Some(raw) = &raw {
         command.env(REATTACH_TTY_ENV, raw.hand_over());
-    }
-    let err = command.exec();
+        (sys.exec_blocked)(&mut command)
+    } else {
+        command.exec()
+    };
     drop(raw);
     crate::say_err(&format!(
         "can't follow the server's upgrade: {}: {err}",

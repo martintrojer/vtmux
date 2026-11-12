@@ -90,14 +90,22 @@ impl Drop for RawTty {
 pub struct Handed(Termios);
 
 impl Handed {
-    /// The settings in `text`: what raw mode changes (`c_iflag`, `c_oflag`
-    /// and `c_lflag` whole, `VMIN`, `VTIME`) over what the terminal has
-    /// now, the rest of which raw mode left as it was. `None` for a text this build
-    /// does not read, or no terminal.
+    /// Takes the terminal over: its own settings are those in `text`
+    /// (what raw mode changes, `c_iflag`, `c_oflag` and `c_lflag` whole,
+    /// `VMIN`, `VTIME`, over what the terminal has now, the rest of which
+    /// raw mode left as it was), or sane cooked ones for a text this build
+    /// does not read ([`sane`]), never the raw ones it has now. Its output
+    /// modes go back at once, its input staying raw: what this process
+    /// prints before it attaches (why it could not, the server's `Exit`)
+    /// gets its carriage returns. `None` with no terminal.
     #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
+    pub fn take_over(text: &str) -> Option<Self> {
         let now = termios::tcgetattr(io::stdin()).ok()?;
-        settings_over(text, now).map(Self)
+        let saved = settings_over(text, now.clone()).unwrap_or_else(|| sane(now.clone()));
+        let mut output = now;
+        output.output_modes = saved.output_modes;
+        let _ = termios::tcsetattr(io::stdin(), OptionalActions::Now, &output);
+        Some(Self(saved))
     }
 
     #[must_use]
@@ -125,6 +133,26 @@ fn handover_text(saved: &Termios) -> String {
         saved.special_codes[termios::SpecialCodeIndex::VMIN],
         saved.special_codes[termios::SpecialCodeIndex::VTIME],
     )
+}
+
+/// `now` (raw) made cooked as `stty sane` makes a terminal, for the bits
+/// raw mode changes: line editing, echo, signals and output processing on,
+/// CR read as NL, a BREAK interrupting, `VMIN` 1 and `VTIME` 0.
+fn sane(mut now: Termios) -> Termios {
+    use termios::{InputModes as I, LocalModes as L, OutputModes as O, SpecialCodeIndex as S};
+    now.input_modes
+        .remove(I::IGNBRK | I::INLCR | I::IGNCR | I::IXOFF | I::ISTRIP);
+    now.input_modes
+        .insert(I::BRKINT | I::ICRNL | I::IXON | I::IMAXBEL);
+    now.output_modes.remove(O::OCRNL | O::ONLRET);
+    now.output_modes.insert(O::OPOST | O::ONLCR);
+    now.local_modes.remove(L::ECHONL | L::ECHOPRT);
+    now.local_modes.insert(
+        L::ISIG | L::ICANON | L::IEXTEN | L::ECHO | L::ECHOE | L::ECHOK | L::ECHOCTL | L::ECHOKE,
+    );
+    now.special_codes[S::VMIN] = 1;
+    now.special_codes[S::VTIME] = 0;
+    now
 }
 
 /// The settings [`handover_text`] wrote, over `now` (the terminal raw).
@@ -232,5 +260,22 @@ mod tests {
         for bad in ["", "1,2,3,4", "1,2,3,4,5,6", "x,2,3,4,5", "1,2,3,256,0"] {
             assert!(settings_over(bad, raw.clone()).is_none(), "{bad:?}");
         }
+        // What `take_over` puts back for those: cooked, whatever raw left.
+        let cooked = sane(raw.clone());
+        assert!(cooked.local_modes.contains(
+            LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG | LocalModes::IEXTEN
+        ));
+        assert!(
+            cooked
+                .input_modes
+                .contains(InputModes::ICRNL | InputModes::IXON)
+        );
+        assert!(!cooked.input_modes.contains(InputModes::IGNBRK));
+        assert!(
+            cooked
+                .output_modes
+                .contains(OutputModes::OPOST | OutputModes::ONLCR)
+        );
+        assert_eq!(cooked.control_modes, raw.control_modes);
     }
 }

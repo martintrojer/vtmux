@@ -83,8 +83,11 @@
 //!   that signal and has not ended for it yet (a binary that knows no such
 //!   variable stays attached, as every build before it did), and
 //!   [`REATTACH_TTY_ENV`] when the client left its terminal raw for the
-//!   new image (only for a binary whose dry run said it takes it so). The
-//!   new process takes them out of its environment at once.
+//!   new image (only for a binary whose dry run said it takes it so); it
+//!   then execs with SIGCHLD, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2,
+//!   SIGWINCH and SIGCONT blocked, which the new image unblocks once its
+//!   handlers are in, so none kills it with the terminal raw. The new
+//!   process takes them out of its environment at once.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
@@ -166,7 +169,11 @@ pub const REATTACH_SIGNAL_ENV: &str = "VTMUX_REATTACH_SIGNAL";
 /// Set on the re-attach command line of a client that left its terminal
 /// raw across the exec (module docs, *Frozen frames*): the terminal's own
 /// settings, which the new image puts back when it leaves, as
-/// `<c_iflag>,<c_oflag>,<c_lflag>,<VMIN>,<VTIME>`, the flags in hex.
+/// `<c_iflag>,<c_oflag>,<c_lflag>,<VMIN>,<VTIME>`, the flags in hex (a
+/// text it can't read gets sane cooked settings instead, never the raw
+/// ones). Its output modes go back as it starts, so what it prints before
+/// it attaches ends its lines as a terminal should; the signals it
+/// catches come blocked across the exec (module docs).
 /// Raw throughout, every byte typed while the client re-executes reaches
 /// the new image as it was typed: restored first, the line discipline
 /// cooked them (`ICRNL`, erase and kill, signals) and, with no newline in

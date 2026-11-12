@@ -120,6 +120,29 @@ pub fn unblock_handled() {
     }
 }
 
+/// `command.exec()` with every signal of [`HANDLED`] blocked across the
+/// `execve`: an attached client handing its terminal over raw to the
+/// binary it re-executes as, which unblocks them once its handlers are in
+/// (`vtmux_core::protocol::REATTACH_TTY_ENV`). Without it a SIGINT,
+/// SIGTERM, SIGHUP, SIGUSR1 or SIGUSR2 in between took the default action
+/// and killed the new image before it could give the terminal its
+/// settings back. Blocked in a `pre_exec` hook: std's `exec` empties the
+/// mask first. Returns only if the exec fails, the mask let in again.
+pub fn exec_handled_blocked(command: &mut std::process::Command) -> std::io::Error {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: `exec` does not fork: the hook runs in this process just
+    // before `execve`, and only sets the calling thread's signal mask.
+    unsafe {
+        command.pre_exec(|| {
+            let _ = block_handled();
+            Ok(())
+        });
+    }
+    let err = command.exec();
+    unblock_handled();
+    err
+}
+
 /// Whether `sig` is blocked in the calling thread.
 #[must_use]
 pub fn blocked(sig: libc::c_int) -> bool {

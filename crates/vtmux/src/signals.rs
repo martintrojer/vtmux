@@ -146,6 +146,7 @@ pub const SYS: vtmux_client::attach::Sys = vtmux_client::attach::Sys {
     defaults: vtmux_server::sys::signal::default_job_control,
     attached,
     caught,
+    exec_blocked: vtmux_server::sys::signal::exec_handled_blocked,
 };
 
 /// Attached: the client's own handlers, installed just before, take
@@ -235,7 +236,10 @@ pub fn ready() {
 /// (`crates/vtmux/tests/upgrade.rs`): `TERM` or `HUP`, raised once a live
 /// upgrade's re-exec is decided, the attach's handlers gone (a signal
 /// that once left the client attached after the exec); `TERM-reattach`
-/// or `HUP-reattach`, raised in the image it execs, before its `Hello`.
+/// or `HUP-reattach`, raised in the image it execs, before its `Hello`;
+/// `<sig>-start` (`TERM`, `HUP`, `INT`, `USR1`, `USR2`), raised in that
+/// image first thing, before it has any handler (a signal that once
+/// killed it there, the terminal it was handed raw left raw).
 const REEXEC_SIGNAL_HOOK: &str = "VTMUX_TEST_REEXEC_SIGNAL";
 
 fn reexec_hook(reattach: bool) {
@@ -244,12 +248,31 @@ fn reexec_hook(reattach: bool) {
     };
     let sig = match value.strip_suffix("-reattach") {
         Some(name) if reattach => signal_named(name),
-        None if !reattach => signal_named(&value),
+        None if !reattach && !value.ends_with("-start") => signal_named(&value),
         _ => None,
     };
     if let Some(sig) = sig {
         let _ = signal_hook::low_level::raise(sig);
     }
+}
+
+/// [`REEXEC_SIGNAL_HOOK`]'s `<sig>-start`: in a re-attaching image, before
+/// its first handler.
+pub fn reattach_start_hook() {
+    let Ok(value) = std::env::var(REEXEC_SIGNAL_HOOK) else {
+        return;
+    };
+    let sig = match value.strip_suffix("-start") {
+        Some("INT") => SIGINT,
+        Some("USR1") => SIGUSR1,
+        Some("USR2") => SIGUSR2,
+        Some(name) => match signal_named(name) {
+            Some(sig) => sig,
+            None => return,
+        },
+        None => return,
+    };
+    let _ = signal_hook::low_level::raise(sig);
 }
 
 /// A test hook read from the client's environment
