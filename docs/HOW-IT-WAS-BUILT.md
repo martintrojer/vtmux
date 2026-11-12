@@ -50,7 +50,7 @@ mise exec -- bash scripts/check.sh       # the whole gate, as CI runs it
 
 - `unsafe` is allowed in two places only (D10): `crates/vtmux-vt`, the wrapper over libghostty-vt, and `crates/vtmux-server/src/sys/`, the OS calls. Every other crate is `#![forbid(unsafe_code)]`, and vtmux-server denies it outside `sys/`.
 - 82 `unsafe` blocks in all: 3 in vtmux-vt and 79 in `sys/` (most of them for ptys, live upgrade and user lookup).
-- Below that sit the vendored Ghostty bindings (`third_party/libghostty-rs`, 421 `unsafe` blocks, mostly FFI calls) and Ghostty itself (Zig) with 42 local patches, each explained in its `VENDOR.md`.
+- Below that sit the vendored Ghostty bindings (`third_party/libghostty-rs`, 421 `unsafe` blocks, mostly FFI calls) and Ghostty itself (Zig, the libghostty-vt 1.0.1 release) with 41 local patches, each explained in its `VENDOR.md`.
 
 ## Not done yet
 

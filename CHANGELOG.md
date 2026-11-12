@@ -17,7 +17,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 
 ### Changed
 
-- The engine is the libghostty-vt 1.0.1 release (tag `vt-1.0.1`), not a Ghostty commit: the build downloads its source and Zig packages from release.files.ghostty.org, checks their SHA-256 and builds with `zig build --system`, so Zig fetches nothing. Offline, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` to local copies. 40 vtmux patches on top; two are in 1.0.1 already. Behaviour and live upgrade both ways with 3.8-beta3 are unchanged; agent panes and idle panes cost the same, and SGR-heavy output ran faster (86 against 64 MB/s, one run on a shared host).
+- The engine is the libghostty-vt 1.0.1 release (tag `vt-1.0.1`), not a Ghostty commit: the build downloads its source and Zig packages from release.files.ghostty.org, checks their SHA-256 and builds with `zig build --system`, so Zig fetches nothing. Offline, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` to local copies. 41 vtmux patches on top; two of the old ones are in 1.0.1 already. Behaviour and live upgrade both ways with 3.8-beta3 are unchanged; agent panes and idle panes cost the same, and SGR-heavy output ran faster (86 against 64 MB/s, one run on a shared host).
 
 ### Fixed
 
