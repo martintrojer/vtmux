@@ -19,7 +19,8 @@ use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
     self, ClientFlags, ClientMsg, ControlMode, Hello, HelloExt, PROTOCOL_VERSION, REATTACH_FLAG,
-    REATTACH_LOGIN_ENV, REATTACH_SIGNAL_ENV, REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
+    REATTACH_LOGIN_ENV, REATTACH_SIGNAL_ENV, REATTACH_TOKEN_ENV, REATTACH_TTY_ENV, ServerMsg,
+    TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -306,6 +307,7 @@ fn main() -> ExitCode {
     let token = vtmux_server::sys::upgrade::take_env(REATTACH_TOKEN_ENV);
     let login = vtmux_server::sys::upgrade::take_env(REATTACH_LOGIN_ENV).is_some_and(|v| v == "1");
     let carried = vtmux_server::sys::upgrade::take_env(REATTACH_SIGNAL_ENV);
+    let tty = vtmux_server::sys::upgrade::take_env(REATTACH_TTY_ENV);
     upgrade_image(args.get(1..).unwrap_or_default())
         .or_else(|| match args.as_slice() {
             [argv0, flag, socket] if flag == REATTACH_FLAG => Some(reattach_main(
@@ -313,6 +315,7 @@ fn main() -> ExitCode {
                 token.as_deref(),
                 login,
                 carried.as_deref(),
+                tty.as_deref(),
                 Path::new(socket),
             )),
             _ => None,
@@ -409,13 +412,15 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             utf8,
             no_start: cli.no_start,
         },
-        // An attached client re-executes on an upgrade (decision 4).
+        // An attached client re-executes on an upgrade (decision 4), its
+        // terminal raw throughout when the new binary takes it so.
         ext: HelloExt {
             follows_upgrade: cli.control == ControlMode::None && cli.shell_command.is_none(),
             reattach: None,
             pixels: tty_pixels(),
             shell: cli.shell_command.is_some(),
             control_chars: tty_control_chars(),
+            keeps_raw: cli.control == ControlMode::None && cli.shell_command.is_none(),
         },
     };
     // A SIGTERM or SIGHUP may have shut the connection down already: the
@@ -431,6 +436,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         socket: path.clone(),
         sent_size: None,
         login,
+        handed: None,
     };
     if let Some(command) = &cli.shell_command {
         return shell_relay(&mut stream, command, &how);
@@ -457,8 +463,10 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
 /// process to the client record it had; then go on as that attached
 /// client. A token the server no longer knows is told to attach again.
 /// The terminal is the shell's until the server starts it again: the old
-/// image restored it before the notice, so every way out here leaves it
-/// as a detach does. It is an attached client from the start: a SIGTERM
+/// image restored its escapes before the notice, and its termios too
+/// unless it handed them over raw (`tty`, [`REATTACH_TTY_ENV`]), which
+/// every way out here puts back, so each leaves the terminal as a detach
+/// does. It is an attached client from the start: a SIGTERM
 /// or SIGHUP, carried from the image before (`carried`) or caught here,
 /// ends it once it is back, with `Detach`, as an attached tmux client
 /// ends (client.c `client_signal`).
@@ -467,8 +475,14 @@ fn reattach_main(
     token: Option<&std::ffi::OsStr>,
     login: bool,
     carried: Option<&std::ffi::OsStr>,
+    tty: Option<&std::ffi::OsStr>,
     socket: &Path,
 ) -> ExitCode {
+    // Raw since the image before: the user's settings go back when this
+    // returns, whichever way (the attach puts them back itself too).
+    let handed = tty
+        .and_then(|t| t.to_str())
+        .and_then(vtmux_client::tty::Handed::parse);
     signals::ignore_job_control();
     signals::reattaching(carried);
     let Some(token) = token
@@ -507,6 +521,7 @@ fn reattach_main(
             pixels: tty_pixels(),
             shell: false,
             control_chars: tty_control_chars(),
+            keeps_raw: true,
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
@@ -520,6 +535,7 @@ fn reattach_main(
         socket: socket.to_owned(),
         sent_size,
         login,
+        handed: handed.as_ref().map(|h| h.settings().clone()),
     };
     match protocol::read_msg::<ServerMsg>(&mut stream) {
         // Told to attach again: said as a detached client says it, or as
@@ -544,14 +560,15 @@ fn reattach_main(
 /// The images a live upgrade starts (vtmux-server `sys::upgrade`): the new
 /// server, `[-S <socket>] --vtmux-resume <fd> [--vtmux-switched-back]`,
 /// the dry run, `--vtmux-check-snapshot <fd>`, which says on stderr that
-/// this binary takes the `-S` (`TAKES_SOCKET`) and that it read and
+/// this binary takes the `-S` (`TAKES_SOCKET`) and a re-attaching
+/// client's terminal raw (`TAKES_RAW_TTY`), and that it read and
 /// rebuilt the snapshot (`CHECKED`, without which nothing passes), and the old image's
 /// question before it, `--vtmux-patch-stack`. `None` for any other command
 /// line.
 fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
     use vtmux_server::server::resume;
     use vtmux_server::sys::upgrade::{
-        CHECK_FLAG, PATCH_STACK_FLAG, RESUME_FLAG, SWITCHED_BACK_FLAG, TAKES_SOCKET,
+        CHECK_FLAG, PATCH_STACK_FLAG, RESUME_FLAG, SWITCHED_BACK_FLAG, TAKES_RAW_TTY, TAKES_SOCKET,
     };
     let (socket, args) = match args {
         [s, path, rest @ ..] if s == "-S" && rest.first().is_some_and(|f| f == RESUME_FLAG) => {
@@ -576,6 +593,7 @@ fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
         [flag, n] if *flag == CHECK_FLAG => Some(match resume::check_snapshot(fd(n)?) {
             Ok(checked) => {
                 write_err(TAKES_SOCKET.as_bytes());
+                write_err(TAKES_RAW_TTY.as_bytes());
                 write_err(checked.as_bytes());
                 ExitCode::SUCCESS
             }
@@ -808,6 +826,7 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
                 | ServerMsg::Suspend
                 | ServerMsg::Lock { .. }
                 | ServerMsg::UpgradeNotice { .. }
+                | ServerMsg::UpgradeRaw
                 | ServerMsg::UpgradeResult { .. },
             ))
             | Err(protocol::ProtocolError::UnknownTag(_)) => {}
@@ -920,6 +939,7 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) 
                 | ServerMsg::Lock { .. }
                 | ServerMsg::Flags { .. }
                 | ServerMsg::UpgradeNotice { .. }
+                | ServerMsg::UpgradeRaw
                 | ServerMsg::UpgradeResult { .. },
             )) => {}
             Ok(None) | Err(_) if signals::terminated() => return ExitCode::SUCCESS,

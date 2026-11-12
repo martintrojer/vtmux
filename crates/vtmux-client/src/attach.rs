@@ -5,14 +5,16 @@ use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
+use rustix::termios::Termios;
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{
     self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_LOGIN_ENV, REATTACH_SIGNAL_ENV,
-    REATTACH_TOKEN_ENV, ServerMsg, UPGRADED_DETACH,
+    REATTACH_TOKEN_ENV, REATTACH_TTY_ENV, ServerMsg, UPGRADED_DETACH,
 };
 
 use crate::tty::RawTty;
@@ -37,6 +39,9 @@ pub struct Reattach {
     /// `-l`, or `argv[0]` starting `-` (tmux.c:415-416, 459-460):
     /// `detach-client -E` runs a login shell.
     pub login: bool,
+    /// The terminal's own settings when it is a re-attach that the image
+    /// before left raw ([`crate::tty::Handed`]).
+    pub handed: Option<Termios>,
 }
 
 /// The signal dispositions the attached client changes, set by the
@@ -77,7 +82,7 @@ pub struct Caught {
 /// Called after Ready; the server owns startup and teardown escapes.
 #[must_use]
 pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
-    match run(stream, how.sent_size, sys) {
+    match run(stream, how, sys) {
         Ok(Leave::Exit { code, message, hup }) => {
             if let Some(message) = message {
                 crate::say(&format!("[{message}]"));
@@ -95,9 +100,12 @@ pub fn attach(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> i32 {
             (sys.defaults)();
             exec(&shell, &command, how.login)
         }
-        // The terminal has its modes back and has taken every frame: the
-        // process becomes the new binary, on the same terminal.
-        Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how, sys.caught),
+        // The terminal has taken every frame, and has its modes back unless
+        // the new binary takes it raw: the process becomes the new binary,
+        // on the same terminal.
+        Ok(Leave::Upgrade {
+            binary, token, raw, ..
+        }) => reexec(&binary, &token, how, sys.caught, raw),
         Err(e) => {
             crate::say_err(&e.to_string());
             1
@@ -115,7 +123,14 @@ enum Leave {
     /// `MSG_EXEC`.
     Exec { command: String, shell: PathBuf },
     /// The frozen `UpgradeNotice`: re-execute `binary` and re-attach.
-    Upgrade { binary: PathBuf, token: String },
+    Upgrade {
+        binary: PathBuf,
+        token: String,
+        /// `UpgradeRaw` came first: `binary` takes the terminal raw.
+        keep_raw: bool,
+        /// The raw terminal, held across the exec when `keep_raw`.
+        raw: Option<RawTty>,
+    },
 }
 
 impl Leave {
@@ -157,10 +172,15 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
 /// decision 4): become `binary`, re-attaching with `token` on the same
 /// terminal through the same socket (the frozen re-attach command line,
 /// protocol module docs: the token in the environment, where other users
-/// can't read it). The server restored the terminal before the notice, as
-/// for a detach, so it is the shell's whatever happens next. Only returns,
-/// with the exit status, if the exec fails: the client can't follow, so it
-/// says why and what the server would have.
+/// can't read it). The server restored the terminal's escapes before the
+/// notice, as for a detach. Its termios stay raw across the exec when
+/// `raw` holds it (the server said `binary` takes it so): the new image
+/// is handed the terminal's own settings in [`REATTACH_TTY_ENV`] and every
+/// byte typed meanwhile reaches it as typed. Otherwise they were restored
+/// already, and the terminal is the shell's whatever happens next. Only
+/// returns, with the exit status, if the exec fails: the client can't
+/// follow, so it gives the terminal its modes back and says why and what
+/// the server would have.
 ///
 /// A SIGTERM or SIGHUP caught since the client connected (`caught`, read
 /// just before the exec) would be lost with this image's handlers: an
@@ -172,7 +192,13 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
 /// image those before its first handlers, where the signal's default
 /// action ends the process, as it does a tmux client starting up.
 #[must_use]
-pub fn reexec(binary: &Path, token: &str, how: &Reattach, caught: fn() -> Option<i32>) -> i32 {
+fn reexec(
+    binary: &Path,
+    token: &str,
+    how: &Reattach,
+    caught: fn() -> Option<i32>,
+    raw: Option<RawTty>,
+) -> i32 {
     use std::os::unix::process::CommandExt;
     let mut command = std::process::Command::new(binary);
     command
@@ -192,7 +218,11 @@ pub fn reexec(binary: &Path, token: &str, how: &Reattach, caught: fn() -> Option
         }
         _ => {}
     }
+    if let Some(raw) = &raw {
+        command.env(REATTACH_TTY_ENV, raw.hand_over());
+    }
     let err = command.exec();
+    drop(raw);
     crate::say_err(&format!(
         "can't follow the server's upgrade: {}: {err}",
         binary.display()
@@ -201,7 +231,7 @@ pub fn reexec(binary: &Path, token: &str, how: &Reattach, caught: fn() -> Option
     1
 }
 
-fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::Result<Leave> {
+fn run(stream: &mut UnixStream, how: &Reattach, sys: Sys) -> io::Result<Leave> {
     // Install signal handlers before entering raw mode: all returns drop the
     // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT,
     // SIGUSR1 and SIGUSR2 go to proc_signal_cb and client_signal ignores
@@ -230,7 +260,7 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut signals, SIGNALS, Interest::READABLE)?;
-    let raw = RawTty::enter()?;
+    let raw = RawTty::enter(how.handed.as_ref())?;
     let stdin = io::stdin();
     poll.registry()
         .register(&mut SourceFd(&stdin.as_raw_fd()), STDIN, Interest::READABLE)?;
@@ -250,7 +280,7 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
         &mut signals,
         &mut out,
         &raw,
-        sent_size,
+        how.sent_size,
         sys,
         pending,
     );
@@ -258,8 +288,16 @@ fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>, sys: Sys) -> io::
     // restores termios.
     let flushed = out.finish();
     let _ = stream.set_nonblocking(false);
-    let result = result?;
+    let mut result = result?;
     flushed?;
+    if let Leave::Upgrade {
+        keep_raw: true,
+        raw: held,
+        ..
+    } = &mut result
+    {
+        *held = Some(raw);
+    }
     Ok(result)
 }
 
@@ -422,9 +460,18 @@ fn high_water() -> usize {
     })
 }
 
-/// Send what the terminal has typed until `WouldBlock`.
-fn read_stdin(stream: &mut UnixStream) -> io::Result<Option<Leave>> {
+/// Send one read of what the terminal has typed; `more` says whether
+/// there may be more to read (the read got bytes), for the next loop turn.
+/// One read a turn, not all until `WouldBlock`: under a flood of typing
+/// (a paste, `cat`ing a file into a pane) the terminal never runs dry, and
+/// a client reading on to `WouldBlock` read nothing from the server: not
+/// the upgrade notice it was sent, so the new image gave it up after its
+/// 10 s and the rest of the typing went with it, nor a detach or `Exit`.
+/// tmux's server reads the terminal as libevent calls it, a read per
+/// event (tty.c `tty_read_callback`), the client's socket in between.
+fn read_stdin(stream: &mut UnixStream, more: &mut bool) -> io::Result<Option<Leave>> {
     let mut bytes = [0; 4096];
+    *more = false;
     loop {
         match io::stdin().read(&mut bytes) {
             // The tty is gone: tmux's server drops the client itself
@@ -441,6 +488,8 @@ fn read_stdin(stream: &mut UnixStream) -> io::Result<Option<Leave>> {
                 if send(stream, &ClientMsg::Input(bytes[..n].to_vec())).is_err() {
                     return Ok(None);
                 }
+                *more = true;
+                return Ok(None);
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -479,13 +528,8 @@ fn suspend(out: &mut Output, raw: &RawTty, sys: Sys) -> io::Result<()> {
 /// `command` runs in the foreground (`system`: `/bin/sh -c`, the client
 /// waiting). Then the terminal is raw again, the server is told
 /// (`MSG_UNLOCK`) and redraws, and what was typed meanwhile and not read
-/// by the command goes to the server.
-fn lock(
-    stream: &mut UnixStream,
-    out: &mut Output,
-    raw: &RawTty,
-    command: &str,
-) -> io::Result<Option<Leave>> {
+/// by the command goes to the server (the relay reads it next).
+fn lock(stream: &mut UnixStream, out: &mut Output, raw: &RawTty, command: &str) -> io::Result<()> {
     out.finish()?;
     raw.suspend();
     // system(3) ignores its result here; so does tmux.
@@ -499,7 +543,7 @@ fn lock(
     // closed: the failed send is ignored and the socket read as usual,
     // where Exit, or EOF for a server that went (kill-server), ends it.
     let _ = send(stream, &ClientMsg::Unlock);
-    read_stdin(stream)
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -515,6 +559,9 @@ fn relay(
 ) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
+    // The terminal may have more typed: read once a turn
+    // ([`read_stdin`]), the loop not waiting meanwhile.
+    let mut typed = false;
     out.high_water = high_water();
     if sent_size.is_none() || sent_size != size().ok() {
         send_size(stream);
@@ -525,7 +572,8 @@ fn relay(
         return Ok(exit);
     }
     loop {
-        match poll.poll(&mut events, None) {
+        let wait = (typed && !socket.suspended).then_some(Duration::ZERO);
+        match poll.poll(&mut events, wait) {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             result => result?,
         }
@@ -534,11 +582,7 @@ fn relay(
                 // A suspended client leaves the terminal's input to
                 // whoever has it now (tty_stop_tty: event_del(event_in)).
                 STDIN if socket.suspended => {}
-                STDIN => {
-                    if let Some(exit) = read_stdin(stream)? {
-                        return Ok(exit);
-                    }
-                }
+                STDIN => typed = true,
                 STDOUT => out.flush()?,
                 SIGNALS => {
                     for sig in signals.pending() {
@@ -566,24 +610,24 @@ fn relay(
                                 socket.readable = true;
                                 // Input typed before the stop was never
                                 // read: edge-triggered, it raises no event.
-                                if let Some(exit) = read_stdin(stream)? {
-                                    return Ok(exit);
-                                }
+                                typed = true;
                             }
                             // Put in the foreground: what was typed
                             // while it was in the background is read now
                             // (edge-triggered, it raises no event).
-                            SIGCONT => {
-                                if let Some(exit) = read_stdin(stream)? {
-                                    return Ok(exit);
-                                }
-                            }
+                            SIGCONT => typed = true,
                             _ => {} // SIGINT, SIGUSR1, SIGUSR2
                         }
                     }
                 }
                 _ => socket.readable = true,
             }
+        }
+        if typed
+            && !socket.suspended
+            && let Some(exit) = read_stdin(stream, &mut typed)?
+        {
+            return Ok(exit);
         }
         if socket.readable
             && !out.full()
@@ -596,9 +640,8 @@ fn relay(
             suspend(out, raw, sys)?;
         }
         if let Some(command) = socket.lock.take() {
-            if let Some(exit) = lock(stream, out, raw, &command)? {
-                return Ok(exit);
-            }
+            lock(stream, out, raw, &command)?;
+            typed = true;
             // What came while the command ran (the redraw, or the Exit of
             // a client that left meanwhile) is read now, not on the next
             // event.
@@ -627,6 +670,8 @@ struct Socket {
     lock: Option<String>,
     /// `Detach` went for a SIGTERM or SIGHUP.
     detach_sent: bool,
+    /// `UpgradeRaw` arrived: the notice's binary takes the terminal raw.
+    keep_raw: bool,
 }
 
 impl Socket {
@@ -709,8 +754,14 @@ impl Socket {
                             // Nothing more is read: what comes after is
                             // the new image's, for the re-attach.
                             ServerMsg::UpgradeNotice { binary, token } => {
-                                return Ok(Some(Leave::Upgrade { binary, token }));
+                                return Ok(Some(Leave::Upgrade {
+                                    binary,
+                                    token,
+                                    keep_raw: self.keep_raw,
+                                    raw: None,
+                                }));
                             }
+                            ServerMsg::UpgradeRaw => self.keep_raw = true,
                             // File requests go to command clients only: an
                             // attached client's I/O is the server's.
                             ServerMsg::Ready

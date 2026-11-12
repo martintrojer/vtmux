@@ -13,6 +13,10 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 - **Commands piped into `-C`.** 20,000 lines take 118 ms (was 415 ms; tmux 180 ms), 161 ms with formats in them (was 484; tmux 282).
   - A command client's answer while a script pipes commands: 6.5 ms (tmux 19 ms).
 
+### Fixed
+
+- Live upgrade: typing (or pasting) into an attached client while the server upgrades no longer loses input. A client flooded with input read its terminal until it ran dry and so never saw the upgrade notice; the new server gave up on it after 10 s and dropped the rest of what was typed. The client now reads the server between reads of the terminal, and keeps the terminal raw across its re-exec, so keys typed in those milliseconds are no longer cooked by the terminal (Enter as a newline, Ctrl-C, Ctrl-U). Upgrading onto a build from before this fix still gives the terminal its modes back before the exec.
+
 ### Removed
 
 - **Save and restore.** vtmux no longer checkpoints sessions to disk or restores them at start: restoring after a crash or reboot is tmux-resurrect's and tmux-continuum's job, and they work on vtmux as on tmux. vtmux keeps what no plugin can do: live upgrades, the terminal features tmux drops, pane blend.

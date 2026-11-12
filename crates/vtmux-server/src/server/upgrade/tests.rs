@@ -1148,6 +1148,65 @@ fn a_client_whose_write_failed_is_lost_before_the_exec() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A client is told to keep its terminal raw across its re-exec
+/// (`UpgradeRaw`, right before its notice) only when the binary's dry run
+/// said it takes the terminal so and the client's `Hello` says it knows
+/// the frame: a client of a build before the frame would fail on it, and
+/// a binary before `VTMUX_REATTACH_TTY` would take the raw settings for
+/// the user's.
+#[test]
+fn only_a_client_that_knows_it_is_told_to_keep_its_terminal_raw() {
+    let (mut server, dir) = setup("keepraw");
+    let (old, mut old_peer) = attach_as(&mut server, &dir, "a", "/dev/o", true);
+    let mut h = st::hello(
+        &["attach-session", "-t", "a"],
+        &dir,
+        Some(vtmux_core::protocol::TtyInfo {
+            name: "/dev/n".into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        }),
+        ControlMode::None,
+    );
+    h.ext.follows_upgrade = true;
+    h.ext.keeps_raw = true;
+    let (new, mut new_peer) = st::connect(&mut server, h);
+    server.pending_exits.clear();
+    let _ = st::messages(&mut server, old, &mut old_peer);
+    let _ = st::messages(&mut server, new, &mut new_peer);
+    let told = |server: &mut Server, id, peer: &mut mio::net::UnixStream| {
+        st::messages(server, id, peer)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::UpgradeRaw => Some("raw"),
+                ServerMsg::UpgradeNotice { .. } => Some("notice"),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for (raw, want) in [(false, ["notice"].as_slice()), (true, &["raw", "notice"])] {
+        server.upgrade_tokens();
+        server.upgrade_notify(&dir.join("new"), raw);
+        assert_eq!(
+            told(&mut server, new, &mut new_peer),
+            want,
+            "takes raw: {raw}"
+        );
+        assert_eq!(
+            told(&mut server, old, &mut old_peer),
+            ["notice"],
+            "takes raw: {raw}"
+        );
+        // As if the exec had failed and both had re-attached.
+        for id in [old, new] {
+            server.clients.get_mut(&id).unwrap().reattach = None;
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A dry run that fails sends no notice, and the tokens it would have
 /// carried are void.
 #[test]
@@ -1198,7 +1257,7 @@ fn a_re_attach_rebinds_the_record_and_fires_nothing() {
     let created = server.clients[&f].created_secs;
 
     server.upgrade_tokens();
-    server.upgrade_notify(&dir.join("new"));
+    server.upgrade_notify(&dir.join("new"), false);
     let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
     // The client execs: its old connection closes, the record stays.
     drop(f_peer);
@@ -1299,7 +1358,7 @@ fn a_re_attach_without_a_cell_size_asks_the_terminal() {
         let _ = st::messages(&mut server, f, &mut f_peer);
         server.clients.get_mut(&f).unwrap().cell_pixels = carried;
         server.upgrade_tokens();
-        server.upgrade_notify(&dir.join("new"));
+        server.upgrade_notify(&dir.join("new"), false);
         let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
         drop(f_peer);
         gone(&mut server, f);
@@ -1423,7 +1482,7 @@ fn the_notice_comes_after_the_terminal_is_restored() {
     let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
     let _ = st::messages(&mut server, f, &mut f_peer);
     server.upgrade_tokens();
-    server.upgrade_notify(&dir.join("new"));
+    server.upgrade_notify(&dir.join("new"), false);
     let got = st::messages(&mut server, f, &mut f_peer);
     let [ServerMsg::Frame(teardown), ServerMsg::UpgradeNotice { .. }] = got.as_slice() else {
         panic!("{got:?}");
@@ -1561,7 +1620,7 @@ fn a_re_attach_is_as_the_access_list_says_now() {
     let _ = st::messages(&mut server, f, &mut f_peer);
     assert!(!server.clients[&f].flags.read_only);
     server.upgrade_tokens();
-    server.upgrade_notify(&dir.join("new"));
+    server.upgrade_notify(&dir.join("new"), false);
     let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
     drop(f_peer);
     gone(&mut server, f);
@@ -1949,7 +2008,7 @@ fn a_re_attach_drops_the_notifications_queued_for_its_old_connection() {
         let new = if let Some(new) = restored.as_mut() {
             new
         } else {
-            server.upgrade_notify(&dir.join("new"));
+            server.upgrade_notify(&dir.join("new"), false);
             assert_eq!(notices(&mut server, f, &mut f_peer).pop().unwrap().1, token);
             &mut server
         };

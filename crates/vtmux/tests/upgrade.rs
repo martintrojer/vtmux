@@ -451,6 +451,11 @@ impl Attached {
         (m.cursor_shape, m.cursor_blinking, t.cursor_colour())
     }
 
+    /// The terminal's input side, for a thread typing on its own.
+    fn take_writer(&mut self) -> Box<dyn std::io::Write + Send> {
+        std::mem::replace(&mut self.writer, Box::new(std::io::sink()))
+    }
+
     fn keys(&mut self, bytes: &str) {
         self.writer.write_all(bytes.as_bytes()).unwrap();
         self.writer.flush().unwrap();
@@ -707,6 +712,179 @@ fn input_a_pane_has_not_read_yet_survives_an_upgrade() {
         "every byte of the paste",
         || std::fs::metadata(&got).map_or(0, |m| m.len()),
         |&n| n == 200_000,
+    );
+}
+
+/// Types at an attached client from a thread until told to stop: a fixed
+/// stream made before it starts (printable ASCII from a counter, a
+/// carriage return every 61 bytes, so a terminal that cooks it, CR to NL,
+/// or drops some shows in the pane's file), in writes of 512 bytes, `pace`
+/// apart or as fast as the terminal takes them.
+struct Typist {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: thread::JoinHandle<(Vec<u8>, Box<dyn std::io::Write + Send>)>,
+}
+
+impl Typist {
+    fn start(attached: &mut Attached, pace: Option<Duration>) -> Self {
+        const MOST: usize = 16 << 20;
+        let mut writer = attached.take_writer();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let mut state: u32 = 0x9e37_79b9;
+        let mut stream: Vec<u8> = (0..MOST)
+            .map(|i| {
+                if i % 61 == 60 {
+                    return b'\r';
+                }
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                b'!' + u8::try_from(state % 94).unwrap()
+            })
+            .collect();
+        let thread = thread::spawn(move || {
+            let mut typed = 0;
+            for chunk in stream.chunks(512) {
+                if stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                writer.write_all(chunk).unwrap();
+                writer.flush().unwrap();
+                typed += chunk.len();
+                if let Some(pace) = pace {
+                    thread::sleep(pace);
+                }
+            }
+            stream.truncate(typed);
+            (stream, writer)
+        });
+        Self { stop, thread }
+    }
+
+    /// Everything it typed, and the terminal's input side, kept open: a
+    /// closed one sends an end of file the pane would read.
+    fn stop(self) -> (Vec<u8>, Box<dyn std::io::Write + Send>) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.thread.join().unwrap()
+    }
+}
+
+/// A pane whose program writes what it is typed to a file, raw (the bytes
+/// the client sent, unchanged), and the attached client showing it. The
+/// program is `dd` reading 512 bytes at a time, which keeps the server
+/// behind the typing (where `cat` reads all there is), and writing each
+/// read out at once.
+fn typed_into_file() -> (World, Attached, PathBuf) {
+    let world = World::new();
+    let file = world.home.path().join("typed");
+    let script = format!(
+        "stty raw -echo; tmux wait-for -S ready; exec dd bs=512 of='{}' 2>/dev/null",
+        file.display()
+    );
+    world.run(&[
+        "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", &script,
+    ]);
+    world.run(&["set", "-g", "status-right", "R"]);
+    world.run(&["wait-for", "ready"]);
+    let attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    (world, attached, file)
+}
+
+/// Waits until `file` holds as many bytes as `typed`, then compares them:
+/// every byte typed reached the pane once, in order.
+fn assert_typed_whole(file: &Path, typed: &[u8], what: &str) {
+    let size = || std::fs::metadata(file).map_or(0, |m| m.len());
+    let end = Instant::now() + Duration::from_secs(60);
+    while size() < typed.len() as u64 && Instant::now() < end {
+        thread::sleep(Duration::from_millis(50));
+    }
+    let got = std::fs::read(file).unwrap_or_default();
+    if got == typed {
+        return;
+    }
+    let at = got
+        .iter()
+        .zip(typed)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(typed.len()));
+    let window = |b: &[u8]| {
+        String::from_utf8_lossy(&b[at.min(b.len())..(at + 30).min(b.len())]).into_owned()
+    };
+    panic!(
+        "{what}: the pane got {} of {} bytes typed, the first difference at {at}: \
+         got {:?}, typed {:?}",
+        got.len(),
+        typed.len(),
+        window(&got),
+        window(typed)
+    );
+}
+
+/// A flood typed at an attached client while the server upgrades under
+/// it, twice: every byte reaches the pane's program once, in order, and
+/// the client follows each upgrade. The typing goes on until each upgrade
+/// has answered, so the terminal never runs dry for long: a client that
+/// read its terminal until it did read nothing from the server meanwhile,
+/// not even the upgrade notice, and the new image gave it up after 10 s,
+/// and the rest of the typing with it (the reviewer's 2.4 MB into
+/// `cat >file`).
+#[test]
+fn a_flood_typed_through_upgrades_reaches_the_pane_whole() {
+    let (world, mut attached, file) = typed_into_file();
+    let typist = Typist::start(&mut attached, None);
+    let size = || std::fs::metadata(&file).map_or(0, |m| m.len());
+    for n in 1..=2 {
+        // Mid-flood, with the pane well into it.
+        let at = size() + 200_000;
+        wait_for("some of the flood", size, |&got| got >= at);
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "upgrade {n}");
+    }
+    let (typed, _writer) = typist.stop();
+    assert_typed_whole(&file, &typed, "2 upgrades");
+    assert!(attached.exited().is_none());
+    assert!(attached.args().contains(protocol::REATTACH_FLAG));
+}
+
+/// What is typed while the client re-executes is input as typed: its
+/// terminal stays raw across the exec, the new image handed its own
+/// settings. Given back before the exec, the line discipline cooked it
+/// (the carriage returns came as newlines; erase, kill and signal keys
+/// would act, and a line of 4096 bytes would lose the rest), and so it
+/// does for a binary whose dry run does not say it takes the terminal raw.
+/// After the client leaves, the terminal has its own settings back.
+#[test]
+fn keys_typed_while_the_client_re_executes_reach_the_pane_raw() {
+    use rustix::termios::{InputModes, LocalModes};
+    let (world, mut attached, file) = typed_into_file();
+    let typist = Typist::start(&mut attached, Some(Duration::from_millis(2)));
+    let size = || std::fs::metadata(&file).map_or(0, |m| m.len());
+    for n in 1..=3 {
+        let at = size() + 20_000;
+        wait_for("some of the typing", size, |&got| got >= at);
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "upgrade {n}");
+    }
+    let (typed, _writer) = typist.stop();
+    assert_typed_whole(&file, &typed, "3 upgrades");
+    // The terminal's own settings (the pty's, cooked) are back once the
+    // client has detached: the image the last one handed them to put them
+    // back. Read through the terminal itself, held open past the client.
+    let tty = world.run(&["lsc", "-F", "#{client_tty}"]);
+    let tty = rustix::fs::open(
+        tty.trim(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap();
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.exited().is_some());
+    let t = rustix::termios::tcgetattr(&tty).unwrap();
+    assert!(
+        t.local_modes
+            .contains(LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG)
+            && t.input_modes.contains(InputModes::ICRNL),
+        "{t:?}"
     );
 }
 
@@ -3190,6 +3368,45 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
     assert_eq!(world.pid(), pid);
     assert_eq!(big("#{history_size} #{alternate_on}"), "90050 0");
     assert_eq!(history(), "209978 27 90050");
+}
+
+/// A downgrade onto 3.8-beta3 (`VTMUX_BETA3_BINARY`), a build from before
+/// a client's terminal is handed over raw: this build's client gives the
+/// terminal its settings back before it re-executes as beta3 (beta3's dry
+/// run does not say it takes it raw, so no `UpgradeRaw`), and so beta3,
+/// which takes the terminal as it finds it for the user's, leaves it
+/// cooked when it detaches. Handed over raw, it would leave it raw.
+#[test]
+#[ignore = "needs VTMUX_BETA3_BINARY, a 3.8-beta3 vtmux"]
+fn a_downgrade_to_beta3_leaves_the_terminal_cooked_after_the_detach() {
+    use rustix::termios::{InputModes, LocalModes};
+    let beta3 =
+        PathBuf::from(std::env::var_os("VTMUX_BETA3_BINARY").expect("VTMUX_BETA3_BINARY is set"));
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let tty = world.run(&["lsc", "-F", "#{client_tty}"]);
+    let tty = rustix::fs::open(
+        tty.trim(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap();
+    assert_eq!(world.upgrade(&beta3), Some(upgraded()), "onto beta3");
+    wait("the client as beta3", || {
+        attached.args().contains(protocol::REATTACH_FLAG)
+            && world.run(&["lsc"]).lines().count() == 1
+    });
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.exited().is_some());
+    let t = rustix::termios::tcgetattr(&tty).unwrap();
+    assert!(
+        t.local_modes
+            .contains(LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG)
+            && t.input_modes.contains(InputModes::ICRNL),
+        "{t:?}"
+    );
 }
 
 /// Live upgrade both ways with 3.8-beta3, the last release with

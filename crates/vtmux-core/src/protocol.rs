@@ -67,8 +67,11 @@
 //!   answered with an [`ServerMsg::Exec`] whose `command` is empty; then
 //!   `control_chars` bytes: the terminal's `c_cc` array as the platform
 //!   lays it out, written only when not empty, and `pixels` before it then
-//!   even when both 0. A `Hello` whose fields are all unset has an empty
-//!   `ext`, as before them.
+//!   even when both 0; from protocol 11 too, `upgrade` bit 2: the client
+//!   keeps its terminal raw across a re-exec when told to
+//!   ([`ServerMsg::UpgradeRaw`], [`REATTACH_TTY_ENV`]), so a server sends
+//!   that frame only to a client that sets it. A `Hello` whose fields are
+//!   all unset has an empty `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
 //!   path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own, with the
@@ -78,8 +81,10 @@
 //!   `-l` (a binary that knows no such variable leaves it), and
 //!   [`REATTACH_SIGNAL_ENV`] set to `TERM` or `HUP` when the client caught
 //!   that signal and has not ended for it yet (a binary that knows no such
-//!   variable stays attached, as every build before it did). The new
-//!   process takes them out of its environment at once.
+//!   variable stays attached, as every build before it did), and
+//!   [`REATTACH_TTY_ENV`] when the client left its terminal raw for the
+//!   new image (only for a binary whose dry run said it takes it so). The
+//!   new process takes them out of its environment at once.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
@@ -157,6 +162,18 @@ pub const REATTACH_LOGIN_ENV: &str = "VTMUX_REATTACH_LOGIN";
 /// frames*): its handlers go with the exec, so the new image ends for it,
 /// detaching once it is back as an attached client does.
 pub const REATTACH_SIGNAL_ENV: &str = "VTMUX_REATTACH_SIGNAL";
+
+/// Set on the re-attach command line of a client that left its terminal
+/// raw across the exec (module docs, *Frozen frames*): the terminal's own
+/// settings, which the new image puts back when it leaves, as
+/// `<c_iflag>,<c_oflag>,<c_lflag>,<VMIN>,<VTIME>`, the flags in hex.
+/// Raw throughout, every byte typed while the client re-executes reaches
+/// the new image as it was typed: restored first, the line discipline
+/// cooked them (`ICRNL`, erase and kill, signals) and, with no newline in
+/// 4095 bytes, dropped the rest. A server tells a client to do so
+/// ([`ServerMsg::UpgradeRaw`]) only for a binary that reads it: an older
+/// one would take the raw terminal for the user's and leave it raw.
+pub const REATTACH_TTY_ENV: &str = "VTMUX_REATTACH_TTY";
 
 /// What a client that can't follow an upgrade is detached with
 /// (live-upgrade spec, decisions 4 and 25); the client prints it in
@@ -254,6 +271,10 @@ pub struct HelloExt {
     /// platform's layout), empty without one: a session made by an attaching
     /// client keeps them for its panes (cmd-new-session.c:191-202).
     pub control_chars: Vec<u8>,
+    /// The client keeps its terminal raw across an upgrade's re-exec when
+    /// told to ([`ServerMsg::UpgradeRaw`]); one from before it would not
+    /// know the frame.
+    pub keeps_raw: bool,
 }
 
 impl HelloExt {
@@ -280,7 +301,11 @@ impl HelloExt {
         if *self == Self::default() {
             return;
         }
-        out.push(u8::from(self.follows_upgrade) | u8::from(self.shell) << 1);
+        out.push(
+            u8::from(self.follows_upgrade)
+                | u8::from(self.shell) << 1
+                | u8::from(self.keeps_raw) << 2,
+        );
         put_option(out, self.reattach.as_ref(), |o, t| {
             put_bytes(o, t.as_bytes());
         });
@@ -300,10 +325,11 @@ impl HelloExt {
         if r.buf.is_empty() {
             return Ok(Self::default());
         }
-        // Bits other than 0 and 1 are a later build's.
+        // Bits other than 0 to 2 are a later build's.
         let bits = r.u8()?;
         let follows_upgrade = bits & 1 != 0;
         let shell = bits & 2 != 0;
+        let keeps_raw = bits & 4 != 0;
         let reattach = if r.buf.is_empty() {
             None
         } else {
@@ -328,6 +354,7 @@ impl HelloExt {
             pixels,
             shell,
             control_chars,
+            keeps_raw,
         })
     }
 }
@@ -501,6 +528,11 @@ pub enum ServerMsg {
         binary: PathBuf,
         token: String,
     },
+    /// The next [`Self::UpgradeNotice`]'s binary takes the terminal raw
+    /// ([`REATTACH_TTY_ENV`]): the client leaves it raw across the exec.
+    /// Sent only to a client whose `Hello` says it knows the frame
+    /// ([`HelloExt::keeps_raw`]).
+    UpgradeRaw,
 }
 
 impl ServerMsg {
@@ -1036,7 +1068,7 @@ impl Message for ServerMsg {
             Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()) + 1,
             Self::Exec { command, shell } => 4 + command.len() + 4 + shell.as_os_str().len(),
             Self::Lock { command } => 4 + command.len(),
-            Self::Ready | Self::WriteClose | Self::Suspend => 0,
+            Self::Ready | Self::WriteClose | Self::Suspend | Self::UpgradeRaw => 0,
             Self::Flags { .. } => 1,
             Self::UpgradeResult { message, .. } => 1 + 4 + message.len(),
             Self::UpgradeNotice { binary, token } => 4 + binary.as_os_str().len() + 4 + token.len(),
@@ -1096,6 +1128,7 @@ impl Message for ServerMsg {
                 out.push(12);
                 out.push(u8::from(*wait_exit));
             }
+            Self::UpgradeRaw => out.push(13),
             Self::UpgradeResult { ok, message } => {
                 out.push(0x80);
                 out.push(u8::from(*ok));
@@ -1140,6 +1173,7 @@ impl Message for ServerMsg {
             12 => Self::Flags {
                 wait_exit: r.flag()?,
             },
+            13 => Self::UpgradeRaw,
             0x80 => Self::UpgradeResult {
                 ok: r.flag()?,
                 message: r.string()?,
@@ -1291,6 +1325,7 @@ mod tests {
             },
             ServerMsg::Flags { wait_exit: true },
             ServerMsg::Flags { wait_exit: false },
+            ServerMsg::UpgradeRaw,
             ServerMsg::UpgradeResult {
                 ok: false,
                 message: "not implemented".into(),
@@ -1821,6 +1856,7 @@ mod tests {
                 },
                 "06000000 0b 01000000 63",
             ),
+            (ServerMsg::UpgradeRaw, "01000000 0d"),
         ]
     }
 
@@ -1912,7 +1948,7 @@ mod tests {
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want.clone()), frame.len())
         );
-        let frame = hello_golden_with(9, 0, b"\xfc", b"");
+        let frame = hello_golden_with(9, 0, b"\xf8", b"");
         assert_eq!(
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want.clone()), frame.len())
@@ -1923,6 +1959,7 @@ mod tests {
             pixels: (800, 480),
             shell: true,
             control_chars: b"\x03\x1c".to_vec(),
+            keeps_raw: true,
         };
         let mut ext = b"\x07\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
         ext.extend_from_slice(b"\x20\x03\x00\x00\xe0\x01\x00\x00");
@@ -1963,6 +2000,7 @@ mod tests {
                     pixels: (0, 0),
                     shell: false,
                     control_chars: Vec::new(),
+                    keeps_raw: false,
                 },
                 b"\x01\x00",
             ),
@@ -1973,6 +2011,7 @@ mod tests {
                     pixels: (0, 0),
                     shell: false,
                     control_chars: Vec::new(),
+                    keeps_raw: false,
                 },
                 b"\x01\x01\x10\x00\x00\x000123456789abcdef",
             ),
@@ -1983,6 +2022,7 @@ mod tests {
                     pixels: (800, 480),
                     shell: false,
                     control_chars: Vec::new(),
+                    keeps_raw: false,
                 },
                 b"\x00\x00\x20\x03\x00\x00\xe0\x01\x00\x00",
             ),
@@ -1993,6 +2033,7 @@ mod tests {
                     pixels: (0, 0),
                     shell: true,
                     control_chars: Vec::new(),
+                    keeps_raw: false,
                 },
                 b"\x02\x00",
             ),
@@ -2003,8 +2044,20 @@ mod tests {
                     pixels: (0, 0),
                     shell: false,
                     control_chars: b"\x03\x7f".to_vec(),
+                    keeps_raw: false,
                 },
                 b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x03\x7f",
+            ),
+            (
+                HelloExt {
+                    follows_upgrade: true,
+                    reattach: None,
+                    pixels: (0, 0),
+                    shell: false,
+                    control_chars: Vec::new(),
+                    keeps_raw: true,
+                },
+                b"\x05\x00",
             ),
         ] {
             let m = with(ext);

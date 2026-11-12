@@ -6,13 +6,31 @@ use std::io;
 pub struct RawTty(Termios, rustix::fs::OFlags);
 
 impl RawTty {
-    pub fn enter() -> io::Result<Self> {
+    /// Raw from here on; `handed` is the terminal's own settings when the
+    /// image before this one left it raw across a live upgrade's re-exec
+    /// ([`Handed`]), which are put back on the way out.
+    pub fn enter(handed: Option<&Termios>) -> io::Result<Self> {
         let stdin = io::stdin();
-        let saved = termios::tcgetattr(&stdin)?;
+        let saved = match handed {
+            Some(saved) => saved.clone(),
+            None => termios::tcgetattr(&stdin)?,
+        };
         let flags = rustix::fs::fcntl_getfl(&stdin)?;
         let guard = Self(saved, flags);
         guard.resume()?;
         Ok(guard)
+    }
+
+    /// The terminal's own settings as the next image takes them in
+    /// `VTMUX_REATTACH_TTY` ([`Handed::parse`]): the termios stay raw
+    /// across the exec, only the file status flags go back (`O_NONBLOCK`
+    /// is shared by every process on the terminal), so a byte typed
+    /// while the client re-executes is input as typed. Restored, the line
+    /// discipline cooked it (`ICRNL`, erase, signals, the line limit).
+    #[must_use]
+    pub fn hand_over(&self) -> String {
+        let _ = rustix::fs::fcntl_setfl(io::stdin(), self.1);
+        handover_text(&self.0)
     }
 
     /// Raw and non-blocking again after [`RawTty::suspend`].
@@ -63,6 +81,66 @@ impl Drop for RawTty {
     fn drop(&mut self) {
         self.suspend();
     }
+}
+
+/// The terminal's own settings, handed over raw by the image before a
+/// live upgrade's re-exec ([`RawTty::hand_over`]): put back when this
+/// process leaves before it attaches (refused, the server gone), as the
+/// attach does when it ends ([`RawTty::enter`]).
+pub struct Handed(Termios);
+
+impl Handed {
+    /// The settings in `text`: what raw mode changes (`c_iflag`, `c_oflag`
+    /// and `c_lflag` whole, `VMIN`, `VTIME`) over what the terminal has
+    /// now, the rest of which raw mode left as it was. `None` for a text this build
+    /// does not read, or no terminal.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let now = termios::tcgetattr(io::stdin()).ok()?;
+        settings_over(text, now).map(Self)
+    }
+
+    #[must_use]
+    pub fn settings(&self) -> &Termios {
+        &self.0
+    }
+}
+
+impl Drop for Handed {
+    fn drop(&mut self) {
+        let _ = termios::tcsetattr(io::stdin(), OptionalActions::Now, &self.0);
+    }
+}
+
+/// `VTMUX_REATTACH_TTY`'s text for `saved` (protocol module docs). The
+/// flag words go as `u64`: rustix's `bits()` is `u32` on Linux and `u64`
+/// on macOS (`tcflag_t`).
+#[allow(clippy::useless_conversion)] // u64 -> u64 on macOS
+fn handover_text(saved: &Termios) -> String {
+    format!(
+        "{:x},{:x},{:x},{},{}",
+        u64::from(saved.input_modes.bits()),
+        u64::from(saved.output_modes.bits()),
+        u64::from(saved.local_modes.bits()),
+        saved.special_codes[termios::SpecialCodeIndex::VMIN],
+        saved.special_codes[termios::SpecialCodeIndex::VTIME],
+    )
+}
+
+/// The settings [`handover_text`] wrote, over `now` (the terminal raw).
+#[allow(clippy::unnecessary_fallible_conversions)] // u64 -> u64 on macOS
+fn settings_over(text: &str, mut now: Termios) -> Option<Termios> {
+    let words: Vec<&str> = text.split(',').collect();
+    let [i, o, l, vmin, vtime] = words.as_slice() else {
+        return None;
+    };
+    let hex = |w: &str| u64::from_str_radix(w, 16).ok();
+    now.input_modes = termios::InputModes::from_bits_retain(hex(i)?.try_into().ok()?);
+    now.output_modes = termios::OutputModes::from_bits_retain(hex(o)?.try_into().ok()?);
+    now.local_modes = termios::LocalModes::from_bits_retain(hex(l)?.try_into().ok()?);
+    now.special_codes[termios::SpecialCodeIndex::VMIN] = vmin.parse().ok()?;
+    now.special_codes[termios::SpecialCodeIndex::VTIME] = vtime.parse().ok()?;
+    Some(now)
 }
 
 #[cfg(test)]
@@ -125,5 +203,34 @@ mod tests {
         );
         assert_eq!(raw.special_codes[termios::SpecialCodeIndex::VMIN], 1);
         assert_eq!(raw.special_codes[termios::SpecialCodeIndex::VTIME], 0);
+    }
+
+    /// A terminal handed over raw across a live upgrade's re-exec gets its
+    /// own settings back from the text the image before wrote: every bit
+    /// raw mode changed, and nothing else touched. A text this build does
+    /// not read is no settings at all, never raw ones taken for the user's.
+    #[test]
+    fn a_handed_over_terminal_gets_its_own_settings_back() {
+        let mut saved = cooked();
+        saved.special_codes[termios::SpecialCodeIndex::VMIN] = 4;
+        saved.special_codes[termios::SpecialCodeIndex::VTIME] = 2;
+        let raw = raw_modes(&saved);
+        let back = settings_over(&handover_text(&saved), raw.clone()).unwrap();
+        assert_eq!(back.input_modes, saved.input_modes);
+        assert_eq!(back.output_modes, saved.output_modes);
+        assert_eq!(back.local_modes, saved.local_modes);
+        assert_eq!(back.control_modes, saved.control_modes);
+        for code in [
+            termios::SpecialCodeIndex::VMIN,
+            termios::SpecialCodeIndex::VTIME,
+            termios::SpecialCodeIndex::VERASE,
+            termios::SpecialCodeIndex::VINTR,
+        ] {
+            assert_eq!(back.special_codes[code], saved.special_codes[code]);
+        }
+        assert_eq!(raw_modes(&back).local_modes, raw.local_modes);
+        for bad in ["", "1,2,3,4", "1,2,3,4,5,6", "x,2,3,4,5", "1,2,3,256,0"] {
+            assert!(settings_over(bad, raw.clone()).is_none(), "{bad:?}");
+        }
     }
 }
