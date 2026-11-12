@@ -288,6 +288,18 @@ impl Side {
         });
     }
 
+    /// Wait until `window`, named automatically, is named `name`. tmux names
+    /// a new window after its pane's process before the shell has replaced
+    /// it (`tmux` for a while), and renames it on a timer: resurrect saves
+    /// and restores whatever name the window has then.
+    fn wait_name(&self, window: &str, name: &str) {
+        self.wait(&format!("{window} to be named {name}"), || {
+            self.t(&["display", "-p", "-t", window, "#{window_name}"])
+                .trim_end()
+                == name
+        });
+    }
+
     /// Wait for the shell's prompt in `target`, then type `line` and Enter.
     fn shell(&self, target: &str, line: &str) {
         self.wait_pane(target, "sh", |s| prompts(s) == 1);
@@ -421,6 +433,7 @@ fn settled(s: &Side, restored: bool) {
     s.wait_pane("work:2.1", "sh", |x| prompts(x) == 1);
     s.wait_pane("work:2.2", "sh", |x| prompts(x) == n && has(x, "60"));
     s.wait_pane("misc:1.0", "sh", |x| prompts(x) == n && has(x, "misc-pane"));
+    s.wait_name("misc:1", "sh");
     if have_vim() && restored {
         s.redraw("misc:2.1", "vim", "C-l");
     } else if have_vim() {
@@ -595,7 +608,12 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
         for id in s.t(&["lsp", "-a", "-F", "#{pane_id}"]).lines() {
             s.t(&["select-pane", "-t", id, "-T", &format!("t{id}")]);
         }
+        // The first status line saves: every pane settled before it.
+        s.wait_pane("work:1.0", "sh", |x| prompts(x) == 1);
         s.wait_pane("work:1.1", "sh", |x| prompts(x) == 1 && has(x, "pane-one"));
+        s.wait_pane("work:2.0", "sh", |x| prompts(x) == 1);
+        s.wait_pane("misc:1.0", "sh", |x| prompts(x) == 1);
+        s.wait_name("misc:1", "sh");
         let res = s.root.join("res");
         let attached = attach(&s, "work");
         // The save runs in the background: done when its pane contents are
@@ -617,6 +635,7 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
         s.wait_pane("work:1.1", "sh", |x| prompts(x) == 2 && has(x, "pane-one"));
         s.wait_pane("work:2.0", "sh", |x| prompts(x) == 1);
         s.wait_pane("misc:1.0", "sh", |x| prompts(x) == 1);
+        s.wait_name("misc:1", "sh");
         Seen {
             saved,
             restored: s.dump(),

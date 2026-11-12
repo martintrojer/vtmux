@@ -17,11 +17,15 @@ resurrect saves pane contents with `capture-pane -epJ`. vtmux ended a `-J` (or `
 
 resurrect's restore types each program's command right after laying the window out. A program can then draw for a size its pane had a moment before (tmux resizes a pane's tty on a timer, server-client.c `server_client_check_pane_resize`) and get one redraw more on one side than the other: seen under load as less showing `file.txt` on one side and `:` on the other, and once in the reference tmux as a less screen drawn 11 rows high in a 24-row pane. The test sends each restarted less and vim SIGWINCH and a redraw key before comparing. vim sits in the bottom pane of its window: in the top one it could read the pane's one-row moment, set a two-row scroll region and keep it after its pane grew back (seen on vtmux: `scroll_region_upper/lower` 0,1 in a 12-row pane).
 
+Window names: tmux 3.8 names a new window after its pane's process before the shell has replaced it (`tmux` for up to ~500 ms) and renames it on a timer, and resurrect saves whatever name the window has. Review found the continuum test failing 4/14 at idle and 6/6 under build load (`misc:1` saved as `sh` on vtmux, `tmux` on tmux 3.8): it attached, and so saved, before that window was renamed. Both tests now wait for every pane's prompt and for `misc:1` to be named `sh` before the save and after the restore.
+
 ## Runs
 
 | run | result |
 |---|---|
-| `cargo test -p vtmux --test resurrect`, 10x under 48 busy loops (`flock /tmp/vtmux-stress.lock`) | 10/10, 4.3-4.6 s each |
+| after the window-name wait: the test binary run directly, 14x at idle | 14/14, 3.9-4.3 s |
+| the same, 8x under 48 busy loops and 4x under 96 | 12/12, 4.1-4.2 s and 6.7-6.8 s |
+| before it: `cargo test -p vtmux --test resurrect`, 10x under 48 busy loops (`flock /tmp/vtmux-stress.lock`) | 10/10, 4.3-4.6 s each |
 | the same 12x, an earlier version (programs redrawn before the save too) | 12/12 |
 | earlier still: vim in the top pane, redrawn | 1 failure in 8 (the stuck scroll region), 1 in 2 |
 | earlier still: no redraw | 5 failures in 5 (less's last row, vim) |
