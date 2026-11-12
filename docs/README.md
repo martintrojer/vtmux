@@ -11,7 +11,7 @@ For contributors: [AGENTS.md](../AGENTS.md) (gates and rules), [ARCHITECTURE.md]
 | [2026-10-29-vtmux.md](specs/2026-10-29-vtmux.md) | The project: pitch, scope, decisions D1-D31 and D33, compliance triangulation, milestones |
 | [2026-10-31-history-memory.md](specs/2026-10-31-history-memory.md) | Scrollback memory: retain close to `history-limit`, compress quiet history, keep compressing a pane that never stops |
 | [2026-11-04-pane-blend.md](specs/2026-11-04-pane-blend.md) | Pane blend (D26): blend every cell of active or inactive panes toward a colour |
-| [2026-11-06-live-upgrade.md](specs/2026-11-06-live-upgrade.md) | Live upgrade and persistence (D27), with its own numbered decisions 1-30 (cited as "decision 13") |
+| [2026-11-06-live-upgrade.md](specs/2026-11-06-live-upgrade.md) | Live upgrade (D27), with its own numbered decisions 1-32 (cited as "decision 13"); its persistence phase was removed 2026-11-12 (M5) |
 | [2026-11-09-osc-survey.md](specs/2026-11-09-osc-survey.md) | Survey of terminal protocols tmux 3.8 drops; led to D28-D31 |
 
 ## Decisions
@@ -46,7 +46,7 @@ From the main spec's *Key decisions*. The spec has the reasons; a change that co
 | D24 | The pitch: "Drop-in tmux replacement. Modern stack. Better rendering. Live upgrades."; speed and memory claimed only with published numbers |
 | D25 | The version is the tmux release it is tested against: `3.8-beta1`, then `3.8` |
 | D26 | Pane blend: `vtmux-pane-active-blend` and `vtmux-pane-inactive-blend` |
-| D27 | Live upgrade by `execve` in place, with opt-in persistence (`vtmux-persist`) from the same snapshot |
+| D27 | Live upgrade by `execve` in place; its opt-in persistence (`vtmux-persist`) removed 2026-11-12: restoring is tmux-resurrect's job |
 | D28 | Protocol extensions: a protocol tmux drops, only where libghostty and Ghostty implement it, behind a `vtmux-*` option, tmux when off |
 | D29 | Kitty keyboard protocol, pane side: `vtmux-kitty-keys` |
 | D30 | Desktop notifications, OSC 9 and 777, to Ghostty clients: `vtmux-notifications` |
