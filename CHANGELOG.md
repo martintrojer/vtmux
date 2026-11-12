@@ -1,8 +1,8 @@
 # Changelog
 
-vtmux's version is the tmux release it is tested against: `3.8-beta2` is the second beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
+vtmux's version is the tmux release it is tested against: `3.8-beta3` is the third beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
-## Unreleased
+## 3.8-beta3
 
 ### New
 

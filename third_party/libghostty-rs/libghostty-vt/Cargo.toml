@@ -3,7 +3,7 @@
 # `libghostty_vt` is what code imports. Its version follows vtmux's.
 [package]
 name = "vtmux-ghostty-vt"
-version = "3.8.0-beta.2"
+version = "3.8.0-beta.3"
 edition = "2024"
 rust-version = "1.90"
 description = "Safe Rust API over Ghostty's libghostty-vt terminal emulator, with vtmux's additions (vtmux's fork of libghostty-vt)"
@@ -44,7 +44,7 @@ version = "1.2.0"
 
 [dependencies.libghostty-vt-sys]
 package = "vtmux-ghostty-vt-sys"
-version = "=3.8.0-beta.2"
+version = "=3.8.0-beta.3"
 path = "../libghostty-vt-sys"
 
 [dependencies.log]

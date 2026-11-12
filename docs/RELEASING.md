@@ -4,7 +4,7 @@ A release is a version, a GitHub release with prebuilt tarballs, and the crates 
 
 ## Version
 
-vtmux's version is the tmux release it is tested against (D25): `version` in `[workspace.package]` of `Cargo.toml` is `3.8.0-beta.2`, which `vtmux -V` prints as `3.8-beta2`. A bump changes it in every place a crate names it, which `cargo test -p xtask publish` checks:
+vtmux's version is the tmux release it is tested against (D25): `version` in `[workspace.package]` of `Cargo.toml` is `3.8.0-beta.3`, which `vtmux -V` prints as `3.8-beta3`. A bump changes it in every place a crate names it, which `cargo test -p xtask publish` checks:
 
 - `[workspace.package] version` and the `=` requirements in `[workspace.dependencies]` (`Cargo.toml`);
 - `version` of the two forks and the `=` requirements on them (`third_party/libghostty-rs/libghostty-vt-sys/Cargo.toml`, `libghostty-vt/Cargo.toml`, `crates/vtmux-vt/Cargo.toml`);

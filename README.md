@@ -116,14 +116,14 @@ With cargo. The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:
 
 ```sh
 mise use -g zig@0.17
-cargo install --locked vtmux@3.8.0-beta.2   # a beta: cargo needs the version named
+cargo install --locked vtmux@3.8.0-beta.3   # a beta: cargo needs the version named
 ```
 
 That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
 
 From a checkout (mise brings the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
 
-Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets: `vtmux -V` prints `vtmux 3.8-beta2`.
+Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets: `vtmux -V` prints `vtmux 3.8-beta3`.
 
 ## Also
 
@@ -131,6 +131,6 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI.
 
-**Status:** beta ([3.8-beta2](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
+**Status:** beta ([3.8-beta3](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
 ISC license.

@@ -1179,7 +1179,7 @@ fn own_name() {
         )
     );
     let v = w.raw(&["-V"]);
-    assert_eq!(v.stdout, "vtmux 3.8-beta2\n");
+    assert_eq!(v.stdout, "vtmux 3.8-beta3\n");
     assert!(
         w.raw(&["-Z"])
             .stderr
@@ -1203,7 +1203,7 @@ fn version_formats() {
     let w = World::new(&vtmux_bin());
     w.run(&["new", "-d", "-s", "a", "cat", "-"]);
     let r = w.run(&["display", "-p", "#{version} #{vtmux_version}"]);
-    assert_eq!((r.code, r.stdout.as_str()), (0, "3.8 3.8-beta2\n"));
+    assert_eq!((r.code, r.stdout.as_str()), (0, "3.8 3.8-beta3\n"));
     let r = w.run(&[
         "if-shell",
         "-F",
