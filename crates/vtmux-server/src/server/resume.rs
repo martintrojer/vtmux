@@ -848,7 +848,7 @@ impl Server {
         // so none of them may close (or its number be reused by a hook's
         // job) before it, and no hook runs in the middle of it.
         self.upgrade.held = Some(Vec::new());
-        self.upgrade_notify(binary);
+        self.upgrade_notify(binary, passed.checked.takes_raw_tty);
         let keep: Vec<RawFd> = snapshot
             .descriptors
             .iter()

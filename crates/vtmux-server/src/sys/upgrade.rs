@@ -58,6 +58,14 @@ pub const PATCH_STACK_LIMIT: Duration = Duration::from_secs(1);
 /// that passes, so either side may be the older.
 pub const TAKES_SOCKET: &str = "vtmux-resume takes -S\n";
 
+/// What a dry run that passes writes on stderr when its binary, re-attaching
+/// a client, takes the terminal raw with its own settings in
+/// `VTMUX_REATTACH_TTY` (`vtmux_core::protocol::REATTACH_TTY_ENV`): the
+/// clients told to follow are then told to leave it raw across their exec
+/// (`ServerMsg::UpgradeRaw`). A binary from before it writes nothing, and
+/// its clients restore the terminal before the exec, as they always did.
+pub const TAKES_RAW_TTY: &str = "vtmux-reattach takes the terminal raw\n";
+
 /// What a dry run that read and rebuilt the snapshot writes on stderr, a
 /// line of its own: this, the hash of the snapshot's body its header
 /// records (`vtmux_snapshot::digest`) in lowercase hex, and a newline
@@ -103,6 +111,8 @@ pub fn acknowledgement(digest: &[u8; 32]) -> String {
 pub struct Checked {
     /// `-S <socket>` before [`RESUME_FLAG`] ([`TAKES_SOCKET`]).
     pub takes_socket: bool,
+    /// A re-attaching client's terminal left raw ([`TAKES_RAW_TTY`]).
+    pub takes_raw_tty: bool,
 }
 
 /// The environment variable a switch back passes why the resume failed in,
@@ -500,6 +510,7 @@ impl DryRun {
             }
             return Ok(Ok(Checked {
                 takes_socket: line(TAKES_SOCKET),
+                takes_raw_tty: line(TAKES_RAW_TTY),
             }));
         }
         let message = String::from_utf8_lossy(&self.said);
@@ -1152,17 +1163,26 @@ mod tests {
                 binary.display()
             );
         }
-        let passes = says("new", &format!("{TAKES_SOCKET}{ack}"));
+        let passes = says("new", &format!("{TAKES_SOCKET}{TAKES_RAW_TTY}{ack}"));
         assert_eq!(
             dry_run(&passes, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
-            Ok(Checked { takes_socket: true })
+            Ok(Checked {
+                takes_socket: true,
+                takes_raw_tty: true
+            })
+        );
+        let cooked = says("cooked", &format!("{TAKES_SOCKET}{ack}"));
+        assert_eq!(
+            dry_run(&cooked, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
+            Ok(Checked {
+                takes_socket: true,
+                takes_raw_tty: false
+            })
         );
         let no_socket = says("bare", &ack);
         assert_eq!(
             dry_run(&no_socket, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap(),
-            Ok(Checked {
-                takes_socket: false
-            })
+            Ok(Checked::default())
         );
         // A vtmux from before the acknowledgement: its `-V` says which;
         // nothing else will do. (Run as `vtmux`, which a script, given its
@@ -1191,7 +1211,14 @@ mod tests {
         ] {
             let got = dry_run(&legacy(name, version), snapshot.as_fd(), DRY_RUN_LIMIT).unwrap();
             if passes {
-                assert_eq!(got, Ok(Checked { takes_socket: true }), "{name}");
+                assert_eq!(
+                    got,
+                    Ok(Checked {
+                        takes_socket: true,
+                        takes_raw_tty: false
+                    }),
+                    "{name}"
+                );
             } else {
                 assert!(got.is_err(), "{name}: {got:?}");
             }

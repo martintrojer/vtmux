@@ -1061,21 +1061,28 @@ impl Server {
     /// not come back (its exec fails, the new binary can't re-attach, its
     /// token is refused) leaves the terminal as it found it, and the
     /// re-attach starts it again ([`Server::reattach`]), so each upgrade
-    /// pops the title it pushes.
-    pub(crate) fn upgrade_notify(&mut self, binary: &Path) {
-        let told: Vec<(ClientId, String)> = self
+    /// pops the title it pushes. Its termios stay raw across the exec when
+    /// `binary` takes them so (`raw`, the dry run's `TAKES_RAW_TTY`) and
+    /// the client knows how (`keeps_raw`): what is typed meanwhile is
+    /// then input as it was typed, not cooked by the line discipline.
+    pub(crate) fn upgrade_notify(&mut self, binary: &Path, raw: bool) {
+        let told: Vec<(ClientId, String, bool)> = self
             .clients
             .iter()
             .filter_map(|(&id, c)| {
                 let r = c.reattach.filter(|r| r.deadline.is_none())?;
-                Some((id, r.text()))
+                let keeps_raw = c.hello.as_ref().is_some_and(|h| h.ext.keeps_raw);
+                Some((id, r.text(), raw && keeps_raw))
             })
             .collect();
         let deadline = Instant::now() + REATTACH_WAIT;
-        for (id, token) in told {
+        for (id, token, raw) in told {
             self.send_teardown(id);
             if let Some(r) = self.clients.get_mut(&id).and_then(|c| c.reattach.as_mut()) {
                 r.deadline = Some(deadline);
+            }
+            if raw {
+                self.send(id, &ServerMsg::UpgradeRaw);
             }
             self.send(
                 id,
@@ -1467,6 +1474,7 @@ impl super::Client {
             pixels: hello.ext.pixels,
             shell: false,
             control_chars: hello.ext.control_chars.clone(),
+            keeps_raw: hello.ext.keeps_raw,
         };
         let (was, now) = (h.tty.as_ref()?, hello.tty.as_ref()?);
         let changed = (was.cols, was.rows) != (now.cols, now.rows);
