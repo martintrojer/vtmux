@@ -19,9 +19,13 @@ inputs:
 runs:
   using: composite
   steps:
+    # No setup-zig cache: it saves Zig's global cache under a key per run
+    # (130-290 MB each, which filled the repo's 10 GB and evicted the
+    # Ghostty caches); the Ghostty build cache below holds what we reuse.
     - uses: mlugg/setup-zig@v2
       with:
         version: ${{ inputs.zig-version }}
+        use-cache: false
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: 1.99.1
@@ -44,7 +48,10 @@ runs:
     # toolchain, the profile), hence Cargo.lock, Cargo.toml and
     # rust-toolchain.toml in the key: a key that restores a directory under
     # a stale name would never be saved again. This step's post (the save)
-    # runs before rust-cache's, which cleans target/.
+    # runs before rust-cache's, which cleans target/. The lint job's
+    # ghostty-zig stage keeps Zig's caches in target/ghostty-zig-tests: a
+    # restored one skips the Debug build of Ghostty's tests (about 20 min
+    # cold on a macOS runner) and a run Zig remembers as passed.
     - name: Ghostty build cache
       if: inputs.rust-cache == 'true'
       uses: actions/cache@v4
@@ -52,6 +59,7 @@ runs:
         path: |
           target/*/build/vtmux-ghostty-vt-sys-*/out
           target/*/*/build/vtmux-ghostty-vt-sys-*/out
+          target/ghostty-zig-tests
         key: ghostty-${{ runner.os }}-${{ runner.arch }}-zig${{ inputs.zig-version }}-${{ hashFiles('third_party/libghostty-rs/libghostty-vt-sys/build.rs', 'third_party/libghostty-rs/libghostty-vt-sys/patches/**', 'Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}-${{ inputs.cache-key }}
     - name: Reference tmux 3.8 build dependencies
       if: inputs.reference-tmux == 'true'
