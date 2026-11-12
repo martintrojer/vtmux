@@ -133,4 +133,6 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 **Status:** beta ([3.8-beta3](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
+[How it was built](https://github.com/martintrojer/vtmux/blob/main/docs/HOW-IT-WAS-BUILT.md): agents, tmux 3.8 as the spec, and the checks.
+
 ISC license.
