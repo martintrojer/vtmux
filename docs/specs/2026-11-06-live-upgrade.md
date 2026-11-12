@@ -83,6 +83,15 @@ Owner decision: vtmux keeps only what tmux and its plugins can't do (live upgrad
 - The dry run (`--vtmux-check-snapshot`), its acknowledgement line and the `-V` fallback (decision 6), the resume, the switch back, the last resorts (part by part, then without terminal state) and the readers of a pane without terminal state; `restore_term`; `PaneCompress::restored` and `Alerts::restored` (named for an upgrade's import, not for persistence).
 - Live upgrade both ways with 3.8-beta3: downgrade onto it (its image finds no `vtmux-persist`, so it stays off and writes nothing) and upgrade from it (the fields above read and ignored).
 
+**Tests the removal lands with** (after the spec refuter, 2026-11-12).
+
+- Beta3 both ways, end to end: a released 3.8-beta3 server upgraded onto this build, back onto beta3 and onto this build again, pids, attached clients, screens and history unchanged at each step. The release binary is used when present (`VTMUX_BETA3_BINARY`, else a build of `034e438a`); without one the test is skipped and counted as a skip, not a pass.
+- A beta3-origin fixture: an encoded snapshot with a nonzero `persist_hold` (Server tag 36), a waiting restored pane (`restored_from`, Pane tag 50) and a respawned one under its guard (`restart_from`, tag 51), the obsolete `vtmux-persist*` options in the server, global and session trees and `@` options beside them. The new image rebuilds the first as an ordinary dead pane, lets the second's exit be an ordinary exit, drops the obsolete options from every tree and keeps the `@` ones; a snapshot it then writes carries no provenance, no guard and a `persist_hold` of 0.
+- Decoder tests for the legacy tags, and `--vtmux-check-snapshot` refusing a checkpoint (purpose 1 or 2). Format version 1, every tag's meaning, the required-feature names and `v1.snap` unchanged (the golden test keeps passing untouched).
+- Mixed tests are cut, not deleted: a test whose checkpoint part goes keeps its upgrade part (the graphics grant across a rebuild without its checkpoint tail; terminal state by purpose as an upgrade in rows, the terminal-less import kept through the salvage path; the ordinary-session feature test with the provenance from the fixture). `cargo xtask reap`'s test of real servers told by the socket they hold keeps its socket classification, process-tree selection and surviving-server checks (`-L rvpath/../default`, bundled flags, `$TMUX`, spaces, relative `-S`) on ordinary sessions, without directories or locks; `Held::absolute` and `Held::canonical` stay.
+- `scripts/chaos_upgrade.py` sets no persistence at all and runs as an upgrade-only smoke after the removal.
+- Docs: PAPERCUTS loses the restored-pane exception, the copyable `vtmux-persist` line and "or restore" in the graphics row; `vtmux-snapshot`'s crate description loses persistence. The CHANGELOG's *Unreleased* entry names the three options, says a config setting one now gets `invalid option` (`%if "#{vtmux_version}"` does not guard it, vtmux being vtmux) and names the old state directory (`$XDG_STATE_HOME/vtmux`, default `~/.local/state/vtmux`) as safe to delete; released entries stay.
+
 ## Design
 
 ### Snapshot (phase 1)
