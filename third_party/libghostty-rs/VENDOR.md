@@ -1391,6 +1391,17 @@ Recorded per commit in git history; the list is kept current:
   the load fails with `addImage`'s `ENOMEM`. Rust test: `vtmux-vt`
   `tests/graphics_memory.rs`. Upstream candidate (Ghostty's limit is per
   screen too).
+- `patches/0045-row-tmux-used.patch` (`c/row.zig` and `screen.h`
+  `GHOSTTY_ROW_DATA_TMUX_USED`; `Row::tmux_used` in `screen.rs` and
+  `RowData::TMUX_USED` in `bindings.rs`, by hand): a row's `tmux_used`
+  (patch 0013, tmux's `cellused`) through the row API, so `capture-pane -J`
+  and `-T` end a line where tmux does (grid.c `grid_string_cells`): at the
+  cells written, erased or not, where they read only the text before.
+  tmux-resurrect saves pane contents with `capture-pane -epJ`, and vim's
+  first screen has cells written then erased. Rust test `vtmux-vt`
+  `join_ends_lines_at_the_cells_written`, oracle
+  `capture_join_keeps_erased_cells`. Not an upstream candidate (tmux's
+  model).
 - `libghostty-vt/src/kitty/graphics.rs`:
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a

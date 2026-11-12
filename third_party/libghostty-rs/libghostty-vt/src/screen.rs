@@ -492,6 +492,13 @@ impl Row {
         let bits: u8 = self.get(ffi::RowData::TMUX_LINE_FLAGS)?;
         Ok((bits & 1 != 0, bits & 2 != 0))
     }
+    /// vtmux: tmux's `cellused` (patch 0013, `Row.tmux_used`, read by patch
+    /// 0045): how far the row has been written, erased cells included.
+    /// Readers take the larger of it and the row's text extent, which a row
+    /// from somewhere that does not keep it (a state import) measures by.
+    pub fn tmux_used(self) -> Result<u16> {
+        self.get(ffi::RowData::TMUX_USED)
+    }
 }
 
 /// Represents a single terminal cell.

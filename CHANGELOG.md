@@ -15,6 +15,10 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
   - The old checkpoints in `$XDG_STATE_HOME/vtmux` (default `~/.local/state/vtmux`) are never read again; delete the directory.
   - Live upgrades from and back to 3.8-beta3 keep working. A pane a beta3 server restored and still shows comes across as an ordinary dead pane with its screen; `respawn-pane` restarts it.
 
+### Fixed
+
+- `capture-pane -J` (and `-T -N`) keeps a line's cells that were written then erased, as tmux does: tmux-resurrect's saved pane contents (`capture-pane -epJ`) now match tmux's, vim's screen included. tmux-resurrect's save and restore and tmux-continuum's auto-save and auto-restore are tested against tmux 3.8.
+
 ## 3.8-beta3
 
 ### New

@@ -1,0 +1,134 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "capture_join_keeps_erased_cells",
+  "inputs": {
+    "name": "capture_join_keeps_erased_cells",
+    "size": [
+      20,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'abc       \\033[4G\\033[K\\r\\nabcdef\\033[4G\\033[K\\r\\nabcdef\\033[2K\\r\\nabcdef\\033[1K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\n1\\r\\n2\\r\\nend'; tmux wait-for -S a; exec cat"
+        ]
+      },
+      {
+        "wait_for": "a"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-T",
+          "-N",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-T",
+          "-S",
+          "-",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abc       \nabc   \n\n      \nabc  f\nbold      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abc       \nabc   \n\n      \nabc  f\n\u001b[1mbold\u001b[0m      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abc       \nabc   \n\n      \nabc  f\nbold      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abc\nabc\n\n\nabc  f\nbold\n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

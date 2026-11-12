@@ -417,6 +417,27 @@ impl Source<'_> {
         }
     }
 
+    /// Line `y`'s tmux `cellused` as the row keeps it (Ghostty patches 0013
+    /// and 0045), 0 where none is kept (`-a`, a mode's screen): readers
+    /// take the larger of it and the line's text extent. `last` is the row
+    /// just read for it, as for [`Source::line_kept`].
+    fn line_used(&self, y: usize, last: &LastRow<'_>) -> usize {
+        let Self::Pane(t, p) = self else { return 0 };
+        let used = |r: &GridRef<'_>| {
+            r.row()
+                .ok()
+                .and_then(|row| row.tmux_used().ok())
+                .map_or(0, usize::from)
+        };
+        match p.screen_row(y) {
+            None => 0,
+            Some((at, _)) => match last {
+                Some((from, row_ref)) if *from == at => used(row_ref),
+                _ => row_ref_at(&t.term, at).map_or(0, |r| used(&r)),
+            },
+        }
+    }
+
     /// `hsize` and `sy`.
     fn size(&self) -> (usize, usize) {
         match self {
@@ -553,14 +574,22 @@ fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
                 out.extend_from_slice(row_flags(cells, wrapped, kept, prompt, output).as_bytes());
             }
         }
+        // Without GRID_STRING_EMPTY_CELLS (-J, -T) a line ends at its
+        // cellused (grid.c `grid_string_cells`), which counts cells written
+        // then erased.
+        let used = if opts.join || opts.used_only {
+            src.line_used(y, &at)
+        } else {
+            0
+        };
         if plain_wrapped.is_some() && kind.styled {
-            emit_styled(&mut out, &plain, &styles, opts, &mut last);
+            emit_styled(&mut out, &plain, &styles, opts, used, &mut last);
         } else if plain_wrapped.is_some() {
-            emit_plain(&mut out, &plain, opts);
+            emit_plain(&mut out, &plain, opts, used);
         } else if opts.hyperlinks {
             out.extend_from_slice(&links);
         } else {
-            emit_row(&mut out, &cells, opts, &mut last);
+            emit_row(&mut out, &cells, opts, used, &mut last);
         }
         if !opts.join || !wrapped {
             out.push(b'\n');
@@ -2009,9 +2038,22 @@ struct Gc {
 }
 
 /// Line `cells` appended to `line` (`grid_string_cells`).
-fn emit_row(line: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Gc) {
-    // `cellused`: one past the last cell with text.
-    let used = cells.iter().rposition(|c| !c.empty).map_or(0, |i| i + 1);
+/// `row_used` is the row's own `cellused` ([`Source::line_used`]), read
+/// for `-J` and `-T` only.
+fn emit_row(
+    line: &mut Vec<u8>,
+    cells: &[RowCell],
+    opts: CaptureOpts,
+    row_used: usize,
+    last: &mut Gc,
+) {
+    // `cellused`: one past the last cell with text, or further where the
+    // row kept that it was written further.
+    let used = cells
+        .iter()
+        .rposition(|c| !c.empty)
+        .map_or(0, |i| i + 1)
+        .max(row_used.min(cells.len()));
     // GRID_STRING_EMPTY_CELLS unless -J or -T (cmd-capture-pane.c:349-350):
     // to `cellsize`, else `cellused`.
     let end = if opts.join || opts.used_only {
@@ -2111,8 +2153,12 @@ fn emit_row(line: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut
 /// see [`Source::plain_line`]) when the cell written before had no
 /// sequence (the default style, no charset, no link) or `-e` is off: no
 /// cell needs one, so the line is its characters.
-fn emit_plain(out: &mut Vec<u8>, cells: &[u32], opts: CaptureOpts) {
-    let used = cells.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+fn emit_plain(out: &mut Vec<u8>, cells: &[u32], opts: CaptureOpts, row_used: usize) {
+    let used = cells
+        .iter()
+        .rposition(|&b| b != 0)
+        .map_or(0, |i| i + 1)
+        .max(row_used.min(cells.len()));
     let end = if opts.join || opts.used_only {
         used
     } else if opts.escapes || opts.keep_spaces {
@@ -2190,9 +2236,14 @@ fn emit_styled(
     cells: &[u32],
     styles: &StyleRow,
     opts: CaptureOpts,
+    row_used: usize,
     last: &mut Gc,
 ) {
-    let used = cells.iter().rposition(|&c| c != 0).map_or(0, |i| i + 1);
+    let used = cells
+        .iter()
+        .rposition(|&c| c != 0)
+        .map_or(0, |i| i + 1)
+        .max(row_used.min(cells.len()));
     let end = if opts.join || opts.used_only {
         used
     } else if opts.escapes || opts.keep_spaces {
@@ -2888,6 +2939,40 @@ mod tests {
         };
         let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
         assert_eq!(text, "012345678x\u{4e00}a\n0123\u{4e00}b\n", "{text:?}");
+    }
+
+    /// Without `GRID_STRING_EMPTY_CELLS` (`-J`, `-T`) a line ends at its
+    /// `cellused` (grid.c `grid_string_cells`), which an erase within the
+    /// line does not lower (`grid_clear` keeps it) and a whole-line clear
+    /// resets (`grid_clear_lines`), in the history too. resurrect saves pane
+    /// contents with `capture-pane -epJ`. Expected: tmux 3.8's
+    /// `capture-pane -pJ -S -` and `-pTN -S -`.
+    #[test]
+    fn join_ends_lines_at_the_cells_written() {
+        let mut t = PaneTerm::new(20, 4, 100);
+        t.feed(
+            b"abc       \x1b[4G\x1b[K\r\nabcdef\x1b[4G\x1b[K\r\nabcdef\x1b[2K\r\n\
+              abcdef\x1b[1K\r\nabcdef\x1b[3D\x1b[2X\r\nend",
+        );
+        let want = "abc       \nabc   \n\n      \nabc  f\nend\n";
+        for opts in [
+            CaptureOpts {
+                join: true,
+                ..Default::default()
+            },
+            CaptureOpts {
+                used_only: true,
+                keep_spaces: true,
+                ..Default::default()
+            },
+        ] {
+            let opts = CaptureOpts {
+                start: LineRef::Start,
+                ..opts
+            };
+            let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+            assert_eq!(text, want, "{text:?}");
+        }
     }
 
     /// In insert mode tmux makes room before a wide character wraps, which

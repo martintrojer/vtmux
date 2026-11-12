@@ -1,0 +1,16 @@
+name = "capture_join_keeps_erased_cells"
+size = [20, 6]
+# Without GRID_STRING_EMPTY_CELLS (-J, -T) a line ends at its cellused
+# (grid.c grid_string_cells), which an erase inside the line does not lower
+# (grid_clear keeps it, EL 0, EL 1, ECH) and a whole-line clear resets
+# (grid_clear_lines, EL 2), also once the line is in the history. vim draws
+# its screen so (spaces, then text and EL 0), and tmux-resurrect saves pane
+# contents with capture-pane -epJ.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "6", "sh", "-c", "printf 'abc       \\033[4G\\033[K\\r\\nabcdef\\033[4G\\033[K\\r\\nabcdef\\033[2K\\r\\nabcdef\\033[1K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\n1\\r\\n2\\r\\nend'; tmux wait-for -S a; exec cat"] },
+  { wait_for = "a" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-J", "-S", "-", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-T", "-N", "-S", "-", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-T", "-S", "-", "-t", "a:"] },
+]
