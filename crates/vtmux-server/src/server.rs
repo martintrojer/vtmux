@@ -64,8 +64,6 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// output ([`Server::release_hidden_screens`]).
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
-pub mod persist;
-pub mod restore;
 pub mod resume;
 pub mod snapshot;
 pub mod upgrade;
@@ -762,11 +760,6 @@ pub struct Server {
     config_loaded: bool,
     /// `cfg_finished`: the startup config has run.
     pub(crate) cfg_finished: bool,
-    /// On a server a `vtmux-persist` restore built, until its startup
-    /// config has run: the options the config has set so far. Its first
-    /// set of each starts from the default, as on a fresh server
-    /// (`super::restore`, [`vtmux_core::options::OptionHost::set_from_default`]).
-    pub(crate) config_sets: Option<std::collections::HashSet<(TreeId, String)>>,
     /// `cfg_client` (the client that started the server, whose directory
     /// jobs use while the config loads) and `cfg_item` (its waiting step).
     pub(crate) cfg_client: Option<ClientId>,
@@ -860,8 +853,6 @@ pub struct Server {
     /// Held PTYs with output still to discard when their read budget ran
     /// out: the backlog for [`Self::held`].
     held_backlog: std::collections::BTreeSet<usize>,
-    /// `vtmux-persist` checkpoints ([`persist`]).
-    pub(crate) persist: persist::Persist,
     /// A live upgrade in its preflight ([`upgrade`]).
     pub(crate) upgrade: upgrade::Upgrade,
     /// The path the server was started as, carried across upgrades
@@ -1061,7 +1052,6 @@ impl Server {
             config,
             config_loaded: false,
             cfg_finished: false,
-            config_sets: None,
             cfg_client: None,
             cfg_wait: None,
             cmdq: crate::cmdq::Cmdq::default(),
@@ -1093,7 +1083,6 @@ impl Server {
             exe: None,
             held: Vec::new(),
             held_backlog: std::collections::BTreeSet::new(),
-            persist: persist::Persist::default(),
             upgrade: upgrade::Upgrade::default(),
             start_binary: None,
         };
@@ -1169,7 +1158,6 @@ impl Server {
             self.exit_timers(Instant::now());
             self.reattach_timers(Instant::now());
             self.upgrade_answer_due();
-            self.persist_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -1343,8 +1331,6 @@ impl Server {
             self.lock_timers
                 .values()
                 .min()
-                .map(|d| d.saturating_duration_since(now)),
-            self.persist_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.upgrade_deadline()
                 .map(|d| d.saturating_duration_since(now)),
@@ -1520,9 +1506,6 @@ impl Server {
     /// the job's `tmux` needs) stays, as tmux's does until it exits: a
     /// client meanwhile is accepted and dropped (`server_accept`).
     pub(crate) fn begin_shutdown(&mut self) {
-        // D27 decision 16: the checkpoint of a clean shutdown holds the
-        // server as it was, before `send_exit` hangs up every pane.
-        self.checkpoint_exit();
         if !self.shutdown {
             self.shutdown = true;
             // server_send_exit (server.c:319-326) walks the clients in
@@ -1557,9 +1540,6 @@ impl Server {
     fn exit_clients(&mut self) {
         // Close the socket before the slower teardown below.
         self.close_listener();
-        // The last session gone (`exit-empty`): its checkpoint (D27
-        // decision 16). After `kill-server` or SIGTERM it is written.
-        self.checkpoint_exit();
         // server_exit -> job_kill_all (server.c:260), prompt_save_history.
         self.jobs_kill_all();
         if let Some(path) = self.history_file() {
@@ -3342,9 +3322,6 @@ impl Server {
                 && let Some(io) = o.io.as_mut()
             {
                 io.write(&bytes);
-                if !bytes.is_empty() {
-                    o.took_input();
-                }
             }
             self.pane_output_queued(other);
         }
@@ -3357,9 +3334,6 @@ impl Server {
         };
         if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
             io.write(bytes);
-            if !bytes.is_empty() {
-                pane.took_input();
-            }
         }
         self.pane_output_queued(p);
     }
@@ -3377,7 +3351,6 @@ impl Server {
             self.close_listener();
         }
         for (id, code) in exits {
-            let code = self.tell_starter(id, code);
             self.finish_client(id, code);
         }
         self.format_jobs_flush();
@@ -3453,8 +3426,6 @@ impl Server {
         // Work from here on (during the render or after it) is drawn by
         // the next render, so it is not "since the last render".
         self.rendered_work = self.turn_work;
-        // Restored panes' hints as the options say now (decision 31).
-        self.refresh_restored_hints();
         let attached: Vec<_> = self
             .clients
             .iter()
@@ -5203,14 +5174,8 @@ impl Server {
             return;
         }
         self.cfg_finished = true;
-        self.config_sets = None;
         self.prompt_load_history();
         self.cfg_show_causes(None);
-        // Decision 32: once the config's queue is done, before the
-        // starting client's command.
-        if std::mem::take(&mut self.persist.auto_pass) == crate::restored::AutoPass::Due {
-            self.auto_respawn_restored();
-        }
         if let Some(step) = self.cfg_wait.take() {
             self.cmdq_continue(step);
         }
@@ -5759,9 +5724,6 @@ impl Server {
             shell_commands: crate::model::ShellCommands::default(),
             kitty_owner: [None; 2],
             graphics: crate::model::PaneGraphics::default(),
-            restored_from: None,
-            restored_hint: None,
-            restart_guard: None,
         })
     }
 
@@ -5916,16 +5878,6 @@ impl Server {
     /// longer matches the pane, which now has the new pid.
     pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
         let p = ps.pane;
-        // Decision 31: a restored pane keeps its screen; `-E` keeps it
-        // restored and writes nothing (*Respawning a restored pane*).
-        let restored = self.model.panes.get_mut(&p).and_then(|x| {
-            // Respawned again, a pane once restored respawns as tmux's.
-            x.restart_guard = None;
-            x.restored_from
-        });
-        if let Some(from) = restored {
-            return self.respawn_restored_pane(ps, from);
-        }
         // The old process is hung up once the new PTY is made: while its
         // master is open, the new one cannot take its minor ([`hang_up`]).
         let old = self.model.panes.get_mut(&p).and_then(|pane| {
@@ -6770,8 +6722,7 @@ pub fn run_server(
     config: ServerConfig,
     starter: std::os::unix::net::UnixStream,
 ) -> i32 {
-    // D27 decision 15: a `vtmux-persist` checkpoint comes back first.
-    match restore::start(listener, socket, config) {
+    match Server::new(listener, socket, config) {
         Ok(mut server) => match server.adopt_starter(starter).and_then(|()| server.run()) {
             Ok(()) => 0,
             Err(_) => 1,

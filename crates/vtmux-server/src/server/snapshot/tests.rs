@@ -1407,8 +1407,7 @@ fn a_clients_view_is_kept() {
 /// D33: a kitty graphics grant survives a live upgrade, required while its
 /// program runs, with its owner; the images do not (the snapshot is
 /// image-free): the program's next command is answered, its placements are
-/// gone. A grant whose process group is gone ends on import. A checkpoint
-/// drops the grant: a restored pane is dead.
+/// gone. A grant whose process group is gone ends on import.
 #[test]
 fn a_graphics_grant_survives_a_rebuild_and_its_images_do_not() {
     use crate::pane_kitty::fake;
@@ -1445,18 +1444,6 @@ fn a_graphics_grant_survives_a_rebuild_and_its_images_do_not() {
     ok(&mut b, &dir, &["set", "-s", "vtmux-graphics", "off"]);
     b.pane_input(p0, image, false);
     assert_eq!(b.model.panes[&p0].term.graphics_storage(false).0, 3);
-    // A checkpoint keeps no grant.
-    let saved = b.checkpoint_snapshot(crate::server::persist::Mode::Full);
-    assert!(saved.panes.iter().all(|p| {
-        let t = p.term.as_ref().unwrap();
-        !t.graphics_primary && !t.graphics_alternate && p.graphics_owner_primary.is_none()
-    }));
-    assert!(
-        !saved
-            .meta
-            .requires
-            .contains(&snap::GRAPHICS_GRANT_FEATURE.to_string())
-    );
     fake::clear();
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
@@ -1592,13 +1579,6 @@ fn an_ordinary_attached_client_requires_no_feature() {
     a.clients.get_mut(&client).unwrap().inbuf = vec![0x03, 0x00];
     // A client stopped by `suspend-client` (`stopped`).
     a.suspend_client(client);
-    // A pane a cold restore brought back, still waiting for its respawn
-    // (`restored_from`, decision 31): every reboot restore makes them.
-    let restored = *a.model.panes.keys().max().unwrap();
-    a.model.panes.get_mut(&restored).unwrap().restored_from = Some(1_790_000_000);
-    // One respawned from a restored pane whose program has had no input
-    // yet (`restart_from`): every `auto` restart makes them.
-    a.model.panes.get_mut(&PaneId(0)).unwrap().restart_guard = Some(1_790_000_000);
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
@@ -1616,19 +1596,35 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
     assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
     assert_eq!(s.sessions[0].control_chars, Some(vec![3, 28, 127, 21]));
-    assert!(
-        s.panes
-            .iter()
-            .any(|p| p.restored_from == Some(1_790_000_000))
-    );
-    assert_eq!(s.panes[0].restart_from, Some(1_790_000_000));
     assert_eq!(s.meta.requires, Vec::<String>::new());
+    // A 3.8-beta3 image's restored pane (`restored_from`) and a respawned
+    // one under its guard (`restart_from`), which its upgrade stream
+    // carried: read, ignored, and never written again.
+    let mut legacy = s.clone();
+    let last = legacy.panes.len() - 1;
+    legacy.panes[last].restored_from = Some(1_790_000_000);
+    legacy.panes[0].restart_from = Some(1_790_000_000);
+    legacy.server.persist_hold = snap::PERSIST_HOLD_ALWAYS;
+    let back = snap::decode(&snap::encode(&legacy)).unwrap();
+    assert_eq!(back.meta.requires, Vec::<String>::new());
+    let (listening, _) = listener(&dir, "legacy");
+    let read = Server::from_snapshot(listening, ServerConfig::default(), &back, &mut |r| {
+        adopt(&a, r)
+    })
+    .unwrap()
+    .to_snapshot(snap::Meta::default());
+    assert!(
+        read.panes
+            .iter()
+            .all(|p| p.restored_from.is_none() && p.restart_from.is_none())
+    );
+    assert_eq!(read.server.persist_hold, 0);
     let rows = a.to_snapshot_with(
         snap::Meta {
             purpose: snap::Purpose::Upgrade,
             ..snap::Meta::default()
         },
-        Some(crate::snapshot_term::Form::Rows),
+        crate::snapshot_term::Form::Rows,
     );
     let term = rows.panes[0].term.as_ref().unwrap();
     let alt = term.alt_entry.as_ref().expect("the editor's entry");
@@ -1663,6 +1659,106 @@ fn an_ordinary_attached_client_requires_no_feature() {
         Some(vec![3, 28, 127, 21])
     );
     drop((a, rebuilt));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A 3.8-beta3 image's upgrade stream (live-upgrade spec, *Removal*):
+/// a nonzero `persist_hold`, a pane its cold restore brought back and
+/// still waiting (`restored_from`: dead, status unknown, no pty), and the
+/// persistence options set beside user options. This build rebuilds the
+/// pane as an ordinary dead pane, drops the options it no longer has from
+/// every tree, keeps the `@` ones, and writes none of it again.
+#[test]
+fn a_beta3_streams_persistence_state_is_read_and_dropped() {
+    let dir = temp_dir("beta3");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["split-window", "-d", "-t", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-g", "@keep", "1"]);
+    ok(&mut a, &dir, &["set", "-t", "s", "@mine", "2"]);
+    let mut s = a.to_snapshot(snap::Meta::default());
+    s.server.persist_hold = snap::PERSIST_HOLD_WHILE_THERE;
+    let entry = |name: &str, value: snap::OptionValue| snap::OptionEntry {
+        name: name.into(),
+        value,
+    };
+    let choice = |v: &str| snap::OptionValue::Single(snap::Value::Choice(v.into()));
+    let globs = snap::OptionValue::Array(vec![snap::ArrayItem {
+        key: snap::ArrayKey::Index(0),
+        value: snap::Value::String("@murmur_*".into()),
+    }]);
+    s.server
+        .server_options
+        .push(entry("vtmux-persist", choice("full")));
+    s.server
+        .server_options
+        .push(entry("vtmux-persist-respawn", choice("auto")));
+    s.server
+        .session_options
+        .push(entry("vtmux-persist-drop", globs.clone()));
+    s.sessions[0]
+        .options
+        .push(entry("vtmux-persist-drop", globs));
+    let restored = s.panes.last_mut().unwrap();
+    let id = restored.id;
+    restored.restored_from = Some(1_790_000_000);
+    restored.exited = true;
+    restored.status = Some(snap::ExitStatus::default());
+    restored.dead_time = Some(1_790_000_000);
+    restored.pid = 0;
+    restored.tty.clear();
+    s.descriptors.retain(|d| d.role != snap::Role::PanePty(id));
+    let decoded = snap::decode(&snap::encode(&s)).unwrap();
+    decoded.check().unwrap();
+    let (l, _) = listener(&dir, "b");
+    let mut b = Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| {
+        (*r != snap::Role::PanePty(id))
+            .then(|| adopt(&a, r))
+            .flatten()
+    })
+    .unwrap();
+
+    let target = format!("%{id}");
+    let dead = "#{pane_dead} [#{pane_dead_status}#{pane_dead_signal}]";
+    assert!(
+        run(&mut b, &dir, &["display", "-p", "-t", &target, dead]).contains("\n1 []\n"),
+        "an ordinary dead pane, status unknown"
+    );
+    let mut shown = String::new();
+    for words in [
+        &["show", "-s"][..],
+        &["show", "-g"],
+        &["show", "-t", "s"],
+        &["show", "-gv", "@keep"],
+        &["show", "-t", "s", "-v", "@mine"],
+    ] {
+        shown.push_str(&run(&mut b, &dir, words));
+    }
+    assert!(!shown.contains("vtmux-persist"), "{shown}");
+    assert!(
+        shown.contains("\n1\n--stderr") && shown.contains("\n2\n--stderr"),
+        "{shown}"
+    );
+    let again = b.to_snapshot(snap::Meta::default());
+    assert_eq!(again.server.persist_hold, 0);
+    assert!(
+        again
+            .panes
+            .iter()
+            .all(|p| p.restored_from.is_none() && p.restart_from.is_none())
+    );
+    let names = again
+        .server
+        .server_options
+        .iter()
+        .chain(&again.server.session_options)
+        .chain(again.sessions.iter().flat_map(|x| &x.options));
+    assert!(
+        names
+            .into_iter()
+            .all(|e| !e.name.starts_with("vtmux-persist"))
+    );
+    drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -2197,8 +2293,7 @@ fn timers_and_messages_survive_a_rebuild() {
 /// split, a zoom, a client attaching at another size): its primary screen,
 /// which the alternate one left at its size (Ghostty patch 0028), requires
 /// no feature, so the build before reads the snapshot (live upgrade spec,
-/// *Required and ignorable fields*; a checkpoint's restore refuses one
-/// requiring what it lacks too). It comes back to end the alternate screen
+/// *Required and ignorable fields*). It comes back to end the alternate screen
 /// as tmux does.
 #[test]
 fn a_primary_screen_left_at_its_size_requires_nothing() {
@@ -2225,20 +2320,12 @@ fn a_primary_screen_left_at_its_size_requires_nothing() {
     term.feed(b"one\r\ntwo\x1b[?1049h\x1b[Hvim");
     ok(&mut a, &dir, &["resize-window", "-t", "s", "-y", "10"]);
     assert_eq!(a.model.panes[&p].term.rows(), 10);
-    for (purpose, form) in [
-        (snap::Purpose::Upgrade, crate::snapshot_term::Form::SamePin),
-        (snap::Purpose::Upgrade, crate::snapshot_term::Form::Rows),
-        (
-            snap::Purpose::CheckpointFull,
-            crate::snapshot_term::Form::Rows,
-        ),
+    for form in [
+        crate::snapshot_term::Form::SamePin,
+        crate::snapshot_term::Form::Rows,
     ] {
-        let meta = snap::Meta {
-            purpose,
-            ..snap::Meta::default()
-        };
-        let sized = a.to_snapshot_with(meta, Some(form));
-        assert_eq!(sized.meta.requires, Vec::<String>::new(), "{purpose:?}");
+        let sized = a.to_snapshot_with(snap::Meta::default(), form);
+        assert_eq!(sized.meta.requires, Vec::<String>::new(), "{form:?}");
     }
 
     let mut b = rebuild(&a, &dir, "b");
@@ -2282,23 +2369,15 @@ fn kept_line_flags_require_nothing() {
             .term
             .feed(bytes.as_bytes());
         assert!(flags(&a).starts_with("X "), "{scene}: {}", flags(&a));
-        for (purpose, form) in [
-            (snap::Purpose::Upgrade, crate::snapshot_term::Form::SamePin),
-            (snap::Purpose::Upgrade, crate::snapshot_term::Form::Rows),
-            (
-                snap::Purpose::CheckpointFull,
-                crate::snapshot_term::Form::Rows,
-            ),
+        for form in [
+            crate::snapshot_term::Form::SamePin,
+            crate::snapshot_term::Form::Rows,
         ] {
-            let meta = snap::Meta {
-                purpose,
-                ..snap::Meta::default()
-            };
-            let taken = a.to_snapshot_with(meta, Some(form));
+            let taken = a.to_snapshot_with(snap::Meta::default(), form);
             assert_eq!(
                 taken.meta.requires,
                 Vec::<String>::new(),
-                "{scene} {purpose:?}"
+                "{scene} {form:?}"
             );
         }
         let b = rebuild(&a, &dir, "b");
@@ -2548,13 +2627,14 @@ fn pane0(server: &Server) -> &crate::model::Pane {
     &server.model.panes[&vtmux_core::ids::PaneId(0)]
 }
 
-/// Terminal state goes as the snapshot's purpose says (D27 decisions 17
-/// and 23): an upgrade keeps compressed pages in Ghostty's form and says
-/// a reader needs this binary's patch stack for them; a full checkpoint
-/// writes rows any reader takes; a layout checkpoint writes no screen,
-/// and the pane comes back with a fresh terminal.
+/// Terminal state goes in the form asked (D27 decision 23): onto this
+/// binary's patch stack compressed pages stay in Ghostty's form and a
+/// reader needs that stack for them; onto another stack every page goes
+/// as rows any reader takes. A pane read without terminal state (the
+/// last-resort rebuild, or a `vtmux-persist layout` checkpoint of
+/// 3.8-beta3 and before) comes back with a fresh terminal.
 #[test]
-fn terminal_state_goes_as_the_purpose_says() {
+fn terminal_state_goes_in_the_form_asked() {
     let dir = temp_dir("purpose");
     let mut old = server(&dir);
     let (compressed, want) = compressed_pane(&mut old, &dir, 5000);
@@ -2585,7 +2665,7 @@ fn terminal_state_goes_as_the_purpose_says() {
         );
     }
     let features = crate::snapshot_term::reader_features();
-    let back = snap::decode_for(&snap::encode(&up), &features, |_| None).unwrap();
+    let back = snap::decode_for(&snap::encode(&up), &features).unwrap();
     let mut upgraded = restore(&dir, "b", &back).unwrap();
     assert_eq!(
         pane0(&upgraded).term.compressed_pages(),
@@ -2602,32 +2682,39 @@ fn terminal_state_goes_as_the_purpose_says() {
         assert!(err.to_string().contains("another Ghostty build"), "{err}");
     }
 
-    // Full checkpoint: rows only, readable by any reader; the history is
-    // resident again and due for the compressor at once.
-    let full = old.to_snapshot(meta(snap::Purpose::CheckpointFull));
+    // Rows (an upgrade onto another patch stack): readable by any reader;
+    // the history is resident again and due for the compressor at once.
+    let full = old.to_snapshot_with(
+        meta(snap::Purpose::Upgrade),
+        crate::snapshot_term::Form::Rows,
+    );
     assert_eq!(pages(&full).0, 0);
     assert_eq!(full.meta.requires, Vec::<String>::new());
     let before = Instant::now();
-    let mut checkpointed =
-        restore(&dir, "d", &snap::decode(&snap::encode(&full)).unwrap()).unwrap();
-    let pane = pane0(&checkpointed);
+    let mut rows = restore(&dir, "d", &snap::decode(&snap::encode(&full)).unwrap()).unwrap();
+    let pane = pane0(&rows);
     assert_eq!(pane.term.compressed_pages(), 0);
     assert!(
         pane.compress
             .due()
             .is_some_and(|t| t >= before && t <= Instant::now())
     );
-    assert_eq!(pane_capture(&mut checkpointed, &dir), want);
+    assert_eq!(pane_capture(&mut rows, &dir), want);
 
-    // Layout checkpoint: no terminal; a fresh one, empty, of the pane's
-    // size.
-    let layout = old.to_snapshot(meta(snap::Purpose::CheckpointLayout));
-    assert!(layout.panes.iter().all(|p| p.term.is_none()));
-    let mut fresh = restore(&dir, "e", &layout).unwrap();
+    // No terminal: a fresh one, empty, of the pane's size.
+    let mut bare = up.clone();
+    let terms: Vec<snap::Part> = up
+        .panes
+        .iter()
+        .map(|p| snap::Part::PaneTerm(p.id))
+        .collect();
+    bare.without(&terms);
+    assert!(bare.panes.iter().all(|p| p.term.is_none()));
+    let mut fresh = restore(&dir, "e", &bare).unwrap();
     assert!(!pane_capture(&mut fresh, &dir).contains("log text"));
     let term = &pane0(&fresh).term;
     assert_eq!((term.cols(), term.rows(), term.history_size()), (80, 24, 0));
-    drop((old, upgraded, checkpointed, fresh));
+    drop((old, upgraded, rows, fresh));
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -29,7 +29,6 @@ pub fn exec(
             client,
             formats: server.cmd_formats.clone(),
             jobs: Some(jobs),
-            config_sets: None,
         },
     )?;
     for line in lines {

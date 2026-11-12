@@ -272,7 +272,8 @@ record! {
         /// starts keeps the old one's promise not to write over a
         /// checkpoint it refused. Added within v1, 0 in the golden sample:
         /// a v1 reader without it holds nothing back, as builds before it
-        /// did. Always 0 in a checkpoint.
+        /// did. Always 0 in a checkpoint. Written as 0 since persistence
+        /// went (2026-11-12): read and ignored.
         36 => one persist_hold: u32,
         /// The next OSC 8 external id's number (`hyperlinks_next_external_id`,
         /// the server's one counter): links drawn after a live upgrade, in
@@ -284,12 +285,12 @@ record! {
     }
 }
 
-/// [`Server::persist_hold`]: the checkpoint a restore refused is not
-/// written over while its manifests are there.
+/// [`Server::persist_hold`] (3.8-beta3 and before): the checkpoint a
+/// restore refused is not written over while its manifests are there.
 pub const PERSIST_HOLD_WHILE_THERE: u32 = 1;
-/// [`Server::persist_hold`]: a newer binary's checkpoint; nothing is
-/// written to the directory for the server's lifetime. So is any value
-/// this build does not know.
+/// [`Server::persist_hold`] (3.8-beta3 and before): a newer binary's
+/// checkpoint; nothing is written to the directory for the server's
+/// lifetime.
 pub const PERSIST_HOLD_ALWAYS: u32 = 2;
 
 record! {
@@ -638,7 +639,8 @@ record! {
         /// The last copy-mode search (`#{pane_search_string}`).
         22 => opt search: Option<(String, bool)>,
         23 => opt pipe: Option<PipePane>,
-        /// `None` when persistence is `layout`.
+        /// `None` in a `vtmux-persist layout` checkpoint (3.8-beta3 and
+        /// before) and after a last-resort rebuild.
         24 => opt term: Option<TermState>,
         25 => one over_zoom: bool,
         26 => one capture_keys: bool,
@@ -694,13 +696,15 @@ record! {
         /// vtmux's restored pane (live-upgrade spec, decision 31): the
         /// write time, epoch seconds, of the checkpoint a cold restore
         /// brought it back from, until it is respawned or killed.
-        /// Ignorable: a reader before reads an ordinary dead pane.
+        /// Ignorable: a reader before reads an ordinary dead pane. Read
+        /// and ignored since persistence went (2026-11-12), never written.
         50 => opt restored_from: Option<i64>,
         /// A pane respawned from a restored one whose program has had no
         /// input yet: the checkpoint time it came from, so the program's
         /// exit puts it back as restored (decision 31, *A restart that
         /// does not run*). Ignorable: a reader before closes the pane on
-        /// that exit as any.
+        /// that exit as any. Read and ignored since 2026-11-12, never
+        /// written.
         51 => opt restart_from: Option<i64>,
     }
 }

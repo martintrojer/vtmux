@@ -1238,7 +1238,7 @@ Closed (vtmux now matches tmux):
   - The images of every pane together, with their loads in progress, are held to `vtmux-graphics-limit`. A load in progress never holds more than its screen's limit (the chunk past it fails the load, `ENOMEM` at its last chunk); over the cap, other screens' loads in progress go first, then the images of the screen that loaded least recently, in Ghostty's order.
   - The grant outlives the option and ends with the process group that started it, at RIS or at a respawn; the images outlive the grant.
   - `TMUX` and XTVERSION stay tmux's (D28 rule 3), so an app that wraps its commands for tmux keeps doing so through `allow-passthrough`, unchanged: yazi 26.9 sets `allow-passthrough all` on its pane and wraps every command (`docs/test-health/2026-11-10-graphics-real-apps.md`).
-- **Live upgrade:** the grant is carried (`TermState.graphics_primary`, `graphics_alternate`, required as `graphics-grant` while a granted program runs; its process group ignorable), the images are not: a resumed screen draws nothing until its program sends them again. A checkpoint (`vtmux-persist`) keeps no grant.
+- **Live upgrade:** the grant is carried (`TermState.graphics_primary`, `graphics_alternate`, required as `graphics-grant` while a granted program runs; its process group ignorable), the images are not: a resumed screen draws nothing until its program sends them again.
 - **Evidence:** Ghostty implements the protocol in the pane (`graphics_exec.zig` `execute`, `graphics_storage.zig`, placeholders `graphics_unicode.zig:16`) and as the outer terminal with placeholders (termio/Termio.zig:294-295, 511-512).
 
 <a id="d-073"></a>

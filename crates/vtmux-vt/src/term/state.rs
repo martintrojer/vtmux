@@ -52,10 +52,7 @@ use crate::palette::PaletteState;
 use crate::progress::ProgressBar;
 use crate::snapshot::{Color, Snapshot, Style, Underline};
 
-mod rows;
 mod validate;
-
-pub use rows::RowCopy;
 
 /// Identifies the Ghostty build a [`PageState::Blob`] can be read by:
 /// its commit, local patches, optimize mode and target.

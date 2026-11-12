@@ -328,7 +328,7 @@ fn job_done(
         lines.pop();
     }
     let retcode = match status {
-        // `Unknown` is a restored pane's, never a job's.
+        // `Unknown` is a pane's a beta3 server restored, never a job's.
         JobStatus::Exited(0) | JobStatus::Unknown => 0,
         JobStatus::Exited(code) => {
             lines.push(format!("'{command}' returned {code}").into_bytes());

@@ -145,7 +145,7 @@ fn main() {
     let base2 = status_mb("VmRSS:");
     reset_peak();
     let t2 = Instant::now();
-    let decoded = snap::decode_for(&stream, &reader_features(), |_| None).expect("decode");
+    let decoded = snap::decode_for(&stream, &reader_features()).expect("decode");
     let decode = t2.elapsed();
     let t3 = Instant::now();
     let imported: Vec<PaneTerm> = decoded

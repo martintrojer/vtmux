@@ -604,14 +604,6 @@ pub trait OptionHost {
     fn config_env(&mut self) -> &mut dyn ConfigEnv;
     /// `checkshell` (tmux.c:98): absolute, executable, not tmux itself.
     fn usable_shell(&self, path: &str) -> bool;
-    /// Whether this set of `name` in `tree` starts from the option's
-    /// default (unset in a local tree), as on a fresh server: vtmux's
-    /// `vtmux-persist` restore asks it for the startup config's sets, so
-    /// the config's `-a` and `-o` see what they would without the
-    /// restore. tmux has no such case: `false`.
-    fn set_from_default(&mut self, _tree: TreeId, _name: &str) -> bool {
-        false
-    }
 }
 
 /// Why `set` or `show` failed. `Display` is tmux's message.

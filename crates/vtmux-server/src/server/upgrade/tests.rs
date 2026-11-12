@@ -353,12 +353,7 @@ fn history_goes_in_ghosttys_form_only_to_the_same_patch_stack() {
     for (binary, ghostty) in [(&other, false), (&passing(&dir), false), (&same, true)] {
         upgrade(&mut server, &dir, binary);
         let exec = execs().pop().expect("exec");
-        let s = snap::decode_for(
-            &exec.bytes,
-            &crate::snapshot_term::reader_features(),
-            |_| None,
-        )
-        .unwrap();
+        let s = snap::decode_for(&exec.bytes, &crate::snapshot_term::reader_features()).unwrap();
         let t = s
             .panes
             .iter()
@@ -1769,7 +1764,6 @@ fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
     let s = snap::decode_for(
         &execs().pop().expect("exec").bytes,
         &crate::snapshot_term::reader_features(),
-        |_| None,
     )
     .unwrap();
     assert!(
@@ -1843,7 +1837,6 @@ fn a_feature_checked_once_needs_no_dry_run_when_it_comes_back() {
     let s = snap::decode_for(
         &execs().pop().expect("exec").bytes,
         &crate::snapshot_term::reader_features(),
-        |_| None,
     )
     .unwrap();
     assert!(

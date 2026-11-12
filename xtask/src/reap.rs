@@ -22,16 +22,6 @@
 //! from `$TMUX_TMPDIR/{tmux,vtmux}-<uid>/` and `/tmp/{tmux,vtmux}-<uid>/`;
 //! `cargo xtask sockets` lists the test-labelled entries there, which is what
 //! `check.sh` diffs around the suites to catch a harness that leaks.
-//!
-//! A server with `vtmux-persist` on keeps a checkpoint directory per socket,
-//! `$XDG_STATE_HOME/vtmux/<label>-<hash>/` (`vtmux_server::persist::state_dir`),
-//! which outlives it too. [`sweep_checkpoints`] empties the test-labelled
-//! ones whose server is gone: no socket held open whose path names the
-//! directory, none of those directories' socket files answering, no
-//! server holding the directory's `lock` (the sweep holds it while it
-//! empties that one directory), and nothing in it changed for `--min-age`.
-//! When any of that cannot be told, the directory stays. The `lock` file
-//! itself stays, for a server that may have it open.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -92,7 +82,6 @@ pub fn pids_where(ps: &str, own: u32, keep: impl Fn(&str) -> bool) -> Vec<u32> {
 
 /// Servers younger than this are left alone: a gate, a harness run or a
 /// reviewer's script may still be using them (the slow gate budget is 10 min).
-/// A checkpoint directory changed more recently than this stays too.
 const DEFAULT_MIN_AGE: Duration = Duration::from_hours(1);
 
 /// One row of `ps -o pid=,ppid=,etime=,args=`. The arguments are only
@@ -169,10 +158,9 @@ pub struct Held {
 }
 
 impl Held {
-    /// The absolute path the server of this socket names its checkpoint
-    /// directory by (`std::path::absolute` in its own directory, which it
-    /// keeps: `Server::persist_dir`, `daemon(1, 0)`): `..` stays, as it
-    /// does there. `None` for a relative path whose holder is unknown.
+    /// The absolute path of this socket (`std::path::absolute` in its
+    /// holder's directory, which a server keeps: `daemon(1, 0)`): `..`
+    /// stays. `None` for a relative path whose holder is unknown.
     fn absolute(&self) -> Option<PathBuf> {
         let path = if self.path.is_absolute() {
             self.path.clone()
@@ -189,21 +177,10 @@ impl Held {
         let name = path.file_name()?;
         Some(path.parent()?.canonicalize().ok()?.join(name))
     }
-
-    /// Whether this may be the socket of checkpoint directory
-    /// `<label>-<hash>` (`vtmux_server::persist::state_dir`): its name is
-    /// `label`, and its absolute path hashes to `hash` or is unknown.
-    fn may_own(&self, label: &str, hash: &str) -> bool {
-        self.path.file_name() == Some(label.as_ref())
-            && self
-                .absolute()
-                .is_none_or(|p| vtmux_server::persist::path_hash(&p) == hash)
-    }
 }
 
 /// The sockets bound to a path and held open now, with their holders.
-/// `None` when that cannot be told: then nothing is killed and every
-/// checkpoint directory stays.
+/// `None` when that cannot be told: then nothing is killed.
 #[cfg(target_os = "linux")]
 pub fn held_sockets() -> Option<Vec<Held>> {
     held_in_proc(Path::new("/proc"))
@@ -342,33 +319,6 @@ fn held_in_proc(proc: &Path) -> Option<Vec<Held>> {
     held.sort();
     held.dedup();
     Some(held)
-}
-
-/// Whether a socket that may be checkpoint directory `<label>-<hash>`'s
-/// ([`Held::may_own`]) is bound now, as far as a cheap look can tell: on
-/// Linux the kernel's table (`/proc/net/unix`), whoever holds it (a
-/// relative path counts by its name), true when the table does not read;
-/// elsewhere false (the sweep asks the socket files then:
-/// `sweep_checkpoints`).
-fn bound_now(label: &str, hash: &str) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        std::fs::read("/proc/net/unix").map_or(true, |t| {
-            parse_net_unix(&t).into_iter().any(|(_, path)| {
-                Held {
-                    pid: None,
-                    path,
-                    cwd: None,
-                }
-                .may_own(label, hash)
-            })
-        })
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (label, hash);
-        false
-    }
 }
 
 /// `lsof -F pftn` output: `p<pid>` starts a process, `f<fd>` one of its
@@ -666,181 +616,6 @@ pub fn sweep_sockets(dirs: &[PathBuf], also: impl Fn(&str) -> bool, dry: bool) -
         .collect()
 }
 
-/// `$XDG_STATE_HOME/vtmux` (else `~/.local/state/vtmux`), as a server of
-/// this environment would name it (`vtmux_server::persist::state_dir`).
-pub fn default_state_root() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    vtmux_server::persist::state_dir(
-        Path::new("/s"),
-        std::env::var_os("XDG_STATE_HOME").as_deref(),
-        home.as_deref(),
-    )
-    .and_then(|d| d.parent().map(Path::to_path_buf))
-}
-
-/// The lock of checkpoint directory `dir` (`vtmux_server::persist::Lock`),
-/// taken exclusive without waiting: `None` while another holds it, or when
-/// the file does not open. A server taking it meanwhile waits a moment
-/// (`Lock::take`) or retries past it (a periodic checkpoint's
-/// `Lock::try_take`, `Server::persist_lock`). The file is made if missing,
-/// as a server would (in a dry run nothing is made: no lock file, no
-/// holder).
-fn take_checkpoint_lock(dir: &Path, dry: bool) -> Option<Taken> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let path = dir.join(vtmux_server::persist::LOCK);
-    let file = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(!dry)
-        .create(!dry)
-        .truncate(false)
-        .mode(0o600)
-        .open(&path)
-    {
-        Ok(f) => f,
-        Err(e) if dry && e.kind() == std::io::ErrorKind::NotFound => return Some(Taken::NoFile),
-        Err(_) => return None,
-    };
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).ok()?;
-    Some(Taken::Held(file))
-}
-
-/// A checkpoint lock [`take_checkpoint_lock`] got.
-enum Taken {
-    /// Held until dropped.
-    Held(#[expect(dead_code, reason = "held for its lock")] std::fs::File),
-    /// A dry run's: no lock file to take.
-    NoFile,
-}
-
-/// Empty checkpoint directory `dir` but for its `lock`, which may be open
-/// in a server about to take it: unlinked, the next server would take a
-/// new file's lock while that one holds the old, and both would write the
-/// directory. True if there was something to remove, and all of it went.
-fn empty_checkpoint(dir: &Path, dry: bool) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    let mut found = false;
-    let mut all = true;
-    for e in entries.filter_map(Result::ok) {
-        if e.file_name() == vtmux_server::persist::LOCK {
-            continue;
-        }
-        found = true;
-        if dry {
-            continue;
-        }
-        let gone = if e.file_type().is_ok_and(|t| t.is_dir()) {
-            std::fs::remove_dir_all(e.path())
-        } else {
-            std::fs::remove_file(e.path())
-        };
-        all &= gone.is_ok();
-    }
-    found && all
-}
-
-/// How long since checkpoint directory `dir` changed: since the newest
-/// change to it or an entry in it (a checkpoint renames its `manifest`
-/// into place, which changes the directory). `None` if any of it does not
-/// read.
-fn unchanged_for(dir: &Path) -> Option<Duration> {
-    let mut newest = dir.metadata().ok()?.modified().ok()?;
-    for e in std::fs::read_dir(dir).ok()? {
-        newest = newest.max(e.ok()?.metadata().ok()?.modified().ok()?);
-    }
-    Some(newest.elapsed().unwrap_or(Duration::ZERO))
-}
-
-/// Empty the checkpoint directories in `root` (`<label>-<hash>`) whose
-/// label is a test one ([`is_test_label`]) and whose server is gone, as
-/// far as can be told; when in doubt, a directory stays.
-///
-/// `held` lists the sockets held open now ([`held_sockets`]), with no lock
-/// held; `None` (it cannot be told) keeps every directory. A directory is
-/// kept when a held socket may be its own ([`Held::may_own`]: its name,
-/// its absolute path hashing as the server's does), whatever command line
-/// its server has (a `-L` with path parts, a socket from `$TMUX`), and its
-/// lock is never touched; a server binds its socket before it restores,
-/// so one starting is held already. Kept too: a directory with a socket
-/// `<dir>/<label>` of `socket_dirs` hashing to `<hash>` that answers a
-/// `connect()`, and one changed within `min_age`. Then one at a time: its
-/// lock is taken, exclusive and without waiting ([`take_checkpoint_lock`]),
-/// one a server holds kept; its socket is asked again under it (a socket of
-/// its name bound now, [`bound_now`], or a file of `socket_dirs` that
-/// answers: a server started since the list binds before its restore takes
-/// the lock); and it is emptied, all but the lock file
-/// ([`empty_checkpoint`]), and let go. So no lock is held longer than one
-/// directory's emptying, far short of the 50 ms a restore's `Lock::take`
-/// waits, and a server that starts then finds no checkpoint, never one
-/// half removed.
-///
-/// An emptied directory keeps its `lock` for good (a server may have it
-/// open), so it stays, holding that empty file; a later sweep does not
-/// list it again.
-///
-/// `default`, other labels, live servers and anything else stay. Returns
-/// the directories emptied, or with `dry` the ones that would be.
-pub fn sweep_checkpoints(
-    root: &Path,
-    socket_dirs: &[PathBuf],
-    held: impl FnOnce() -> Option<Vec<Held>>,
-    min_age: Duration,
-    dry: bool,
-) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    let candidates: Vec<(PathBuf, String, String)> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let (label, hash) = name.rsplit_once('-')?;
-            let hashed = hash.len() == 12 && hash.bytes().all(|b| b.is_ascii_hexdigit());
-            (hashed && is_test_label(label)).then(|| (e.path(), label.to_owned(), hash.to_owned()))
-        })
-        .collect();
-    if candidates.is_empty() {
-        return Vec::new();
-    }
-    let Some(held) = held() else {
-        return Vec::new();
-    };
-    let live = |label: &str, hash: &str| {
-        socket_dirs
-            .iter()
-            .map(|d| d.join(label))
-            .filter(|p| vtmux_server::persist::path_hash(p) == hash)
-            .any(|p| {
-                p.symlink_metadata()
-                    .is_ok_and(|m| m.file_type().is_socket())
-                    && !matches!(probe_connect(&p), Err(rustix::io::Errno::CONNREFUSED))
-            })
-    };
-    let mut gone: Vec<PathBuf> = candidates
-        .into_iter()
-        .filter(|(dir, label, hash)| {
-            if held.iter().any(|h| h.may_own(label, hash))
-                || live(label, hash)
-                || unchanged_for(dir).is_none_or(|age| age < min_age)
-            {
-                return false;
-            }
-            let Some(lock) = take_checkpoint_lock(dir, dry) else {
-                return false;
-            };
-            let emptied =
-                !bound_now(label, hash) && !live(label, hash) && empty_checkpoint(dir, dry);
-            drop(lock);
-            emptied
-        })
-        .map(|(dir, _, _)| dir)
-        .collect();
-    gone.sort();
-    gone
-}
-
 /// `cargo xtask sockets`: the test-labelled entries of the default socket
 /// directories, one path per line, sorted.
 pub fn list_sockets() -> ExitCode {
@@ -905,25 +680,6 @@ pub fn run() -> ExitCode {
         "{} {} dead test socket(s)",
         if dry { "would remove" } else { "removed" },
         socks.len()
-    );
-    // The sockets held once the kill and the socket sweep are done (a
-    // server started meanwhile too), but those of the processes just
-    // killed, which may linger a moment.
-    let held = || {
-        let mut held = held_sockets()?;
-        held.retain(|h| h.pid.is_none_or(|p| !pids.contains(&p)));
-        Some(held)
-    };
-    let checkpoints = default_state_root()
-        .map(|root| sweep_checkpoints(&root, &default_socket_dirs(), held, min_age, dry))
-        .unwrap_or_default();
-    for p in &checkpoints {
-        eprintln!("checkpoint {}", p.display());
-    }
-    eprintln!(
-        "{} {} dead test checkpoint dir(s)",
-        if dry { "would empty" } else { "emptied" },
-        checkpoints.len()
     );
     ExitCode::SUCCESS
 }
@@ -1145,36 +901,6 @@ mod tests {
         assert_eq!(test_servers(&oracle, 7, &base), HashSet::from([1]));
     }
 
-    /// A held socket keeps the checkpoint directory its server names
-    /// (`state_dir`: the name, and the hash of the absolute path, `..`
-    /// kept); one whose absolute path is unknown keeps every directory of
-    /// its name.
-    #[test]
-    fn a_held_socket_keeps_the_directory_its_server_names() {
-        let dir_of = |socket: &str| {
-            let dir =
-                vtmux_server::persist::state_dir(Path::new(socket), Some("/st".as_ref()), None)
-                    .unwrap();
-            let name = dir.file_name().unwrap().to_str().unwrap().to_owned();
-            let (label, hash) = name.rsplit_once('-').unwrap();
-            (label.to_owned(), hash.to_owned())
-        };
-        let owns = |h: &Held, socket: &str| {
-            let (label, hash) = dir_of(socket);
-            h.may_own(&label, &hash)
-        };
-        let dotted = hold(Some(1), "/t/vtmux-7/rvp/../rv1", None);
-        assert!(owns(&dotted, "/t/vtmux-7/rvp/../rv1"));
-        assert!(!owns(&dotted, "/t/vtmux-7/rv1"));
-        let relative = hold(Some(2), "rel/rv2", Some(Path::new("/w")));
-        assert!(owns(&relative, "/w/rel/rv2"));
-        assert!(!owns(&relative, "/x/rel/rv2"));
-        let unknown = hold(None, "rel/rv3", None);
-        assert!(owns(&unknown, "/w/rel/rv3"));
-        assert!(owns(&unknown, "/x/rv3"));
-        assert!(!owns(&unknown, "/x/rv4"));
-    }
-
     #[test]
     fn only_old_orphans_and_their_children_are_picked() {
         let procs = ps(&[
@@ -1269,222 +995,6 @@ mod tests {
         assert!(tmp.iter().all(|d| d.starts_with("/tmp")), "{tmp:?}");
     }
 
-    /// The entries of checkpoint directory `dir`, sorted.
-    fn entries(dir: &Path) -> Vec<String> {
-        let mut found: Vec<String> = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .collect();
-        found.sort();
-        found
-    }
-
-    /// A test-labelled checkpoint directory is emptied (all but its lock)
-    /// when its server's socket is dead or missing, unless a server holds
-    /// its lock or a socket held open names it; a live socket file,
-    /// `default` and other labels keep theirs. A dry run lists the same
-    /// and removes nothing; an emptied one is not listed again.
-    #[test]
-    fn sweep_empties_test_checkpoints_of_gone_servers_only() {
-        use std::os::unix::net::UnixListener;
-        let s = Scratch::new("ckpt");
-        let socks = s.0.join("vtmux-1");
-        let root = s.0.join("state");
-        std::fs::create_dir_all(&socks).unwrap();
-        let checkpoint = |label: &str| {
-            let hash = vtmux_server::persist::path_hash(&socks.join(label));
-            let dir = root.join(format!("{label}-{hash}"));
-            std::fs::create_dir_all(dir.join("chunks")).unwrap();
-            std::fs::write(dir.join("chunks/c"), "c").unwrap();
-            std::fs::write(dir.join("manifest"), "m").unwrap();
-            dir
-        };
-        dead_socket(&socks.join("cli1"));
-        checkpoint("cli1");
-        checkpoint("rv2");
-        let _live = UnixListener::bind(socks.join("att3-0")).unwrap();
-        checkpoint("att3-0");
-        let held = checkpoint("testA4");
-        let lock = std::fs::File::create(held.join("lock")).unwrap();
-        rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive).unwrap();
-        dead_socket(&socks.join("default"));
-        checkpoint("default");
-        checkpoint("mywork");
-        std::fs::create_dir_all(root.join("rv5-nothex")).unwrap();
-        // A socket held open (the kernel lists it) of a server that does
-        // not hold its lock: its file replaced by a dead one.
-        dead_socket(&socks.join("rv6"));
-        let starting = checkpoint("rv6");
-        let in_use = || Some(vec![hold(None, socks.join("rv6"), None)]);
-        let want = ["cli1", "rv2"].map(|l| {
-            let hash = vtmux_server::persist::path_hash(&socks.join(l));
-            root.join(format!("{l}-{hash}"))
-        });
-        let dirs = [socks.clone()];
-        assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, true),
-            want,
-            "dry run"
-        );
-        for d in &want {
-            assert_eq!(
-                entries(d),
-                ["chunks", "manifest"],
-                "a dry run changes nothing"
-            );
-        }
-        assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false),
-            want
-        );
-        for d in &want {
-            assert_eq!(entries(d), ["lock"]);
-        }
-        assert_eq!(entries(&held), ["chunks", "lock", "manifest"]);
-        // Kept for its process: its lock never touched, nor made.
-        assert_eq!(entries(&starting), ["chunks", "manifest"]);
-        assert_eq!(entries(&root).len(), 8, "no directory goes");
-        assert_eq!(
-            sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false),
-            [] as [PathBuf; 0]
-        );
-        drop(lock);
-        // A parallel test's fork between a lock's open and its drop holds
-        // the lock too until its child execs (`CLOEXEC` acts at exec, as
-        // `dead_socket` says), this test's lock or an earlier sweep's: a
-        // sweep keeps the directory until it is free.
-        let sweep_until = |in_use: &dyn Fn() -> Option<Vec<Held>>| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            loop {
-                let gone = sweep_checkpoints(&root, &dirs, in_use, Duration::ZERO, false);
-                if !gone.is_empty() || std::time::Instant::now() >= deadline {
-                    break gone;
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-        };
-        assert_eq!(sweep_until(&in_use), [held], "unlocked");
-        assert_eq!(
-            sweep_until(&|| Some(Vec::new())),
-            [starting],
-            "its socket gone"
-        );
-    }
-
-    /// When the held sockets cannot be listed, every directory stays; so
-    /// does one changed within `min_age`, until it is older.
-    #[test]
-    fn a_sweep_keeps_what_it_cannot_tell_and_what_is_recent() {
-        let s = Scratch::new("ckpt-doubt");
-        let root = s.0.join("state");
-        let hash = vtmux_server::persist::path_hash(&s.0.join("rv1"));
-        let dir = root.join(format!("rv1-{hash}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("manifest"), "m").unwrap();
-        let none = || None;
-        assert_eq!(
-            sweep_checkpoints(&root, &[], none, Duration::ZERO, false),
-            [] as [PathBuf; 0]
-        );
-        let hour = Duration::from_secs(3600);
-        let nothing = || Some(Vec::new());
-        assert_eq!(
-            sweep_checkpoints(&root, &[], nothing, hour, false),
-            [] as [PathBuf; 0]
-        );
-        assert_eq!(entries(&dir), ["manifest"]);
-        let old = std::time::SystemTime::now() - 2 * hour;
-        for p in [dir.join("manifest"), dir.clone()] {
-            std::fs::File::open(&p).unwrap().set_modified(old).unwrap();
-        }
-        assert_eq!(
-            sweep_checkpoints(&root, &[], nothing, hour, false),
-            std::slice::from_ref(&dir)
-        );
-    }
-
-    /// The sweep holds no lock while it lists the processes, and never
-    /// the lock of a directory it keeps for a running label: a server of
-    /// that label restoring meanwhile (`Lock::take`, which waits 50 ms)
-    /// gets it, however many dead directories the sweep empties.
-    #[test]
-    fn a_sweep_never_holds_the_lock_of_a_directory_a_process_keeps() {
-        use vtmux_server::persist::{LOCK, Lock};
-        let s = Scratch::new("ckpt-hold");
-        let root = s.0.join("state");
-        let dir = |label: &str| {
-            let hash = vtmux_server::persist::path_hash(&s.0.join(label));
-            let dir = root.join(format!("{label}-{hash}"));
-            std::fs::create_dir_all(dir.join("chunks")).unwrap();
-            std::fs::write(dir.join("chunks/c"), "c").unwrap();
-            std::fs::write(dir.join("manifest"), "m").unwrap();
-            // Made, not taken (`a_lock_file_a_server_may_take_is_never_unlinked`).
-            std::fs::File::create(dir.join(LOCK)).unwrap();
-            dir
-        };
-        let kept = dir("rv1");
-        let dead: Vec<PathBuf> = (2..42).map(|n| dir(&format!("rv{n}"))).collect();
-        let in_use = || {
-            let restoring = Lock::take(&kept);
-            assert!(
-                restoring.is_ok(),
-                "the sweep holds rv1's lock: {restoring:?}"
-            );
-            Some(vec![hold(Some(1), s.0.join("rv1"), None)])
-        };
-        let gone = sweep_checkpoints(&root, &[], in_use, Duration::ZERO, false);
-        assert!(!gone.contains(&kept), "{gone:?}");
-        assert_eq!(entries(&kept), ["chunks", LOCK, "manifest"]);
-        let mut want = dead.clone();
-        want.sort();
-        assert_eq!(gone, want);
-    }
-
-    /// A server between opening its directory's lock file and taking the
-    /// lock (`Lock::take`) while the sweep runs: the file it has open stays
-    /// the directory's, so the next server is refused while it holds it.
-    /// Were the file unlinked, the next would take a new one's lock and
-    /// both would write the directory.
-    #[test]
-    fn a_lock_file_a_server_may_take_is_never_unlinked() {
-        use std::os::unix::fs::MetadataExt as _;
-        use vtmux_server::persist::{LOCK, Lock};
-        let s = Scratch::new("ckpt-lock");
-        let root = s.0.join("state");
-        let hash = vtmux_server::persist::path_hash(&s.0.join("rv1"));
-        let dir = root.join(format!("rv1-{hash}"));
-        std::fs::create_dir_all(dir.join("chunks")).unwrap();
-        std::fs::write(dir.join("manifest"), "m").unwrap();
-        // Made, not taken: a parallel test's fork would hold a taken lock
-        // until its child execs (`sweep_empties_test_checkpoints_of_gone_servers_only`).
-        let opened = std::fs::File::create(dir.join(LOCK)).unwrap();
-        let inode = opened.metadata().unwrap().ino();
-
-        assert_eq!(
-            sweep_checkpoints(&root, &[], || Some(Vec::new()), Duration::ZERO, false),
-            std::slice::from_ref(&dir)
-        );
-        assert_eq!(entries(&dir), [LOCK]);
-        assert_eq!(std::fs::metadata(dir.join(LOCK)).unwrap().ino(), inode);
-        // The sweep's own descriptor may live on a moment in a parallel
-        // test's fork, until its child execs.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while rustix::fs::flock(
-            &opened,
-            rustix::fs::FlockOperation::NonBlockingLockExclusive,
-        )
-        .is_err()
-        {
-            assert!(std::time::Instant::now() < deadline, "the lock stays held");
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert_eq!(
-            Lock::take(&dir).unwrap_err().kind(),
-            std::io::ErrorKind::WouldBlock,
-            "two servers hold the directory"
-        );
-    }
-
     /// A real server, started with `args` (and `$TMUX`, when set) from
     /// directory `cwd` under `TMUX_TMPDIR` `tmpdir`, on `socket` (absolute,
     /// as the server takes it); `test` when that is a test socket.
@@ -1496,12 +1006,10 @@ mod tests {
         test: bool,
     }
 
-    /// Where [`RealServer`]s run: the binary, their directory (`cwd`) and
-    /// `XDG_STATE_HOME`.
+    /// Where [`RealServer`]s run: the binary and their directory (`cwd`).
     struct Place {
         bin: PathBuf,
         cwd: PathBuf,
-        state: PathBuf,
     }
 
     impl RealServer {
@@ -1527,7 +1035,6 @@ mod tests {
                 .args(cmd)
                 .current_dir(&at.cwd)
                 .env("TMUX_TMPDIR", &self.tmpdir)
-                .env("XDG_STATE_HOME", &at.state)
                 .env_remove("TMUX")
                 .stdin(Stdio::null())
                 .stderr(Stdio::null());
@@ -1537,47 +1044,17 @@ mod tests {
             command.output().unwrap()
         }
 
-        /// Its checkpoint directory, as the server names it.
-        fn dir(&self, at: &Place) -> PathBuf {
-            vtmux_server::persist::state_dir(&self.socket, Some(at.state.as_os_str()), None)
-                .unwrap()
-        }
-
         fn pid(&self, at: &Place) -> u32 {
             let out = self.run(at, &["display", "-p", "#{pid}"]);
             String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
         }
 
-        /// Start it with a session, write a real checkpoint (at its
-        /// `kill-server`), start it again to restore it, turn
-        /// `vtmux-persist` off so it lets the lock go, and give it a pane
-        /// program.
-        fn start_restored(&self, at: &Place) {
+        /// Start it with a session running a pane program.
+        fn start(&self, at: &Place) {
             let name = self.socket.display().to_string();
             let ok = |cmd: &[&str]| assert!(self.run(at, cmd).status.success(), "{name}: {cmd:?}");
             ok(&["new", "-d", "-s", "z", "sleep", "1000"]);
-            ok(&["kill-server"]);
-            until(&format!("{name} checkpoints"), || {
-                self.dir(at).join("manifest").exists()
-            });
-            ok(&["start"]);
-            until(&format!("{name} restores"), || {
-                self.run(at, &["has", "-t", "z"]).status.success()
-            });
-            ok(&["set", "-g", "vtmux-persist", "off"]);
-            until(&format!("{name} lets its lock go"), || {
-                vtmux_server::persist::Lock::try_take(&self.dir(at)).is_ok()
-            });
             ok(&["neww", "-d", "sleep", "1000"]);
-        }
-    }
-
-    /// Poll `ok` for up to 30 s.
-    fn until(what: &str, ok: impl Fn() -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while !ok() {
-            assert!(std::time::Instant::now() < deadline, "never: {what}");
-            thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -1612,7 +1089,7 @@ mod tests {
         }
         std::fs::set_permissions(&socks, std::fs::Permissions::from_mode(0o700)).unwrap();
         let conf = base.join("a b.conf");
-        std::fs::write(&conf, "set -g vtmux-persist layout\nset -g status off\n").unwrap();
+        std::fs::write(&conf, "set -g status off\n").unwrap();
         let (dotted_default, dotted) = (
             format!("rvp{tag}/../default"),
             format!("rvp{tag}/../rvH{tag}"),
@@ -1675,34 +1152,9 @@ mod tests {
         ]
     }
 
-    /// Sweep `root` until `want` are emptied, and only they.
-    fn sweep_until(root: &Path, want: Vec<PathBuf>) {
-        let mut want = want;
-        want.sort();
-        let mut gone = Vec::new();
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while gone.len() < want.len() {
-            assert!(std::time::Instant::now() < deadline, "kept: {gone:?}");
-            gone.extend(sweep_checkpoints(
-                root,
-                &[],
-                held_sockets,
-                Duration::ZERO,
-                false,
-            ));
-            thread::sleep(Duration::from_millis(20));
-        }
-        gone.sort();
-        assert_eq!(gone, want);
-    }
-
-    /// Real servers on [`misleading_servers`]' sockets. Each writes a real
-    /// checkpoint, restores it and turns `vtmux-persist` off, so it holds
-    /// no lock: while they run, a sweep empties none of their checkpoints.
-    /// The reaper picks exactly the test sockets' servers (and their
-    /// panes); killed, those are gone and the others still answer. Then
-    /// the gone servers' checkpoints are emptied, and once the rest are
-    /// killed theirs too; `default`'s never.
+    /// Real servers on [`misleading_servers`]' sockets, each with a
+    /// session. The reaper picks exactly the test sockets' servers (and
+    /// their panes); killed, those are gone and the others still answer.
     #[test]
     fn real_servers_are_told_by_the_socket_they_hold() {
         let s = Scratch::new("real");
@@ -1710,7 +1162,6 @@ mod tests {
         let at = Place {
             bin: crate::build_vtmux(&crate::oracle::workspace_root()).unwrap(),
             cwd: base.clone(),
-            state: base.join("st"),
         };
         let uid = current_uid();
         let servers = misleading_servers(&base, uid, std::process::id());
@@ -1720,15 +1171,8 @@ mod tests {
             }
         });
         for srv in &servers {
-            srv.start_restored(&at);
+            srv.start(&at);
         }
-        let root = at.state.join("vtmux");
-        let held = held_sockets().expect("the held sockets read");
-        assert_eq!(
-            sweep_checkpoints(&root, &[], || Some(held), Duration::ZERO, false),
-            [] as [PathBuf; 0],
-            "a live server's checkpoint went"
-        );
 
         let pids: Vec<u32> = servers.iter().map(|srv| srv.pid(&at)).collect();
         let found = test_servers(&held_sockets().unwrap(), uid, &real_tmp());
@@ -1763,25 +1207,6 @@ mod tests {
         for srv in &servers {
             let alive = srv.run(&at, &["has", "-t", "z"]).status.success();
             assert_eq!(alive, !srv.test, "{}", srv.socket.display());
-        }
-
-        // The killed servers' checkpoints go; the others' stay while they
-        // run, and go once they are killed too. `default`'s never.
-        let tested = |test: bool| {
-            servers
-                .iter()
-                .filter(|srv| srv.test == test)
-                .map(|srv| srv.dir(&at))
-                .filter(|d| d.file_name().unwrap().to_str().unwrap().starts_with("rv"))
-                .collect::<Vec<_>>()
-        };
-        sweep_until(&root, tested(true));
-        for srv in servers.iter().filter(|srv| !srv.test) {
-            assert!(srv.run(&at, &["kill-server"]).status.success());
-        }
-        sweep_until(&root, tested(false));
-        for srv in servers.iter().filter(|srv| srv.socket.ends_with("default")) {
-            assert!(srv.dir(&at).join("manifest").exists(), "{:?}", srv.dir(&at));
         }
     }
 

@@ -38,8 +38,8 @@ pub struct JobId(pub usize);
 pub enum JobStatus {
     Exited(i32),
     Signaled(i32),
-    /// Not known: a pane restored from a `vtmux-persist` checkpoint, whose
-    /// process ran in the server before (`#{pane_dead}` 1, no
+    /// Not known: a pane a 3.8-beta3 server restored from a `vtmux-persist`
+    /// checkpoint, carried over by an upgrade (`#{pane_dead}` 1, no
     /// `#{pane_dead_status}` or `#{pane_dead_signal}`). Never a job's.
     Unknown,
 }

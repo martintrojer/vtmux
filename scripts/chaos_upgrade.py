@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-"""Chaos driver for live upgrade and vtmux-persist (live-upgrade spec, D27).
+"""Chaos driver for live upgrade (live-upgrade spec, D27).
 
-Usage: python3 scripts/chaos_upgrade.py [--rounds N] [--seed S] [--persist-every K]
-                                         [--busy N] [--keep]
+Usage: python3 scripts/chaos_upgrade.py [--rounds N] [--seed S] [--busy N] [--keep]
 
 Builds a busy vtmux server (streaming panes, alternate-screen programs, copy
 mode, popups, menus, prompts, two control clients, a pipe-pane, attached
 clients of several sizes, jobs, hooks, dead panes) and upgrades it at random
 moments, alternating between the binary under test and a copy of it, with
 pane programs and attached clients stopped (SIGSTOP) and CPU hogs running
-at random. Every Kth round it also stops the server (kill-server writing a
-`vtmux-persist` `full` or `layout` checkpoint, or SIGKILL) and restarts it
-from the checkpoint. Invariants checked:
+at random. Invariants checked:
 
   - no session, window or pane lost or added, no pane process restarted,
     no hook fired;
@@ -20,10 +17,7 @@ from the checkpoint. Invariants checked:
   - every attached client the same process and client record afterwards,
     and in a quiet round (everything stopped) each pane's capture and each
     client's screen as before the upgrade;
-  - every client's screen equal to a fresh attach of the same size;
-  - a persist restore brings back every session, window and pane id, each
-    pane dead with its last screen and history (`full`); after a SIGKILL,
-    the last finished checkpoint restores without an error.
+  - every client's screen equal to a fresh attach of the same size.
 
 Attached clients run in panes of an observer server (the reference tmux
 3.8, ~/.cache/vtmux/tmux-3.8/bin/tmux or $VTMUX_REFERENCE_TMUX), whose
@@ -266,7 +260,6 @@ class Chaos:
             f"rvchaos{os.getpid()}",
             os.path.join(self.root, "s"),
             home,
-            {"XDG_STATE_HOME": os.path.join(self.root, "state")},
         )
         self.observer = Server(REF, f"rvobs{os.getpid()}", os.path.join(self.root, "o"), home)
         self.controls = []
@@ -277,7 +270,7 @@ class Chaos:
         self.pipe_file = os.path.join(self.root, "pipe.out")
         self.pipe_tag = None
         self.hogs = []
-        self.stats = {"upgrades": 0, "refused": 0, "quiet": 0, "restores": 0}
+        self.stats = {"upgrades": 0, "refused": 0, "quiet": 0}
         self.next_tag = 0
         self.findings = []
 
@@ -310,7 +303,6 @@ class Chaos:
             ("set", "-g", "history-limit", "120000"),
             ("set", "-g", "automatic-rename", "off"),
             ("set", "-g", "allow-rename", "off"),
-            ("set", "-s", "vtmux-persist", "full"),
             ("set", "-g", "remain-on-exit", "on"),
             ("set", "-g", "@hooks", "0"),
             ("set-hook", "-g", "pane-died", "set -ga @hooks d"),
@@ -354,7 +346,6 @@ class Chaos:
         first = next(iter(self.streams))
         self.pipe_tag = self.streams[first]
         s.run("pipe-pane", "-t", first, f"cat >> {self.pipe_file}")
-        s.run("set", "-s", "vtmux-persist", "full")
         for _ in range(2):
             self.controls.append(Control(s, "s0"))
         o = self.observer
@@ -820,98 +811,6 @@ class Chaos:
         with open(self.pipe_file, "rb") as f:
             check_sequence("pipe-pane file", f.read(), self.pipe_tag)
 
-    def persist_round(self, n):
-        """A checkpoint, then a new server restores it: kill-server writes
-        one (`full` or `layout` at random), or the server is killed
-        (SIGKILL, maybe while it writes a periodic one) and restores the
-        last it finished."""
-        s, r = self.subject, self.rng
-        mode = r.choice(["full", "layout"])
-        # A crash restores the last checkpoint: the first round writes one.
-        crash = self.stats["restores"] > 0 and r.random() < 0.3
-        s.run("set", "-s", "vtmux-persist", mode)
-        self.close_overlays()
-        self.signal_panes(signal.SIGSTOP)
-        time.sleep(0.3)
-        fmt = ("#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{window_id} "
-               "#{session_id} #{window_layout}" + (" #{pane_title}" if mode == "full" else ""))
-        before = s.run("lsp", "-a", "-F", fmt)
-        caps = {p: s.run("capture-pane", "-p", "-e", "-S", "-", "-t", p)
-                for p in s.run("lsp", "-a", "-F", "#{pane_id}").split()}
-        for c in self.controls:
-            c.close()
-        self.controls = []
-        if crash:
-            pid = int(s.run("display", "-p", "#{pid}").strip())
-            self.signal_panes(signal.SIGCONT)
-            # Pane programs die with their terminal; give the periodic
-            # checkpoint (60 s) a chance to be cut short.
-            time.sleep(r.random() * 2)
-            os.kill(pid, signal.SIGKILL)
-            wait("the server gone", lambda: not alive(pid))
-        else:
-            s.kill()
-        for name, _, _ in self.clients:
-            self.observer.try_run("kill-session", "-t", name)
-        self.clients = []
-        s.run("start-server")
-        wait("the restore", lambda: s.try_run("ls"))
-        errors = [l for l in s.run("show-messages").splitlines()
-                  if "vtmux-persist:" in l and "vtmux-persist: restored " not in l]
-        if crash:
-            # The last checkpoint finished may be older than the state: only
-            # that it restores, whole.
-            if errors:
-                raise Failure(f"restore after a crash: {errors}")
-            live = set(s.run("lsp", "-a", "-F", "#{pane_id}").split())
-            self.streams = {p: t for p, t in self.streams.items() if p in live}
-            self.tickers = [(p, f) for p, f in self.tickers if p in live]
-            log(f"round {n}: persist ({mode}) restore after SIGKILL ok: "
-                f"{len(s.run('lsp', '-a').splitlines())} panes")
-        else:
-            after = s.run("lsp", "-a", "-F", fmt)
-            if after != before:
-                raise Failure(f"restore changed the panes:\n--- before\n{before}\n--- after\n{after}\n{errors}")
-            for p, cap in caps.items():
-                now = s.run("capture-pane", "-p", "-e", "-S", "-", "-t", p)
-                if s.run("display", "-p", "-t", p, "#{pane_dead}").strip() != "1":
-                    raise Failure(f"restored pane {p} not dead")
-                got = now.rstrip("\n").split("\n")
-                if mode == "layout":
-                    kept = []
-                else:
-                    kept = cap.rstrip("\n").split("\n")
-                # The dead line goes on the last blank row, or after a scroll.
-                if not check_restored(kept, got):
-                    raise Failure(f"restored pane {p} lost its screen or history ({mode}):\n"
-                                  f"--- before\n{cap[-3000:]}\n--- after\n{now[-3000:]}")
-            log(f"round {n}: persist ({mode}) restore of {len(caps)} panes ok")
-        self.stats["restores"] += 1
-        # Back to a live server: every pane respawned with its saved
-        # command, each stream under a new tag (its restored screen holds
-        # the old numbers), the pipe-pane started again.
-        for line in s.run("lsp", "-a", "-F", "#{pane_id} #{window_name}").splitlines():
-            pane, name = line.split()
-            if name == "dead" or s.run("display", "-p", "-t", pane, "#{pane_dead}").strip() != "1":
-                continue
-            if pane in self.streams:
-                tag = self.next_tag
-                self.next_tag += 1
-                self.streams[pane] = tag
-                s.run("respawn-pane", "-t", pane, *self.stream_cmd(tag))
-            else:
-                s.run("respawn-pane", "-t", pane)
-        first = next(iter(self.streams))
-        self.pipe_tag = self.streams[first]
-        s.run("pipe-pane", "-t", first, f"cat >> {self.pipe_file}")
-        for _ in range(2):
-            self.controls.append(Control(s, "s0"))
-        for k, (w, h) in enumerate(SIZES):
-            self.attach(f"c{k}", f"s{k}", (w, h))
-        # A read-only client beside c0, of its size.
-        self.attach("ro", "s0", SIZES[0], flags=("-r",))
-        wait("every client", lambda: len(self.client_rows()) == len(self.clients))
-
     def cleanup(self):
         """Everything this run started stopped, each step on its own so one
         that fails leaves the rest to run; the servers first. `main` runs
@@ -1001,18 +900,10 @@ def visible(capture):
     return "\n".join(out) + "\n"
 
 
-def check_restored(kept, got):
-    """A restored screen holds the saved rows, the dead line after them."""
-    while kept and kept[-1] == "":
-        kept.pop()
-    return got[: len(kept)] == kept or got[: len(kept) - 1] == kept[1:]
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=20)
     ap.add_argument("--seed", type=int, default=int(time.time()))
-    ap.add_argument("--persist-every", type=int, default=0)
     ap.add_argument("--busy", type=int, default=(os.cpu_count() or 2) // 2)
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
@@ -1025,10 +916,7 @@ def main():
     try:
         chaos.setup()
         for n in range(args.rounds):
-            if args.persist_every and n % args.persist_every == args.persist_every - 1:
-                chaos.persist_round(n)
-            else:
-                chaos.round(n)
+            chaos.round(n)
         log(f"ok {chaos.stats}")
     except Failure as e:
         log(f"FAILED (seed {args.seed}, root {chaos.root}): {e}")

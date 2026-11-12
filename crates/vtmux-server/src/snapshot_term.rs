@@ -6,7 +6,7 @@
 //! and encodes each page into the vtmux row format as it comes
 //! ([`vtmux_snapshot::PageBuilder`]), so a pane's history never exists
 //! whole in the rows form (12 bytes a cell). [`Form::Rows`] writes every
-//! page as rows: checkpoints, and a reader of any build. [`Form::SamePin`]
+//! page as rows: upgrades onto another patch stack, a reader of any build. [`Form::SamePin`]
 //! lets pages Ghostty holds compressed go in Ghostty's own form
 //! ([`vtmux_snapshot::HistoryPage::ghostty`]): upgrade streams to a binary
 //! of the same Ghostty patch stack only, behind
@@ -36,7 +36,7 @@ use vtmux_vt::{
 /// What a pane's history pages become in a snapshot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Form {
-    /// The vtmux row format, every page: checkpoints, any reader.
+    /// The vtmux row format, every page: any reader.
     #[default]
     Rows,
     /// Pages Ghostty holds compressed in its own form (decision 23): only
@@ -1409,7 +1409,7 @@ fn primary_of(
 
 /// What a reader from before [`snap::TermState::sized_primary`],
 /// [`snap::TermState::alternate_saved`] and Ghostty patch 0038 (a
-/// downgrade, or an older binary restoring a checkpoint) needs where it
+/// downgrade) needs where it
 /// reads: the copy of tmux's history it shows under the alternate screen,
 /// the primary screen at the terminal's size, as its emulator kept it, and
 /// `?1049h`'s save in the primary screen's DECSC slot, where its `?1049l`
@@ -1474,7 +1474,7 @@ fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap:
 }
 
 /// The newest `n` rows of `pages`, as pages: whole pages are the same
-/// pages (a checkpoint stores their chunk once), the one the cut falls in
+/// pages, the one the cut falls in
 /// is encoded again from its cut.
 fn history_tail(pages: &[snap::HistoryPage], n: usize) -> Vec<snap::HistoryPage> {
     let mut left = n;

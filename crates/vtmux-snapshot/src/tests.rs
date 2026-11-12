@@ -1,5 +1,5 @@
-//! Whole-stream tests: round trips, versions, unknown tags, manifests and
-//! chunks, consistency checks, the golden files.
+//! Whole-stream tests: round trips, versions, unknown tags, pages,
+//! consistency checks, the golden files.
 
 use super::*;
 use crate::model::tests::{
@@ -98,8 +98,9 @@ fn the_writer_executable_descriptor_round_trips() {
 
 /// A restored pane's provenance (`Pane::restored_from`, the live-upgrade
 /// spec's decision 31) and a restarted one's guard (`restart_from`),
-/// added within v1, round-trip with no feature
-/// required, so a reader before skips it and reads an ordinary dead pane;
+/// added within v1 and written by 3.8-beta3 and before, still decode with
+/// no feature required: a beta3 image's upgrade stream may carry them,
+/// and the server reads and ignores them (persistence went 2026-11-12);
 /// the golden stream has none.
 #[test]
 fn a_restored_panes_provenance_round_trips_and_requires_nothing() {
@@ -393,7 +394,7 @@ fn pages_are_found_everywhere_they_live() {
     sample().pages_mut(&mut |_| n += 1);
     assert_eq!(n, 7);
     // The primary screen at the size the alternate one left it, beside
-    // its copy at the terminal's: in a manifest and back from its chunks.
+    // its copy at the terminal's: in a stream and back.
     let mut s = sample();
     let t = s.panes[0].term.as_mut().unwrap();
     let mut screen = t.primary.clone();
@@ -408,41 +409,21 @@ fn pages_are_found_everywhere_they_live() {
     let mut n = 0;
     s.pages_mut(&mut |_| n += 1);
     assert_eq!(n, 8);
-    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
-        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
-    assert_eq!(
-        decode_with(&encode_manifest(&s), |h| chunks.get(h).cloned()).unwrap(),
-        s
-    );
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
 }
 
+/// A `vtmux-persist` manifest (3.8-beta3 and before) named its pages
+/// without their bytes, which lived in files of their own: no reader
+/// fetches them since 2026-11-12, so such a stream is refused.
 #[test]
-fn a_manifest_names_pages_and_reads_them_from_chunks() {
-    let s = sample();
-    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
-        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
-    let manifest = encode_manifest(&s);
-    let inline = encode(&s);
-    let page_bytes: usize = chunks.values().map(Vec::len).sum();
-    assert!(manifest.len() + page_bytes <= inline.len() + 64);
-
-    assert_eq!(
-        decode_with(&manifest, |h| chunks.get(h).cloned()).unwrap(),
-        s
-    );
-    // Without its chunks, or with a corrupt one, the manifest is refused.
-    assert!(matches!(decode(&manifest), Err(Error::MissingChunk(_))));
-    let corrupt = decode_with(&manifest, |h| {
-        let mut c = chunks.get(h).cloned()?;
-        c[0] ^= 1;
-        Some(c)
-    });
-    assert!(matches!(corrupt, Err(Error::MissingChunk(_))));
+fn a_page_without_its_bytes_is_refused() {
+    let mut s = sample();
+    s.pages_mut(&mut |p| p.data = Vec::new());
+    assert!(matches!(decode(&encode(&s)), Err(Error::MissingChunk(_))));
 }
 
-/// A manifest read with some chunks missing: [`decode_partial`] keeps
-/// it, [`Snapshot::unreadable`] names each part holding a page that does
-/// not check (a pane's terminal state, a copy mode, a popup's terminal
+/// A snapshot with some pages that do not check: [`Snapshot::unreadable`]
+/// names each part holding a page that does not check (a pane's terminal state, a copy mode, a popup's terminal
 /// state), and [`Snapshot::without`] leaves out only those, so what is
 /// left checks and is the rest as it was.
 #[test]
@@ -457,13 +438,12 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
         false,
     )];
     let copy_page = copy.history[0].hash;
-    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
-        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
-    let manifest = encode_manifest(&s);
-    let mut partial = decode_partial(&manifest, &Features::default(), |h| {
-        chunks.get(h).filter(|_| *h != copy_page).cloned()
-    })
-    .unwrap();
+    let mut partial = s.clone();
+    partial.pages_mut(&mut |p| {
+        if p.hash == copy_page {
+            p.data = Vec::new();
+        }
+    });
     let bad = partial.unreadable();
     assert_eq!(
         bad,
@@ -488,8 +468,11 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
     want.panes[0].modes.remove(0);
     assert_eq!(partial, want);
 
-    // Every chunk missing: every part with history is named, in order.
-    let mut none = decode_partial(&manifest, &Features::default(), |_| None).unwrap();
+    // Every page's bytes missing: every part with history is named, in
+    // order.
+    let mut none = s.clone();
+    none.pages_mut(&mut |p| p.data = Vec::new());
+    let stripped = encode(&none);
     let parts: Vec<Part> = none.unreadable().into_iter().map(|(p, _)| p).collect();
     let popup = s.clients.iter().find(|c| c.popup.is_some()).unwrap().id;
     assert_eq!(
@@ -504,8 +487,8 @@ fn the_parts_holding_pages_that_do_not_check_can_be_left_out() {
     assert_eq!(none.check(), Ok(()));
     assert_eq!(none.pages(), Vec::<&HistoryPage>::new());
     assert_eq!(none.panes[0].modes.len(), s.panes[0].modes.len() - 1);
-    // A strict decode refuses both.
-    assert!(decode_with(&manifest, |_| None).is_err());
+    // A decode refuses such a stream.
+    assert!(decode(&stripped).is_err());
 }
 
 /// A page equal to one read already is not read again (the copy of the
@@ -534,29 +517,6 @@ fn a_page_equal_to_one_read_is_read_once() {
     copy.history = vec![other];
     let parts: Vec<Part> = s.unreadable().into_iter().map(|(p, _)| p).collect();
     assert_eq!(parts, [Part::PaneMode(1, 0, ModeKind::Copy)]);
-}
-
-#[test]
-fn page_refs_names_a_manifests_pages_without_their_chunks() {
-    let s = sample();
-    let want: Vec<Hash> = s.pages().iter().map(|p| p.hash).collect();
-    assert_eq!(page_refs(&encode_manifest(&s)).unwrap(), want);
-    assert_eq!(page_refs(&encode(&s)).unwrap(), want);
-    // What can't be read whole is an error: its caller keeps every chunk.
-    let mut newer = encode_manifest(&s);
-    newer[8..12].copy_from_slice(&(FORMAT_VERSION + 1).to_le_bytes());
-    assert!(matches!(page_refs(&newer), Err(Error::Newer { .. })));
-    let mut future = sample();
-    future.meta.requires = vec!["from-the-future".into()];
-    assert!(matches!(
-        page_refs(&encode_manifest(&future)),
-        Err(Error::Unsupported(_))
-    ));
-    let manifest = encode_manifest(&s);
-    assert_eq!(
-        page_refs(&manifest[..manifest.len() - 1]),
-        Err(Error::Truncated)
-    );
 }
 
 #[test]
@@ -643,26 +603,6 @@ fn every_cut_and_every_bit_flip_is_an_error() {
     let mut flipped = bytes.clone();
     *flipped.last_mut().unwrap() ^= 1;
     assert_eq!(decode(&flipped), Err(Error::Corrupt));
-}
-
-#[test]
-fn a_cut_or_damaged_manifest_is_an_error() {
-    let s = sample();
-    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
-        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
-    let manifest = encode_manifest(&s);
-    let fetch = |h: &Hash| chunks.get(h).cloned();
-    for cut in 0..manifest.len() {
-        assert!(
-            decode_with(&manifest[..cut], fetch).is_err(),
-            "cut at {cut}"
-        );
-    }
-    for at in (0..manifest.len()).step_by(3) {
-        let mut b = manifest.clone();
-        b[at] ^= 0x10;
-        assert!(decode_with(&b, fetch).is_err(), "byte {at}");
-    }
 }
 
 #[test]
@@ -807,13 +747,13 @@ fn a_stream_requiring_an_unknown_feature_is_refused() {
         ghostty_patches: Some("feedf00d".into()),
     };
     assert!(matches!(
-        decode_for(&bytes, &other, |_| None),
+        decode_for(&bytes, &other),
         Err(Error::Unsupported(_))
     ));
     let same = Features {
         ghostty_patches: Some("0123abcd".into()),
     };
-    assert_eq!(decode_for(&bytes, &same, |_| None).unwrap(), s);
+    assert_eq!(decode_for(&bytes, &same).unwrap(), s);
 }
 
 /// Pages in Ghostty's own form (decision 23) travel inline in an upgrade
@@ -830,7 +770,7 @@ fn ghostty_pages_decode_without_chunks_and_pass_check() {
     let same = Features {
         ghostty_patches: Some("0123abcd".into()),
     };
-    let back = decode_for(&encode(&s), &same, |_| panic!("no chunk wanted")).unwrap();
+    let back = decode_for(&encode(&s), &same).unwrap();
     assert_eq!(back, s);
     back.check().unwrap();
     let page = &back.panes[0].term.as_ref().unwrap().primary.history[0];
@@ -1009,10 +949,18 @@ fn the_current_version_encodes_to_its_golden_file() {
     });
     let golden = decode(&want).unwrap();
     assert!(
-        encode(&golden) == want && encode_manifest(&sample()) == encode_manifest(&golden),
+        encode(&golden) == want && by_name(&sample()) == by_name(&golden),
         "the encoding of format {FORMAT_VERSION} changed: bump FORMAT_VERSION and add a \
          golden file (or, before v{FORMAT_VERSION} is released, delete it and bless again)"
     );
+}
+
+/// `s` encoded with its pages by name only (their bytes left out): the
+/// golden test's comparison of everything but the page bytes.
+fn by_name(s: &Snapshot) -> Vec<u8> {
+    let mut named = s.clone();
+    named.pages_mut(&mut |p| p.data = Vec::new());
+    encode(&named)
 }
 
 /// A window's cell size in pixels and the one pending came within v1:
@@ -1068,6 +1016,7 @@ fn the_start_binary_round_trips_and_defaults_to_empty() {
 
 /// `Server::persist_hold` came within v1, like `start_binary`: it round
 /// trips, and a stream without it (the golden file's) holds nothing back.
+/// Written by 3.8-beta3 and before; read and ignored since 2026-11-12.
 #[test]
 fn the_persist_hold_round_trips_and_defaults_to_free() {
     let mut s = sample();

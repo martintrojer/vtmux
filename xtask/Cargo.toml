@@ -18,7 +18,6 @@ serde_json = "1.0.154"
 similar = "3.2.1"
 toml = "1.1.8"
 vtmux-core.workspace = true
-vtmux-server.workspace = true
 vtmux-vt.workspace = true
 
 [dev-dependencies]

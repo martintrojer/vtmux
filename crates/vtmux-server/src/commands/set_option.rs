@@ -1,15 +1,12 @@
 //! `set-option` and `set-window-option`: targets come from `cmdq_find_flag`;
 //! option semantics live in the core (cmd-set-option.c `cmd_set_option_exec`).
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
 
 use vtmux_core::cmd::{CommandCall, ConfigEnv};
 use vtmux_core::format::{self, FormatContext, LoopItem, OptionScope, OptionsLoop};
-use vtmux_core::options::{
-    OptionError, OptionHost, OptionsStore, SetOutcome, Target, TreeId, apply_set,
-};
+use vtmux_core::options::{OptionError, OptionHost, OptionsStore, SetOutcome, Target, apply_set};
 
 use super::Item;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
@@ -41,9 +38,6 @@ pub(super) struct Host<'a> {
     pub formats: Vec<(String, String)>,
     /// The running command's client's `#()` jobs (`format_single_from_target`).
     pub jobs: Option<JobHandle>,
-    /// `Server::config_sets`: the options a restored server's startup
-    /// config has set so far.
-    pub config_sets: Option<&'a mut HashSet<(TreeId, String)>>,
 }
 
 /// The attached clients and the command's target client, for [`Host`].
@@ -142,12 +136,6 @@ impl OptionHost for Host<'_> {
     fn usable_shell(&self, path: &str) -> bool {
         check_shell(Path::new(path))
     }
-
-    fn set_from_default(&mut self, tree: TreeId, name: &str) -> bool {
-        self.config_sets
-            .as_mut()
-            .is_some_and(|sets| sets.insert((tree, name.to_owned())))
-    }
 }
 
 pub fn exec(
@@ -177,7 +165,6 @@ pub fn exec(
             client,
             formats: server.cmd_formats.clone(),
             jobs: Some(jobs),
-            config_sets: server.config_sets.as_mut(),
         },
     );
     server.model.options = options;
@@ -207,7 +194,6 @@ pub(crate) fn with_option_host<R>(
             client: None,
             formats: Vec::new(),
             jobs: None,
-            config_sets: None,
         },
     );
     server.model.options = options;

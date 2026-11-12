@@ -16,7 +16,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 10] = [
+pub(super) static EXTENSIONS: [OptionDef; 7] = [
     // D33: kitty graphics, drawn as unicode placeholders (a D28 protocol
     // extension).
     OptionDef {
@@ -103,45 +103,6 @@ pub(super) static EXTENSIONS: [OptionDef; 10] = [
         separator: None,
         default: DefaultValue::Str(""),
         text: Some("Colours every cell of the other panes is blended toward."),
-        unit: None,
-    },
-    // D27: checkpoints on disk (docs/specs/2026-11-06-live-upgrade.md,
-    // decision 17).
-    OptionDef {
-        name: "vtmux-persist",
-        scope: Scope::Server,
-        kind: Kind::Choice(&["off", "layout", "full"]),
-        array: false,
-        hook: false,
-        separator: None,
-        default: DefaultValue::Choice(0),
-        text: Some("Checkpoint the server's state to disk: layout only, or with screens."),
-        unit: None,
-    },
-    // D27: what restarts a restored pane (decision 32): `key` Enter from
-    // a client, `auto` also the default shells once after a cold restore.
-    OptionDef {
-        name: "vtmux-persist-respawn",
-        scope: Scope::Server,
-        kind: Kind::Choice(&["off", "key", "auto"]),
-        array: false,
-        hook: false,
-        separator: None,
-        default: DefaultValue::Choice(1),
-        text: Some("Restart restored panes: never, with Enter, or shells at once."),
-        unit: None,
-    },
-    // D27: user options a restore leaves out (decision 30), globs as
-    // `update-environment` lists names.
-    OptionDef {
-        name: "vtmux-persist-drop",
-        scope: Scope::Session,
-        kind: Kind::String(StringCheck::None),
-        array: true,
-        hook: false,
-        separator: None,
-        default: DefaultValue::Str(""),
-        text: Some("User options (globs) not restored from a checkpoint."),
         unit: None,
     },
 ];

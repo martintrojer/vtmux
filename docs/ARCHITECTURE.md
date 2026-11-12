@@ -53,9 +53,9 @@ Each pane's screen lives in its own libghostty-vt terminal inside the server, wh
 |---|---|
 | `vtmux-core` | Pure tmux semantics, no I/O: command parser and table, targets, formats (with a POSIX regex engine), options, styles, keys, layouts, socket paths, the client/server protocol, tmux's exact error texts. |
 | `vtmux-vt` | The FFI crate: a safe wrapper over libghostty-vt that shapes Ghostty's terminal as tmux (`capture-pane`, query replies, cursor and history). Exports and imports a pane's whole terminal state for live upgrade, and refuses a malformed one. |
-| `vtmux-server` | The event loop and everything stateful: model, ptys and processes, commands, control mode, compositor, live upgrade, persistence. OS calls live in `sys/`. |
+| `vtmux-server` | The event loop and everything stateful: model, ptys and processes, commands, control mode, compositor, live upgrade. OS calls live in `sys/`. |
 | `vtmux-client` | The attached client: raw mode, input, frames, resize, signals, restoring the terminal on exit. |
-| `vtmux-snapshot` | The live-upgrade and persistence format: versioned, tagged records, its own types so a server refactor can't change it. |
+| `vtmux-snapshot` | The live-upgrade format: versioned, tagged records, its own types so a server refactor can't change it. |
 | `vtmux` | The binary: global flags, connect-or-start, then a command, attach or control mode. |
 | `xtask` | Test tooling: the reference tmux build, the regress runner, the behaviour oracle, socket reaping. |
 
@@ -118,10 +118,6 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
 - **Frozen frames.** A few protocol frames never change (`Hello`, `Stdin`, `StdinEof`, `Stdout`, `Stderr`, `Exit`, `Exec`, `Flags`, and `UpgradeRequest`/`UpgradeResult`/`UpgradeNotice`), so control clients of any version from protocol 9 on stay served and a newer client can ask an older server to upgrade. Every other frame may change with a protocol bump.
 - **Failure never loses panes.** A failed dry run leaves the server as it was. A resume that fails switches back to the old image on the same descriptors (Linux: `fexecve` of the executable it kept open). Failing that, it serves without the parts that don't read, then without terminal state, then with no sessions while it holds every pty open. Exit status: 0 upgraded, 1 not, 2 upgraded short of a part.
 - **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. Across stacks an alternate screen's hidden history also goes as the copy a build from before Ghostty patch 0038 reads, mostly the primary's own pages, which the dry run reads once. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
-
-## Persistence
-
-`vtmux-persist layout|full` writes the same snapshot to `$XDG_STATE_HOME/vtmux/<socket>-<hash>/` on a clean shutdown and every 60 s while something changed (`persist.rs`, `server/persist.rs`): a manifest plus content-addressed, LZ4-compressed history chunks, one locked directory per socket. A server starting on that socket first checks a checkpoint in a child process (the upgrade's dry run, `--vtmux-check-snapshot`), then restores it before the config runs, every pane dead (`server/restore.rs`). A pane that ran in the checkpoint carries its write time until it is respawned (`restored.rs`): the renderer draws its status over its last row, outside the grid, and a respawn (Enter, `respawn-pane`, or `vtmux-persist-respawn auto` once the config has run) keeps its screen above a `restored <time>` row instead of clearing it. A checkpoint that can't be read leaves a fresh server and the files untouched. A periodic checkpoint is written a piece per loop turn's 5 ms step (`persist::Writer`): a chunk written, or one it reuses and did not write read back first, so the first checkpoint of a live upgrade's image does not read the previous one back in one turn.
 
 ## Terminal protocols tmux drops (D28)
 

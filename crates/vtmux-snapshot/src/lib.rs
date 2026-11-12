@@ -1,6 +1,10 @@
 //! The vtmux snapshot format (D27, docs/specs/2026-11-06-live-upgrade.md):
 //! the whole server state as one versioned stream, which a live upgrade
-//! hands to the new binary and persistence writes to disk.
+//! hands to the new binary. (`vtmux-persist` also wrote it to disk until
+//! 2026-11-12; what only those checkpoints set is still read, never
+//! written: [`Server::persist_hold`], [`Pane::restored_from`],
+//! [`Pane::restart_from`], [`Purpose::CheckpointLayout`] and
+//! [`Purpose::CheckpointFull`].)
 //!
 //! A stream is a header of [`HEADER_LEN`] bytes, then the [`Snapshot`]
 //! record (the body):
@@ -22,11 +26,7 @@
 //! Rows use the vtmux row format ([`row`]), not Ghostty's page memory
 //! (decision 11). History pages are LZ4-compressed and named by the BLAKE3
 //! hash of their rows' encoding (before compression, so the names don't
-//! depend on the compressor): [`encode`] writes them inline (the upgrade
-//! stream), [`encode_manifest`] writes only their names for a checkpoint
-//! whose pages live in `chunks/<hash>` (decision 20), [`decode_with`]
-//! reads them back from there, and [`page_refs`] lists their names for
-//! the checkpoint's garbage collection.
+//! depend on the compressor), and [`encode`] writes them inline.
 //!
 //! The types here are the format's own, not the server's (decision 18).
 //!
@@ -284,9 +284,11 @@ wire::value_enum! {
     /// Why the snapshot was written.
     pub enum Purpose {
         0 => Upgrade,
-        /// `vtmux-persist layout`: no terminal state.
+        /// `vtmux-persist layout` (3.8-beta3 and before): no terminal
+        /// state. Never written since 2026-11-12; `--vtmux-check-snapshot`
+        /// refuses it.
         1 => CheckpointLayout,
-        /// `vtmux-persist full`.
+        /// `vtmux-persist full` (3.8-beta3 and before), likewise.
         2 => CheckpointFull,
     }
 }
@@ -360,17 +362,6 @@ pub fn encode(s: &Snapshot) -> Vec<u8> {
     out
 }
 
-/// A checkpoint manifest: history pages by name only. The caller stores
-/// each page of [`Snapshot::pages`] as `chunks/<hex(hash)>` (its `data`).
-/// A checkpoint holds rows only: pages in Ghostty's form are for upgrade
-/// streams (decision 23), and a writer exports rows for a checkpoint.
-#[must_use]
-pub fn encode_manifest(s: &Snapshot) -> Vec<u8> {
-    let mut by_ref = s.clone();
-    by_ref.pages_mut(&mut |p| p.data = Vec::new());
-    encode(&by_ref)
-}
-
 /// Fill in the header of `out`, whose body follows [`HEADER_LEN`] bytes
 /// of room for it.
 fn seal(out: &mut [u8]) {
@@ -442,74 +433,30 @@ fn body(bytes: &[u8]) -> Result<(u32, &[u8]), Error> {
     Ok((found, body))
 }
 
-/// Decode a stream whose history pages are inline.
+/// Decode a stream. A stream that requires a feature beyond
+/// [`KNOWN_FEATURES`] is refused.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
-    decode_with(bytes, |_| None)
+    decode_for(bytes, &Features::default())
 }
 
-/// Decode a stream, fetching each page that is not inline from `chunk`
-/// (by its hash), and checking each fetched page against its hash (the
-/// stream's own hash covers the inline ones). A stream that requires a
-/// feature beyond [`KNOWN_FEATURES`] is refused.
-pub fn decode_with(
-    bytes: &[u8],
-    chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
-) -> Result<Snapshot, Error> {
-    decode_for(bytes, &Features::default(), chunk)
-}
-
-/// [`decode_with`] for a reader that understands `features` too.
-pub fn decode_for(
-    bytes: &[u8],
-    features: &Features,
-    mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
-) -> Result<Snapshot, Error> {
-    let mut missing = None;
-    let s = decode_fetching(bytes, features, |p| {
-        if missing.is_some() {
-            return;
-        }
-        p.data = chunk(&p.hash).unwrap_or_default();
-        if p.raw().is_err() {
-            missing = Some(p.hash);
-        }
-    })?;
-    match missing {
-        Some(h) => Err(Error::MissingChunk(h)),
-        None => Ok(s),
-    }
-}
-
-/// [`decode_for`], except that a page whose chunk is missing or does not
-/// check is left in the snapshot as it is (its `data` empty or what the
-/// chunk held), for [`Snapshot::unreadable`] to find: what a restore that
-/// can do without some [`Part`]s reads.
-pub fn decode_partial(
-    bytes: &[u8],
-    features: &Features,
-    mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
-) -> Result<Snapshot, Error> {
-    decode_fetching(bytes, features, |p| {
-        p.data = chunk(&p.hash).unwrap_or_default();
-    })
-}
-
-/// The stream decoded, `fetch` called on each page that is neither
-/// inline nor in Ghostty's form, then migrated.
-fn decode_fetching(
-    bytes: &[u8],
-    features: &Features,
-    mut fetch: impl FnMut(&mut HistoryPage),
-) -> Result<Snapshot, Error> {
+/// [`decode`] for a reader that understands `features` too. Every page
+/// is inline: one in the vtmux row format without its bytes (a
+/// `vtmux-persist` manifest of 3.8-beta3 and before, which named them
+/// only) is [`Error::MissingChunk`].
+pub fn decode_for(bytes: &[u8], features: &Features) -> Result<Snapshot, Error> {
     let (found, body) = body(bytes)?;
     let cx = Ctx::for_input(found, body.len());
     check_requires(body, &cx, features)?;
     let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
+    let mut missing = None;
     s.pages_mut(&mut |p| {
-        if p.data.is_empty() && !p.is_ghostty() {
-            fetch(p);
+        if missing.is_none() && p.data.is_empty() && !p.is_ghostty() {
+            missing = Some(p.hash);
         }
     });
+    if let Some(h) = missing {
+        return Err(Error::MissingChunk(h));
+    }
     migrate::migrate(&mut s, found)?;
     Ok(s)
 }
@@ -568,20 +515,6 @@ fn check_requires(body: &[u8], cx: &Ctx, features: &Features) -> Result<(), Erro
         }
     }
     Ok(())
-}
-
-/// The names of the history pages a stream refers to, without fetching
-/// any: what a checkpoint's garbage collection keeps of `chunks/`. A
-/// stream this build can't read whole (newer, or requiring a feature it
-/// lacks) is an error, so that a caller keeps every chunk rather than
-/// delete one a page it can't see refers to.
-pub fn page_refs(bytes: &[u8]) -> Result<Vec<Hash>, Error> {
-    let (found, body) = body(bytes)?;
-    let cx = Ctx::for_input(found, body.len());
-    check_requires(body, &cx, &Features::default())?;
-    let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
-    migrate::migrate(&mut s, found)?;
-    Ok(s.pages().iter().map(|p| p.hash).collect())
 }
 
 impl Snapshot {

@@ -2,6 +2,15 @@
 
 vtmux's version is the tmux release it is tested against: `3.8-beta3` is the third beta of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
+## Unreleased
+
+### Removed
+
+- **Save and restore.** vtmux no longer checkpoints sessions to disk or restores them at start: restoring after a crash or reboot is tmux-resurrect's and tmux-continuum's job, and they work on vtmux as on tmux. vtmux keeps what no plugin can do: live upgrades, the terminal features tmux drops, pane blend.
+  - `vtmux-persist`, `vtmux-persist-respawn` and `vtmux-persist-drop` are gone. A config that sets one now gets `invalid option`, inside `%if "#{vtmux_version}"` too (that guard is for real tmux); delete those lines.
+  - The old checkpoints in `$XDG_STATE_HOME/vtmux` (default `~/.local/state/vtmux`) are never read again; delete the directory.
+  - Live upgrades from and back to 3.8-beta3 keep working. A pane a beta3 server restored and still shows comes across as an ordinary dead pane with its screen; `respawn-pane` restarts it.
+
 ## 3.8-beta3
 
 ### New

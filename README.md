@@ -38,20 +38,9 @@ mise upgrade vtmux
 tmux vtmux-upgrade -b "$(mise which vtmux)"
 ```
 
-Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary. Exit status: 0 upgraded, 1 not (the server runs on as it was), 2 upgraded without a part that did not read (stderr says which). The new binary must prove it read the server's state before it takes over, so `-b` naming anything else (a typo'd `/bin/echo`, a script) is refused with 1. Downgrading to 3.8-beta1 or 3.8-beta2 still works.
+Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary. Exit status: 0 upgraded, 1 not (the server runs on as it was), 2 upgraded without a part that did not read (stderr says which). The new binary must prove it read the server's state before it takes over, so `-b` naming anything else (a typo'd `/bin/echo`, a script) is refused with 1. Downgrading to an earlier beta still works.
 
-### Full restores
-
-After a crash or a reboot, sessions come back with their windows, layout, screens and scrollback. Panes come back dead with their last screen; press Enter in one (or `respawn-pane`) and its command starts again below the old screen instead of over it, in the directory the pane started in (as tmux's `respawn-pane` does), not the last one you `cd`'d to. A restarted command that ends before you type into it (gone since the save, failing at once) leaves the pane and its screen as they were.
-
-```tmux
-%if "#{vtmux_version}"
-set -s vtmux-persist full            # or layout: sessions and windows, no screens
-set -s vtmux-persist-respawn auto    # also restart panes that ran your default shell
-%endif
-```
-
-Checkpoints go to `~/.local/state/vtmux/` on a clean exit and every 60 s while something changed. `set -s vtmux-persist off` at run time stops them, and the next start restores nothing unless its config turns persistence back on; the files stay until you delete them.
+Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-continuum work on vtmux as on tmux.
 
 ### Terminal features tmux drops
 
@@ -129,7 +118,7 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 - **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
-- **Just the core.** No agent integration, no extra TUI.
+- **Just the core.** No agent integration, no extra TUI, no session save and restore of its own: only what tmux and its plugins can't do.
 
 **Status:** beta ([3.8-beta3](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 

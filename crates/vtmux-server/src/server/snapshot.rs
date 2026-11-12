@@ -4,11 +4,17 @@
 //! `list-*` and `show-*` command and expands every format as the model it
 //! came from did.
 //!
-//! Pane and popup terminal state (`Pane.term`, `Popup.term`) goes as
-//! `Meta.purpose` says ([`Server::to_snapshot`]): rows for a full
-//! checkpoint, rows or Ghostty's compressed pages for an upgrade, none for
-//! a layout checkpoint, after which [`restore_term`] gives a pane a fresh
-//! terminal of its size, history limit and title.
+//! Pane and popup terminal state (`Pane.term`, `Popup.term`) goes as rows
+//! or Ghostty's compressed pages ([`Server::to_snapshot_with`]). A pane
+//! read without one (a last-resort rebuild, or a `vtmux-persist layout`
+//! checkpoint of 3.8-beta3 and before) gets a fresh terminal of its size,
+//! history limit and title from [`restore_term`].
+//!
+//! The fields only `vtmux-persist` checkpoints set (removed 2026-11-12,
+//! live-upgrade spec, *Removal*: `Server::persist_hold`,
+//! `Pane::restored_from`, `Pane::restart_from`) are read and ignored, since
+//! an older image's upgrade stream may carry them, and never set: a pane a
+//! 3.8-beta3 server restored comes over as an ordinary dead pane.
 //!
 //! What a snapshot leaves out, by design:
 //!
@@ -109,8 +115,8 @@ fn before(now: Instant, ms: u64) -> Instant {
 }
 
 /// How long ago an upgrade's snapshot `s` was written (`written_us`, the
-/// wall clock), at most [`taken_limit`]; nothing for one with no time or a
-/// checkpoint, whose timers a restore does not carry on.
+/// wall clock), at most [`taken_limit`]; nothing for one with no time or
+/// another purpose (a checkpoint of 3.8-beta3 and before).
 fn since_taken(s: &snap::Snapshot) -> Duration {
     let meta = &s.meta;
     if meta.purpose != snap::Purpose::Upgrade || meta.written_us <= 0 {
@@ -495,7 +501,7 @@ fn status_in(s: &snap::ExitStatus) -> crate::jobs::JobStatus {
 /// The pane's terminal from the snapshot: `p.term` imported
 /// ([`term_from_snapshot`], pages in Ghostty's form read only if
 /// `ghostty_patches`, the writer's stack, is this binary's), which must be
-/// the pane's size. Without one (a `vtmux-persist layout` checkpoint) a
+/// the pane's size. Without one (a last-resort rebuild) a
 /// fresh terminal the pane's size, with its history limit, title and an
 /// empty pane's modes, made as `spawn_pane` makes one.
 pub(crate) fn restore_term(
@@ -651,13 +657,11 @@ pub(super) fn validate(s: &snap::Snapshot) -> io::Result<()> {
     Ok(())
 }
 
-/// A pane mode as carried, `None` for one the snapshot closes. Without
-/// `screens` (a `vtmux-persist layout` checkpoint) copy mode is closed
-/// too: its frozen grid is the pane's screen.
-fn mode_out(m: &crate::mode::Mode, now: Instant, screens: bool) -> Option<snap::PaneMode> {
+/// A pane mode as carried, `None` for one the snapshot closes.
+fn mode_out(m: &crate::mode::Mode, now: Instant) -> Option<snap::PaneMode> {
     use crate::mode::Mode;
     match m {
-        Mode::Copy(c) if screens => Some(snap::PaneMode::Copy(c.export(now))),
+        Mode::Copy(c) => Some(snap::PaneMode::Copy(c.export(now))),
         Mode::Clock(c) => Some(snap::PaneMode::Clock(crate::mode::copy::key_mode_out(
             c.key_mode,
         ))),
@@ -920,22 +924,15 @@ impl Server {
     /// writes it and why; the descriptor table lists the listening socket,
     /// every client socket, pane PTY and `pipe-pane` descriptor by their
     /// numbers now, for a live upgrade to keep open across `execve`.
-    /// Terminal state goes as `meta.purpose` says: an upgrade keeps pages
-    /// Ghostty holds compressed in its form ([`Form::SamePin`], decision
-    /// 23), a full checkpoint writes rows, a layout checkpoint none (see
-    /// [`Server::to_snapshot_with`]).
+    /// Terminal state keeps pages Ghostty holds compressed in its form
+    /// ([`Form::SamePin`], decision 23; see [`Server::to_snapshot_with`]).
     #[must_use]
     pub fn to_snapshot(&self, meta: snap::Meta) -> snap::Snapshot {
-        let form = match meta.purpose {
-            snap::Purpose::Upgrade => Some(Form::SamePin),
-            snap::Purpose::CheckpointFull => Some(Form::Rows),
-            snap::Purpose::CheckpointLayout => None,
-        };
-        self.to_snapshot_with(meta, form)
+        self.to_snapshot_with(meta, Form::SamePin)
     }
 
     /// [`Server::to_snapshot`] with every pane's and popup's terminal in
-    /// `form`, or none. `meta.ghostty_patches` becomes this binary's stack
+    /// `form`. `meta.ghostty_patches` becomes this binary's stack
     /// and, when a page went in Ghostty's form, `meta.requires` names
     /// [`ghostty_pages_requirement`], so a reader of another stack refuses
     /// the stream instead of losing that history: an upgrade to such a
@@ -946,11 +943,8 @@ impl Server {
     /// must have been drained: the end of a loop turn.
     #[must_use]
     #[expect(clippy::too_many_lines, reason = "one record after another")]
-    pub fn to_snapshot_with(&self, mut meta: snap::Meta, form: Option<Form>) -> snap::Snapshot {
+    pub fn to_snapshot_with(&self, mut meta: snap::Meta, form: Form) -> snap::Snapshot {
         let now = Instant::now();
-        // Whether copy mode's frozen screen is carried: not in a `layout`
-        // checkpoint, which holds no screen at all (D27 decision 17).
-        let screens = meta.purpose != snap::Purpose::CheckpointLayout;
         let parts = self.model.options.export();
         let mut trees: BTreeMap<(u8, u32), Vec<snap::OptionEntry>> = BTreeMap::new();
         for (tree, entries) in &parts.trees {
@@ -992,7 +986,9 @@ impl Server {
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            persist_hold: self.persist.kept.hold(),
+            // Only checkpoints set it; 0 is "free", what an older reader
+            // assumes without it.
+            persist_hold: 0,
             link_number: self.link_numbers.next(),
             server_options: tree((0, 0)),
             session_options: tree((1, 0)),
@@ -1254,8 +1250,8 @@ impl Server {
                     kitty_owner_alternate: p.kitty_owner[1],
                     graphics_owner_primary: p.graphics.owner[0],
                     graphics_owner_alternate: p.graphics.owner[1],
-                    restored_from: p.restored_from,
-                    restart_from: p.restart_guard,
+                    restored_from: None,
+                    restart_from: None,
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -1269,11 +1265,7 @@ impl Server {
                     focused: p.focused,
                     active_point: p.active_point,
                     options: tree((5, p.id.0)),
-                    modes: p
-                        .modes
-                        .iter()
-                        .filter_map(|m| mode_out(m, now, screens))
-                        .collect(),
+                    modes: p.modes.iter().filter_map(|m| mode_out(m, now)).collect(),
                     search: p.search.clone(),
                     pipe: p.pipe.as_ref().map(|pipe| snap::PipePane {
                         pid: pipe.pid,
@@ -1282,7 +1274,7 @@ impl Server {
                         output: pipe.output(),
                         pending: pipe.pending().to_vec(),
                     }),
-                    term: form.map(|f| term_to_snapshot(&p.term, f)),
+                    term: Some(term_to_snapshot(&p.term, form)),
                     over_zoom: p.over_zoom,
                     capture_keys: p.capture_keys,
                     close_on_click: p.close_on_click,
@@ -1382,7 +1374,7 @@ impl Server {
         id: ClientId,
         c: &Client,
         hello: &vtmux_core::protocol::Hello,
-        form: Option<Form>,
+        form: Form,
         now: Instant,
     ) -> snap::Client {
         use vtmux_core::protocol::ControlMode;
@@ -1449,7 +1441,7 @@ impl Server {
             }),
             popup: c.popup.as_ref().and_then(|p| {
                 let mut out = p.export()?;
-                out.term = form.map(|f| term_to_snapshot(&p.term, f));
+                out.term = Some(term_to_snapshot(&p.term, form));
                 Some(out)
             }),
             token: c.reattach.map_or(0, |r| r.token),
@@ -1574,7 +1566,6 @@ impl Server {
         server.info = info;
         server.global_env = env_in(&s.environment);
         server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
-        server.persist.kept = super::persist::Kept::from_hold(s.persist_hold);
         server.link_numbers.reach(s.link_number);
 
         // Options: every tree, then the hook bookkeeping.
@@ -1999,9 +1990,6 @@ impl Server {
                 x.graphics_owner_primary,
                 x.graphics_owner_alternate,
             ]),
-            restored_from: x.restored_from,
-            restored_hint: None,
-            restart_guard: x.restart_from,
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,

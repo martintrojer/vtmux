@@ -92,7 +92,7 @@ fn check(s: &snap::Snapshot) -> Result<(), String> {
 /// A stream decoded, its records not yet checked (their pages among
 /// them): what the last resort and the descriptor table are read from.
 fn decode_unchecked(bytes: &[u8]) -> Result<snap::Snapshot, String> {
-    snap::decode_for(bytes, &features(), |_| None).map_err(|e| e.to_string())
+    snap::decode_for(bytes, &features()).map_err(|e| e.to_string())
 }
 
 /// The dry run (sequence step 4): the snapshot in inherited descriptor
@@ -132,19 +132,10 @@ fn check_bytes(bytes: &[u8]) -> Result<(), String> {
         Some(hint) => format!("{e}: {hint}"),
         None => e,
     })?;
-    if matches!(
-        s.meta.purpose,
-        snap::Purpose::CheckpointLayout | snap::Purpose::CheckpointFull
-    ) {
-        // A `vtmux-persist` checkpoint a starting server is about to
-        // restore (`super::restore`): it names no descriptor.
-        return guarded(|| {
-            if hook().as_deref() == Some("check") {
-                return Err(io::Error::other("test hook: the rebuild fails"));
-            }
-            super::restore::check(&s)
-        })
-        .map(drop);
+    if s.meta.purpose != snap::Purpose::Upgrade {
+        // A `vtmux-persist` checkpoint (3.8-beta3 and before): no build
+        // restores one since 2026-11-12 (live-upgrade spec, *Removal*).
+        return Err(format!("not an upgrade snapshot: {:?}", s.meta.purpose));
     }
     let kept = s
         .descriptors
@@ -837,8 +828,8 @@ impl Server {
         // The editors the snapshot does not carry (an editor pane resumes
         // as a plain modal pane): their 0600 temp files would outlive the
         // exec (no destructor runs), so they go now, the last moment before
-        // it. Not at `to_snapshot`'s export: that runs for each dry run and
-        // for persistence checkpoints too, with the server serving on. An
+        // it. Not at `to_snapshot`'s export: that runs for each dry run, with
+        // the server serving on. An
         // exec that returns puts them back as they were, for the editors
         // still running.
         let edits: Vec<(PathBuf, Option<Vec<u8>>)> = self
@@ -914,7 +905,7 @@ impl Server {
                 binary_fd,
                 requester,
             },
-            Some(form),
+            form,
         );
         let bytes = snap::encode(&snapshot);
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));

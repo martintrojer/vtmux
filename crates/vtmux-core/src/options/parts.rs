@@ -1,5 +1,5 @@
 //! A store taken apart and put together again, for the snapshot a live
-//! upgrade or a checkpoint carries (D27). The parts are plain data; the
+//! upgrade carries (D27). The parts are plain data; the
 //! server turns them into the snapshot's records and back.
 
 use super::{Entry, OptionValue, OptionsStore, TreeId, monitor, table, vtmux};

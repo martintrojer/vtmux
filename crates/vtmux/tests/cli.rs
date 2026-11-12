@@ -2335,7 +2335,7 @@ fn owner_config_for_both_drops_the_vtmux_blocks() {
                 %if \"#{y}\"\n\
                 set -g e 5\n\
                 %endif\n\
-                set -s vtmux-persist full\n\
+                set -s vtmux-kitty-keys on\n\
                 run -b x";
     assert_eq!(
         owner_config_for_both(conf),

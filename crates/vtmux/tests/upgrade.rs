@@ -789,9 +789,7 @@ fn a_granted_kitty_keys_pane_keeps_its_encoding_across_an_upgrade() {
 /// Every row a pane shows and holds in history comes through an upgrade
 /// cell for cell, with its cursor: a `cat -` pane with line1 to line3
 /// typed (each echoed twice), and one with 40 lines of history whose
-/// last row is full, its cursor pending a wrap. (A `full` restore lost
-/// the first of those `cat -` rows from the screen: `vtmux-persist`'s
-/// dead line, `persist.rs`; the upgrade draws none.)
+/// last row is full, its cursor pending a wrap.
 #[test]
 fn an_upgrade_keeps_every_row_and_the_cursor_of_each_pane() {
     let world = World::new();
@@ -3138,4 +3136,175 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
     assert_eq!(world.pid(), pid);
     assert_eq!(big("#{history_size} #{alternate_on}"), "90050 0");
     assert_eq!(history(), "209978 27 90050");
+}
+
+/// Live upgrade both ways with 3.8-beta3, the last release with
+/// `vtmux-persist` (live-upgrade spec, *Removal*), against
+/// `VTMUX_BETA3_BINARY` (the release binary, or `cargo build -p vtmux` at
+/// its commit, 034e438a). A beta3 server restored from its checkpoint (a
+/// pane still waiting, dead with its saved screen, and one respawned
+/// under beta3's restart guard), with `vtmux-persist` on, a live pane with
+/// history and a beta3 client attached: onto this build, back onto beta3
+/// and onto this build again. Each time the pid, the panes, their screens
+/// and history stay and the client follows. This build takes the waiting
+/// pane as an ordinary dead pane, knows no persistence option (`@` ones
+/// kept), lets the guarded pane's program exit as any pane's and writes
+/// nothing to the checkpoint directory.
+#[test]
+#[ignore = "needs VTMUX_BETA3_BINARY, a 3.8-beta3 vtmux"]
+#[expect(clippy::too_many_lines, reason = "three upgrades in a row")]
+fn a_beta3_server_upgrades_onto_this_build_and_back() {
+    let beta3 =
+        PathBuf::from(std::env::var_os("VTMUX_BETA3_BINARY").expect("VTMUX_BETA3_BINARY is set"));
+    let world = World::new();
+    *world.client.lock().unwrap() = beta3.clone();
+    let shown = |pane: &str, word: &str| {
+        world
+            .run(&["capture-pane", "-p", "-t", pane])
+            .contains(word)
+    };
+    // A beta3 checkpoint: two panes that printed a word each.
+    let out = output_retrying(|| {
+        world.command_of(
+            &beta3,
+            &[
+                "new",
+                "-d",
+                "-s",
+                "r",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "sh",
+                "-c",
+                "echo saved-one; exec cat -",
+            ],
+        )
+    });
+    assert!(out.status.success(), "{out:?}");
+    world.run(&[
+        "splitw",
+        "-d",
+        "-t",
+        "r",
+        "sh",
+        "-c",
+        "echo saved-two; exec cat -",
+    ]);
+    wait("both words", || {
+        shown("r:0.0", "saved-one") && shown("r:0.1", "saved-two")
+    });
+    world.run(&["set", "-s", "vtmux-persist", "full"]);
+    world.run(&["set", "-g", "vtmux-persist-drop", "@murmur_*"]);
+    world.run(&["kill-server"]);
+    let state = world.home.path().join(".local/state/vtmux");
+    let manifest = || {
+        std::fs::read_dir(&state)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("manifest"))
+            .find(|m| m.exists())
+    };
+    wait("beta3's checkpoint", || manifest().is_some());
+    // The next start restores it; then sessions of every kind, a pane
+    // with history, a user option, a beta3 client.
+    world.populate(&[]);
+    world.run(&["set", "-g", "@keep", "yes"]);
+    world.run(&[
+        "neww",
+        "-d",
+        "-t",
+        "b",
+        "-n",
+        "hist",
+        "sh",
+        "-c",
+        "seq 3000; exec cat -",
+    ]);
+    wait("the history", || shown("b:hist", "3000"));
+    let dead = |pane: &str| world.run(&["display", "-p", "-t", pane, "#{pane_dead}"]);
+    assert_eq!(dead("r:0.0"), "1\n", "beta3 restored it");
+    assert!(shown("r:0.0", "saved-one"));
+    // Respawned with no input yet: beta3 guards it (`restart_from`).
+    world.run(&["respawn-pane", "-t", "r:0.1", "cat", "-"]);
+    let guarded = world
+        .run(&["display", "-p", "-t", "r:0.1", "#{pane_pid}"])
+        .trim()
+        .to_owned();
+    let mut attached = Attached::of(&world, &beta3, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let pid = world.pid();
+    let state_now = || {
+        let mut out = world.run(&[
+            "lsp",
+            "-a",
+            "-F",
+            "#{pane_id} #{pane_pid} #{pane_dead} #{pane_dead_status} #{history_size}",
+        ]);
+        for pane in ["r:0.0", "b:hist"] {
+            out.push_str(&world.run(&["capture-pane", "-p", "-S", "-", "-t", pane]));
+        }
+        out
+    };
+    let before = state_now();
+
+    // Onto this build.
+    let at = attached.len();
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "onto this build");
+    *world.client.lock().unwrap() = bin();
+    assert_eq!(world.pid(), pid);
+    assert_eq!(state_now(), before);
+    reexecuted(&attached, at);
+    assert_eq!(dead("r:0.0"), "1\n");
+    let out = world
+        .command(&["show", "-s", "vtmux-persist"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("invalid option: vtmux-persist"),
+        "{out:?}"
+    );
+    assert!(!world.run(&["show", "-g"]).contains("vtmux-persist"));
+    assert_eq!(world.run(&["show", "-gv", "@keep"]), "yes\n");
+    let written = std::fs::read(manifest().unwrap()).unwrap();
+    // The guarded program's exit is any pane's: `remain-on-exit` is off,
+    // so the pane goes (beta3 kept it as restored).
+    let raw = rustix::process::Pid::from_raw(guarded.parse().unwrap()).unwrap();
+    rustix::process::kill_process(raw, rustix::process::Signal::TERM).unwrap();
+    wait("the guarded pane closed", || {
+        world.run(&["lsp", "-t", "r", "-F", "#{pane_index}"]) == "0\n"
+    });
+    let before = state_now();
+
+    // Back onto beta3: it reads no persistence option, so it writes none.
+    let at = attached.len();
+    assert_eq!(world.upgrade(&beta3), Some(upgraded()), "onto beta3");
+    *world.client.lock().unwrap() = beta3.clone();
+    assert_eq!(world.pid(), pid);
+    assert_eq!(state_now(), before);
+    reexecuted(&attached, at);
+    assert_eq!(world.run(&["show", "-sv", "vtmux-persist"]), "off\n");
+    assert_eq!(world.run(&["show", "-gv", "@keep"]), "yes\n");
+
+    // And onto this build again.
+    let at = attached.len();
+    assert_eq!(
+        world.upgrade(&bin()),
+        Some(upgraded()),
+        "onto this build again"
+    );
+    *world.client.lock().unwrap() = bin();
+    assert_eq!(world.pid(), pid);
+    assert_eq!(state_now(), before);
+    reexecuted(&attached, at);
+    attached.keys("typed\r");
+    wait("the keys to reach the pane", || shown("a:w1", "typed"));
+    world.run(&["kill-server"]);
+    assert_eq!(
+        std::fs::read(manifest().unwrap()).unwrap(),
+        written,
+        "the checkpoint as beta3 left it"
+    );
 }

@@ -63,11 +63,6 @@ impl Server {
         let Some(status) = self.model.panes.get(&p).and_then(|x| x.status) else {
             return;
         };
-        // vtmux (decision 31): a restored pane's screen is never lost to
-        // a restart that did not run.
-        if notify && self.keep_restored(p) {
-            return;
-        }
         let pane = &self.model.panes[&p];
         let remain =
             Remain::from_option(self.model.number_option(TreeId::Pane(p), "remain-on-exit"));
@@ -102,18 +97,6 @@ impl Server {
     /// new last line; the cursor stays at its start, hidden. False when
     /// the format is empty and nothing is drawn.
     pub(crate) fn draw_dead_line(&mut self, p: PaneId) -> bool {
-        self.dead_line(p, false)
-    }
-
-    /// [`Server::draw_dead_line`] for a pane restored from a checkpoint
-    /// (vtmux only, D27), whose screen is the one saved: when its last row
-    /// is blank the line goes there without the scroll, so every saved row
-    /// stays where it was and none goes into history; otherwise as tmux.
-    pub(crate) fn draw_restored_dead_line(&mut self, p: PaneId) -> bool {
-        self.dead_line(p, true)
-    }
-
-    fn dead_line(&mut self, p: PaneId, restored: bool) -> bool {
         let template = self
             .model
             .options
@@ -154,11 +137,9 @@ impl Server {
                 bytes,
                 "\x0f\x1b(B\x1b]8;;\x1b\\\x1b[0m\x1b[4l\x1b[?7h\x1b[?69l\x1b[r\x1b[{sy};1H"
             );
-            if !(restored && bottom_row_blank(&pane.term, sy)) {
-                bytes.extend_from_slice(b"\x1bD");
-                if sy >= 2 {
-                    mark_wrapped(&mut bytes, &pane.term, sx, sy);
-                }
+            bytes.extend_from_slice(b"\x1bD");
+            if sy >= 2 {
+                mark_wrapped(&mut bytes, &pane.term, sx, sy);
             }
             write_cells(&mut bytes, &line.cells, sy);
             let _ = write!(bytes, "\x1b[0m\x1b[{sy};1H");
@@ -221,11 +202,6 @@ impl Server {
             return false;
         };
         if !pane.exited && pane.io.is_some() {
-            return false;
-        }
-        // Decision 32: a restored pane waits for Enter instead while the
-        // option offers it; tmux's rule applies again once respawned.
-        if pane.restored_from.is_some() && self.respawn_setting() != crate::restored::Respawn::Off {
             return false;
         }
         let remain =
@@ -297,19 +273,6 @@ fn mark_wrapped(out: &mut Vec<u8>, term: &vtmux_vt::PaneTerm, sx: u16, sy: u16) 
         );
     }
     let _ = write!(out, "\x1b[0m\x1b[{sy};1H\x1b[X");
-}
-
-/// Whether the bottom row of `term` (`sy` rows) was never written: no
-/// cell used (tmux's `cellused`), none with text, a style or a link, and
-/// not wrapped.
-fn bottom_row_blank(term: &vtmux_vt::PaneTerm, sy: u16) -> bool {
-    let row = term.row(term.history_size() + usize::from(sy) - 1);
-    term.bottom_row_used() == 0
-        && !row.wrapped
-        && row
-            .cells
-            .iter()
-            .all(|c| c.text.is_empty() && c.style == vtmux_vt::Style::default() && c.link.is_none())
 }
 
 /// The SGR that gives a grid cell `style`, from a reset.

@@ -64,9 +64,6 @@ pub fn exec(server: &mut Server, args: &Args, found: Found) -> Result<(), CmdErr
             && let Some(io) = pane.io.as_mut()
         {
             io.write(&out);
-            if !out.is_empty() {
-                pane.took_input();
-            }
         }
         server.pane_output_queued(p);
     }

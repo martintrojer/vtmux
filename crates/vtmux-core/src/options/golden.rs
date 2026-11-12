@@ -579,65 +579,6 @@ fn vtmux_graphics_limit_is_a_hidden_server_number() {
     assert!(!sim.take().contains(NAME));
 }
 
-/// `vtmux-persist-respawn` (D27, decision 32): a server choice, `key`
-/// until set, `off`, `key` or `auto`, hidden from listings until set.
-#[test]
-fn vtmux_persist_respawn_is_a_hidden_server_choice() {
-    const NAME: &str = "vtmux-persist-respawn";
-    let mut sim = Sim::new();
-    sim.argv(&["show", "-s"]);
-    assert!(!sim.take().contains(NAME));
-    for c in [
-        &["show", "-sv", NAME][..],
-        &["set", "-s", NAME, "auto"],
-        &["show", "-s", NAME],
-        &["set", "-s", NAME, "always"],
-        &["show", "-sv", NAME],
-        &["set", "-s", NAME, "off"],
-        &["show", "-sv", NAME],
-        &["set", "-su", NAME],
-        &["show", "-s", NAME],
-    ] {
-        sim.argv(c);
-    }
-    assert_eq!(
-        sim.take(),
-        format!("key\n{NAME} auto\nunknown value: always\nauto\noff\n{NAME} key\n")
-    );
-    sim.argv(&["show", "-s"]);
-    assert!(!sim.take().contains(NAME));
-}
-
-/// `vtmux-persist` (D27, decision 17): a server option, `off` until set,
-/// `layout` or `full`, hidden from listings until set like every vtmux
-/// option.
-#[test]
-fn vtmux_persist_is_a_hidden_server_choice() {
-    const NAME: &str = "vtmux-persist";
-    let mut sim = Sim::new();
-    sim.argv(&["show", "-s"]);
-    assert!(!sim.take().contains(NAME));
-    for c in [
-        &["show", "-sv", NAME][..],
-        &["set", "-s", NAME, "layout"],
-        &["show", "-s", NAME],
-        &["set", "-g", NAME, "full"],
-        &["show", "-sv", NAME],
-        &["set", "-s", NAME, "screens"],
-        &["show", "-sv", NAME],
-        &["set", "-su", NAME],
-        &["show", "-s", NAME],
-    ] {
-        sim.argv(c);
-    }
-    assert_eq!(
-        sim.take(),
-        format!("off\n{NAME} layout\nfull\nunknown value: screens\nfull\n{NAME} off\n")
-    );
-    sim.argv(&["show", "-s"]);
-    assert!(!sim.take().contains(NAME));
-}
-
 /// `vtmux-kitty-keys` (D29): a server flag, `off` until set, hidden from
 /// listings until set like every vtmux option (D28 rule 4).
 #[test]
@@ -696,32 +637,24 @@ fn vtmux_notifications_is_a_hidden_server_flag() {
     assert!(!sim.take().contains(NAME));
 }
 
-/// `vtmux-persist-drop` (D27, decision 30): a session array of globs,
-/// empty until set, assigned from one string as `update-environment` is,
-/// hidden from listings until set.
+/// The persistence options are gone (live-upgrade spec, *Removal*,
+/// 2026-11-12): a config still setting one gets tmux's unknown-option
+/// error, as for any option vtmux lacks.
 #[test]
-fn vtmux_persist_drop_is_a_hidden_session_array() {
-    const NAME: &str = "vtmux-persist-drop";
+fn the_persistence_options_are_gone() {
     let mut sim = Sim::new();
-    sim.argv(&["show", "-g"]);
-    assert!(!sim.take().contains(NAME));
-    for c in [
-        &["show", "-gv", NAME][..],
-        &["set", "-g", NAME, "@murmur_* @x"],
-        &["show", "-g", NAME],
-        &["set", "-ga", NAME, "@y"],
-        &["show", "-gv", NAME],
-        &["set", "-gu", NAME],
-        &["show", "-gv", NAME],
+    for name in [
+        "vtmux-persist",
+        "vtmux-persist-respawn",
+        "vtmux-persist-drop",
     ] {
-        sim.argv(c);
+        sim.argv(&["set", "-s", name, "off"]);
+        sim.argv(&["show", "-g", name]);
     }
     assert_eq!(
         sim.take(),
-        // An empty array shows nothing with -v, as tmux's
-        // `update-environment` does.
-        format!("{NAME}[0] @murmur_*\n{NAME}[1] @x\n@murmur_*\n@x\n@y\n")
+        "invalid option: vtmux-persist\ninvalid option: vtmux-persist\n\
+         invalid option: vtmux-persist-respawn\ninvalid option: vtmux-persist-respawn\n\
+         invalid option: vtmux-persist-drop\ninvalid option: vtmux-persist-drop\n"
     );
-    sim.argv(&["show", "-g"]);
-    assert!(!sim.take().contains(NAME));
 }

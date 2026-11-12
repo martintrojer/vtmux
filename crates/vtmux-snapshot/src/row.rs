@@ -917,8 +917,8 @@ pub const MAX_PAGE_ROWS: u32 = 1 << 16;
 pub const MAX_PAGE_CELLS: u64 = 1 << 22;
 
 /// A run of history rows, LZ4-compressed, named by the hash of their
-/// encoding. `data` is empty in a snapshot decoded without its chunks (see
-/// [`crate::decode_with`]).
+/// encoding. `data` was empty in a `vtmux-persist` manifest (3.8-beta3
+/// and before), whose pages lived in files of their own.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryPage {
     pub rows: u32,

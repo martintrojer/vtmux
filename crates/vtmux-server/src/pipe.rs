@@ -233,7 +233,6 @@ impl Server {
             && let Some(io) = pane.io.as_mut()
         {
             io.write(&got);
-            pane.took_input();
             self.pane_output_queued(p);
         }
         if closed {

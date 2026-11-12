@@ -1,7 +1,6 @@
 //! A pane's terminal through the snapshot format and back (live upgrade
 //! spec, decisions 5, 11 and 23): `term_to_snapshot`, a whole snapshot
-//! stream encoded and decoded (the upgrade stream inline, a checkpoint as
-//! manifest plus chunks), `term_from_snapshot`. The pane that comes back
+//! stream encoded and decoded, `term_from_snapshot`. The pane that comes back
 //! is the same terminal: every capture (`capture-pane -e -S -` and the
 //! other flags), cursor, mode, row flag, history time and the re-exported
 //! state outside the page structure are equal, and the same further input
@@ -10,8 +9,6 @@
 
 #[path = "../../vtmux-vt/tests/state/harness.rs"]
 mod harness;
-
-use std::collections::HashMap;
 
 use harness::{
     Fuzz, PROBE, exported, exported_flat, flat_text, fuzz_seeds, observe, oracle_programs,
@@ -24,8 +21,8 @@ use vtmux_snapshot as snap;
 use vtmux_vt::{Compression, ImportCheck, PATCH_STACK, PaneTerm, StateError};
 
 /// `t` alone in a consistent snapshot, encoded as `form` travels (an
-/// upgrade stream for `SamePin`, a checkpoint manifest and its chunks for
-/// `Rows`), decoded, checked, and its terminal taken out again.
+/// upgrade stream onto this patch stack for `SamePin`, onto another for
+/// `Rows`, rows only), decoded, checked, and its terminal taken out again.
 fn through_stream(t: snap::TermState, form: Form) -> snap::TermState {
     let mut s = snap::Snapshot {
         windows: vec![snap::Window {
@@ -54,20 +51,12 @@ fn through_stream(t: snap::TermState, form: Form) -> snap::TermState {
     if has_ghostty_pages(term) {
         s.meta.requires.push(ghostty_pages_requirement());
     }
+    let bytes = snap::encode(&s);
     let decoded = match form {
-        Form::SamePin => {
-            let bytes = snap::encode(&s);
-            snap::decode_for(&bytes, &reader_features(), |_| None).expect("decode")
-        }
+        Form::SamePin => snap::decode_for(&bytes, &reader_features()).expect("decode"),
         Form::Rows => {
-            assert!(!has_ghostty_pages(term), "a checkpoint holds rows only");
-            let chunks: HashMap<snap::Hash, Vec<u8>> = s
-                .pages()
-                .into_iter()
-                .map(|p| (p.hash, p.data.clone()))
-                .collect();
-            let manifest = snap::encode_manifest(&s);
-            snap::decode_with(&manifest, |h| chunks.get(h).cloned()).expect("decode")
+            assert!(!has_ghostty_pages(term), "rows only, for any reader");
+            snap::decode(&bytes).expect("decode")
         }
     };
     decoded.check().expect("check");
@@ -258,9 +247,9 @@ fn rows_scrolled_in_under_an_rgb_background_round_trip() {
 }
 
 /// The oracle pane programs, each cut at a quarter, half, three quarters
-/// and the end, through a checkpoint; at the end with its history
-/// compressed too, through an upgrade stream (pages in Ghostty's form) and
-/// through a checkpoint (compressed pages decoded into rows).
+/// and the end, as rows; at the end with its history compressed too,
+/// through an upgrade stream (pages in Ghostty's form) and as rows
+/// (compressed pages decoded).
 #[test]
 fn oracle_pane_programs_round_trip() {
     let programs = oracle_programs();
@@ -281,7 +270,7 @@ fn oracle_pane_programs_round_trip() {
 }
 
 /// History spread over many Ghostty pages, some compressed: each form
-/// keeps the page layout, and a checkpoint is rows only.
+/// keeps the page layout, and `Rows` is rows only.
 #[test]
 fn long_history_in_both_forms() {
     let mut text = Vec::new();
@@ -405,13 +394,12 @@ fn pages_text(pages: &[snap::HistoryPage]) -> Vec<String> {
     out
 }
 
-/// A reader from before Ghostty patch 0038 (a downgrade, an older binary
-/// restoring a checkpoint) shows, under the alternate screen, the copy of
+/// A reader from before Ghostty patch 0038 (a downgrade) shows, under the alternate screen, the copy of
 /// tmux's history it took on `?1049h` (`AltEntry::history`, trimmed from
 /// the oldest end by a history-limit lowered meanwhile). A writer of rows
 /// puts the newest `hsize` primary rows there, at the width the primary
-/// was left at, the primary's own pages where the cut leaves them whole
-/// (a checkpoint stores those chunks once); an upgrade to this patch stack
+/// was left at, the primary's own pages where the cut leaves them whole;
+/// an upgrade to this patch stack
 /// carries none, as `?1049h` takes none.
 #[test]
 fn an_older_reader_gets_its_copy_of_the_hidden_history() {
@@ -834,7 +822,7 @@ fn alternate_screen_slots_round_trip() {
 }
 
 /// What a reader from before `sized_primary` and `alternate_saved` (the
-/// build before, after a downgrade or reading a checkpoint) reads of a
+/// build before, after a downgrade) reads of a
 /// pane with `?1049` or `?47` up: the primary screen at the terminal's
 /// size, reflowed as its emulator kept it, and `?1049h`'s save in the
 /// primary screen's DECSC slot, where its `?1049l` restores from. Nothing

@@ -333,20 +333,6 @@ pub struct Pane {
     pub kitty_owner: [Option<i32>; 2],
     /// D33: its kitty graphics as the server keeps them.
     pub graphics: PaneGraphics,
-    /// vtmux only (live-upgrade spec, decision 31): the write time of the
-    /// checkpoint a cold restore brought it back from (epoch seconds),
-    /// while it waits to be respawned; `None` for every other pane.
-    pub restored_from: Option<i64>,
-    /// The status text the renderer draws over its bottom row while it is
-    /// restored and dead, at the width it was made for
-    /// ([`crate::remain`]); never in its grid.
-    pub restored_hint: Option<(u16, Vec<vtmux_core::styled::Cell>)>,
-    /// Respawned from a restored pane and given no input since: the
-    /// checkpoint time it came from, so the program's exit puts the pane
-    /// back as restored instead of closing it (decision 31, *A restart
-    /// that does not run*). The first input written to the program (a
-    /// key, a paste, `send-keys`) clears it ([`Pane::took_input`]).
-    pub restart_guard: Option<i64>,
 }
 
 /// D33: a pane's kitty graphics as the server keeps them
@@ -2380,12 +2366,6 @@ impl Rect {
 }
 
 impl Pane {
-    /// Input was written to the program: its exit is an ordinary one from
-    /// now on, a restart that ran ([`Pane::restart_guard`]).
-    pub fn took_input(&mut self) {
-        self.restart_guard = None;
-    }
-
     /// `window_pane_resize` (window.c:1702-1740) plus the pane offsets: the
     /// terminal reflows at once; the program hears of a new size later,
     /// from the queue [`Self::send_resizes`] works through. The old size
