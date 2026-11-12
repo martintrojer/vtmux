@@ -50,3 +50,9 @@ All are within noise. tmux in the same runs: agent_panes 3.1 / 3.2 and 5.4 / 6.3
 - `attach::a_key_flood_leaves_commands_answered_between_its_reads` (end to end, vtmux only): an attached client floods keys into `cat >file` while a control client sends `display -p` 11 times. It asserts that the median of the bytes reaching the pane during one round trip is under 64 KB. Against the base release binary: 168-358 KB, median 176 KB, fails. After: 1.5-8 KB, median 4 KB. It is vtmux only because tmux handles keys several times faster, so its keys per round trip say nothing of its latency.
 - `server::tests::a_flooding_client_is_read_a_budget_a_turn`: a socket holding more than two budgets takes more than `sent / budget` reads. Each read that stops short leaves the client in the backlog with a zero poll timeout.
 - Stress: both, 5x under 48 busy loops (`flock /tmp/vtmux-stress.lock`), 5/5 each. The end-to-end test once more with a dash-like `/bin/sh` (a POSIX-mode bash that forks its last command, bind-mounted over `/usr/bin/bash` in a user and mount namespace): passed.
+
+## Gate
+
+GATE: c678a49d `muzzle run --class high --rule vtmux-check --run-timeout 3000 -- mise exec -- bash scripts/check.sh` (the slow gate, all of it)
+RESULT: exit 0 in 4 min 22 s; cargo test 1709 passed, 0 failed, 10 ignored; regress 171/174 pass, 1 xfail, 2 flaky (clock-mode.sh, screen-redraw-menus.sh, passed on retry), 0 skipped; oracle replay 443/443, `--upgrade-every 3` 443/443, `--upgrade-every 1` 9/9. Skipped: the macOS type-check (no aarch64-apple-darwin target installed).
+CONDITIONS: Linux 6.16, AMD EPYC Genoa, 96 CPUs, shared with other workers (load 13-38); suites in parallel (`nproc` 96); Rust from `rust-toolchain.toml`, Zig 0.17.0 via mise; Ghostty source copied from a local build at the pinned commit with this tree's patches (no network).
