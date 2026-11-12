@@ -245,6 +245,11 @@ pub(crate) struct Client {
     /// `c->exit_timer` (server-client.c:2361-2387): when a closing client
     /// whose output has not drained is looked at again.
     exit_deadline: Option<Instant>,
+    /// A write to the socket failed (the peer is gone): lost at the next
+    /// turn's [`Server::exit_timers`], not inside the command that wrote,
+    /// as tmux finds a peer's error only in its event loop (proc.c
+    /// `proc_event_cb`), after the command ran to its end.
+    write_failed: bool,
     /// When the socket last took a byte, for the exit timer.
     last_write: Instant,
     /// `CLIENT_DEAD` (server-client.c:491): being dropped. Nothing more is
@@ -410,6 +415,7 @@ impl Client {
             unacked: Unacked::default(),
             closing: false,
             exit_deadline: None,
+            write_failed: false,
             last_write: Instant::now(),
             dead: false,
             suspended: false,
@@ -1982,6 +1988,7 @@ impl Server {
             Err(_) => {
                 c.out = Outbox::default();
                 c.closing = true;
+                c.write_failed = true;
             }
         }
         // Re-armed only while output is left, or to drop WRITABLE: the
@@ -1999,7 +2006,12 @@ impl Server {
                     .registry()
                     .reregister(&mut c.stream, Token(CLIENT_BASE + id.0), interest);
         }
-        if c.closing && c.out.is_empty() {
+        if c.write_failed {
+            // Lost once this turn's commands are done: attach-session sends
+            // Ready and then the terminal setup, and a client gone between
+            // them is still the attached client it made (client-detached).
+            c.exit_deadline = Some(Instant::now());
+        } else if c.closing && c.out.is_empty() {
             self.drop_client(id);
         } else if c.closing {
             c.exit_deadline
@@ -2027,6 +2039,10 @@ impl Server {
             let Some(c) = self.clients.get_mut(&id) else {
                 continue;
             };
+            if c.write_failed {
+                self.drop_client(id);
+                continue;
+            }
             c.out.discard(|k| k != OutKind::Last);
             c.exit_deadline = Some(now + EXIT_TIMEOUT);
             self.flush_client(id);
@@ -6968,10 +6984,10 @@ mod tests {
     }
 
     /// Two `wait-for -E -v` waiters on one event, the first one's socket
-    /// closed before the event fires: printing its payload drops that
-    /// client while the waiters are woken (`flush_client`). The second
-    /// still gets the payload and its exit, and nothing of the first is
-    /// left queued.
+    /// closed before the event fires: printing its payload fails while the
+    /// waiters are woken (`flush_client`), and the client is lost at the
+    /// next turn. The second still gets the payload and its exit, and
+    /// nothing of the first is left queued.
     #[test]
     fn an_event_waiter_dropped_while_woken_leaves_the_others_alone() {
         use crate::server::snapshot::tests::{connect, hello, messages, ok};
@@ -7003,8 +7019,67 @@ mod tests {
                 .any(|m| matches!(m, ServerMsg::Exit { code: 0, .. })),
             "{got:?}"
         );
+        server.exit_timers(std::time::Instant::now());
         assert!(!server.clients.contains_key(&gone));
         assert_eq!(server.cmdq_batches_of(gone), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A terminal client gone before `attach-session` has written to it
+    /// (its peer cut the connection as `Ready` came: a SIGTERM then, on a
+    /// loaded host) is still the attached client the command made: lost at
+    /// the next turn, it fires client-detached (server-client.c
+    /// `server_client_lost`; tmux finds a peer's error only in its event
+    /// loop, proc.c `proc_event_cb`). Before, the failed write dropped it
+    /// inside the attach, before it counted as attached, and no
+    /// client-detached fired.
+    #[test]
+    fn a_client_gone_during_its_attach_is_lost_as_attached() {
+        use crate::server::snapshot::tests::{hello, ok, run, server, temp_dir};
+        use vtmux_core::protocol::{ControlMode, TtyInfo};
+        let dir = temp_dir("gone");
+        let mut server = server(&dir);
+        ok(&mut server, &dir, &["new-session", "-d", "-s", "s"]);
+        ok(
+            &mut server,
+            &dir,
+            &["set-hook", "-g", "client-detached", "set -g @gone yes"],
+        );
+        let (ours, peer) = mio::net::UnixStream::pair().unwrap();
+        drop(peer);
+        let id = super::ClientId(server.next_client);
+        server.next_client += 1;
+        server.clients.insert(id, super::Client::new(ours, 0));
+        let tty = TtyInfo {
+            name: "/dev/vtmux-test-tty".into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        };
+        server.on_hello(
+            id,
+            hello(
+                &["attach-session", "-t", "s"],
+                &dir,
+                Some(tty),
+                ControlMode::None,
+            ),
+        );
+        assert!(
+            server
+                .clients
+                .get(&id)
+                .is_some_and(|c| !c.dead && c.was_attached),
+            "dropped inside the attach"
+        );
+        server.exit_timers(std::time::Instant::now());
+        server.cmdq_process();
+        assert!(server.clients.get(&id).is_none_or(|c| c.dead));
+        assert_eq!(
+            run(&mut server, &dir, &["show", "-gv", "@gone"]),
+            "$ show -gv @gone\nyes\n--stderr--\n--exit Some(0)--\n"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

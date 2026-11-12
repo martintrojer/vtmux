@@ -1078,7 +1078,8 @@ fn closed(server: &Server, id: ClientId) {
 }
 
 /// A client lost during the notice (its socket takes no more: the
-/// teardown's write fails) is dropped only once the exec has returned:
+/// teardown's write fails) is dropped only at the turn after the exec has
+/// returned:
 /// every descriptor the snapshot names is still open at the exec, which
 /// would otherwise fail on the closed one (EBADF), after the client's
 /// hooks had run in the middle of it.
@@ -1094,6 +1095,7 @@ fn a_client_lost_during_the_notice_is_dropped_after_the_exec() {
     let exec = execs().pop().expect("exec");
     assert!(exec.keep.contains(&fd));
     assert_eq!(exec.closed, [] as [RawFd; 0]);
+    server.exit_timers(Instant::now());
     assert!(
         !server.clients.contains_key(&f),
         "dropped once the exec failed"
