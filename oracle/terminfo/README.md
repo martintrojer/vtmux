@@ -7,4 +7,5 @@ uses (`w/wezterm`, and `77/wezterm` where the file system folds case). vtmux its
 (D-007): `crates/vtmux-core/tests/terminfo_table.py` turns the full database into its table.
 
 `xterm-ghostty` is Ghostty's own entry, the one vtmux's table carries: `src/terminfo/ghostty.zig` at the pinned
-ghostty commit, written out as `Source.encode` does and compiled with `tic -x` (ncurses 6.2).
+ghostty commit, written out as `Source.encode` does and compiled with `tic -x` (ncurses 6.2). Ghostty is MIT,
+Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors: its licence is `LICENSE-ghostty` here, from the same commit.
