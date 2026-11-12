@@ -42,7 +42,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           reference-tmux: ${{ !startsWith(matrix.stage, 'lint') }}
-          cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
+          cache-key: ${{ startsWith(matrix.stage, 'lint') && 'lint' || (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
           # The macOS type-check, for the pushes no macOS job runs on, and
           # the static release build's libc.
           targets: ${{ startsWith(matrix.stage, 'lint') && 'aarch64-apple-darwin,x86_64-unknown-linux-musl' || '' }}
@@ -91,7 +91,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           reference-tmux: ${{ !startsWith(matrix.stage, 'lint') }}
-          cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
+          cache-key: ${{ startsWith(matrix.stage, 'lint') && 'lint' || (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
       - name: check.sh --only ${{ matrix.stage }}
         run: bash scripts/check.sh --only ${{ matrix.stage }}
       - uses: actions/upload-artifact@v4
