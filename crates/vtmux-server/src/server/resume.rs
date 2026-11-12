@@ -828,8 +828,8 @@ impl Server {
         // The editors the snapshot does not carry (an editor pane resumes
         // as a plain modal pane): their 0600 temp files would outlive the
         // exec (no destructor runs), so they go now, the last moment before
-        // it. Not at `to_snapshot`'s export: that runs for each dry run, with
-        // the server serving on. An
+        // it. Not at `to_snapshot`'s export: that runs for each dry run,
+        // with the server serving on. An
         // exec that returns puts them back as they were, for the editors
         // still running.
         let edits: Vec<(PathBuf, Option<Vec<u8>>)> = self
@@ -1220,6 +1220,20 @@ mod tests {
             check_bytes(&snap::encode(&no_listener)),
             Err("no listening socket kept".to_owned())
         );
+        // A `vtmux-persist` checkpoint (3.8-beta3 and before) is no
+        // upgrade: no build restores one since 2026-11-12.
+        for purpose in [
+            snap::Purpose::CheckpointLayout,
+            snap::Purpose::CheckpointFull,
+        ] {
+            let mut checkpoint = taken.clone();
+            checkpoint.meta.purpose = purpose;
+            checkpoint.descriptors.clear();
+            assert_eq!(
+                check_bytes(&snap::encode(&checkpoint)),
+                Err(format!("not an upgrade snapshot: {purpose:?}"))
+            );
+        }
         drop(server);
     }
 
