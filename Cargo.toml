@@ -36,9 +36,9 @@ module_name_repetitions = "allow"
 # Rust crates only; libghostty-vt's Zig archive links as native code, still
 # ReleaseFast (its build script reads DEBUG and OPT_LEVEL, which this leaves
 # alone: debug info here would set DEBUG=true and build ghostty in Debug).
-# panic stays unwind: a live upgrade's resume and the persistence restore
-# catch a panic to switch back or refuse (server/resume.rs `guarded`,
-# server/restore.rs), where abort would close every pane's PTY.
+# panic stays unwind: a live upgrade's resume and its dry run catch a panic
+# to switch back or refuse (server/resume.rs `guarded`), where abort would
+# close every pane's PTY.
 [profile.release]
 lto = "fat"
 codegen-units = 1

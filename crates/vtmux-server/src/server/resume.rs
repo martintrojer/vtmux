@@ -175,7 +175,7 @@ fn leave_hint(s: &snap::Snapshot) -> Option<String> {
 /// `rebuild()`, a panic in it turned into an error: a failed rebuild in
 /// the new image leads to the switch back, not to an exit that would close
 /// every pane's PTY.
-pub(super) fn guarded(rebuild: impl FnOnce() -> io::Result<Server>) -> Result<Server, String> {
+fn guarded(rebuild: impl FnOnce() -> io::Result<Server>) -> Result<Server, String> {
     match catch_unwind(AssertUnwindSafe(rebuild)) {
         Ok(Ok(server)) => Ok(server),
         Ok(Err(e)) => Err(e.to_string()),
