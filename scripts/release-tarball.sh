@@ -5,8 +5,12 @@
 #   scripts/release-tarball.sh <target-name> [tag]
 #
 # <target-name> is the Rust target triple that names the tarball
-# (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, aarch64-apple-darwin),
-# so `mise use github:martintrojer/vtmux` finds the asset for its platform.
+# (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, aarch64-apple-darwin,
+# x86_64-unknown-linux-musl, aarch64-unknown-linux-musl), so `mise use
+# github:martintrojer/vtmux` finds the asset for its platform. A gnu or
+# darwin target is this host's own build; a musl one is a static binary of
+# the same CPU (`rustup target add <target>` first), linked by `zig cc`
+# against Zig's own musl.
 # With a tag (v3.8-beta1), the built binary's version must match it (D25: the tag
 # is `v` + what `vtmux -V` prints). Writes target/dist/vtmux-v<version>-<target>.tar.gz
 # and its .sha256, and prints the tarball's path.
@@ -16,8 +20,39 @@ cd "$(dirname "$0")/.."
 target=${1:?usage: release-tarball.sh <target-name> [tag]}
 tag=${2:-}
 
-cargo build --release --locked -p vtmux
-bin=target/release/vtmux
+case "$target" in
+*-linux-musl)
+  # Rust's musl target links its own crt objects and libc.a by default;
+  # Zig's musl (the one libghostty-vt is built against) instead, through
+  # `zig cc`, and no self-contained objects to clash with it. `zig cc`
+  # refuses the Cortex-A53 erratum flag rustc gives aarch64 (as
+  # cargo-zigbuild, it is dropped).
+  linker=$PWD/target/zig-cc-$target
+  mkdir -p target
+  cat >"$linker" <<EOF
+#!/bin/sh
+for a; do
+  shift
+  case \$a in -Wl,--fix-cortex-a53-843419) ;; *) set -- "\$@" "\$a" ;; esac
+done
+exec zig cc -target ${target%%-*}-linux-musl "\$@"
+EOF
+  chmod +x "$linker"
+  env_target=$(echo "$target" | tr a-z- A-Z_)
+  export "CARGO_TARGET_${env_target}_LINKER=$linker"
+  export "CARGO_TARGET_${env_target}_RUSTFLAGS=-C link-self-contained=no"
+  cargo build --release --locked -p vtmux --target "$target"
+  bin=target/$target/release/vtmux
+  # Static: no interpreter, no shared libraries.
+  case "$(readelf -l -d "$bin")" in
+  *INTERP* | *NEEDED*) echo "$bin is not static" >&2 && exit 1 ;;
+  esac
+  ;;
+*)
+  cargo build --release --locked -p vtmux
+  bin=target/release/vtmux
+  ;;
+esac
 
 # D25: as vtmux, `-V` prints `vtmux 3.8-beta1`; as tmux, `tmux 3.8`.
 version=$("$bin" -V)

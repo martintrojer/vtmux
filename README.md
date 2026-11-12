@@ -99,6 +99,8 @@ mise use -g github:martintrojer/vtmux
 ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
 ```
 
+Older glibc than 2.35 (EL9, Debian 11)? Take the static Linux build: `mise use -g "github:martintrojer/vtmux[matching=musl]"` (Alpine gets it by default).
+
 Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
 With cargo. The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:

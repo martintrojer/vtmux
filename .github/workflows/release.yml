@@ -1,7 +1,10 @@
 name: release
 # A tag `v<version>` builds the release tarballs and publishes them as a
 # GitHub release (assets named by Rust target triple, as ramble's, so
-# `mise use -g github:martintrojer/vtmux` installs it).
+# `mise use -g github:martintrojer/vtmux` installs it: mise's github backend
+# scores the triple's libc, so a glibc host gets the gnu tarball and a musl
+# one (Alpine) the musl tarball; `[matching=musl]` picks the static one on
+# a glibc older than the gnu build's).
 #
 # To cut one (D25: the version is the tmux release it is tested against):
 # set `version` in Cargo.toml (3.8.0-beta.1 displays as 3.8-beta1), add its
@@ -31,6 +34,12 @@ jobs:
             runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
+          # Static (musl, linked by `zig cc`): runs on any Linux of the CPU,
+          # whatever its glibc (EL9's 2.34, Debian 11's 2.31) or none (Alpine).
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-22.04-arm
           # Zig 0.17 (the ghostty pin's) targets macOS 15+, as ci.yml's macOS job.
           - target: aarch64-apple-darwin
             runner: macos-15
@@ -42,6 +51,7 @@ jobs:
         with:
           reference-tmux: "false"
           rust-cache: "false"
+          targets: ${{ matrix.target }}
       # vtmux-ghostty-vt-sys's build script downloads the pinned ghostty commit,
       # applies the vendored patches and builds it with Zig (ReleaseFast,
       # baseline CPU).
@@ -59,9 +69,10 @@ jobs:
             echo '```'
             cat "$tarball.sha256"
             ls -l "$tarball"
-            if [ "$RUNNER_OS" = Linux ]; then
-              echo "needs glibc $(objdump -T target/release/vtmux | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
-            fi
+            case $TARGET in
+            *-linux-gnu) echo "needs glibc $(objdump -T target/release/vtmux | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)" ;;
+            *-linux-musl) file "target/$TARGET/release/vtmux" ;;
+            esac
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

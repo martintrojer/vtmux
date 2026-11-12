@@ -495,10 +495,18 @@ fn last_errno() -> libc::c_int {
 /// # Safety
 /// Closes descriptors; only call in a forked child that owns none it needs.
 pub(super) unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
+    // The raw syscall: musl has no `close_range` wrapper (and the libc
+    // crate none for it), glibc's needs 2.34.
     #[cfg(target_os = "linux")]
     // SAFETY: close_range on a range of descriptors the child does not use.
     unsafe {
-        if libc::close_range(first.cast_unsigned(), libc::c_uint::MAX, 0) == 0 {
+        if libc::syscall(
+            libc::SYS_close_range,
+            first.cast_unsigned(),
+            libc::c_uint::MAX,
+            0,
+        ) == 0
+        {
             return;
         }
     }

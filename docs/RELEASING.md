@@ -14,7 +14,7 @@ Add the version's section to `CHANGELOG.md`, and the release page's text to `doc
 
 ## GitHub release
 
-Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it.
+Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64; glibc and static musl) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it (the gnu tarball on a glibc host, the musl one on a musl host or with `[matching=musl]`). A musl tarball builds the same way (`rustup target add x86_64-unknown-linux-musl`; `zig cc` links it).
 
 ## crates.io
 

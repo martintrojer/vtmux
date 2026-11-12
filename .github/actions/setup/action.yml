@@ -11,7 +11,7 @@ inputs:
     description: The last word of the rust-cache and Ghostty cache keys; jobs that build the same things share one
     default: default
   targets:
-    description: Other Rust targets to install (the lint stage's other-OS type-check)
+    description: Rust targets to install besides the host's, comma-separated (the lint stage's other-OS and musl type-checks, a release build's musl triple)
     default: ""
   zig-version:
     description: The Zig of mise.toml (also a word of the Ghostty cache key)
@@ -39,7 +39,7 @@ runs:
     # makes the build script's `zig build` a cache hit (under a second).
     # The test stage builds Ghostty twice (the wrapper's tests are a
     # workspace of their own, so a package of another hash), the lint stage
-    # once more for the other OS's target, so the key ends in the job's
+    # once more for each other target it type-checks, so the key ends in the job's
     # cache-key. The directory's name is cargo's hash of the package (its version, the
     # toolchain, the profile), hence Cargo.lock, Cargo.toml and
     # rust-toolchain.toml in the key: a key that restores a directory under

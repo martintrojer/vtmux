@@ -96,17 +96,22 @@ if want lint; then
   cargo fmt --manifest-path "$ghostty_manifest" --check
   cargo clippy --workspace --all-targets -- -D warnings
   # Type-check the other platform too, so a Linux-only API (SOCK_CLOEXEC,
-  # O_CLOEXEC on openpt) is caught before CI. Skipped where the target isn't
-  # installed (`rustup target add aarch64-apple-darwin` / x86_64-unknown-linux-gnu).
+  # O_CLOEXEC on openpt) is caught before CI, and on Linux the static
+  # release build's libc (x86_64-unknown-linux-musl: the libc crate lacks
+  # some glibc wrappers there). Skipped where the target isn't installed
+  # (`rustup target add aarch64-apple-darwin x86_64-unknown-linux-musl` /
+  # x86_64-unknown-linux-gnu).
   case "$(uname -s)" in
-  Linux) other=aarch64-apple-darwin ;;
-  *) other=x86_64-unknown-linux-gnu ;;
+  Linux) others="aarch64-apple-darwin x86_64-unknown-linux-musl" ;;
+  *) others=x86_64-unknown-linux-gnu ;;
   esac
-  if rustup target list --installed 2>/dev/null | grep -qx "$other"; then
-    cargo check --workspace --all-targets --exclude xtask --target "$other"
-  else
-    echo "check: no $other target installed: the other OS's type-check skipped"
-  fi
+  for other in $others; do
+    if rustup target list --installed 2>/dev/null | grep -qx "$other"; then
+      cargo check --workspace --all-targets --exclude xtask --target "$other"
+    else
+      echo "check: no $other target installed: its type-check skipped"
+    fi
+  done
   echo "check: lint passed in $(($(date +%s) - start)) s"
 fi
 # The suites below build nothing once these are built, so they can run at
