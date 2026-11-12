@@ -79,7 +79,8 @@ reads its pages raw (`PATCH_STACK`), so it must be exactly this build.
 Every patch was rebased onto the release (a scratch repository with
 `3bd54e025` plus the old stack and the release tarball as a commit, then
 `git cherry-pick` patch by patch). 40 stay, as separate patches (squashing
-is a later task); two are dropped because 1.0.1 has them:
+is a later task), and 0045, written on the old pin meanwhile, was carried
+onto 1.0.1 after them (41 in all); two are dropped because 1.0.1 has them:
 
 - **0001-keep-one-free-page-resident, dropped.** 1.0.1's `PageList.zig`
   frees a page the line limit prunes with `DestroyMode.retain` (zeroed in
@@ -1528,7 +1529,9 @@ Recorded per commit in git history; the list is kept current:
   first screen has cells written then erased. Rust test `vtmux-vt`
   `join_ends_lines_at_the_cells_written`, oracle
   `capture_join_keeps_erased_cells`. Not an upstream candidate (tmux's
-  model).
+  model). Written on 3bd54e025 and carried onto 1.0.1 after the rebase
+  (the same two additions; 1.0's non-exhaustive `RowData` keeps its `_`
+  arm last).
 - `libghostty-vt/src/kitty/graphics.rs`:
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a

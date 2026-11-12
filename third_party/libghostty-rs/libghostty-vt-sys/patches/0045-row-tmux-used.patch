@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
-index f60b83775..95b944cce 100644
+index 3603e26..d196164 100644
 --- a/include/ghostty/vt/screen.h
 +++ b/include/ghostty/vt/screen.h
-@@ -338,6 +338,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
+@@ -352,6 +352,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
     * Output type: uint8_t *
     */
    GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS = 9,
@@ -19,7 +19,7 @@ index f60b83775..95b944cce 100644
  } GhosttyRowData;
  
 diff --git a/src/terminal/c/row.zig b/src/terminal/c/row.zig
-index 44402909a..d4a4f343b 100644
+index 471b2e0..5bf3fa4 100644
 --- a/src/terminal/c/row.zig
 +++ b/src/terminal/c/row.zig
 @@ -57,6 +57,12 @@ pub const RowData = enum(c_int) {
@@ -32,22 +32,24 @@ index 44402909a..d4a4f343b 100644
 +    /// Output type: uint16_t *
 +    tmux_used = 10,
 +
+     _,
+ 
      /// Output type expected for querying the data of the given kind.
-     pub fn OutType(comptime self: RowData) type {
-         return switch (self) {
-@@ -65,6 +71,7 @@ pub const RowData = enum(c_int) {
+@@ -67,7 +73,7 @@ pub const RowData = enum(c_int) {
              .kitty_virtual_placeholder, .dirty => bool,
              .semantic_prompt => SemanticPrompt,
              .tmux_line_flags => u8,
+-
 +            .tmux_used => u16,
+             _ => void,
          };
      }
- };
-@@ -129,6 +136,7 @@ fn getTyped(
+@@ -130,7 +136,7 @@ fn getTyped(
          .dirty => out.* = row.dirty,
          .tmux_line_flags => out.* = @as(u8, @intFromBool(row.tmux_extended)) |
              @as(u8, @intFromBool(row.tmux_hyperlink)) << 1,
+-
 +        .tmux_used => out.* = row.tmux_used,
+         _ => comptime unreachable,
      }
  
-     return .success;
