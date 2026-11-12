@@ -19,10 +19,13 @@ resurrect's restore types each program's command right after laying the window o
 
 Window names: tmux 3.8 names a new window after its pane's process before the shell has replaced it (`tmux` for up to ~500 ms) and renames it on a timer, and resurrect saves whatever name the window has. Review found the continuum test failing 4/14 at idle and 6/6 under build load (`misc:1` saved as `sh` on vtmux, `tmux` on tmux 3.8): it attached, and so saved, before that window was renamed. Both tests now wait for every pane's prompt and for `misc:1` to be named `sh` before the save and after the restore.
 
+Shell names: on macOS `/bin/sh` runs as `bash`, so `#{pane_current_command}` is `bash` under both servers, and the first macOS run failed every time on both binaries waiting for `sh`. The test no longer names the shell: a shell pane is ready when its last row is a bare prompt (the count tells a restored pane's new prompt from its saved one), an automatically named window is waited on until its name is its pane's command, and the assertions take the shell's name from an idle pane. SIGWINCH goes to every process under the pane, not only its children, in case `/bin/sh` does not exec the shell. Simulated on Linux by making the panes' shell `bash --posix` (named `bash`): the previous version timed out on both binaries as on macOS, this one passes 3/3.
+
 ## Runs
 
 | run | result |
 |---|---|
+| after the shell-name change: the test binary 10x at idle, 5x under 48 busy loops, once with a dash-like `/bin/sh` | 10/10, 5/5, 2/2 |
 | after the window-name wait: the test binary run directly, 14x at idle | 14/14, 3.9-4.3 s |
 | the same, 8x under 48 busy loops and 4x under 96 | 12/12, 4.1-4.2 s and 6.7-6.8 s |
 | before it: `cargo test -p vtmux --test resurrect`, 10x under 48 busy loops (`flock /tmp/vtmux-stress.lock`) | 10/10, 4.3-4.6 s each |

@@ -263,14 +263,19 @@ impl Side {
     /// less's prompt `:` on the last row, vim's an empty one.
     fn redraw(&self, target: &str, program: &str, key: &str) {
         self.wait_pane(target, program, |x| has(x, "line"));
-        let shell = self.t(&["display", "-p", "-t", target, "#{pane_pid}"]);
-        let children = Command::new("pgrep")
-            .args(["-P", shell.trim()])
-            .output()
-            .unwrap();
-        for pid in String::from_utf8_lossy(&children.stdout).split_whitespace() {
-            let pid = rustix::process::Pid::from_raw(pid.parse().unwrap()).unwrap();
-            let _ = rustix::process::kill_process(pid, rustix::process::Signal::WINCH);
+        // Every process under the pane's: the program is the shell's child
+        // where `/bin/sh` execs the shell, a grandchild where it does not.
+        let mut parents = vec![self.t(&["display", "-p", "-t", target, "#{pane_pid}"])];
+        while let Some(parent) = parents.pop() {
+            let children = Command::new("pgrep")
+                .args(["-P", parent.trim()])
+                .output()
+                .unwrap();
+            for pid in String::from_utf8_lossy(&children.stdout).split_whitespace() {
+                let raw = rustix::process::Pid::from_raw(pid.parse().unwrap()).unwrap();
+                let _ = rustix::process::kill_process(raw, rustix::process::Signal::WINCH);
+                parents.push(pid.to_owned());
+            }
         }
         self.t(&["send-keys", "-t", target, key]);
         let h: usize = self
@@ -288,21 +293,44 @@ impl Side {
         });
     }
 
-    /// Wait until `window`, named automatically, is named `name`. tmux names
-    /// a new window after its pane's process before the shell has replaced
-    /// it (`tmux` for a while), and renames it on a timer: resurrect saves
-    /// and restores whatever name the window has then.
-    fn wait_name(&self, window: &str, name: &str) {
-        self.wait(&format!("{window} to be named {name}"), || {
-            self.t(&["display", "-p", "-t", window, "#{window_name}"])
-                .trim_end()
-                == name
+    /// Wait until `window`, named automatically, is named after the
+    /// command its pane runs ([`Side::wait_shell`] first: its shell). tmux
+    /// names a new window after its pane's process before the shell has
+    /// replaced it (`tmux` for a while), and renames it on a timer:
+    /// resurrect saves and restores whatever name the window has then.
+    fn wait_named_after_its_command(&self, window: &str) {
+        self.wait(&format!("{window} to be named after its command"), || {
+            let name = self.t(&["display", "-p", "-t", window, "#{window_name}"]);
+            name.trim_end() == self.command_in(window)
         });
+    }
+
+    /// Wait until the shell in `target` shows its prompt and its screen
+    /// passes `check` (which counts the prompts: a restored pane's saved
+    /// screen ends in one too). The command is not looked at: what
+    /// `/bin/sh` runs as is the host's (`sh`, `dash`, `bash` on macOS), and
+    /// a bare prompt on the last row is the shell's.
+    fn wait_shell(&self, target: &str, check: impl Fn(&[String]) -> bool) {
+        let end = Instant::now() + LIMIT;
+        loop {
+            let screen = self.screen(target);
+            if prompts(&screen) > 0 && check(&screen) {
+                return;
+            }
+            assert!(
+                Instant::now() < end,
+                "{}: timed out waiting for the shell in {target}: {screen:#?}\n{}",
+                self.bin.display(),
+                self.t(&["capture-pane", "-p", "-S", "-", "-t", target])
+                    + &self.t(&["display", "-p", "-t", target, DIAGNOSIS])
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// Wait for the shell's prompt in `target`, then type `line` and Enter.
     fn shell(&self, target: &str, line: &str) {
-        self.wait_pane(target, "sh", |s| prompts(s) == 1);
+        self.wait_shell(target, |s| prompts(s) == 1);
         self.t(&["send-keys", "-t", target, line, "Enter"]);
     }
 
@@ -416,7 +444,7 @@ fn has(screen: &[String], text: &str) -> bool {
 /// a restore, when every shell's saved screen has a new prompt under it.
 fn settled(s: &Side, restored: bool) {
     let n = 1 + usize::from(restored);
-    s.wait_pane("work:1.0", "sh", |x| prompts(x) == 1);
+    s.wait_shell("work:1.0", |x| prompts(x) == 1);
     // Before the save each program started in a pane made for it, at its
     // size: its first screen is saved as it is (vim's has cells written
     // and erased, which `capture-pane -J` keeps). After the restore it is
@@ -427,13 +455,11 @@ fn settled(s: &Side, restored: bool) {
     } else {
         s.wait_pane("work:1.1", "less", |x| top(x) && has(x, "file.txt"));
     }
-    s.wait_pane("work:2.0", "sh", |x| {
-        prompts(x) == n && has(x, "hello-logs-0")
-    });
-    s.wait_pane("work:2.1", "sh", |x| prompts(x) == 1);
-    s.wait_pane("work:2.2", "sh", |x| prompts(x) == n && has(x, "60"));
-    s.wait_pane("misc:1.0", "sh", |x| prompts(x) == n && has(x, "misc-pane"));
-    s.wait_name("misc:1", "sh");
+    s.wait_shell("work:2.0", |x| prompts(x) == n && has(x, "hello-logs-0"));
+    s.wait_shell("work:2.1", |x| prompts(x) == 1);
+    s.wait_shell("work:2.2", |x| prompts(x) == n && has(x, "60"));
+    s.wait_shell("misc:1.0", |x| prompts(x) == n && has(x, "misc-pane"));
+    s.wait_named_after_its_command("misc:1");
     if have_vim() && restored {
         s.redraw("misc:2.1", "vim", "C-l");
     } else if have_vim() {
@@ -504,6 +530,9 @@ fn build(s: &Side) {
 struct Seen {
     saved: String,
     restored: String,
+    /// What an idle shell's pane runs, as `#{pane_current_command}` says:
+    /// the host's `/bin/sh` (`bash` on macOS).
+    shell: String,
 }
 
 fn assert_same(seen: &[Seen], bins: &[PathBuf]) {
@@ -558,17 +587,18 @@ fn resurrect_saves_and_restores_as_with_tmux() {
         Seen {
             saved,
             restored: s.dump(),
+            shell: s.command_in("work:1.0"),
         }
     });
     // What a user sees come back, on vtmux; the comparison does the rest.
-    let vt = &seen[0].restored;
+    let (vt, sh) = (&seen[0].restored, &seen[0].shell);
     for want in [
         "work:1 edit 1 *",
         "work:2 logs 0 Z",
         "misc:2 zed 0",
         "work:1.1 1 39x24 t%1 less <R>/w/a\n",
-        "work:2.0 0 80x12 t%2 sh <R>/w/c d\n",
-        "misc:1.0 1 80x24 t%5 sh <R>/w\n",
+        &format!("work:2.0 0 80x12 t%2 {sh} <R>/w/c d\n"),
+        &format!("misc:1.0 1 80x24 t%5 {sh} <R>/w\n"),
         "misc:2.0 0 80x12 t%6 tail <R>/w/b\n",
         "== work:2.0\n$ echo hello-logs-0\nhello-logs-0\n$\n$\n",
         "== misc:1.0\n$ echo misc-pane; cd ..\nmisc-pane\n$\n$\n",
@@ -609,11 +639,11 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
             s.t(&["select-pane", "-t", id, "-T", &format!("t{id}")]);
         }
         // The first status line saves: every pane settled before it.
-        s.wait_pane("work:1.0", "sh", |x| prompts(x) == 1);
-        s.wait_pane("work:1.1", "sh", |x| prompts(x) == 1 && has(x, "pane-one"));
-        s.wait_pane("work:2.0", "sh", |x| prompts(x) == 1);
-        s.wait_pane("misc:1.0", "sh", |x| prompts(x) == 1);
-        s.wait_name("misc:1", "sh");
+        s.wait_shell("work:1.0", |x| prompts(x) == 1);
+        s.wait_shell("work:1.1", |x| prompts(x) == 1 && has(x, "pane-one"));
+        s.wait_shell("work:2.0", |x| prompts(x) == 1);
+        s.wait_shell("misc:1.0", |x| prompts(x) == 1);
+        s.wait_named_after_its_command("misc:1");
         let res = s.root.join("res");
         let attached = attach(&s, "work");
         // The save runs in the background: done when its pane contents are
@@ -631,21 +661,22 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
         s.wait("continuum's restore", || {
             s.t(&["ls", "-F", "#{session_name}"]) == "misc\nwork\n"
         });
-        s.wait_pane("work:1.0", "sh", |x| prompts(x) == 1);
-        s.wait_pane("work:1.1", "sh", |x| prompts(x) == 2 && has(x, "pane-one"));
-        s.wait_pane("work:2.0", "sh", |x| prompts(x) == 1);
-        s.wait_pane("misc:1.0", "sh", |x| prompts(x) == 1);
-        s.wait_name("misc:1", "sh");
+        s.wait_shell("work:1.0", |x| prompts(x) == 1);
+        s.wait_shell("work:1.1", |x| prompts(x) == 2 && has(x, "pane-one"));
+        s.wait_shell("work:2.0", |x| prompts(x) == 1);
+        s.wait_shell("misc:1.0", |x| prompts(x) == 1);
+        s.wait_named_after_its_command("misc:1");
         Seen {
             saved,
             restored: s.dump(),
+            shell: s.command_in("work:1.0"),
         }
     });
-    let vt = &seen[0].restored;
+    let (vt, sh) = (&seen[0].restored, &seen[0].shell);
     for want in [
         "work:1 edit 1 *",
         "work:2 logs 0",
-        "work:1.1 0 39x23 t%1 sh <R>/w/b\n",
+        &format!("work:1.1 0 39x23 t%1 {sh} <R>/w/b\n"),
         "== work:1.1\n$ echo pane-one\npane-one\n$\n$\n",
     ] {
         assert!(vt.contains(want), "{want:?} not in\n{vt}");
