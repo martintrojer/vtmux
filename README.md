@@ -9,7 +9,7 @@ tmux 3.8, reimplemented in Rust on [libghostty-vt](https://github.com/ghostty-or
 vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them. Run as `tmux`, `tmux -V` prints `tmux 3.8`, so plugins' version checks pass.
 
 - **tmux's own test suite:** 173 of its 174 regress tests pass (1 expected failure, recorded).
-- **A behaviour oracle:** 444 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, also with a live upgrade inserted between steps.
+- **A behaviour oracle:** 447 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, all but six also with a live upgrade inserted between steps.
 - **Your terminal:** Ghostty, WezTerm, foot, kitty, Alacritty, rio, xterm and some 2,600 other terminals from ncurses' database work out of the box, with the same features and colours tmux gives them, even on a host that has no terminfo entry for yours.
 - **Your setup:** a real `.tmux.conf` with TPM plugins gives the same options, key bindings, hooks and screens as tmux 3.8 on macOS and Linux.
 - **Restores across reboots:** tmux-resurrect and tmux-continuum work as with tmux.
