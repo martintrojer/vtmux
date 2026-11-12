@@ -357,7 +357,7 @@ struct Attached {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     bytes: Arc<Mutex<Vec<u8>>>,
     writer: Box<dyn std::io::Write + Send>,
-    _master: Box<dyn portable_pty::MasterPty + Send>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
 impl Attached {
@@ -411,7 +411,7 @@ impl Attached {
             child,
             bytes,
             writer,
-            _master: pair.master,
+            master: pair.master,
         }
     }
 
@@ -449,6 +449,18 @@ impl Attached {
         t.feed(&self.bytes.lock().unwrap());
         let m = t.screen_modes();
         (m.cursor_shape, m.cursor_blinking, t.cursor_colour())
+    }
+
+    /// The terminal changes size (SIGWINCH to the client).
+    fn resize(&self, cols: u16, rows: u16) {
+        self.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
     }
 
     /// The terminal's input side, for a thread typing on its own.
@@ -2830,6 +2842,36 @@ fn a_client_whose_token_is_refused_gets_its_terminal_back() {
         "[server upgraded: re-attach]\r\n",
     );
     assert_cooked(&tty, "a refused token");
+}
+
+/// A client that arrives without `VTMUX_REATTACH_TTY` (a wrapper between
+/// the two images drops it) still has its signals let in: the image before
+/// blocked them across the exec, as it does whenever it hands the terminal
+/// over raw, and a client left so never saw a resize again.
+#[test]
+fn a_re_attach_without_the_handed_settings_still_takes_signals() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let binary = wrapper(
+        &world,
+        "vtmux-new",
+        "--vtmux-reattach) unset VTMUX_REATTACH_TTY;;",
+    );
+    assert_eq!(world.upgrade(&binary), Some(upgraded()));
+    wait("the re-attach", || {
+        attached.args().contains(protocol::REATTACH_FLAG)
+            && world.run(&["lsc"]).lines().count() == 1
+    });
+    attached.resize(100, 30);
+    wait_for(
+        "the resize",
+        || world.run(&["lsc", "-F", "#{client_width}x#{client_height}"]),
+        |size| size == "100x30\n",
+    );
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.exited().is_some());
 }
 
 /// A terminal handed over with settings the new image can't read (a later

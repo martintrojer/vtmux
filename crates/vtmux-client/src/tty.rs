@@ -137,7 +137,9 @@ fn handover_text(saved: &Termios) -> String {
 
 /// `now` (raw) made cooked as `stty sane` makes a terminal, for the bits
 /// raw mode changes: line editing, echo, signals and output processing on,
-/// CR read as NL, a BREAK interrupting, `VMIN` 1 and `VTIME` 0.
+/// CR read as NL, a BREAK interrupting, `VMIN` 1 and `VTIME` 0; and XON/XOFF
+/// flow control (`IXON`) on, which `stty sane` leaves as it finds it but a
+/// fresh terminal has and raw mode cleared.
 fn sane(mut now: Termios) -> Termios {
     use termios::{InputModes as I, LocalModes as L, OutputModes as O, SpecialCodeIndex as S};
     now.input_modes

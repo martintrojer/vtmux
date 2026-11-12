@@ -238,8 +238,9 @@ pub fn ready() {
 /// that once left the client attached after the exec); `TERM-reattach`
 /// or `HUP-reattach`, raised in the image it execs, before its `Hello`;
 /// `<sig>-start` (`TERM`, `HUP`, `INT`, `USR1`, `USR2`), raised in that
-/// image first thing, before it has any handler (a signal that once
-/// killed it there, the terminal it was handed raw left raw).
+/// image once it has taken the terminal over (`Handed::take_over`) and
+/// before it has any handler (a signal that once killed it there, the
+/// terminal it was handed raw left raw).
 const REEXEC_SIGNAL_HOOK: &str = "VTMUX_TEST_REEXEC_SIGNAL";
 
 fn reexec_hook(reattach: bool) {
@@ -256,8 +257,8 @@ fn reexec_hook(reattach: bool) {
     }
 }
 
-/// [`REEXEC_SIGNAL_HOOK`]'s `<sig>-start`: in a re-attaching image, before
-/// its first handler.
+/// [`REEXEC_SIGNAL_HOOK`]'s `<sig>-start`: in a re-attaching image, after
+/// it took the terminal over, before its first handler.
 pub fn reattach_start_hook() {
     let Ok(value) = std::env::var(REEXEC_SIGNAL_HOOK) else {
         return;
