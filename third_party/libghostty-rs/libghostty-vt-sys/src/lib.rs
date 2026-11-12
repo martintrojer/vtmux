@@ -19,6 +19,12 @@ pub const PATCH_STACK: &str = match option_env!("LIBGHOSTTY_VT_PATCH_STACK") {
     None => "unknown",
 };
 
+/// vtmux: the C headers of the library this crate was built against (the
+/// install's `include`), for the ABI test that checks `bindings.rs`
+/// against them. `None` when the build did not compile Ghostty itself.
+#[doc(hidden)]
+pub const INCLUDE_DIR: Option<&str> = option_env!("LIBGHOSTTY_VT_INCLUDE_DIR");
+
 /// Initialize a "sized" FFI object.
 #[macro_export]
 macro_rules! sized {

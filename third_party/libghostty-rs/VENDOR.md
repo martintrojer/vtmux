@@ -43,7 +43,8 @@ OUT_DIR/ghostty-deps`: Zig makes no network request. The Zig global cache
 is `OUT_DIR/zig-global-cache`, set through `ZIG_GLOBAL_CACHE_DIR` (Zig 0.17
 has no `--global-cache-dir` flag, and `--system` with the user's own cache
 crashes it). Offline, `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL`
-name local copies (absolute paths), and `GHOSTTY_RELEASE_URL` names a
+name local copies (absolute paths; both or neither, the build stops when
+only one is set), and `GHOSTTY_RELEASE_URL` names a
 mirror of the release directory. The packaged crate carries the patches,
 not Ghostty (4.5 MB and 5.9 MB of tarballs). `GHOSTTY_SOURCE_DIR` (a local
 checkout, patches not applied) still fetches its own packages unless
@@ -144,9 +145,19 @@ from a diff of `zig translate-c` of the old and new headers: enum values
 fields (`GridRef`, `Selection`, the clipboard, notification, progress,
 program-status and semantic-prompt records), `GhosttyStyle`'s new layout,
 `AllocatorVtable.reserved`, `setopt` renamed `set`, setters that now return
-`GhosttyResult`, and the removed formatter-options structs. Every size,
-alignment and offset `bindings.rs` asserts was then checked against the
-C headers with `zig cc` (405 of them, all equal).
+`GhosttyResult`, and the removed formatter-options structs.
+`libghostty-vt/tests/abi.rs` keeps them honest. It restates every
+`extern "C"` function of `bindings.rs` in C, so a different signature is a
+`conflicting types` error. It compares every callback type and every
+struct or union field with `__builtin_types_compatible_p`, and turns every
+size, alignment and offset `bindings.rs` asserts into a `_Static_assert`.
+All of it is compiled by `zig cc` against the headers of the library the
+build made (1,082 checks). It found what the first hand edit missed:
+`ghostty_key_event_set_utf8` takes a `GhosttyString` by value, not a
+pointer and a length (which pass in the same registers on x86-64 and
+aarch64, so nothing broke), and the output buffers of the encoders and
+reports are `uint8_t *`, not `char *`. Enum values are not in the test;
+they were compared from the `translate-c` diff.
 
 ## Local changes
 
@@ -1551,9 +1562,10 @@ Track releases by tag, never a commit (owner policy, 2026-11-11).
    functions, callback types and struct fields (a changed callback type
    still compiles), and fix the wrapper. Without libclang, diff `zig
    translate-c -lc -I<include> <include>/ghostty/vt.h` of the old and new
-   headers instead, edit `bindings.rs` by hand, and check every layout it
-   asserts against the headers with a C file of `offsetof`/`sizeof` built
-   by `zig cc` (as for 1.0.1). Read the changed "Output type" lines too: a
+   headers instead and edit `bindings.rs` by hand. Either way,
+   `cargo test --manifest-path libghostty-vt/Cargo.toml --test abi` must
+   pass: it compiles every declaration, field and layout of `bindings.rs`
+   against the new headers. Read the changed "Output type" lines too: a
    data key whose type changed still compiles.
 4. Rebase each `libghostty-vt-sys/patches/*.patch` (the build fails if
    one no longer applies): in a scratch repository, commit the old release
