@@ -286,7 +286,12 @@ impl Side {
         let last_text = format!("line {}", h - 1);
         self.wait_pane(target, program, |x| {
             let rows = if program == "less" { h } else { h - 1 };
-            x.len() == rows
+            // vim's last row is blank, or its ruler (`1,1  Top`) where
+            // vim starts with `ruler` set (CI's Ubuntu, even under
+            // `-u NONE`): no file line either way.
+            let vim_ruler =
+                program != "less" && x.len() == h && !x[h - 1].trim_start().starts_with("line");
+            (x.len() == rows || vim_ruler)
                 && x[0] == "line 1"
                 && x[h - 2] == last_text
                 && (program != "less" || x[h - 1] == ":")
