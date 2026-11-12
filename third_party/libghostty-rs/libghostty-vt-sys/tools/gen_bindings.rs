@@ -96,7 +96,7 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyTerminalOption", "GHOSTTY_TERMINAL_OPT"),
     (
         "GhosttyTerminalScrollViewportTag",
-        "GHOSTTY_SCROLL_VIEWPORT",
+        "GHOSTTY_TERMINAL_SCROLL_VIEWPORT",
     ),
     ("GhosttyStyleColorTag", "GHOSTTY_STYLE_COLOR"),
     ("GhosttyRowSemanticPrompt", "GHOSTTY_ROW_SEMANTIC"),

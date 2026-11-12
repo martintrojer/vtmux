@@ -97,6 +97,7 @@ pub mod Result {
     pub const LIMIT_EXCEEDED: Type = -6;
     #[doc = " Operation was rejected by a safety check (e.g. pasted text that could\n inject commands). Nothing was done. Confirm with the user and retry\n with the operation's allow flag set."]
     pub const REJECTED: Type = -7;
+    pub const UNSUPPORTED: Type = -8;
     #[doc = " Operation was rejected by a safety check (e.g. pasted text that could\n inject commands). Nothing was done. Confirm with the user and retry\n with the operation's allow flag set."]
     pub const RESULT_MAX_VALUE: Type = 2147483647;
 }
@@ -317,7 +318,7 @@ unsafe extern "C" {
 }
 #[doc = " Function table for custom memory allocator operations.\n\n This vtable defines the interface for a custom memory allocator. All\n function pointers must be valid and non-NULL.\n\n\n If you're not going to use a custom allocator, you can ignore all of\n this. All functions that take an allocator pointer allow NULL to use a\n default allocator. Native freestanding builds must provide an allocator\n for operations that allocate memory.\n\n The interface is based on the Zig allocator interface. I'll say up front\n that it is easy to look at this interface and think \"wow, this is really\n overcomplicated\". The reason for this complexity is well thought out by\n the Zig folks, and it enables a diverse set of allocation strategies\n as shown by the Zig ecosystem. As a consolation, please note that many\n of the arguments are only needed for advanced use cases and can be\n safely ignored in simple implementations. For example, if you look at\n the Zig implementation of the libc allocator in `lib/std/heap.zig`\n (search for CAllocator), you'll see it is very simple.\n\n We chose to align with the Zig allocator interface because:\n\n   1. It is a proven interface that serves a wide variety of use cases\n      in the real world via the Zig ecosystem. It's shown to work.\n\n   2. Our core implementation itself is Zig, and this lets us very\n      cheaply and easily convert between C and Zig allocators.\n\n NOTE(mitchellh): In the future, we can have default implementations of\n resize/remap and allow those to be null."]
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct AllocatorVtable {
     #[doc = " Return a pointer to `len` bytes with specified `alignment`, or return\n `NULL` indicating the allocation failed.\n\n   of low bits of the returned address that must be zero. This is not\n   a byte count: convert it with `1 << alignment` before passing it to\n   aligned_alloc or posix_memalign. For example:\n   - 1: the lowest bit must be zero (2-byte aligned)\n   - 2: the lowest two bits must be zero (4-byte aligned)\n   - 4: the lowest four bits must be zero (16-byte aligned)\n   This matches Zig's `std.mem.Alignment`."]
     pub alloc: ::std::option::Option<
@@ -360,10 +361,12 @@ pub struct AllocatorVtable {
             ret_addr: usize,
         ),
     >,
+    #[doc = " Reserved for future use. Must be NULL."]
+    pub reserved: [*mut ::std::os::raw::c_void; 4usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 32usize];
+    ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 64usize];
     ["Alignment of AllocatorVtable"][::std::mem::align_of::<AllocatorVtable>() - 8usize];
     ["Offset of field: AllocatorVtable::alloc"]
         [::std::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
@@ -374,6 +377,15 @@ const _: () = {
     ["Offset of field: AllocatorVtable::free"]
         [::std::mem::offset_of!(AllocatorVtable, free) - 24usize];
 };
+impl Default for AllocatorVtable {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
 #[doc = " Custom memory allocator.\n\n For functions that take an allocator pointer, a NULL pointer indicates\n that the default allocator should be used. The default allocator will\n be libc malloc/free if we're linking to libc. If libc isn't linked,\n a custom allocator is used (currently Zig's SMP allocator). On native\n freestanding targets, the default allocator always fails instead.\n\n\n Usage example:\n GhosttyAllocator allocator = {\n     .vtable = &my_allocator_vtable,\n     .ctx = my_allocator_state\n };"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -441,6 +453,15 @@ pub mod BuildInfo {
     pub const VERSION_PRE: Type = 9;
     #[doc = " The build metadata string (e.g. commit hash). Has zero length if\n no build metadata is present.\n\n Output type: GhosttyString *"]
     pub const VERSION_BUILD: Type = 10;
+    pub const FEATURE_SNAPSHOT: Type = 11;
+    pub const FEATURE_FORMATTER: Type = 12;
+    pub const FEATURE_SELECTION: Type = 13;
+    pub const FEATURE_SEARCH: Type = 14;
+    pub const FEATURE_RENDER_STATE: Type = 15;
+    pub const FEATURE_INPUT_ENCODE: Type = 16;
+    pub const FEATURE_COLOR: Type = 17;
+    pub const FEATURE_GRID_INTROSPECTION: Type = 18;
+    pub const FEATURE_GLYPH_PROTOCOL: Type = 19;
     #[doc = " The build metadata string (e.g. commit hash). Has zero length if\n no build metadata is present.\n\n Output type: GhosttyString *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -995,24 +1016,37 @@ pub mod StyleColorTag {
     pub const RGB: Type = 2;
     pub const TAG_MAX_VALUE: Type = 2147483647;
 }
+#[doc = " Style flags: bits 0-7 attributes (GHOSTTY_STYLE_FLAG_*), 8-10 the\n underline style (a GhosttySgrUnderline), 11-12 vtmux's palette-form\n bits, 13-15 reserved."]
+pub type StyleFlags = u16;
+pub const STYLE_FLAG_BOLD: StyleFlags = 1 << 0;
+pub const STYLE_FLAG_ITALIC: StyleFlags = 1 << 1;
+pub const STYLE_FLAG_FAINT: StyleFlags = 1 << 2;
+pub const STYLE_FLAG_BLINK: StyleFlags = 1 << 3;
+pub const STYLE_FLAG_INVERSE: StyleFlags = 1 << 4;
+pub const STYLE_FLAG_INVISIBLE: StyleFlags = 1 << 5;
+pub const STYLE_FLAG_STRIKETHROUGH: StyleFlags = 1 << 6;
+pub const STYLE_FLAG_OVERLINE: StyleFlags = 1 << 7;
+pub const STYLE_UNDERLINE_SHIFT: u32 = 8;
+pub const STYLE_UNDERLINE_MASK: StyleFlags = 0x7 << STYLE_UNDERLINE_SHIFT;
+#[doc = " vtmux: the foreground palette colour was set by `38;5;N` (patch 0010)."]
+pub const STYLE_FLAG_VTMUX_FG_PALETTE_256: StyleFlags = 1 << 11;
+#[doc = " vtmux: the background palette colour was set by `48;5;N` (patch 0010)."]
+pub const STYLE_FLAG_VTMUX_BG_PALETTE_256: StyleFlags = 1 << 12;
 #[doc = " Style color value union.\n\n Use the tag to determine which field is active.\n"]
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union StyleColorValue {
     pub palette: ColorPaletteIndex,
     pub rgb: ColorRgb,
-    pub _padding: u64,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 8usize];
-    ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 8usize];
+    ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 3usize];
+    ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 1usize];
     ["Offset of field: StyleColorValue::palette"]
         [::std::mem::offset_of!(StyleColorValue, palette) - 0usize];
     ["Offset of field: StyleColorValue::rgb"]
         [::std::mem::offset_of!(StyleColorValue, rgb) - 0usize];
-    ["Offset of field: StyleColorValue::_padding"]
-        [::std::mem::offset_of!(StyleColorValue, _padding) - 0usize];
 };
 impl Default for StyleColorValue {
     fn default() -> Self {
@@ -1027,15 +1061,16 @@ impl Default for StyleColorValue {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct StyleColor {
-    pub tag: StyleColorTag::Type,
+    #[doc = " One of GhosttyStyleColorTag, stored as a byte."]
+    pub tag: u8,
     pub value: StyleColorValue,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 16usize];
-    ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 8usize];
+    ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 4usize];
+    ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 1usize];
     ["Offset of field: StyleColor::tag"][::std::mem::offset_of!(StyleColor, tag) - 0usize];
-    ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 8usize];
+    ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 1usize];
 };
 impl Default for StyleColor {
     fn default() -> Self {
@@ -1046,52 +1081,31 @@ impl Default for StyleColor {
         }
     }
 }
-#[doc = " Terminal cell style.\n\n Describes the complete visual style for a terminal cell, including\n foreground, background, and underline colors, as well as text\n decoration flags. The underline field uses the same values as\n GhosttySgrUnderline.\n\n This is a sized struct. Use GHOSTTY_INIT_SIZED() to initialize it.\n"]
+#[doc = " Terminal cell style: a frozen 16-byte layout (no size field).\n"]
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Style {
-    pub size: usize,
+    #[doc = " Foreground (text) color."]
     pub fg_color: StyleColor,
+    #[doc = " Background color."]
     pub bg_color: StyleColor,
+    #[doc = " Underline color."]
     pub underline_color: StyleColor,
-    pub bold: bool,
-    pub italic: bool,
-    pub faint: bool,
-    pub blink: bool,
-    pub inverse: bool,
-    pub invisible: bool,
-    pub strikethrough: bool,
-    pub overline: bool,
-    #[doc = "< One of GHOSTTY_SGR_UNDERLINE_* values"]
-    pub underline: ::std::os::raw::c_int,
-    #[doc = "< vtmux: fg set by 38;5;N"]
-    pub fg_palette_256: bool,
-    #[doc = "< vtmux: bg set by 48;5;N"]
-    pub bg_palette_256: bool,
+    #[doc = " Text attributes and underline style. See GhosttyStyleFlags."]
+    pub flags: StyleFlags,
+    #[doc = " Reserved for future use. Always zero."]
+    pub reserved: u16,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Style"][::std::mem::size_of::<Style>() - 72usize];
-    ["Alignment of Style"][::std::mem::align_of::<Style>() - 8usize];
-    ["Offset of field: Style::size"][::std::mem::offset_of!(Style, size) - 0usize];
-    ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 8usize];
-    ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 24usize];
+    ["Size of Style"][::std::mem::size_of::<Style>() - 16usize];
+    ["Alignment of Style"][::std::mem::align_of::<Style>() - 2usize];
+    ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 0usize];
+    ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 4usize];
     ["Offset of field: Style::underline_color"]
-        [::std::mem::offset_of!(Style, underline_color) - 40usize];
-    ["Offset of field: Style::bold"][::std::mem::offset_of!(Style, bold) - 56usize];
-    ["Offset of field: Style::italic"][::std::mem::offset_of!(Style, italic) - 57usize];
-    ["Offset of field: Style::faint"][::std::mem::offset_of!(Style, faint) - 58usize];
-    ["Offset of field: Style::blink"][::std::mem::offset_of!(Style, blink) - 59usize];
-    ["Offset of field: Style::inverse"][::std::mem::offset_of!(Style, inverse) - 60usize];
-    ["Offset of field: Style::invisible"][::std::mem::offset_of!(Style, invisible) - 61usize];
-    ["Offset of field: Style::strikethrough"]
-        [::std::mem::offset_of!(Style, strikethrough) - 62usize];
-    ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
-    ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
-    ["Offset of field: Style::fg_palette_256"]
-        [::std::mem::offset_of!(Style, fg_palette_256) - 68usize];
-    ["Offset of field: Style::bg_palette_256"]
-        [::std::mem::offset_of!(Style, bg_palette_256) - 69usize];
+        [::std::mem::offset_of!(Style, underline_color) - 8usize];
+    ["Offset of field: Style::flags"][::std::mem::offset_of!(Style, flags) - 12usize];
+    ["Offset of field: Style::reserved"][::std::mem::offset_of!(Style, reserved) - 14usize];
 };
 impl Default for Style {
     fn default() -> Self {
@@ -1114,19 +1128,17 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct GridRef {
-    pub size: usize,
     pub node: *mut ::std::os::raw::c_void,
     pub x: u16,
     pub y: u16,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 24usize];
+    ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 16usize];
     ["Alignment of GridRef"][::std::mem::align_of::<GridRef>() - 8usize];
-    ["Offset of field: GridRef::size"][::std::mem::offset_of!(GridRef, size) - 0usize];
-    ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 8usize];
-    ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 16usize];
-    ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 18usize];
+    ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 0usize];
+    ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 8usize];
+    ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 10usize];
 };
 impl Default for GridRef {
     fn default() -> Self {
@@ -1276,8 +1288,6 @@ pub type SelectionGestureEvent = *mut SelectionGestureEventImpl;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Selection {
-    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttySelection)."]
-    pub size: usize,
     #[doc = " Start of the selection range (inclusive).\n\n This may be after end in terminal order. It is an untracked\n GhosttyGridRef snapshot and follows untracked grid-ref lifetime rules."]
     pub start: GridRef,
     #[doc = " End of the selection range (inclusive).\n\n This may be before start in terminal order. It is an untracked\n GhosttyGridRef snapshot and follows untracked grid-ref lifetime rules."]
@@ -1287,13 +1297,12 @@ pub struct Selection {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Selection"][::std::mem::size_of::<Selection>() - 64usize];
+    ["Size of Selection"][::std::mem::size_of::<Selection>() - 40usize];
     ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 8usize];
-    ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
-    ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 8usize];
-    ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 32usize];
+    ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 0usize];
+    ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 16usize];
     ["Offset of field: Selection::rectangle"]
-        [::std::mem::offset_of!(Selection, rectangle) - 56usize];
+        [::std::mem::offset_of!(Selection, rectangle) - 32usize];
 };
 impl Default for Selection {
     fn default() -> Self {
@@ -1351,7 +1360,7 @@ pub struct TerminalSelectWordOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectWordOptions"]
-        [::std::mem::size_of::<TerminalSelectWordOptions>() - 48usize];
+        [::std::mem::size_of::<TerminalSelectWordOptions>() - 40usize];
     ["Alignment of TerminalSelectWordOptions"]
         [::std::mem::align_of::<TerminalSelectWordOptions>() - 8usize];
     ["Offset of field: TerminalSelectWordOptions::size"]
@@ -1359,9 +1368,9 @@ const _: () = {
     ["Offset of field: TerminalSelectWordOptions::ref_"]
         [::std::mem::offset_of!(TerminalSelectWordOptions, ref_) - 8usize];
     ["Offset of field: TerminalSelectWordOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 32usize];
+        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 24usize];
     ["Offset of field: TerminalSelectWordOptions::boundary_codepoints_len"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 40usize];
+        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 32usize];
 };
 impl Default for TerminalSelectWordOptions {
     fn default() -> Self {
@@ -1390,7 +1399,7 @@ pub struct TerminalSelectWordBetweenOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectWordBetweenOptions"]
-        [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 72usize];
+        [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 56usize];
     ["Alignment of TerminalSelectWordBetweenOptions"]
         [::std::mem::align_of::<TerminalSelectWordBetweenOptions>() - 8usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::size"]
@@ -1398,13 +1407,13 @@ const _: () = {
     ["Offset of field: TerminalSelectWordBetweenOptions::start"]
         [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 8usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::end"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 32usize];
+        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 24usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, boundary_codepoints) - 56usize];
+        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, boundary_codepoints) - 40usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::std::mem::offset_of!(
         TerminalSelectWordBetweenOptions,
         boundary_codepoints_len
-    ) - 64usize];
+    ) - 48usize];
 };
 impl Default for TerminalSelectWordBetweenOptions {
     fn default() -> Self {
@@ -1433,7 +1442,7 @@ pub struct TerminalSelectLineOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectLineOptions"]
-        [::std::mem::size_of::<TerminalSelectLineOptions>() - 56usize];
+        [::std::mem::size_of::<TerminalSelectLineOptions>() - 48usize];
     ["Alignment of TerminalSelectLineOptions"]
         [::std::mem::align_of::<TerminalSelectLineOptions>() - 8usize];
     ["Offset of field: TerminalSelectLineOptions::size"]
@@ -1441,54 +1450,13 @@ const _: () = {
     ["Offset of field: TerminalSelectLineOptions::ref_"]
         [::std::mem::offset_of!(TerminalSelectLineOptions, ref_) - 8usize];
     ["Offset of field: TerminalSelectLineOptions::whitespace"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 32usize];
+        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 24usize];
     ["Offset of field: TerminalSelectLineOptions::whitespace_len"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 40usize];
+        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 32usize];
     ["Offset of field: TerminalSelectLineOptions::semantic_prompt_boundary"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 48usize];
+        [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 40usize];
 };
 impl Default for TerminalSelectLineOptions {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
-#[doc = " Options for one-shot formatting of a terminal selection.\n\n This is a sized struct. Use GHOSTTY_INIT_SIZED() to initialize it.\n\n If selection is NULL, the terminal's current active selection is used.\n If selection is non-NULL, that caller-provided snapshot selection is used.\n\n The selection is formatted from the terminal's active screen using the same\n formatting semantics as GhosttyFormatter. For copy/clipboard behavior\n matching Ghostty's Screen.selectionString(), use plain output with unwrap\n and trim both set to true.\n"]
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct TerminalSelectionFormatOptions {
-    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyTerminalSelectionFormatOptions)."]
-    pub size: usize,
-    #[doc = " Output format to emit."]
-    pub emit: FormatterFormat::Type,
-    #[doc = " Whether to unwrap soft-wrapped lines."]
-    pub unwrap: bool,
-    #[doc = " Whether to trim trailing whitespace on non-blank lines. Trailing blank\n lines are always trimmed, except in VT output without trimming, where\n they are kept as part of the layout."]
-    pub trim: bool,
-    #[doc = " Optional selection to format.\n\n If NULL, the terminal's current active selection is used. If the terminal\n has no active selection, formatting returns GHOSTTY_NO_VALUE.\n\n If non-NULL, the pointed-to selection must be a valid snapshot selection\n for this terminal and must obey GhosttySelection lifetime rules."]
-    pub selection: *const Selection,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalSelectionFormatOptions"]
-        [::std::mem::size_of::<TerminalSelectionFormatOptions>() - 24usize];
-    ["Alignment of TerminalSelectionFormatOptions"]
-        [::std::mem::align_of::<TerminalSelectionFormatOptions>() - 8usize];
-    ["Offset of field: TerminalSelectionFormatOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
-    ["Offset of field: TerminalSelectionFormatOptions::emit"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 8usize];
-    ["Offset of field: TerminalSelectionFormatOptions::unwrap"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 12usize];
-    ["Offset of field: TerminalSelectionFormatOptions::trim"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 13usize];
-    ["Offset of field: TerminalSelectionFormatOptions::selection"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 16usize];
-};
-impl Default for TerminalSelectionFormatOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
@@ -1627,16 +1595,17 @@ pub mod SelectionGestureAutoscroll {
 pub mod SelectionGestureData {
     #[doc = " Data fields readable from a selection gesture with\n ghostty_selection_gesture_get().\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Current click count: uint8_t*. 0 means inactive."]
-    pub const CLICK_COUNT: Type = 0;
+    pub const CLICK_COUNT: Type = 1;
     #[doc = " Whether the current/last left-click gesture has dragged: bool*."]
-    pub const DRAGGED: Type = 1;
+    pub const DRAGGED: Type = 2;
     #[doc = " Current autoscroll request: GhosttySelectionGestureAutoscroll*."]
-    pub const AUTOSCROLL: Type = 2;
+    pub const AUTOSCROLL: Type = 3;
     #[doc = " Current gesture behavior: GhosttySelectionGestureBehavior*."]
-    pub const BEHAVIOR: Type = 3;
+    pub const BEHAVIOR: Type = 4;
     #[doc = " Current left-click anchor: GhosttyGridRef*.\n\n Returns GHOSTTY_NO_VALUE if there is no valid active anchor. On success,\n writes an untracked GhosttyGridRef snapshot with normal GhosttyGridRef\n lifetime rules."]
-    pub const ANCHOR: Type = 4;
+    pub const ANCHOR: Type = 5;
     #[doc = " Current left-click anchor: GhosttyGridRef*.\n\n Returns GHOSTTY_NO_VALUE if there is no valid active anchor. On success,\n writes an untracked GhosttyGridRef snapshot with normal GhosttyGridRef\n lifetime rules."]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -1659,26 +1628,27 @@ pub mod SelectionGestureEventType {
 pub mod SelectionGestureEventOption {
     #[doc = " Options stored on a reusable selection gesture event.\n\n Passing NULL as the value to ghostty_selection_gesture_event_set() clears the\n corresponding option.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Grid reference under the pointer: GhosttyGridRef*.\n\n Required for PRESS and DRAG events. Optional for RELEASE events; when unset\n or cleared, release records that the pointer did not map to a valid cell."]
-    pub const REF: Type = 0;
+    pub const REF: Type = 1;
     #[doc = " Surface-space pointer position: GhosttySurfacePosition*.\n\n Valid for PRESS, DRAG, and AUTOSCROLL_TICK."]
-    pub const POSITION: Type = 1;
+    pub const POSITION: Type = 2;
     #[doc = " Maximum repeat-click distance in pixels: double*."]
-    pub const REPEAT_DISTANCE: Type = 2;
+    pub const REPEAT_DISTANCE: Type = 3;
     #[doc = " Optional monotonic event time in nanoseconds: uint64_t*.\n\n If unset, press treats the event as untimed and only single-click behavior\n is available."]
-    pub const TIME_NS: Type = 3;
+    pub const TIME_NS: Type = 4;
     #[doc = " Maximum interval between repeat clicks in nanoseconds: uint64_t*."]
-    pub const REPEAT_INTERVAL_NS: Type = 4;
+    pub const REPEAT_INTERVAL_NS: Type = 5;
     #[doc = " Word-boundary codepoints: GhosttyCodepoints*.\n\n The codepoints are copied into event-owned storage when set. If unset,\n operations that need word boundaries use Ghostty's defaults.\n\n Valid for PRESS, DRAG, AUTOSCROLL_TICK, and DEEP_PRESS."]
-    pub const WORD_BOUNDARY_CODEPOINTS: Type = 5;
+    pub const WORD_BOUNDARY_CODEPOINTS: Type = 6;
     #[doc = " Selection behavior table: GhosttySelectionGestureBehaviors*.\n\n If unset, press uses the default behavior table: cell, word, line."]
-    pub const BEHAVIORS: Type = 6;
+    pub const BEHAVIORS: Type = 7;
     #[doc = " Whether a drag or autoscroll tick should produce a rectangular selection: bool*."]
-    pub const RECTANGLE: Type = 7;
+    pub const RECTANGLE: Type = 8;
     #[doc = " Drag display geometry: GhosttySelectionGestureGeometry*. Required for DRAG and AUTOSCROLL_TICK."]
-    pub const GEOMETRY: Type = 8;
+    pub const GEOMETRY: Type = 9;
     #[doc = " Viewport coordinate for an autoscroll tick: GhosttyPointCoordinate*. Required for AUTOSCROLL_TICK."]
-    pub const VIEWPORT: Type = 9;
+    pub const VIEWPORT: Type = 10;
     #[doc = " Viewport coordinate for an autoscroll tick: GhosttyPointCoordinate*. Required for AUTOSCROLL_TICK."]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -1781,28 +1751,8 @@ unsafe extern "C" {
     #[doc = " Derive a command-output selection snapshot from a terminal grid reference.\n\n The returned selection is not installed as the terminal's current\n selection. It is a snapshot with the same lifetime rules as GhosttySelection.\n\n         not selectable command output, or GHOSTTY_INVALID_VALUE if the\n         terminal, ref, or output pointer is invalid.\n"]
     pub fn ghostty_terminal_select_output(
         terminal: Terminal,
-        ref_: GridRef,
+        ref_: *const GridRef,
         out_selection: *mut Selection,
-    ) -> Result::Type;
-}
-unsafe extern "C" {
-    #[doc = " Format a terminal selection into a caller-provided buffer.\n\n This is a one-shot convenience API for formatting either the terminal's\n active selection or a caller-provided GhosttySelection without explicitly\n creating a GhosttyFormatter.\n\n Pass NULL for buf to query the required output size. In that case,\n out_written receives the required size and the function returns\n GHOSTTY_OUT_OF_SPACE.\n\n If buf is too small, the function returns GHOSTTY_OUT_OF_SPACE and writes\n the required size to out_written. The caller can then retry with a larger\n buffer.\n\n If options.selection is NULL and the terminal has no active selection, the\n function returns GHOSTTY_NO_VALUE.\n\n                    GHOSTTY_OUT_OF_SPACE (must not be NULL)\n"]
-    pub fn ghostty_terminal_selection_format_buf(
-        terminal: Terminal,
-        options: TerminalSelectionFormatOptions,
-        buf: *mut u8,
-        buf_len: usize,
-        out_written: *mut usize,
-    ) -> Result::Type;
-}
-unsafe extern "C" {
-    #[doc = " Format a terminal selection into an allocated buffer.\n\n This is a one-shot convenience API for formatting either the terminal's\n active selection or a caller-provided GhosttySelection without explicitly\n creating a GhosttyFormatter.\n\n The returned buffer is allocated using allocator, or the default allocator\n if NULL is passed. The caller owns the returned buffer and must free it with\n ghostty_free(), passing the same allocator and returned length.\n Empty output returns GHOSTTY_SUCCESS with *out_ptr set to NULL and\n *out_len set to zero. This result can be passed to ghostty_free().\n\n The returned bytes are not NUL-terminated. This supports plain text, VT, and\n HTML uniformly as byte output.\n\n If options.selection is NULL and the terminal has no active selection, the\n function returns GHOSTTY_NO_VALUE and leaves out_ptr as NULL and out_len as 0.\n\n"]
-    pub fn ghostty_terminal_selection_format_alloc(
-        terminal: Terminal,
-        allocator: *const Allocator,
-        options: TerminalSelectionFormatOptions,
-        out_ptr: *mut *mut u8,
-        out_len: *mut usize,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -1926,8 +1876,9 @@ pub mod OscTerminator {
 pub mod OscOption {
     #[doc = " OSC parser options, set with ghostty_osc_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const GHOSTTY_OSC_OPT_INVALID: Type = 0;
     #[doc = " The most bytes to keep from each OSC sequence whose number the parser\n does not implement.\n\n Zero, the default, discards these sequences and they produce\n GHOSTTY_OSC_COMMAND_INVALID. Any other value makes them produce\n GHOSTTY_OSC_COMMAND_UNKNOWN. A NULL value pointer sets the limit back\n to zero.\n\n A sequence longer than the limit is still reported. Its content holds\n the first bytes up to the limit, and GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED\n is true.\n\n Limits up to 2048 bytes use a buffer the parser already owns and never\n allocate memory. Larger limits allocate memory from the parser's\n allocator for each unknown sequence.\n\n Input type: size_t*"]
-    pub const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES: Type = 0;
+    pub const GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES: Type = 1;
     #[doc = " The most bytes to keep from each OSC sequence whose number the parser\n does not implement.\n\n Zero, the default, discards these sequences and they produce\n GHOSTTY_OSC_COMMAND_INVALID. Any other value makes them produce\n GHOSTTY_OSC_COMMAND_UNKNOWN. A NULL value pointer sets the limit back\n to zero.\n\n A sequence longer than the limit is still reported. Its content holds\n the first bytes up to the limit, and GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED\n is true.\n\n Limits up to 2048 bytes use a buffer the parser already owns and never\n allocate memory. Larger limits allocate memory from the parser's\n allocator for each unknown sequence.\n\n Input type: size_t*"]
     pub const GHOSTTY_OSC_OPT_MAX_VALUE: Type = 2147483647;
 }
@@ -1985,7 +1936,7 @@ unsafe extern "C" {
         command: OscCommand,
         data: OscCommandData::Type,
         out: *mut ::std::os::raw::c_void,
-    ) -> bool;
+    ) -> Result::Type;
 }
 pub mod SizeReportStyle {
     #[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
@@ -2033,7 +1984,7 @@ unsafe extern "C" {
     #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_size_report_encode(
         style: SizeReportStyle::Type,
-        size: SizeReportSize,
+        size: *const SizeReportSize,
         buf: *mut ::std::os::raw::c_char,
         buf_len: usize,
         out_written: *mut usize,
@@ -2083,25 +2034,12 @@ pub mod KittyGraphicsPlacementData {
     #[doc = " Z-index for this placement.\n\n Output type: int32_t *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
-pub mod KittyPlacementLayer {
-    #[doc = " A layer to limit the storage placement iterator to, set with\n GHOSTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPTION_LAYER.\n\n The Kitty graphics protocol picks a placement's layer from its\n z-index, as each value below describes. This filter is only for the\n storage iterator. To draw, use the layer the render state gives each\n entry (GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER). It follows the same\n rules, and it also covers virtual placements, which are always drawn\n below the text.\n"]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " Every placement. This is the default."]
-    pub const ALL: Type = 0;
-    #[doc = " Placements drawn below the cell backgrounds: z < INT32_MIN / 2."]
-    pub const BELOW_BG: Type = 1;
-    #[doc = " Placements drawn above the cell backgrounds and below the text:\n  INT32_MIN / 2 <= z < 0."]
-    pub const BELOW_TEXT: Type = 2;
-    #[doc = " Placements drawn above the text: z >= 0."]
-    pub const ABOVE_TEXT: Type = 3;
-    #[doc = " Placements drawn above the text: z >= 0."]
-    pub const MAX_VALUE: Type = 2147483647;
-}
 pub mod KittyGraphicsPlacementIteratorOption {
     #[doc = " Settable options for ghostty_kitty_graphics_placement_iterator_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Only return placements in one layer. See GhosttyKittyPlacementLayer.\n\n Input type: GhosttyKittyPlacementLayer *"]
-    pub const LAYER: Type = 0;
+    pub const LAYER: Type = 1;
     #[doc = " Only return placements in one layer. See GhosttyKittyPlacementLayer.\n\n Input type: GhosttyKittyPlacementLayer *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -2139,10 +2077,8 @@ pub mod KittyGraphicsImageData {
     pub const FORMAT: Type = 5;
     #[doc = " Compression of the image. Always\n GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE; compressed payloads are\n inflated before storage.\n\n Output type: GhosttyKittyImageCompression *"]
     pub const COMPRESSION: Type = 6;
-    #[doc = " Borrowed pointer to the raw pixel data. Valid as long as the\n underlying terminal is not mutated. Returns GHOSTTY_NO_VALUE when\n the image metadata is resident but its pixel payload is pending.\n\n The data is always fully decoded, uncompressed pixels in the\n format reported by GHOSTTY_KITTY_IMAGE_DATA_FORMAT: zlib payloads\n are inflated and PNG payloads are decoded to RGBA at transmission\n time, before the image is stored. Consumers can upload this\n directly to the GPU without any decode step.\n\n For an animated image (Kitty graphics animation, actions a=f/a=a)\n this is the pixel data of the current animation frame. The\n image's GHOSTTY_KITTY_IMAGE_DATA_GENERATION changes whenever the\n current frame changes, so generation-keyed caches remain\n coherent.\n\n Output type: const uint8_t **"]
-    pub const DATA_PTR: Type = 7;
-    #[doc = " Length of the raw pixel data in bytes. Always equal to\n width * height * bytes-per-pixel for the reported format. For a\n pending image, this is the expected length reserved against the\n storage limit even though DATA_PTR is not available yet.\n\n Output type: size_t *"]
-    pub const DATA_LEN: Type = 8;
+    pub const PIXELS: Type = 7;
+    pub const EXPECTED_LEN: Type = 8;
     #[doc = " A value that changes whenever this image's pixels may have changed:\n when a program sends the image or replaces it, and when an animation\n moves to a new frame. Use it as part of your texture cache key. If\n it matches the texture you have, you don't need to read the pixels\n again. The render state reports the same value for each of its\n entries as GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION.\n\n Don't use the image's size or data length to detect changes instead.\n A program can send new pixels of the same size under the same ID.\n\n A value is never reused, not even by another image, another screen,\n or another terminal. It is never 0 for a stored image, so you can\n use 0 to mean \"no texture yet\".\n\n One case doesn't change this value. When a program finishes sending\n an image whose pixels were still on the way, the image keeps its\n value, and GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR starts returning the\n pixels. GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION changes when that\n happens, so read DATA_PTR again then.\n\n Output type: uint64_t *"]
     pub const GENERATION: Type = 9;
     #[doc = " A value that changes whenever this image's pixels may have changed:\n when a program sends the image or replaces it, and when an animation\n moves to a new frame. Use it as part of your texture cache key. If\n it matches the texture you have, you don't need to read the pixels\n again. The render state reports the same value for each of its\n entries as GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION.\n\n Don't use the image's size or data length to detect changes instead.\n A program can send new pixels of the same size under the same ID.\n\n A value is never reused, not even by another image, another screen,\n or another terminal. It is never 0 for a stored image, so you can\n use 0 to mean \"no texture yet\".\n\n One case doesn't change this value. When a program finishes sending\n an image whose pixels were still on the way, the image keeps its\n value, and GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR starts returning the\n pixels. GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION changes when that\n happens, so read DATA_PTR again then.\n\n Output type: uint64_t *"]
@@ -2458,20 +2394,6 @@ pub mod TerminalScreen {
     #[doc = " The alternate screen."]
     pub const ALTERNATE: Type = 1;
     #[doc = " The alternate screen."]
-    pub const MAX_VALUE: Type = 2147483647;
-}
-pub mod TerminalCursorStyle {
-    #[doc = " Visual style of the terminal cursor.\n"]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " Bar cursor (DECSCUSR 5, 6)."]
-    pub const BAR: Type = 0;
-    #[doc = " Block cursor (DECSCUSR 1, 2)."]
-    pub const BLOCK: Type = 1;
-    #[doc = " Underline cursor (DECSCUSR 3, 4)."]
-    pub const UNDERLINE: Type = 2;
-    #[doc = " Hollow block cursor."]
-    pub const BLOCK_HOLLOW: Type = 3;
-    #[doc = " Hollow block cursor."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalBoundary {
@@ -2907,8 +2829,6 @@ pub type ClipboardWriteReplyFn = ::std::option::Option<
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ClipboardWrite {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " Clipboard destination."]
     pub location: ClipboardLocation::Type,
     #[doc = " Borrowed array of MIME representations."]
@@ -2928,25 +2848,23 @@ pub struct ClipboardWrite {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 72usize];
+    ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 64usize];
     ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 8usize];
-    ["Offset of field: ClipboardWrite::size"]
-        [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
     ["Offset of field: ClipboardWrite::location"]
-        [::std::mem::offset_of!(ClipboardWrite, location) - 8usize];
+        [::std::mem::offset_of!(ClipboardWrite, location) - 0usize];
     ["Offset of field: ClipboardWrite::contents"]
-        [::std::mem::offset_of!(ClipboardWrite, contents) - 16usize];
+        [::std::mem::offset_of!(ClipboardWrite, contents) - 8usize];
     ["Offset of field: ClipboardWrite::contents_len"]
-        [::std::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
+        [::std::mem::offset_of!(ClipboardWrite, contents_len) - 16usize];
     ["Offset of field: ClipboardWrite::name"]
-        [::std::mem::offset_of!(ClipboardWrite, name) - 32usize];
+        [::std::mem::offset_of!(ClipboardWrite, name) - 24usize];
     ["Offset of field: ClipboardWrite::granted"]
-        [::std::mem::offset_of!(ClipboardWrite, granted) - 48usize];
+        [::std::mem::offset_of!(ClipboardWrite, granted) - 40usize];
     ["Offset of field: ClipboardWrite::can_remember"]
-        [::std::mem::offset_of!(ClipboardWrite, can_remember) - 49usize];
-    ["Offset of field: ClipboardWrite::ctx"][::std::mem::offset_of!(ClipboardWrite, ctx) - 56usize];
+        [::std::mem::offset_of!(ClipboardWrite, can_remember) - 41usize];
+    ["Offset of field: ClipboardWrite::ctx"][::std::mem::offset_of!(ClipboardWrite, ctx) - 48usize];
     ["Offset of field: ClipboardWrite::reply"]
-        [::std::mem::offset_of!(ClipboardWrite, reply) - 64usize];
+        [::std::mem::offset_of!(ClipboardWrite, reply) - 56usize];
 };
 impl Default for ClipboardWrite {
     fn default() -> Self {
@@ -3036,8 +2954,6 @@ pub type ClipboardReadReplyFn = ::std::option::Option<
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ClipboardRead {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " Clipboard to read."]
     pub location: ClipboardLocation::Type,
     #[doc = " Borrowed array of the MIME types the program wants, in order of\n preference. Protocols that only carry text (OSC 52) request\n \"text/plain\". NULL when mimes_len is zero."]
@@ -3059,24 +2975,23 @@ pub struct ClipboardRead {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 80usize];
+    ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 72usize];
     ["Alignment of ClipboardRead"][::std::mem::align_of::<ClipboardRead>() - 8usize];
-    ["Offset of field: ClipboardRead::size"][::std::mem::offset_of!(ClipboardRead, size) - 0usize];
     ["Offset of field: ClipboardRead::location"]
-        [::std::mem::offset_of!(ClipboardRead, location) - 8usize];
+        [::std::mem::offset_of!(ClipboardRead, location) - 0usize];
     ["Offset of field: ClipboardRead::mimes"]
-        [::std::mem::offset_of!(ClipboardRead, mimes) - 16usize];
+        [::std::mem::offset_of!(ClipboardRead, mimes) - 8usize];
     ["Offset of field: ClipboardRead::mimes_len"]
-        [::std::mem::offset_of!(ClipboardRead, mimes_len) - 24usize];
-    ["Offset of field: ClipboardRead::list"][::std::mem::offset_of!(ClipboardRead, list) - 32usize];
-    ["Offset of field: ClipboardRead::name"][::std::mem::offset_of!(ClipboardRead, name) - 40usize];
+        [::std::mem::offset_of!(ClipboardRead, mimes_len) - 16usize];
+    ["Offset of field: ClipboardRead::list"][::std::mem::offset_of!(ClipboardRead, list) - 24usize];
+    ["Offset of field: ClipboardRead::name"][::std::mem::offset_of!(ClipboardRead, name) - 32usize];
     ["Offset of field: ClipboardRead::granted"]
-        [::std::mem::offset_of!(ClipboardRead, granted) - 56usize];
+        [::std::mem::offset_of!(ClipboardRead, granted) - 48usize];
     ["Offset of field: ClipboardRead::can_remember"]
-        [::std::mem::offset_of!(ClipboardRead, can_remember) - 57usize];
-    ["Offset of field: ClipboardRead::ctx"][::std::mem::offset_of!(ClipboardRead, ctx) - 64usize];
+        [::std::mem::offset_of!(ClipboardRead, can_remember) - 49usize];
+    ["Offset of field: ClipboardRead::ctx"][::std::mem::offset_of!(ClipboardRead, ctx) - 56usize];
     ["Offset of field: ClipboardRead::reply"]
-        [::std::mem::offset_of!(ClipboardRead, reply) - 72usize];
+        [::std::mem::offset_of!(ClipboardRead, reply) - 64usize];
 };
 impl Default for ClipboardRead {
     fn default() -> Self {
@@ -3099,8 +3014,6 @@ pub type TerminalClipboardReadFn = ::std::option::Option<
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct TerminalDesktopNotification {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " Notification title, or an empty string when the protocol omits it."]
     pub title: String,
     #[doc = " Notification body."]
@@ -3109,15 +3022,13 @@ pub struct TerminalDesktopNotification {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalDesktopNotification"]
-        [::std::mem::size_of::<TerminalDesktopNotification>() - 40usize];
+        [::std::mem::size_of::<TerminalDesktopNotification>() - 32usize];
     ["Alignment of TerminalDesktopNotification"]
         [::std::mem::align_of::<TerminalDesktopNotification>() - 8usize];
-    ["Offset of field: TerminalDesktopNotification::size"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, size) - 0usize];
     ["Offset of field: TerminalDesktopNotification::title"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, title) - 8usize];
+        [::std::mem::offset_of!(TerminalDesktopNotification, title) - 0usize];
     ["Offset of field: TerminalDesktopNotification::body"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, body) - 24usize];
+        [::std::mem::offset_of!(TerminalDesktopNotification, body) - 16usize];
 };
 impl Default for TerminalDesktopNotification {
     fn default() -> Self {
@@ -3156,8 +3067,6 @@ pub mod TerminalProgressState {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct TerminalProgressReport {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " Literal progress state reported by the running program."]
     pub state: TerminalProgressState::Type,
     #[doc = " Progress percentage from 0 through 100, or -1 when omitted."]
@@ -3165,15 +3074,13 @@ pub struct TerminalProgressReport {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalProgressReport"][::std::mem::size_of::<TerminalProgressReport>() - 16usize];
+    ["Size of TerminalProgressReport"][::std::mem::size_of::<TerminalProgressReport>() - 8usize];
     ["Alignment of TerminalProgressReport"]
-        [::std::mem::align_of::<TerminalProgressReport>() - 8usize];
-    ["Offset of field: TerminalProgressReport::size"]
-        [::std::mem::offset_of!(TerminalProgressReport, size) - 0usize];
+        [::std::mem::align_of::<TerminalProgressReport>() - 4usize];
     ["Offset of field: TerminalProgressReport::state"]
-        [::std::mem::offset_of!(TerminalProgressReport, state) - 8usize];
+        [::std::mem::offset_of!(TerminalProgressReport, state) - 0usize];
     ["Offset of field: TerminalProgressReport::progress"]
-        [::std::mem::offset_of!(TerminalProgressReport, progress) - 12usize];
+        [::std::mem::offset_of!(TerminalProgressReport, progress) - 4usize];
 };
 impl Default for TerminalProgressReport {
     fn default() -> Self {
@@ -3228,8 +3135,6 @@ pub mod ProgramStatusKind {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct TerminalProgramStatus {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " What the program is doing."]
     pub state: ProgramStatusState::Type,
     #[doc = " What the program needs from the user. Only set for\n GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. It is\n GHOSTTY_PROGRAM_STATUS_KIND_NONE for other states, when the program\n didn't say, or when it sent a kind this version doesn't know."]
@@ -3247,25 +3152,23 @@ pub struct TerminalProgramStatus {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 88usize];
+    ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 80usize];
     ["Alignment of TerminalProgramStatus"]
         [::std::mem::align_of::<TerminalProgramStatus>() - 8usize];
-    ["Offset of field: TerminalProgramStatus::size"]
-        [::std::mem::offset_of!(TerminalProgramStatus, size) - 0usize];
     ["Offset of field: TerminalProgramStatus::state"]
-        [::std::mem::offset_of!(TerminalProgramStatus, state) - 8usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, state) - 0usize];
     ["Offset of field: TerminalProgramStatus::kind"]
-        [::std::mem::offset_of!(TerminalProgramStatus, kind) - 12usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, kind) - 4usize];
     ["Offset of field: TerminalProgramStatus::progress"]
-        [::std::mem::offset_of!(TerminalProgramStatus, progress) - 16usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, progress) - 8usize];
     ["Offset of field: TerminalProgramStatus::id"]
-        [::std::mem::offset_of!(TerminalProgramStatus, id) - 24usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, id) - 16usize];
     ["Offset of field: TerminalProgramStatus::app"]
-        [::std::mem::offset_of!(TerminalProgramStatus, app) - 40usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, app) - 32usize];
     ["Offset of field: TerminalProgramStatus::title"]
-        [::std::mem::offset_of!(TerminalProgramStatus, title) - 56usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, title) - 48usize];
     ["Offset of field: TerminalProgramStatus::message"]
-        [::std::mem::offset_of!(TerminalProgramStatus, message) - 72usize];
+        [::std::mem::offset_of!(TerminalProgramStatus, message) - 64usize];
 };
 impl Default for TerminalProgramStatus {
     fn default() -> Self {
@@ -3318,8 +3221,6 @@ pub mod SemanticPromptPromptKind {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct TerminalSemanticPrompt {
-    #[doc = " Size of this struct in bytes."]
-    pub size: usize,
     #[doc = " Which step of the command this event reports."]
     pub kind: SemanticPromptKind::Type,
     #[doc = " Which prompt is starting. Set for\n `GHOSTTY_SEMANTIC_PROMPT_PROMPT_START`. Always\n `GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY` for other kinds."]
@@ -3335,23 +3236,21 @@ pub struct TerminalSemanticPrompt {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalSemanticPrompt"][::std::mem::size_of::<TerminalSemanticPrompt>() - 56usize];
+    ["Size of TerminalSemanticPrompt"][::std::mem::size_of::<TerminalSemanticPrompt>() - 48usize];
     ["Alignment of TerminalSemanticPrompt"]
         [::std::mem::align_of::<TerminalSemanticPrompt>() - 8usize];
-    ["Offset of field: TerminalSemanticPrompt::size"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, size) - 0usize];
     ["Offset of field: TerminalSemanticPrompt::kind"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 8usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 0usize];
     ["Offset of field: TerminalSemanticPrompt::prompt_kind"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 12usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 4usize];
     ["Offset of field: TerminalSemanticPrompt::has_exit_code"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 16usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 8usize];
     ["Offset of field: TerminalSemanticPrompt::exit_code"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 20usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 12usize];
     ["Offset of field: TerminalSemanticPrompt::command"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 24usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 16usize];
     ["Offset of field: TerminalSemanticPrompt::error"]
-        [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 40usize];
+        [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 32usize];
 };
 impl Default for TerminalSemanticPrompt {
     fn default() -> Self {
@@ -3538,102 +3437,103 @@ const _: () = {
 pub mod TerminalOption {
     #[doc = " Terminal option identifiers.\n\n These values are used with ghostty_terminal_set() to configure\n terminal callbacks and associated state.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Opaque userdata pointer passed to all callbacks.\n\n Input type: void*"]
-    pub const USERDATA: Type = 0;
+    pub const USERDATA: Type = 1;
     #[doc = " Callback invoked when the terminal needs to write data back\n to the pty (e.g. in response to a DECRQM query, device status\n report, or VT-driven mode 2048 enable). Set to NULL to ignore such\n sequences.\n\n Input type: GhosttyTerminalWritePtyFn"]
-    pub const WRITE_PTY: Type = 1;
+    pub const WRITE_PTY: Type = 2;
     #[doc = " Callback invoked when the terminal receives a BEL character\n (0x07). Set to NULL to ignore bell events.\n\n Input type: GhosttyTerminalBellFn"]
-    pub const BELL: Type = 2;
+    pub const BELL: Type = 3;
     #[doc = " Callback invoked when the terminal receives an ENQ character\n (0x05). Set to NULL to send no response.\n\n Input type: GhosttyTerminalEnquiryFn"]
-    pub const ENQUIRY: Type = 3;
+    pub const ENQUIRY: Type = 4;
     #[doc = " Callback invoked when the terminal receives an XTVERSION query\n (CSI > q). Set to NULL to report the default \"libghostty\" string.\n\n Input type: GhosttyTerminalXtversionFn"]
-    pub const XTVERSION: Type = 4;
+    pub const XTVERSION: Type = 5;
     #[doc = " Callback invoked when the terminal title changes via escape\n sequences (e.g. OSC 0 or OSC 2). Set to NULL to ignore title\n change events.\n\n Input type: GhosttyTerminalTitleChangedFn"]
-    pub const TITLE_CHANGED: Type = 5;
+    pub const TITLE_CHANGED: Type = 6;
     #[doc = " Callback invoked in response to XTWINOPS size queries\n (CSI 14/16/18/19 t). Set to NULL to silently ignore size queries.\n\n Input type: GhosttyTerminalSizeFn"]
-    pub const SIZE: Type = 6;
+    pub const SIZE: Type = 7;
     #[doc = " Callback invoked in response to a color scheme device status\n report query (CSI ? 996 n). Return true and fill the out pointer\n to report the current scheme, or return false to silently ignore.\n Set to NULL to ignore color scheme queries.\n\n Input type: GhosttyTerminalColorSchemeFn"]
-    pub const COLOR_SCHEME: Type = 7;
+    pub const COLOR_SCHEME: Type = 8;
     #[doc = " Callback invoked in response to a device attributes query\n (CSI c, CSI > c, or CSI = c). Return true and fill the out\n pointer with response data, or return false to silently ignore.\n Set to NULL to ignore device attributes queries.\n\n Input type: GhosttyTerminalDeviceAttributesFn"]
-    pub const DEVICE_ATTRIBUTES: Type = 8;
+    pub const DEVICE_ATTRIBUTES: Type = 9;
     #[doc = " Set the terminal title manually.\n\n The string data is copied into the terminal. A NULL value pointer\n clears the title (equivalent to setting an empty string).\n\n Input type: GhosttyString*"]
-    pub const TITLE: Type = 9;
+    pub const TITLE: Type = 10;
     #[doc = " Set the terminal working directory manually.\n\n The string data is copied into the terminal. A NULL value pointer\n clears the pwd (equivalent to setting an empty string).\n\n Input type: GhosttyString*"]
-    pub const PWD: Type = 10;
+    pub const PWD: Type = 11;
     #[doc = " Set the default foreground color.\n\n A NULL value pointer clears the default (unset).\n\n Input type: GhosttyColorRgb*"]
-    pub const COLOR_FOREGROUND: Type = 11;
+    pub const COLOR_FOREGROUND: Type = 12;
     #[doc = " Set the default background color.\n\n A NULL value pointer clears the default (unset).\n\n Input type: GhosttyColorRgb*"]
-    pub const COLOR_BACKGROUND: Type = 12;
+    pub const COLOR_BACKGROUND: Type = 13;
     #[doc = " Set the default cursor color.\n\n A NULL value pointer clears the default (unset).\n\n Input type: GhosttyColorRgb*"]
-    pub const COLOR_CURSOR: Type = 13;
+    pub const COLOR_CURSOR: Type = 14;
     #[doc = " Set the default 256-color palette.\n\n The value must point to an array of exactly 256 GhosttyColorRgb values.\n A NULL value pointer resets to the built-in default palette.\n\n Input type: GhosttyColorRgb[256]*"]
-    pub const COLOR_PALETTE: Type = 14;
+    pub const COLOR_PALETTE: Type = 15;
     #[doc = " Set the Kitty image storage limit in bytes.\n\n Applied to all initialized screens (primary and alternate).\n A value of zero disables the Kitty graphics protocol entirely,\n deleting all stored images and placements. A NULL value pointer\n is equivalent to zero (disables). Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: uint64_t*"]
-    pub const KITTY_IMAGE_STORAGE_LIMIT: Type = 15;
+    pub const KITTY_IMAGE_STORAGE_LIMIT: Type = 16;
     #[doc = " Enable or disable Kitty image loading via the file medium.\n\n A NULL value pointer is a no-op. Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: bool*"]
-    pub const KITTY_IMAGE_MEDIUM_FILE: Type = 16;
+    pub const KITTY_IMAGE_MEDIUM_FILE: Type = 17;
     #[doc = " Enable Kitty image loading via the temporary file medium, restricted to\n the provided directory. The string data is copied into the terminal.\n\n A NULL value pointer disables the temporary file medium. Has no effect\n when Kitty graphics are disabled at build time.\n\n Input type: GhosttyString*"]
-    pub const KITTY_IMAGE_MEDIUM_TEMP_FILE: Type = 17;
+    pub const KITTY_IMAGE_MEDIUM_TEMP_FILE: Type = 18;
     #[doc = " Enable or disable Kitty image loading via the shared memory medium.\n\n A NULL value pointer is a no-op. Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: bool*"]
-    pub const KITTY_IMAGE_MEDIUM_SHARED_MEM: Type = 18;
+    pub const KITTY_IMAGE_MEDIUM_SHARED_MEM: Type = 19;
     #[doc = " Set the maximum bytes the APC handler will buffer for all protocols.\n This prevents malicious input from causing unbounded memory allocation.\n A NULL value pointer removes all overrides, reverting to the built-in\n defaults.\n\n Input type: size_t*"]
-    pub const APC_MAX_BYTES: Type = 19;
+    pub const APC_MAX_BYTES: Type = 20;
     #[doc = " Set the maximum bytes the APC handler will buffer for Kitty graphics\n protocol data. A NULL value pointer removes the override, reverting\n to the built-in default.\n\n Input type: size_t*"]
-    pub const APC_MAX_BYTES_KITTY: Type = 20;
+    pub const APC_MAX_BYTES_KITTY: Type = 21;
     #[doc = " Set the active screen selection.\n\n The value must point to a GhosttySelection whose grid references are\n valid for this terminal's active screen at the time of the call. The\n terminal copies the selection immediately and converts it to\n terminal-owned tracked state, so the GhosttySelection struct and its\n untracked grid references do not need to outlive this call.\n\n Passing NULL clears the active screen selection.\n\n Input type: GhosttySelection*"]
-    pub const SELECTION: Type = 21;
+    pub const SELECTION: Type = 22;
     #[doc = " Set the default cursor style used by DECSCUSR reset (CSI 0 q).\n\n A NULL value pointer resets to the built-in default block cursor.\n\n Input type: GhosttyTerminalCursorStyle*"]
-    pub const DEFAULT_CURSOR_STYLE: Type = 22;
+    pub const DEFAULT_CURSOR_STYLE: Type = 23;
     #[doc = " Set whether the default cursor should blink when reset by DECSCUSR\n (CSI 0 q).\n\n A NULL value pointer resets to the built-in default of not blinking.\n\n Input type: bool*"]
-    pub const DEFAULT_CURSOR_BLINK: Type = 23;
+    pub const DEFAULT_CURSOR_BLINK: Type = 24;
     #[doc = " Enable or disable Glyph Protocol APC handling.\n\n When disabled, Glyph Protocol APC sequences are ignored and no\n support/query/register/clear responses are emitted. Disabling also clears\n the terminal session's glyph glossary. A NULL value pointer is a no-op.\n\n Input type: bool*"]
-    pub const GLYPH_PROTOCOL: Type = 24;
+    pub const GLYPH_PROTOCOL: Type = 25;
     #[doc = " Callback invoked when the terminal pwd changes via escape\n sequences (OSC 7, OSC 9, or OSC 1337 CurrentDir). Set to NULL\n to ignore pwd change events.\n\n Input type: GhosttyTerminalPwdChangedFn"]
-    pub const PWD_CHANGED: Type = 25;
+    pub const PWD_CHANGED: Type = 26;
     #[doc = " Callback invoked when the running program performs a clipboard write.\n OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522) writes\n are normalized to an atomic set of decoded MIME representations. Set\n to NULL to ignore clipboard writes (Kitty clipboard writes are then\n refused with ENOSYS). Clipboard read requests are delivered to\n GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ instead.\n\n Input type: GhosttyTerminalClipboardWriteFn"]
-    pub const CLIPBOARD_WRITE: Type = 26;
+    pub const CLIPBOARD_WRITE: Type = 27;
     #[doc = " Set the maximum scrollback allocation in bytes.\n\n This is an estimate. Internally, libghostty only prunes bytes up\n to a \"page\"-granularity. A page is the minimum allocated unit of\n grid space within Ghostty. A page at the time of writing these docs\n is about 400KB, so the byte limit will be within this delta.\n\n This works alongside the line limit configuration. If both are set,\n the first-reached limit is used first. Both limits are dependent\n on external state (byte limit can be reached with less lines if\n more styles are used for example, line limit can be reached with\n a narrower terminal viewport). So, they are useful together.\n\n Lowering the limit immediately removes eligible complete historical\n pages. A value of zero disables scrollback and erases retained history.\n A NULL value pointer removes the byte limit.\n\n Input type: size_t*"]
-    pub const SCROLLBACK_MAX_BYTES: Type = 27;
+    pub const SCROLLBACK_MAX_BYTES: Type = 28;
     #[doc = " Set the maximum number of physical lines retained in scrollback.\n\n This is an estimate. Internally, libghostty only prunes lines up\n to a \"page\"-granularity. A page is the minimum allocated unit of\n grid space within Ghostty. As a result, the actual available scrollback\n lines will almost always be higher than configured. The magnitude\n of the difference depends on the number of used styles, graphemes, etc.\n since the row-count in a page is dynamic based on that. In general,\n it ranges from dozens to a hundred or so lines.\n\n This works alongside the line limit configuration. If both are set,\n the first-reached limit is used first. Both limits are dependent\n on external state (byte limit can be reached with less lines if\n more styles are used for example, line limit can be reached with\n a narrower terminal viewport). So, they are useful together.\n\n Lowering the limit immediately removes eligible complete historical\n pages. A NULL value pointer removes the line limit.\n\n Input type: size_t*"]
-    pub const SCROLLBACK_MAX_LINES: Type = 28;
+    pub const SCROLLBACK_MAX_LINES: Type = 29;
     #[doc = " Callback invoked when the running program requests a desktop\n notification via OSC 9 or OSC 777. Set to NULL to ignore desktop\n notification requests.\n\n Input type: GhosttyTerminalDesktopNotificationFn"]
-    pub const DESKTOP_NOTIFICATION: Type = 29;
+    pub const DESKTOP_NOTIFICATION: Type = 30;
     #[doc = " Callback invoked when the running program reports progress via OSC 9;4.\n Set to NULL to ignore progress reports.\n\n Input type: GhosttyTerminalProgressReportFn"]
-    pub const PROGRESS_REPORT: Type = 30;
+    pub const PROGRESS_REPORT: Type = 31;
     #[doc = " Set the maximum number of replay-safe VT continuation bytes retained.\n\n Continuation bytes reconstruct an escape sequence or UTF-8 codepoint\n which was unfinished at the end of the most recent\n VT write call. They are used automatically by terminal snapshots and may\n also be exported directly with the continuation APIs.\n\n Tracking is disabled by default. A nonzero value enables tracking and\n sets its byte limit. Passing NULL or a pointer to zero disables tracking.\n Lowering the limit below an already-retained\n continuation, or enabling tracking while the parser is already\n unfinished, makes the current continuation unavailable because earlier\n bytes cannot be reconstructed. Tracking recovers automatically after a\n later write reaches the ground state or contains a fresh replay start.\n\n Input type: size_t*"]
-    pub const CONTINUATION_MAX_BYTES: Type = 31;
+    pub const CONTINUATION_MAX_BYTES: Type = 32;
     #[doc = " Enable window title reports in response to CSI 21 t.\n\n This is disabled by default because a running program can set a title and\n query it back into the pty input stream, potentially injecting commands\n that execute after user interaction. Passing NULL or a pointer to false\n disables title reporting.\n\n Input type: bool*"]
-    pub const TITLE_REPORT: Type = 32;
+    pub const TITLE_REPORT: Type = 33;
     #[doc = " Set the reset default for a terminal mode.\n\n This unconditionally updates both the current value and the value restored\n by a terminal reset. RIS restores every mode, and DECSTR only a subset.\n\n Some recognized modes represent transitions or mirror additional terminal\n state and cannot safely be configured as reset defaults. Those modes return\n GHOSTTY_INVALID_VALUE. A NULL value pointer also returns\n GHOSTTY_INVALID_VALUE.\n\n Input type: GhosttyTerminalModeConfig*"]
-    pub const MODE_DEFAULT: Type = 33;
+    pub const MODE_DEFAULT: Type = 34;
     #[doc = " Set the current value of a terminal mode.\n\n This does not change the value restored by a reset (RIS or DECSTR).\n A NULL value pointer or unknown mode returns GHOSTTY_INVALID_VALUE.\n\n Input type: GhosttyTerminalModeConfig*"]
-    pub const MODE: Type = 34;
+    pub const MODE: Type = 35;
     #[doc = " Callback for escape sequences that libghostty-vt does not implement.\n Set to NULL to stop receiving them.\n\n GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES must also be set, or the\n callback is never called. See the Unsupported Sequences section of the\n terminal documentation for an example.\n\n Input type: GhosttyTerminalUnknownSequenceFn"]
-    pub const UNKNOWN_SEQUENCE: Type = 35;
+    pub const UNKNOWN_SEQUENCE: Type = 36;
     #[doc = " The most bytes of each unsupported sequence to keep and pass to the\n GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE callback. The same limit applies\n to APC and OSC sequences.\n\n Zero, the default, turns unsupported sequence reporting off. A NULL\n value pointer also sets it to zero.\n\n A sequence longer than the limit is still reported. Its content holds\n the first bytes up to the limit, and `truncated` is true.\n\n Choose a limit that fits the largest sequence you expect. Unknown OSC\n sequences up to 2048 bytes are kept in a buffer the terminal already\n owns, so limits up to 2048 add no memory allocations for OSC. Larger\n limits allocate memory for each unknown OSC sequence. Unknown APC\n sequences are always kept in allocated memory.\n\n Input type: size_t*"]
-    pub const UNKNOWN_MAX_BYTES: Type = 36;
+    pub const UNKNOWN_MAX_BYTES: Type = 37;
     #[doc = " Set the name of the terminfo entry this terminal runs as, reported\n in response to an XTGETTCAP query for \"TN\" (e.g. \"xterm-256color\").\n\n The string data is copied into the terminal. A NULL value pointer\n clears the name (equivalent to setting an empty string). A name\n longer than 128 bytes returns GHOSTTY_INVALID_VALUE.\n\n If this is unset then we don't report anything for an XTGETTCAP\n TN query, because we don't know what the embedding terminal around\n libghostty is advertising itself as.\n\n Input type: GhosttyString*"]
-    pub const TERMINFO_NAME: Type = 37;
+    pub const TERMINFO_NAME: Type = 38;
     #[doc = " Callback invoked when the running program requests clipboard contents\n via OSC 52 with a \"?\" payload or a Kitty clipboard (OSC 5522) read. The\n read is synchronous and must be answered before the callback returns.\n Set to NULL (the default) to ignore OSC 52 read requests and refuse\n OSC 5522 reads with EPERM.\n\n Input type: GhosttyTerminalClipboardReadFn"]
-    pub const CLIPBOARD_READ: Type = 38;
+    pub const CLIPBOARD_READ: Type = 39;
     #[doc = " Set the maximum total decoded bytes a single Kitty clipboard protocol\n (OSC 5522) write transaction may accumulate. The limit is captured\n when a transaction begins; an in-flight transaction keeps the limit\n it started with.\n\n Data beyond the limit fails the whole transaction with EFBIG. The\n transaction is discarded, later write-related packets are ignored\n until a new write begins, and nothing reaches the clipboard write\n callback.\n\n Transactions are buffered in memory, so this limit bounds how much\n memory a single write can make the terminal allocate. Pass SIZE_MAX\n to remove the limit. A NULL value pointer reverts to the built-in\n default of 64MiB, the minimum required by the protocol.\n\n This limit doesn't apply to OSC 52 writes, which are bounded by the\n maximum length of an escape sequence instead.\n\n Input type: size_t*"]
-    pub const CLIPBOARD_WRITE_MAX_BYTES: Type = 39;
+    pub const CLIPBOARD_WRITE_MAX_BYTES: Type = 40;
     #[doc = " Set whether a resize may pull rows out of scrollback back into the\n active area.\n\n When true, growing rows reveals scrollback if the cursor is on the\n bottom row, and a column reflow that needs fewer rows reveals\n scrollback as well. When false, growing rows always appends blank rows\n at the bottom and a column reflow keeps the top of the active area on\n the same content, so a line that is fully in scrollback stays there. A\n soft-wrapped line with at least one row still in the active area may\n still unwrap back into view.\n\n Set this to false when the pty keeps its own screen buffer without\n scrollback, since it cannot pull rows back and will otherwise disagree\n with the terminal about the screen contents after a resize. Windows\n ConPTY is the motivating case.\n\n This is preserved across a full reset (RIS).\n\n A NULL value pointer resets to the built-in default of true.\n\n Input type: bool*"]
-    pub const RESIZE_PULL_SCROLLBACK: Type = 40;
+    pub const RESIZE_PULL_SCROLLBACK: Type = 41;
     #[doc = " Callback invoked when the running program asks the terminal to\n stop updating the screen and when it allows updates again. Today\n this is driven by synchronized output (mode 2026). Set to NULL to\n ignore these events.\n\n See GhosttyTerminalRenderHoldFn for how to use this in a renderer.\n\n Input type: GhosttyTerminalRenderHoldFn"]
-    pub const RENDER_HOLD: Type = 41;
+    pub const RENDER_HOLD: Type = 42;
     #[doc = " Callback invoked when the shell reports a step of a command: a prompt\n starts, input starts, output starts, or the command ends. Set to NULL\n to ignore these events.\n\n Input type: GhosttyTerminalSemanticPromptFn"]
-    pub const SEMANTIC_PROMPT: Type = 42;
+    pub const SEMANTIC_PROMPT: Type = 43;
     #[doc = " Callback invoked after the running program performs a full reset\n (RIS, ESC c). Set to NULL to ignore resets.\n\n Input type: GhosttyTerminalResetFn"]
-    pub const RESET: Type = 43;
+    pub const RESET: Type = 44;
     #[doc = " Enable checksum reports in response to DECRQCRA (CSI Pi ; Pg ; Pt ; Pl ;\n Pb ; Pr * y).\n\n This is disabled by default because a running program can checksum the\n screen one cell at a time and so read back everything on it, including\n output from other programs. Passing NULL or a pointer to false disables\n checksum reporting.\n\n While this is disabled, XTCHECKSUM (CSI Ps # y), which changes how the\n checksum is calculated, is ignored as well.\n\n Input type: bool*"]
-    pub const XT_CHECKSUM_REPORT: Type = 44;
+    pub const XT_CHECKSUM_REPORT: Type = 45;
     #[doc = " Set how the DECRQCRA checksum is calculated after a reset (RIS or DECSTR).\n This also changes the current calculation.\n\n The value holds the same bits as XTCHECKSUM (CSI Ps # y) and xterm's\n checksumExtension resource, which a running program can still use to\n change the calculation until the next reset:\n\n   - 1: don't negate the result\n   - 2: don't add the video attributes of each cell\n   - 4: don't omit blanks\n   - 8: count cells that were never written to as spaces\n   - 16: use full codepoints instead of the DEC 8-bit values\n\n Zero, or passing NULL, is the calculation of a real DEC terminal.\n Values above 31 return GHOSTTY_INVALID_VALUE.\n\n Input type: uint8_t*"]
-    pub const XT_CHECKSUM_EXTENSION: Type = 45;
+    pub const XT_CHECKSUM_EXTENSION: Type = 46;
     #[doc = " Callback invoked when the running program sends a program status\n report via OSC 7501. Set to NULL to ignore these reports.\n\n Programs may ask whether the terminal supports the protocol by\n sending `OSC 7501 ; ?`. While this callback is set, the terminal\n answers through GHOSTTY_TERMINAL_OPT_WRITE_PTY with `?` followed by\n the states and kinds it accepts:\n\n program:  ESC ] 7501 ; ? ST\n terminal: ESC ] 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST\n\n While this callback is NULL, the query gets no reply, so a program\n that asks sees the protocol as unsupported. Asking is optional, so\n programs may send reports anyway. Those are dropped. Set a write_pty\n callback too, or programs never see the reply.\n\n Input type: GhosttyTerminalProgramStatusFn"]
-    pub const PROGRAM_STATUS: Type = 46;
+    pub const PROGRAM_STATUS: Type = 47;
     #[doc = " Callback invoked when the running program asks to resize the window,\n such as with CSI 8 ; rows ; columns t. Set to NULL to ignore resize\n requests.\n\n Input type: GhosttyTerminalResizeWindowFn"]
-    pub const RESIZE_WINDOW: Type = 47;
+    pub const RESIZE_WINDOW: Type = 48;
     #[doc = " Callback invoked when the running program asks to resize the window,\n such as with CSI 8 ; rows ; columns t. Set to NULL to ignore resize\n requests.\n\n Input type: GhosttyTerminalResizeWindowFn"]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -3660,8 +3560,7 @@ pub mod TerminalData {
     pub const KITTY_KEYBOARD_FLAGS: Type = 8;
     #[doc = " Scrollbar state for the terminal viewport.\n\n This is amortized O(1): the total is maintained incrementally as\n the terminal is modified and the viewport offset is cached. The\n first read after the viewport moves to an arbitrary position that\n isn't an absolute row (e.g. scrolling to a selection) may cost\n O(pages) to compute the offset, after which it is cached again.\n\n There is intentionally no change notification for scroll state.\n Callers building scrollbars should poll this once per frame or\n per write batch and diff the result to detect changes; this is\n what Ghostty's own renderer does.\n\n Output type: GhosttyTerminalScrollbar *"]
     pub const SCROLLBAR: Type = 9;
-    #[doc = " The current SGR style of the cursor.\n\n This is the style that will be applied to newly printed characters.\n\n Output type: GhosttyStyle *"]
-    pub const CURSOR_STYLE: Type = 10;
+    pub const CURSOR_SGR_STYLE: Type = 10;
     #[doc = " Whether any mouse tracking mode is active.\n\n Returns true if any of the mouse tracking modes (X10, normal, button,\n or any-event) are enabled.\n\n Output type: bool *"]
     pub const MOUSE_TRACKING: Type = 11;
     #[doc = " The terminal title as set by escape sequences (e.g. OSC 0/2).\n\n Returns a borrowed string. The pointer is valid until the next mutating\n terminal call. An empty string (len=0) is returned when no title has been\n set.\n\n Output type: GhosttyString *"]
@@ -3855,7 +3754,10 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Scroll the terminal viewport.\n\n Scrolls the terminal's viewport according to the given behavior.\n When using GHOSTTY_SCROLL_VIEWPORT_DELTA, set the delta field in\n the value union to specify the number of rows to scroll (negative\n for up, positive for down). When using GHOSTTY_SCROLL_VIEWPORT_ROW,\n set the row field to the absolute row offset from the top of the\n scrollable area (the same row space as the offset field of\n GhosttyTerminalScrollbar). When using\n GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT, set delta_prompt to the signed\n number of prompts to move. See GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT for\n the navigation behavior. For other behaviors, the value is ignored.\n\n"]
-    pub fn ghostty_terminal_scroll_viewport(terminal: Terminal, behavior: TerminalScrollViewport);
+    pub fn ghostty_terminal_scroll_viewport(
+        terminal: Terminal,
+        behavior: TerminalScrollViewport,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Return the current compression activity token.\n\n The token is opaque and only equality comparisons are meaningful. An\n embedding application should cache it and restart its compression idle\n delay whenever the value changes. The value may wrap and changes in either\n direction have the same meaning.\n\n This function only observes terminal state. It does not perform or schedule\n compression.\n\n         is NULL\n"]
@@ -3915,139 +3817,12 @@ unsafe extern "C" {
         out: *mut PointCoordinate,
     ) -> Result::Type;
 }
-#[doc = " Extra screen state to include in styled output.\n"]
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct FormatterScreenExtra {
-    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyFormatterScreenExtra)."]
-    pub size: usize,
-    #[doc = " Emit cursor position using CUP (CSI H)."]
-    pub cursor: bool,
-    #[doc = " Emit current SGR style state based on the cursor's active style_id."]
-    pub style: bool,
-    #[doc = " Emit current hyperlink state using OSC 8 sequences."]
-    pub hyperlink: bool,
-    #[doc = " Emit character protection mode using DECSCA."]
-    pub protection: bool,
-    #[doc = " Emit Kitty keyboard protocol state using CSI > u and CSI = sequences."]
-    pub kitty_keyboard: bool,
-    #[doc = " Emit character set designations and invocations."]
-    pub charsets: bool,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterScreenExtra"][::std::mem::size_of::<FormatterScreenExtra>() - 16usize];
-    ["Alignment of FormatterScreenExtra"][::std::mem::align_of::<FormatterScreenExtra>() - 8usize];
-    ["Offset of field: FormatterScreenExtra::size"]
-        [::std::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
-    ["Offset of field: FormatterScreenExtra::cursor"]
-        [::std::mem::offset_of!(FormatterScreenExtra, cursor) - 8usize];
-    ["Offset of field: FormatterScreenExtra::style"]
-        [::std::mem::offset_of!(FormatterScreenExtra, style) - 9usize];
-    ["Offset of field: FormatterScreenExtra::hyperlink"]
-        [::std::mem::offset_of!(FormatterScreenExtra, hyperlink) - 10usize];
-    ["Offset of field: FormatterScreenExtra::protection"]
-        [::std::mem::offset_of!(FormatterScreenExtra, protection) - 11usize];
-    ["Offset of field: FormatterScreenExtra::kitty_keyboard"]
-        [::std::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 12usize];
-    ["Offset of field: FormatterScreenExtra::charsets"]
-        [::std::mem::offset_of!(FormatterScreenExtra, charsets) - 13usize];
-};
-#[doc = " Extra terminal state to include in styled output.\n"]
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct FormatterTerminalExtra {
-    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyFormatterTerminalExtra)."]
-    pub size: usize,
-    #[doc = " Emit the palette using OSC 4 sequences."]
-    pub palette: bool,
-    #[doc = " Emit terminal modes that differ from their defaults using CSI h/l."]
-    pub modes: bool,
-    #[doc = " Emit scrolling region state using DECSTBM and DECSLRM sequences."]
-    pub scrolling_region: bool,
-    #[doc = " Emit tabstop positions by clearing all tabs and setting each one."]
-    pub tabstops: bool,
-    #[doc = " Emit the present working directory using OSC 7."]
-    pub pwd: bool,
-    #[doc = " Emit keyboard modes such as ModifyOtherKeys."]
-    pub keyboard: bool,
-    #[doc = " Screen-level extras."]
-    pub screen: FormatterScreenExtra,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterTerminalExtra"][::std::mem::size_of::<FormatterTerminalExtra>() - 32usize];
-    ["Alignment of FormatterTerminalExtra"]
-        [::std::mem::align_of::<FormatterTerminalExtra>() - 8usize];
-    ["Offset of field: FormatterTerminalExtra::size"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
-    ["Offset of field: FormatterTerminalExtra::palette"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, palette) - 8usize];
-    ["Offset of field: FormatterTerminalExtra::modes"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, modes) - 9usize];
-    ["Offset of field: FormatterTerminalExtra::scrolling_region"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 10usize];
-    ["Offset of field: FormatterTerminalExtra::tabstops"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, tabstops) - 11usize];
-    ["Offset of field: FormatterTerminalExtra::pwd"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, pwd) - 12usize];
-    ["Offset of field: FormatterTerminalExtra::keyboard"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, keyboard) - 13usize];
-    ["Offset of field: FormatterTerminalExtra::screen"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
-};
-#[doc = " Options for creating a terminal formatter.\n"]
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct FormatterTerminalOptions {
-    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyFormatterTerminalOptions)."]
-    pub size: usize,
-    #[doc = " Output format to emit."]
-    pub emit: FormatterFormat::Type,
-    #[doc = " Whether to unwrap soft-wrapped lines."]
-    pub unwrap: bool,
-    #[doc = " Whether to trim trailing whitespace on non-blank lines. Trailing blank\n lines are always trimmed, except in VT output without trimming, where\n they are kept as part of the layout."]
-    pub trim: bool,
-    #[doc = " Extra terminal state to include in styled output."]
-    pub extra: FormatterTerminalExtra,
-    #[doc = " Optional selection to restrict output to a range.\n  If NULL, the entire screen is formatted."]
-    pub selection: *const Selection,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterTerminalOptions"]
-        [::std::mem::size_of::<FormatterTerminalOptions>() - 56usize];
-    ["Alignment of FormatterTerminalOptions"]
-        [::std::mem::align_of::<FormatterTerminalOptions>() - 8usize];
-    ["Offset of field: FormatterTerminalOptions::size"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
-    ["Offset of field: FormatterTerminalOptions::emit"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, emit) - 8usize];
-    ["Offset of field: FormatterTerminalOptions::unwrap"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, unwrap) - 12usize];
-    ["Offset of field: FormatterTerminalOptions::trim"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
-    ["Offset of field: FormatterTerminalOptions::extra"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
-    ["Offset of field: FormatterTerminalOptions::selection"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
-};
-impl Default for FormatterTerminalOptions {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
 unsafe extern "C" {
     #[doc = " Create a formatter for a terminal's active screen.\n\n The terminal must outlive the formatter. The formatter stores a borrowed\n reference to the terminal and reads its current state on each format call.\n\n"]
     pub fn ghostty_formatter_terminal_new(
         allocator: *const Allocator,
         formatter: *mut Formatter,
         terminal: Terminal,
-        options: FormatterTerminalOptions,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -4086,20 +3861,6 @@ pub mod RenderStateDirty {
     #[doc = " Global state changed; renderer should redraw everything."]
     pub const FULL: Type = 2;
     #[doc = " Global state changed; renderer should redraw everything."]
-    pub const MAX_VALUE: Type = 2147483647;
-}
-pub mod RenderStateCursorVisualStyle {
-    #[doc = " Visual style of the cursor.\n"]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " Bar cursor (DECSCUSR 5, 6)."]
-    pub const BAR: Type = 0;
-    #[doc = " Block cursor (DECSCUSR 1, 2)."]
-    pub const BLOCK: Type = 1;
-    #[doc = " Underline cursor (DECSCUSR 3, 4)."]
-    pub const UNDERLINE: Type = 2;
-    #[doc = " Hollow block cursor."]
-    pub const BLOCK_HOLLOW: Type = 3;
-    #[doc = " Hollow block cursor."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " A number of rows above and below the viewport.\n\n This is used both to request overscan with\n GHOSTTY_RENDER_STATE_OPTION_OVERSCAN and to report how many rows an\n update captured with GHOSTTY_RENDER_STATE_DATA_OVERSCAN. See \"Overscan\"\n in the render state overview for how the extra rows are used.\n"]
@@ -4191,10 +3952,11 @@ pub mod RenderStateData {
 pub mod RenderStateOption {
     #[doc = " Settable options for ghostty_render_state_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Set dirty state (GhosttyRenderStateDirty)."]
-    pub const DIRTY: Type = 0;
+    pub const DIRTY: Type = 1;
     #[doc = " Request overscan rows above and below the viewport\n  (GhosttyRenderStateOverscan). The request takes effect on the next\n  update and stays in effect until it is changed. Both sides are zero\n  by default, which captures only the viewport. The rows of the last\n  update can still be read after changing the request. Expect a full\n  redraw on the update after a change. See \"Overscan\" in the render\n  state overview."]
-    pub const OVERSCAN: Type = 1;
+    pub const OVERSCAN: Type = 2;
     #[doc = " Request overscan rows above and below the viewport\n  (GhosttyRenderStateOverscan). The request takes effect on the next\n  update and stays in effect until it is changed. Both sides are zero\n  by default, which captures only the viewport. The rows of the last\n  update can still be read after changing the request. Expect a full\n  redraw on the update after a change. See \"Overscan\" in the render\n  state overview."]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -4204,18 +3966,6 @@ pub mod ImageProtocol {
     #[doc = " The Kitty graphics protocol. Read the image with\n  ghostty_kitty_graphics_image()."]
     pub const KITTY: Type = 0;
     #[doc = " The Kitty graphics protocol. Read the image with\n  ghostty_kitty_graphics_image()."]
-    pub const MAX_VALUE: Type = 2147483647;
-}
-pub mod RenderStateImageLayer {
-    #[doc = " Where an image is drawn relative to the terminal's text.\n\n Draw the layers in this order: every image below backgrounds, then\n cell backgrounds, then images below text, then text, then images above\n text. Within a layer, draw images in order of their z-index, lowest\n first.\n"]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " Below the cell background colors."]
-    pub const BELOW_BACKGROUND: Type = 0;
-    #[doc = " Above the cell background colors and below the text."]
-    pub const BELOW_TEXT: Type = 1;
-    #[doc = " Above the text."]
-    pub const ABOVE_TEXT: Type = 2;
-    #[doc = " Above the text."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateKittyPlacementKind {
@@ -4301,8 +4051,9 @@ pub mod RenderStateRowData {
 pub mod RenderStateRowOption {
     #[doc = " Settable options for ghostty_render_state_row_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Set dirty state for the current row (bool)."]
-    pub const DIRTY: Type = 0;
+    pub const DIRTY: Type = 1;
     #[doc = " Set dirty state for the current row (bool)."]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -4350,7 +4101,7 @@ pub struct RenderStateCursor {
     #[doc = " Whether the cursor is at a password input field."]
     pub password_input: bool,
     #[doc = " The visual style of the cursor."]
-    pub visual_style: RenderStateCursorVisualStyle::Type,
+    pub visual_style: CursorStyle::Type,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -4855,7 +4606,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Get the tag from an SGR attribute.\n\n This function extracts the tag that identifies which type of attribute\n this is. Primarily useful in WebAssembly environments where accessing\n struct fields directly is difficult.\n\n"]
-    pub fn ghostty_sgr_attribute_tag(attr: SgrAttribute) -> SgrAttributeTag::Type;
+    pub fn ghostty_sgr_attribute_tag(attr: *const SgrAttribute) -> SgrAttributeTag::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the value from an SGR attribute.\n\n This function returns a pointer to the value union from an SGR attribute. Use\n the tag to determine which field of the union is valid. Primarily useful in\n WebAssembly environments where accessing struct fields directly is difficult.\n\n"]
@@ -4929,14 +4680,15 @@ pub type SysRandomSecureFn = ::std::option::Option<
 pub mod SysOption {
     #[doc = " System option identifiers for ghostty_sys_set()."]
     pub type Type = ::std::os::raw::c_uint;
+    pub const GHOSTTY_SYS_OPT_INVALID: Type = 0;
     #[doc = " Set the userdata pointer passed to all sys callbacks.\n\n Input type: void* (or NULL)"]
-    pub const GHOSTTY_SYS_OPT_USERDATA: Type = 0;
+    pub const GHOSTTY_SYS_OPT_USERDATA: Type = 1;
     #[doc = " Set the PNG decode function.\n\n When set, the terminal can accept PNG images via the Kitty\n Graphics Protocol. When cleared (NULL value), PNG decoding is\n unsupported and PNG image data will be rejected.\n\n Input type: GhosttySysDecodePngFn (function pointer, or NULL)"]
-    pub const GHOSTTY_SYS_OPT_DECODE_PNG: Type = 1;
+    pub const GHOSTTY_SYS_OPT_DECODE_PNG: Type = 2;
     #[doc = " Set the log callback.\n\n When set, internal library log messages are delivered to this\n callback. When cleared (NULL value), log messages are silently\n discarded.\n\n Use ghostty_sys_log_stderr as a convenience callback that\n writes formatted messages to stderr.\n\n Which log levels are emitted depends on the build mode of the\n library and is not configurable at runtime. Debug builds emit\n all levels (debug and above). Release builds emit info and\n above; debug-level messages are compiled out entirely and will\n never reach the callback.\n\n Input type: GhosttySysLogFn (function pointer, or NULL)"]
-    pub const GHOSTTY_SYS_OPT_LOG: Type = 2;
+    pub const GHOSTTY_SYS_OPT_LOG: Type = 3;
     #[doc = " Override the secure random source.\n\n By default the library draws secure random bytes from the\n platform (getrandom or arc4random_buf on POSIX, CNG on Windows).\n Targets without one, such as wasm32-freestanding, have no default\n and operations that need entropy fail with GHOSTTY_IO_ERROR until\n this is set. When set,\n it is used instead of the platform source on every target. When\n cleared (NULL value), the platform default is restored.\n\n Input type: GhosttySysRandomSecureFn (function pointer, or NULL)"]
-    pub const GHOSTTY_SYS_OPT_RANDOM_SECURE: Type = 3;
+    pub const GHOSTTY_SYS_OPT_RANDOM_SECURE: Type = 4;
     #[doc = " Override the secure random source.\n\n By default the library draws secure random bytes from the\n platform (getrandom or arc4random_buf on POSIX, CNG on Windows).\n Targets without one, such as wasm32-freestanding, have no default\n and operations that need entropy fail with GHOSTTY_IO_ERROR until\n this is set. When set,\n it is used instead of the platform source on every target. When\n cleared (NULL value), the platform default is restored.\n\n Input type: GhosttySysRandomSecureFn (function pointer, or NULL)"]
     pub const GHOSTTY_SYS_OPT_MAX_VALUE: Type = 2147483647;
 }
@@ -5171,7 +4923,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the key action (press, release, repeat).\n\n"]
-    pub fn ghostty_key_event_set_action(event: KeyEvent, action: KeyAction::Type);
+    pub fn ghostty_key_event_set_action(event: KeyEvent, action: KeyAction::Type) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the key action (press, release, repeat).\n\n"]
@@ -5179,7 +4931,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the physical key code.\n\n"]
-    pub fn ghostty_key_event_set_key(event: KeyEvent, key: Key::Type);
+    pub fn ghostty_key_event_set_key(event: KeyEvent, key: Key::Type) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the physical key code.\n\n"]
@@ -5187,7 +4939,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the modifier keys bitmask.\n\n"]
-    pub fn ghostty_key_event_set_mods(event: KeyEvent, mods: Mods);
+    pub fn ghostty_key_event_set_mods(event: KeyEvent, mods: Mods) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the modifier keys bitmask.\n\n"]
@@ -5195,7 +4947,10 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the consumed modifiers bitmask.\n\n"]
-    pub fn ghostty_key_event_set_consumed_mods(event: KeyEvent, consumed_mods: Mods);
+    pub fn ghostty_key_event_set_consumed_mods(
+        event: KeyEvent,
+        consumed_mods: Mods,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the consumed modifiers bitmask.\n\n"]
@@ -5203,7 +4958,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set whether the key event is part of a composition sequence.\n\n"]
-    pub fn ghostty_key_event_set_composing(event: KeyEvent, composing: bool);
+    pub fn ghostty_key_event_set_composing(event: KeyEvent, composing: bool) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get whether the key event is part of a composition sequence.\n\n"]
@@ -5215,18 +4970,18 @@ unsafe extern "C" {
         event: KeyEvent,
         utf8: *const ::std::os::raw::c_char,
         len: usize,
-    );
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the UTF-8 text generated by the key event.\n\n The returned pointer is valid until the event is freed or the UTF-8 text is modified.\n\n"]
-    pub fn ghostty_key_event_get_utf8(
-        event: KeyEvent,
-        len: *mut usize,
-    ) -> *const ::std::os::raw::c_char;
+    pub fn ghostty_key_event_get_utf8(event: KeyEvent) -> String;
 }
 unsafe extern "C" {
     #[doc = " Set the unshifted Unicode codepoint.\n\n"]
-    pub fn ghostty_key_event_set_unshifted_codepoint(event: KeyEvent, codepoint: u32);
+    pub fn ghostty_key_event_set_unshifted_codepoint(
+        event: KeyEvent,
+        codepoint: u32,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the unshifted Unicode codepoint.\n\n"]
@@ -5258,22 +5013,23 @@ pub mod OptionAsAlt {
 pub mod KeyEncoderOption {
     #[doc = " Key encoder option identifiers.\n\n These values are used with ghostty_key_encoder_setopt() to configure\n the behavior of the key encoder.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Terminal DEC mode 1: cursor key application mode (value: bool)"]
-    pub const CURSOR_KEY_APPLICATION: Type = 0;
+    pub const CURSOR_KEY_APPLICATION: Type = 1;
     #[doc = " Terminal DEC mode 66: keypad key application mode (value: bool)"]
-    pub const KEYPAD_KEY_APPLICATION: Type = 1;
+    pub const KEYPAD_KEY_APPLICATION: Type = 2;
     #[doc = " Terminal DEC mode 1035: ignore keypad with numlock (value: bool)"]
-    pub const IGNORE_KEYPAD_WITH_NUMLOCK: Type = 2;
+    pub const IGNORE_KEYPAD_WITH_NUMLOCK: Type = 3;
     #[doc = " Terminal DEC mode 1036: alt sends escape prefix (value: bool)"]
-    pub const ALT_ESC_PREFIX: Type = 3;
+    pub const ALT_ESC_PREFIX: Type = 4;
     #[doc = " xterm modifyOtherKeys mode 2 (value: bool)"]
-    pub const MODIFY_OTHER_KEYS_STATE_2: Type = 4;
+    pub const MODIFY_OTHER_KEYS_STATE_2: Type = 5;
     #[doc = " Kitty keyboard protocol flags (value: GhosttyKittyKeyFlags bitmask)"]
-    pub const KITTY_FLAGS: Type = 5;
+    pub const KITTY_FLAGS: Type = 6;
     #[doc = " macOS option-as-alt setting (value: GhosttyOptionAsAlt)"]
-    pub const MACOS_OPTION_AS_ALT: Type = 6;
+    pub const MACOS_OPTION_AS_ALT: Type = 7;
     #[doc = " Backarrow key mode (value: bool)\n See https://vt100.net/dec/ek-vt3xx-tp-002.pdf page 170\n If `false` (the default), `backspace` emits 0x7f\n If `true`, `backspace` emits 0x08"]
-    pub const BACKARROW_KEY_MODE: Type = 7;
+    pub const BACKARROW_KEY_MODE: Type = 8;
     #[doc = " Backarrow key mode (value: bool)\n See https://vt100.net/dec/ek-vt3xx-tp-002.pdf page 170\n If `false` (the default), `backspace` emits 0x7f\n If `true`, `backspace` emits 0x08"]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -5290,15 +5046,18 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set an option on the key encoder.\n\n Configures the behavior of the key encoder. Options control various aspects\n of encoding such as terminal modes (cursor key application mode, keypad mode),\n protocol selection (Kitty keyboard protocol flags), and platform-specific\n behaviors (macOS option-as-alt).\n\n If you are using a terminal instance, you can set the key encoding\n options based on the active terminal state (e.g. legacy vs Kitty mode\n and associated flags) with ghostty_key_encoder_setopt_from_terminal().\n\n A null pointer value does nothing. It does not reset the value to the\n default. The setopt call will do nothing.\n\n"]
-    pub fn ghostty_key_encoder_setopt(
+    pub fn ghostty_key_encoder_set(
         encoder: KeyEncoder,
         option: KeyEncoderOption::Type,
         value: *const ::std::os::raw::c_void,
-    );
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Set encoder options from a terminal's current state.\n\n Reads the terminal's current modes and flags and applies them to the\n encoder's options. This sets cursor key application mode, keypad mode,\n alt escape prefix, modifyOtherKeys state, and Kitty keyboard protocol\n flags from the terminal state.\n\n Note that the `macos_option_as_alt` option cannot be determined from\n terminal state and is reset to `GHOSTTY_OPTION_AS_ALT_FALSE` by this\n call. Use ghostty_key_encoder_setopt() to set it afterward if needed.\n\n"]
-    pub fn ghostty_key_encoder_setopt_from_terminal(encoder: KeyEncoder, terminal: Terminal);
+    pub fn ghostty_key_encoder_set_from_terminal(
+        encoder: KeyEncoder,
+        terminal: Terminal,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Encode a key event into a terminal escape sequence.\n\n Converts a key event into the appropriate terminal escape sequence based on\n the encoder's current options. The sequence is written to the provided buffer.\n\n Not all key events produce output. For example, unmodified modifier keys\n typically don't generate escape sequences. Check the out_len parameter to\n determine if any data was written.\n\n If the output buffer is too small, this function returns GHOSTTY_OUT_OF_SPACE\n and out_len will contain the required buffer size. The caller can then\n allocate a larger buffer and call the function again.\n\n\n ## Example: Calculate required buffer size\n\n // Query the required size with a NULL buffer (always returns OUT_OF_SPACE)\n size_t required = 0;\n GhosttyResult result = ghostty_key_encoder_encode(encoder, event, NULL, 0, &required);\n assert(result == GHOSTTY_OUT_OF_SPACE);\n\n // Allocate buffer of required size\n char *buf = malloc(required);\n\n // Encode with properly sized buffer\n size_t written = 0;\n result = ghostty_key_encoder_encode(encoder, event, buf, required, &written);\n assert(result == GHOSTTY_SUCCESS);\n\n // Use the encoded sequence...\n\n free(buf);\n\n ## Example: Direct encoding with static buffer\n\n // Most escape sequences are short, so a static buffer often suffices\n char buf[128];\n size_t written = 0;\n GhosttyResult result = ghostty_key_encoder_encode(encoder, event, buf, sizeof(buf), &written);\n\n if (result == GHOSTTY_SUCCESS) {\n   // Write the encoded sequence to the terminal\n   write(pty_fd, buf, written);\n } else if (result == GHOSTTY_OUT_OF_SPACE) {\n   // Buffer too small, written contains required size\n   char *dynamic_buf = malloc(written);\n   result = ghostty_key_encoder_encode(encoder, event, dynamic_buf, written, &written);\n   assert(result == GHOSTTY_SUCCESS);\n   write(pty_fd, dynamic_buf, written);\n   free(dynamic_buf);\n }\n"]
@@ -5373,7 +5132,10 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the event action.\n\n"]
-    pub fn ghostty_mouse_event_set_action(event: MouseEvent, action: MouseAction::Type);
+    pub fn ghostty_mouse_event_set_action(
+        event: MouseEvent,
+        action: MouseAction::Type,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the event action.\n\n"]
@@ -5381,22 +5143,25 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the event button.\n\n This sets a concrete button identity for the event.\n To represent \"no button\" (for motion events), use\n ghostty_mouse_event_clear_button().\n\n"]
-    pub fn ghostty_mouse_event_set_button(event: MouseEvent, button: MouseButton::Type);
+    pub fn ghostty_mouse_event_set_button(
+        event: MouseEvent,
+        button: MouseButton::Type,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Clear the event button.\n\n This sets the event button to \"none\".\n\n"]
-    pub fn ghostty_mouse_event_clear_button(event: MouseEvent);
+    pub fn ghostty_mouse_event_clear_button(event: MouseEvent) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the event button.\n\n"]
     pub fn ghostty_mouse_event_get_button(
         event: MouseEvent,
         out_button: *mut MouseButton::Type,
-    ) -> bool;
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Set keyboard modifiers held during the event.\n\n"]
-    pub fn ghostty_mouse_event_set_mods(event: MouseEvent, mods: Mods);
+    pub fn ghostty_mouse_event_set_mods(event: MouseEvent, mods: Mods) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get keyboard modifiers held during the event.\n\n"]
@@ -5404,7 +5169,10 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set the event position in surface-space pixels.\n\n"]
-    pub fn ghostty_mouse_event_set_position(event: MouseEvent, position: MousePosition);
+    pub fn ghostty_mouse_event_set_position(
+        event: MouseEvent,
+        position: MousePosition,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the event position in surface-space pixels.\n\n"]
@@ -5492,16 +5260,17 @@ const _: () = {
 pub mod MouseEncoderOption {
     #[doc = " Mouse encoder option identifiers.\n\n These values are used with ghostty_mouse_encoder_setopt() to configure\n the behavior of the mouse encoder.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Mouse tracking mode (value: GhosttyMouseTrackingMode)."]
-    pub const EVENT: Type = 0;
+    pub const EVENT: Type = 1;
     #[doc = " Mouse output format (value: GhosttyMouseFormat)."]
-    pub const FORMAT: Type = 1;
+    pub const FORMAT: Type = 2;
     #[doc = " Renderer size context (value: GhosttyMouseEncoderSize)."]
-    pub const SIZE: Type = 2;
+    pub const SIZE: Type = 3;
     #[doc = " Whether any mouse button is currently pressed (value: bool)."]
-    pub const ANY_BUTTON_PRESSED: Type = 3;
+    pub const ANY_BUTTON_PRESSED: Type = 4;
     #[doc = " Whether to enable motion deduplication by last cell (value: bool)."]
-    pub const TRACK_LAST_CELL: Type = 4;
+    pub const TRACK_LAST_CELL: Type = 5;
     #[doc = " Whether to enable motion deduplication by last cell (value: bool)."]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -5518,19 +5287,22 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     #[doc = " Set an option on the mouse encoder.\n\n A null pointer value does nothing. It does not reset to defaults.\n\n"]
-    pub fn ghostty_mouse_encoder_setopt(
+    pub fn ghostty_mouse_encoder_set(
         encoder: MouseEncoder,
         option: MouseEncoderOption::Type,
         value: *const ::std::os::raw::c_void,
-    );
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Set encoder options from a terminal's current state.\n\n This sets tracking mode and output format from terminal state.\n It does not modify size or any-button state.\n\n"]
-    pub fn ghostty_mouse_encoder_setopt_from_terminal(encoder: MouseEncoder, terminal: Terminal);
+    pub fn ghostty_mouse_encoder_set_from_terminal(
+        encoder: MouseEncoder,
+        terminal: Terminal,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Reset internal encoder state.\n\n This clears motion deduplication state (last tracked cell).\n\n"]
-    pub fn ghostty_mouse_encoder_reset(encoder: MouseEncoder);
+    pub fn ghostty_mouse_encoder_reset(encoder: MouseEncoder) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Encode a mouse event into a terminal escape sequence.\n\n Not all mouse events produce output. In such cases this returns\n GHOSTTY_SUCCESS with out_len set to 0.\n\n If the output buffer is too small, this returns GHOSTTY_OUT_OF_SPACE\n and out_len contains the required size.\n\n         or another error code\n"]
@@ -5679,36 +5451,34 @@ pub mod SearchScroll {
 pub mod SearchData {
     #[doc = " Data fields readable with ghostty_search_get(). The output value\n type is documented per field.\n\n All reads reflect the terminal's active screen as of the last feed.\n When the running application switches to the alternate screen, the\n next feed switches counts, matches, and selection to that screen's\n results. Primary screen results, including completed scrollback\n searches, are retained and restored on the way back.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
     #[doc = " Current search status: GhosttySearchStatus*."]
-    pub const STATUS: Type = 0;
+    pub const STATUS: Type = 1;
     #[doc = " The needle this search is looking for: GhosttyString*. The bytes\n are borrowed from the search and remain valid until the needle is\n changed or the search is freed. Returns GHOSTTY_NO_VALUE when no\n needle is set."]
-    pub const NEEDLE: Type = 1;
+    pub const NEEDLE: Type = 2;
     #[doc = " Total matches found so far on the active screen: size_t*. Zero\n until the first feed."]
-    pub const TOTAL_MATCHES: Type = 2;
+    pub const TOTAL_MATCHES: Type = 3;
     #[doc = " Index of the selected match: size_t*. This indexes the newest to\n oldest ordering of GHOSTTY_SEARCH_DATA_MATCHES, where 0 is the\n newest match, so a \"k of n\" find bar renders index + 1 of\n GHOSTTY_SEARCH_DATA_TOTAL_MATCHES. Returns GHOSTTY_NO_VALUE when\n nothing is selected."]
-    pub const SELECTED_INDEX: Type = 3;
+    pub const SELECTED_INDEX: Type = 4;
     #[doc = " The selected match: GhosttySelection*. This is an untracked\n snapshot with standard GhosttySelection lifetime rules. Returns\n GHOSTTY_NO_VALUE when nothing is selected."]
-    pub const SELECTED_MATCH: Type = 4;
+    pub const SELECTED_MATCH: Type = 5;
     #[doc = " All matches on the active screen, ordered newest to oldest, from\n the bottom of the active area up through scrollback:\n GhosttySelectionBuffer*. Set ptr to NULL with cap 0 to query the\n required capacity. An undersized buffer returns\n GHOSTTY_OUT_OF_SPACE with the required capacity in len."]
-    pub const MATCHES: Type = 5;
+    pub const MATCHES: Type = 6;
     #[doc = " Matches on the pages covering the viewport, for drawing highlight\n rectangles: GhosttySelectionBuffer*. The list is computed during\n feeds and cached, so it reflects the viewport as of the last\n feed.\n\n Matches are found a page at a time, so the list can include\n matches slightly outside the visible viewport when they share a\n page with it. Ghostty's own renderer behaves the same way.\n Converting each match to viewport coordinates with\n ghostty_terminal_point_from_grid_ref() clips this naturally: skip\n matches that fail the conversion or whose row is beyond the\n visible row count."]
-    pub const VIEWPORT_MATCHES: Type = 6;
+    pub const VIEWPORT_MATCHES: Type = 7;
     #[doc = " Current scroll policy: GhosttySearchScroll*."]
-    pub const SELECT_SCROLL: Type = 7;
+    pub const SELECT_SCROLL: Type = 8;
     #[doc = " Current scroll policy: GhosttySearchScroll*."]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod SearchOption {
     #[doc = " Options writable with ghostty_search_set(). The value type, and\n what a NULL value means, is documented per option.\n"]
     pub type Type = ::std::os::raw::c_uint;
+    pub const GHOSTTY_SEARCH_OPT_INVALID: Type = 0;
     #[doc = " Set the needle to search for: const GhosttyString*. The bytes are\n copied, so the caller's memory does not need to outlive the call.\n Matching is byte-exact except ASCII letters, which compare\n case-insensitively.\n\n Changing the needle restarts the search from scratch and drops\n all results. As an exception, setting a needle equal to the current\n one (compared the same way as matching) keeps existing results,\n so find bars can resubmit freely. A NULL or empty value clears\n the needle and returns the search to idle.\n\n Replacing or clearing a needle releases tracked state held\n within the terminal, so the caller must serialize this with all\n other access to the same terminal. Returns GHOSTTY_INVALID_VALUE\n after the terminal was freed."]
-    pub const GHOSTTY_SEARCH_OPT_NEEDLE: Type = 0;
-    #[doc = " Select the next match, moving toward older content: from the\n bottom of the screen upward into history, the direction a search\n from the prompt usually wants. Wraps around past the oldest\n match.\n\n The value must be NULL. It is reserved for future use.\n\n This catches up with the terminal first, so it is safe to call at\n any time relative to feeds. The viewport scrolls to the newly\n selected match according to GHOSTTY_SEARCH_OPT_SELECT_SCROLL.\n This reads the terminal, so the caller must serialize it with all\n other access to the same terminal. Returns GHOSTTY_NO_VALUE when\n there are no matches."]
-    pub const GHOSTTY_SEARCH_OPT_SELECT_NEXT: Type = 1;
-    #[doc = " Select the previous match, moving toward newer content, wrapping\n around past the newest match. Otherwise identical to\n GHOSTTY_SEARCH_OPT_SELECT_NEXT."]
-    pub const GHOSTTY_SEARCH_OPT_SELECT_PREV: Type = 2;
+    pub const GHOSTTY_SEARCH_OPT_NEEDLE: Type = 1;
     #[doc = " Set the scroll policy applied by the select options: const\n GhosttySearchScroll*. The policy persists until changed. A NULL\n value resets it to GHOSTTY_SEARCH_SCROLL_IF_NEEDED. This only\n modifies search-owned state and never reads the terminal."]
-    pub const GHOSTTY_SEARCH_OPT_SELECT_SCROLL: Type = 3;
+    pub const GHOSTTY_SEARCH_OPT_SELECT_SCROLL: Type = 4;
     #[doc = " Set the scroll policy applied by the select options: const\n GhosttySearchScroll*. The policy persists until changed. A NULL\n value resets it to GHOSTTY_SEARCH_SCROLL_IF_NEEDED. This only\n modifies search-owned state and never reads the terminal."]
     pub const GHOSTTY_SEARCH_OPT_MAX_VALUE: Type = 2147483647;
 }
@@ -5766,14 +5536,15 @@ unsafe extern "C" {
 pub mod SnapshotDecoderOption {
     #[doc = " Configurable snapshot decoder options.\n\n Options may only be changed before decoding starts. Calling\n ghostty_snapshot_decoder_set() after ghostty_snapshot_decoder_ready() or\n ghostty_snapshot_decoder_decode() returns GHOSTTY_INVALID_VALUE."]
     pub type Type = ::std::os::raw::c_uint;
+    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_INVALID: Type = 0;
     #[doc = " Largest non-ground continuation the decoder will accept.\n\n A value of zero accepts only snapshots whose VT parser is in the ground\n state. The decoder default matches the largest built-in APC protocol\n buffer limit, currently 65 MiB.\n\n This is primarily an input validation limit. When\n GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION is true, the same value\n also becomes the continuation tracking limit on the returned terminal.\n\n Input type: size_t *"]
-    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES: Type = 0;
+    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES: Type = 1;
     #[doc = " Retain the decoded continuation on the returned terminal.\n\n When true, terminals returned by ghostty_snapshot_decoder_ready() and\n ghostty_snapshot_decoder_decode() use\n GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES as their continuation\n tracking limit. The existing ghostty_terminal_continuation_* APIs can then\n export the exact unfinished VT or UTF-8 input restored from the snapshot.\n\n This is false by default. A maximum continuation size of zero leaves\n tracking disabled. With a nonzero maximum, tracking remains enabled even\n when the decoded continuation is empty. Exporting an empty continuation\n does not disable it. Callers that do not need ongoing tracking must still\n set GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES to zero after export and\n before writing post-snapshot input.\n\n Input type: bool *"]
-    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION: Type = 1;
+    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION: Type = 2;
     #[doc = " Compress scrollback history while it is restored.\n\n By default, restoring a snapshot leaves all of its scrollback history\n uncompressed, even if the terminal that produced the snapshot had\n compressed it. The history stays that size until the application calls\n ghostty_terminal_compress(). For a terminal with a lot of scrollback,\n that can be many times more memory than the terminal needed before.\n\n When this option is true, the decoder compresses each history page right\n after restoring it. The restored terminal starts out compressed, and the\n decode never holds more than one uncompressed history page at a time.\n The result is the same as decoding normally and then calling\n ghostty_terminal_compress() with GHOSTTY_TERMINAL_COMPRESSION_MODE_FULL,\n without the memory spike in between.\n\n A history page that is on screen when it is restored stays uncompressed.\n This only happens if the viewport is scrolled to the top of the\n scrollback during an incremental decode. Compressed history is\n uncompressed automatically when it is accessed later, for example by\n scrolling or searching.\n\n This only changes how the restored terminal stores its history in\n memory. The snapshot format is unchanged, so it works with any snapshot.\n On platforms that do not support scrollback compression, this option is\n accepted and has no effect.\n\n This is false by default.\n\n Input type: bool *"]
-    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY: Type = 2;
+    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY: Type = 3;
     #[doc = " Kitty graphics image storage limit, in bytes, for each restored screen.\n\n The limit of the terminal that wrote the snapshot is not part of the\n snapshot, so the decoder always applies this one. Images are restored\n oldest first, and an image that does not fit evicts older images,\n exactly as a live transmission would. The newest images are kept, and\n the placements of evicted images are dropped with them. Zero disables\n Kitty graphics on the restored terminal.\n\n The default is the storage limit of a new terminal. Change the limit\n of a restored terminal later with\n GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT.\n\n Input type: uint64_t *"]
-    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT: Type = 3;
+    pub const GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT: Type = 4;
     #[doc = " Kitty graphics image storage limit, in bytes, for each restored screen.\n\n The limit of the terminal that wrote the snapshot is not part of the\n snapshot, so the decoder always applies this one. Images are restored\n oldest first, and an image that does not fit evicts older images,\n exactly as a live transmission would. The newest images are kept, and\n the placements of evicted images are dropped with them. Zero disables\n Kitty graphics on the restored terminal.\n\n The default is the storage limit of a new terminal. Change the limit\n of a restored terminal later with\n GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT.\n\n Input type: uint64_t *"]
     pub const GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_VALUE: Type = 2147483647;
 }
@@ -6122,11 +5893,11 @@ const _: () = {
     ["Size of VtmuxCapacity"][::std::mem::size_of::<VtmuxCapacity>() - 20usize];
     ["Size of VtmuxPage"][::std::mem::size_of::<VtmuxPage>() - 176usize];
     ["Offset of VtmuxPage::capacity"][::std::mem::offset_of!(VtmuxPage, capacity) - 156usize];
-    ["Size of VtmuxScreenState"][::std::mem::size_of::<VtmuxScreenState>() - 232usize];
+    ["Size of VtmuxScreenState"][::std::mem::size_of::<VtmuxScreenState>() - 112usize];
     ["Offset of VtmuxScreenState::saved_pen"]
-        [::std::mem::offset_of!(VtmuxScreenState, saved_pen) - 144usize];
-    ["Size of VtmuxState"][::std::mem::size_of::<VtmuxState>() - 10120usize];
-    ["Offset of VtmuxState::screens"][::std::mem::offset_of!(VtmuxState, screens) - 9632usize];
+        [::std::mem::offset_of!(VtmuxScreenState, saved_pen) - 82usize];
+    ["Size of VtmuxState"][::std::mem::size_of::<VtmuxState>() - 9880usize];
+    ["Offset of VtmuxState::screens"][::std::mem::offset_of!(VtmuxState, screens) - 9628usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -6243,3 +6014,77 @@ pub struct VtmuxAltSaved {
     pub y: u16,
     pub pen: Style,
 }
+unsafe extern "C" {
+    #[doc = " Set a formatter option (GhosttyFormatterOption)."]
+    pub fn ghostty_formatter_set(
+        formatter: Formatter,
+        option: FormatterOption::Type,
+        value: *const ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Read a formatter option (GhosttyFormatterOption)."]
+    pub fn ghostty_formatter_get(
+        formatter: Formatter,
+        option: FormatterOption::Type,
+        out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Select the next match of a search."]
+    pub fn ghostty_search_select_next(search: Search) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Select the previous match of a search."]
+    pub fn ghostty_search_select_prev(search: Search) -> Result::Type;
+}
+pub mod FormatterOption {
+    #[doc = " Formatter options, set with ghostty_formatter_set()."]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const INVALID: Type = 0;
+    pub const EMIT: Type = 1;
+    pub const UNWRAP: Type = 2;
+    pub const TRIM: Type = 3;
+    pub const SELECTION: Type = 4;
+    pub const EXTRAS: Type = 5;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod CursorStyle {
+    #[doc = " Cursor style (was GhosttyTerminalCursorStyle and\n GhosttyRenderStateCursorVisualStyle, same values)."]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const BAR: Type = 0;
+    pub const BLOCK: Type = 1;
+    pub const UNDERLINE: Type = 2;
+    pub const BLOCK_HOLLOW: Type = 3;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod ImageLayer {
+    #[doc = " Kitty image layer."]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const BELOW_BACKGROUND: Type = 0;
+    pub const BELOW_TEXT: Type = 1;
+    pub const ABOVE_TEXT: Type = 2;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " A caller-provided codepoint buffer: the library writes up to `cap`\n codepoints to `ptr` and sets `len` to the total."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CodepointBuffer {
+    #[doc = " Where codepoints are written. May be NULL when cap is 0."]
+    pub ptr: *mut u32,
+    #[doc = " Number of uint32_t elements ptr can hold."]
+    pub cap: usize,
+    #[doc = " Set by the library to the total number of codepoints."]
+    pub len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of CodepointBuffer"][::std::mem::size_of::<CodepointBuffer>() - 24usize];
+    ["Alignment of CodepointBuffer"][::std::mem::align_of::<CodepointBuffer>() - 8usize];
+    ["Offset of field: CodepointBuffer::ptr"]
+        [::std::mem::offset_of!(CodepointBuffer, ptr) - 0usize];
+    ["Offset of field: CodepointBuffer::cap"]
+        [::std::mem::offset_of!(CodepointBuffer, cap) - 8usize];
+    ["Offset of field: CodepointBuffer::len"]
+        [::std::mem::offset_of!(CodepointBuffer, len) - 16usize];
+};

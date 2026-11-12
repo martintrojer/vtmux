@@ -27,8 +27,9 @@
 # patched in, which is what `cargo install vtmux` builds once they are
 # published.
 #
-# The Ghostty source download (`vtmux-ghostty-vt-sys`'s build script) honours
-# GHOSTTY_SOURCE_TARBALL, so a dry run works offline given the tarball.
+# The libghostty-vt release download (`vtmux-ghostty-vt-sys`'s build script)
+# honours GHOSTTY_SOURCE_TARBALL and GHOSTTY_DEPS_TARBALL, so a dry run works
+# offline given the two tarballs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

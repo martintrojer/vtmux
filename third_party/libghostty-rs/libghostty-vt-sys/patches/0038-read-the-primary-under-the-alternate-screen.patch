@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
-index 3cb479c..b8b6c05 100644
+index ef68a1ac1..9c77e7b68 100644
 --- a/include/ghostty/vt/terminal.h
 +++ b/include/ghostty/vt/terminal.h
-@@ -3264,6 +3264,41 @@ GHOSTTY_API void ghostty_terminal_free(GhosttyTerminal terminal);
+@@ -3147,6 +3147,41 @@ GHOSTTY_API void ghostty_terminal_free(GhosttyTerminal terminal);
  GHOSTTY_API GhosttyResult ghostty_terminal_clone_screen(GhosttyTerminal terminal,
                                                          GhosttyTerminal* out_terminal);
  
@@ -45,10 +45,10 @@ index 3cb479c..b8b6c05 100644
   * Perform a full reset of the terminal (RIS).
   *
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 5472fa7..8a0a349 100644
+index ef8d60844..44fe92e04 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -329,6 +329,9 @@ comptime {
+@@ -314,6 +314,9 @@ comptime {
          @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
          @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
          @export(&c.terminal_clone_screen, .{ .name = "ghostty_terminal_clone_screen" });
@@ -59,10 +59,10 @@ index 5472fa7..8a0a349 100644
          @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
          @export(&c.terminal_set, .{ .name = "ghostty_terminal_set" });
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index cd0bd40..dcdce8c 100644
+index a2e056e25..0561edf61 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -191,6 +191,9 @@ pub const sys_set = sys.set;
+@@ -196,6 +196,9 @@ pub const sys_set = sys.set;
  pub const terminal_new = terminal.new;
  pub const terminal_free = terminal.free;
  pub const terminal_clone_screen = terminal.clone_screen;
@@ -73,10 +73,10 @@ index cd0bd40..dcdce8c 100644
  pub const terminal_resize = terminal.resize;
  pub const terminal_set = terminal.set;
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
-index f2678a5..7f3c771 100644
+index 1b5a4248c..bc716b729 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -1074,10 +1074,48 @@ pub fn clone_screen(
+@@ -1083,10 +1083,48 @@ pub fn clone_screen(
  
  fn clone_screen_(terminal_: Terminal) NewError!Terminal {
      const src = (terminal_ orelse return error.InvalidValue).terminal;
@@ -127,7 +127,7 @@ index f2678a5..7f3c771 100644
          screen.io,
          screen.alloc,
          .{ .screen = .{} },
-@@ -2216,6 +2254,46 @@ pub fn grid_ref(
+@@ -2219,6 +2257,47 @@ pub fn grid_ref(
      return .success;
  }
  
@@ -148,7 +148,8 @@ index f2678a5..7f3c771 100644
 +        error.InvalidValue => .invalid_value,
 +        error.NoValue => .no_value,
 +    };
-+    const p = screen.pages.pin(.fromC(pt)) orelse return .invalid_value;
++    const zig_pt = point.Point.fromC(pt) orelse return .invalid_value;
++    const p = screen.pages.pin(zig_pt) orelse return .invalid_value;
 +    if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
 +    return .success;
 +}
@@ -174,7 +175,7 @@ index f2678a5..7f3c771 100644
  pub fn grid_ref_track(
      terminal_: Terminal,
      pt: point.Point.C,
-@@ -7945,3 +8023,83 @@ test "get mouse_shape" {
+@@ -8212,3 +8291,83 @@ test "get mouse_shape" {
      try testing.expectEqual(Result.success, get(t, .mouse_shape, @ptrCast(&shape)));
      try testing.expectEqual(mouse.Shape.wait, shape);
  }

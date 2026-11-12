@@ -1,8 +1,16 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index c80bc1e4f..15223de4e 100644
+index 5abdb7ab5..dd9013d36 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -1086,7 +1086,12 @@ fn printSliceFill(
+@@ -1222,10 +1222,20 @@ fn printSliceFill(
+                 // map is full, print() grows the page for it.
+                 if (linked and page.hyperlinkCellsFree() == 0) break;
+ 
++                // vtmux: a linked wrap at the last column keeps the last
++                // cell as it was (see below); print() does that with the
++                // cell's own style and link.
++                if (linked and right_limit == self.cols) break;
++
                  var spacer = template;
                  if (right_limit == self.cols) {
                      cursor.page_row.wrap = true;
@@ -14,9 +22,32 @@ index c80bc1e4f..15223de4e 100644
 +                    spacer = cells[0];
 +                    if (spacer.content.codepoint.data == 0) spacer.wide = .spacer_head;
                  }
-                 cursor.page_row.dirty = true;
+                 cursor.page_row.markWritten();
                  if (style_id != style.default_id) cursor.page_row.styled = true;
-@@ -1764,7 +1769,41 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1661,14 +1671,19 @@ fn printSliceMixed(
+             // that the cell is simple, in our style or the default one.
+             .wide_at_edge => {
+                 var spacer = template;
+-                if (right_limit == self.cols) {
++                const keep = right_limit == self.cols;
++                if (keep) {
+                     cursor.page_row.wrap = true;
+-                    spacer.wide = .spacer_head;
++                    // vtmux: tmux leaves the last cell as it was
++                    // (screen_write_cell), style and link included; only
++                    // an empty one becomes the spacer head (see print).
++                    spacer = cursor.page_cell.*;
++                    if (spacer.content.codepoint.data == 0) spacer.wide = .spacer_head;
+                 }
+                 cursor.page_row.markWritten();
+                 if (style_id != style.default_id) cursor.page_row.styled = true;
+                 cursor.page_cell.* = spacer;
+-                if (linked) page.setHyperlinkRun(
++                if (linked and !keep) page.setHyperlinkRun(
+                     cursor.page_row,
+                     cursor.page_cell[0..1],
+                     link_id,
+@@ -2431,7 +2446,43 @@ pub fn print(self: *Terminal, c: u21) !void {
                      // a page resize during printCell then it'll fail
                      // integrity checks.
                      self.screens.active.cursor.page_row.wrap = true;
@@ -56,10 +87,12 @@ index c80bc1e4f..15223de4e 100644
 +                        // fills with the pen's: the default spacer head.
 +                        last.* = .{ .wide = .spacer_head };
 +                    }
++                    // The cell is written in place, not by writeCell.
++                    self.screens.active.cursor.page_row.markWritten();
                  } else {
                      self.writeCell(0, .narrow);
                  }
-@@ -6796,6 +6835,110 @@ test "Terminal: print wide char at edge creates spacer head" {
+@@ -7482,6 +7533,110 @@ test "Terminal: print wide char at edge creates spacer head" {
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
  }
  
@@ -170,7 +203,7 @@ index c80bc1e4f..15223de4e 100644
  test "Terminal: print wide char with 1-column width" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -9187,11 +9330,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
+@@ -9983,11 +10138,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
      try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
      try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
  

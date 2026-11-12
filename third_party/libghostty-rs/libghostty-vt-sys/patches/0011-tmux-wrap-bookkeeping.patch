@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index 900359205..0c48df85d 100644
+index a205b5d56..feab8bf7e 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -1661,6 +1661,24 @@ pub inline fn cursorMarkDirty(self: *Screen) void {
+@@ -1675,6 +1675,24 @@ pub inline fn cursorMarkDirty(self: *Screen) void {
  /// since it's on Screen not Terminal. This needs to be addressed down the
  /// line. Not an extremely urgent issue since it's an edge case of an edge
  /// case, but not ideal.
@@ -28,10 +28,10 @@ index 900359205..0c48df85d 100644
      // Reset the cursor's pending wrap state
      self.cursor.pending_wrap = false;
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 8fca1c61d..3cc770783 100644
+index 675c3172f..286024bb2 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -2556,11 +2556,13 @@ pub fn index(self: *Terminal) !void {
+@@ -3190,11 +3190,13 @@ pub fn index(self: *Terminal) !void {
                  if (screen.kitty_images.placements.count() != 0) {
                      @branchHint(.unlikely);
                      try self.indexScrollWithImages(.window_shift);
@@ -45,7 +45,7 @@ index 8fca1c61d..3cc770783 100644
              return;
          }
  
-@@ -2579,6 +2581,7 @@ pub fn index(self: *Terminal) !void {
+@@ -3213,6 +3215,7 @@ pub fn index(self: *Terminal) !void {
              if (screen.kitty_images.placements.count() != 0) {
                  @branchHint(.unlikely);
                  try self.indexScrollWithImages(.in_place);
@@ -53,7 +53,7 @@ index 8fca1c61d..3cc770783 100644
                  return;
              }
          }
-@@ -2588,6 +2591,8 @@ pub fn index(self: *Terminal) !void {
+@@ -3222,6 +3225,8 @@ pub fn index(self: *Terminal) !void {
          try screen.cursorScrollRegionUp(
              self.scrolling_region.bottom - self.scrolling_region.top,
          );
@@ -62,7 +62,7 @@ index 8fca1c61d..3cc770783 100644
  
          return;
      }
-@@ -2846,7 +2851,7 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
+@@ -3480,7 +3485,7 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
  
      // Move to the top of the scroll region
      self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
@@ -71,7 +71,7 @@ index 8fca1c61d..3cc770783 100644
  }
  
  /// Removes amount lines from the top of the scroll region. The remaining lines
-@@ -2926,12 +2931,71 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+@@ -3560,12 +3565,71 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
          // use the cursorScrollAbove function to create scrollback
          self.screens.active.cursorAbsolute(0, self.scrolling_region.bottom);
          for (0..adjusted_count) |_| try self.screens.active.cursorScrollAbove();
@@ -143,7 +143,7 @@ index 8fca1c61d..3cc770783 100644
  }
  
  /// Options for scrolling the viewport of the terminal grid.
-@@ -3156,6 +3220,12 @@ fn invalidateFullWidthRowRange(
+@@ -3790,6 +3854,12 @@ fn invalidateFullWidthRowRange(
  ///
  /// Moves the cursor to the left margin.
  pub fn insertLines(self: *Terminal, count: usize) void {
@@ -156,7 +156,7 @@ index 8fca1c61d..3cc770783 100644
      // Rare, but happens
      if (count == 0) return;
  
-@@ -3190,6 +3260,14 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3824,6 +3894,14 @@ pub fn insertLines(self: *Terminal, count: usize) void {
      // region. So we take whichever is smaller.
      const adjusted_count = @min(count, rem);
  
@@ -171,7 +171,7 @@ index 8fca1c61d..3cc770783 100644
      // Create a new tracked pin which we'll use to navigate the page list
      // so that if we need to adjust capacity it will be properly tracked.
      var cur_p = self.screens.active.pages.trackPin(
-@@ -3230,13 +3308,10 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3864,13 +3942,10 @@ pub fn insertLines(self: *Terminal, count: usize) void {
              self.rowWillBeShifted(cur_p.node.page(), cur_row);
              self.rowWillBeShifted(off_p.node.page(), off_row);
  
@@ -189,7 +189,7 @@ index 8fca1c61d..3cc770783 100644
  
              const src_p = off_p;
              const src_row = off_row;
-@@ -3311,6 +3386,75 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3945,6 +4020,75 @@ pub fn insertLines(self: *Terminal, count: usize) void {
          // Move our pin up to the next row.
          if (cur_p.up(1)) |p| cur_p.* = p;
      }
@@ -265,7 +265,7 @@ index 8fca1c61d..3cc770783 100644
  }
  
  /// Removes amount lines from the current cursor row down. The remaining lines
-@@ -3398,13 +3542,10 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4032,13 +4176,10 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
              self.rowWillBeShifted(cur_p.node.page(), cur_row);
              self.rowWillBeShifted(off_p.node.page(), off_row);
  
@@ -283,7 +283,7 @@ index 8fca1c61d..3cc770783 100644
  
              const src_p = off_p;
              const src_row = off_row;
-@@ -3479,6 +3620,17 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4113,6 +4254,17 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
          // Move our pin down to the next row.
          if (cur_p.down(1)) |p| cur_p.* = p;
      }
@@ -301,7 +301,7 @@ index 8fca1c61d..3cc770783 100644
  }
  
  /// Inserts spaces at current cursor position moving existing cell contents
-@@ -3793,21 +3945,37 @@ pub fn eraseLine(
+@@ -4427,21 +4579,37 @@ pub fn eraseLine(
          .right => right: {
              var x = self.screens.active.cursor.x;
  
@@ -342,7 +342,7 @@ index 8fca1c61d..3cc770783 100644
              // If our x is a wide char we need to delete the tail too.
              if (self.screens.active.cursor.page_cell.wide == .wide) {
                  x += 1;
-@@ -3822,6 +3990,9 @@ pub fn eraseLine(
+@@ -4456,6 +4624,9 @@ pub fn eraseLine(
              // continue onto the next row.
              self.screens.active.cursorResetWrap();
  
@@ -352,7 +352,7 @@ index 8fca1c61d..3cc770783 100644
              break :complete .{ 0, self.cols };
          },
  
-@@ -3983,6 +4154,10 @@ pub fn eraseDisplay(
+@@ -4618,6 +4789,10 @@ pub fn eraseDisplay(
                  protected,
              );
  
@@ -363,7 +363,7 @@ index 8fca1c61d..3cc770783 100644
              // Unsets pending wrap state
              self.screens.active.cursor.pending_wrap = false;
  
-@@ -4011,10 +4186,15 @@ pub fn eraseDisplay(
+@@ -4646,10 +4821,15 @@ pub fn eraseDisplay(
                      null,
                      protected,
                  );
@@ -381,7 +381,7 @@ index 8fca1c61d..3cc770783 100644
          },
  
          .above => {
-@@ -4028,6 +4208,10 @@ pub fn eraseDisplay(
+@@ -4663,6 +4843,10 @@ pub fn eraseDisplay(
                      .{ .active = .{ .y = self.screens.active.cursor.y - 1 } },
                      protected,
                  );
@@ -392,7 +392,7 @@ index 8fca1c61d..3cc770783 100644
              }
  
              // Unsets pending wrap state
-@@ -5231,6 +5415,10 @@ pub fn switchScreenMode(
+@@ -5873,6 +6057,10 @@ pub fn switchScreenMode(
          .@"1049" => if (enabled) self.saveCursor(),
      }
  
@@ -403,7 +403,7 @@ index 8fca1c61d..3cc770783 100644
      // Switch screens first to whatever we're going to.
      const to: ScreenSet.Key = if (enabled) .alternate else .primary;
      const old_ = try self.switchScreen(to);
-@@ -9473,9 +9661,12 @@ test "Terminal: insertLines resets wrap" {
+@@ -10220,9 +10408,12 @@ test "Terminal: insertLines resets wrap" {
      }
  
      {
@@ -417,7 +417,7 @@ index 8fca1c61d..3cc770783 100644
      }
  }
  
-@@ -12609,7 +12800,8 @@ test "Terminal: deleteLines resets wrap" {
+@@ -13356,7 +13547,8 @@ test "Terminal: deleteLines resets wrap" {
  
      t.setTopAndBottomMargin(1, 2);
      t.setCursorPos(1, 1);
@@ -427,7 +427,7 @@ index 8fca1c61d..3cc770783 100644
      try t.print('X');
  
      {
-@@ -12759,7 +12951,9 @@ test "Terminal: deleteLines wide character spacer head" {
+@@ -13506,7 +13698,9 @@ test "Terminal: deleteLines wide character spacer head" {
          const unwrapped_str = try t.plainStringUnwrapped(testing.allocator);
          defer testing.allocator.free(unwrapped_str);
          try testing.expectEqualStrings("BBBB\n\u{1F600}CCC", str);
@@ -438,7 +438,7 @@ index 8fca1c61d..3cc770783 100644
      }
  }
  
-@@ -14768,13 +14962,128 @@ test "Terminal: eraseLine resets pending wrap" {
+@@ -15515,13 +15709,128 @@ test "Terminal: eraseLine resets pending wrap" {
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
      t.eraseLine(.right, false);
@@ -569,7 +569,7 @@ index 8fca1c61d..3cc770783 100644
      }
  }
  
-@@ -17970,7 +18279,10 @@ test "Terminal: deleteLines count over region blanks row metadata" {
+@@ -19738,7 +20047,10 @@ test "Terminal: deleteLines count over region blanks row metadata" {
      ).?.row.semantic_prompt = .prompt;
  
      t.setCursorPos(2, 1);
@@ -582,10 +582,10 @@ index 8fca1c61d..3cc770783 100644
      for (1..5) |y| {
          const rac = t.screens.active.pages.getCell(
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
-index 15ea8aebc..1da0e2819 100644
+index 8a49a9764..f36546cd5 100644
 --- a/src/terminal/stream_terminal.zig
 +++ b/src/terminal/stream_terminal.zig
-@@ -667,7 +667,7 @@ pub const Handler = struct {
+@@ -677,7 +677,7 @@ pub const Handler = struct {
              .insert_blanks => self.terminal.insertBlanks(value),
              .insert_columns => self.terminal.insertColumns(value),
              .delete_columns => self.terminal.deleteColumns(value),

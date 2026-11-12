@@ -1,4 +1,5 @@
 diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+index aeceac3f4..cc363d667 100644
 --- a/include/ghostty/vt/vtmux_state.h
 +++ b/include/ghostty/vt/vtmux_state.h
 @@ -392,6 +392,16 @@ GHOSTTY_API GhosttyResult ghostty_vtmux_set_kitty_limit(GhosttyTerminal terminal
@@ -19,21 +20,23 @@ diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
   * area's top (negative: in history), visible or not (vtmux patch 0042).
   * GHOSTTY_NO_VALUE for a virtual placement. */
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 26e1e17ca..84c585393 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -402,6 +402,8 @@ comptime {
+@@ -379,6 +379,8 @@ comptime {
          @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
          @export(&c.vtmux_kitty_storage, .{ .name = "ghostty_vtmux_kitty_storage" });
          @export(&c.vtmux_set_kitty_limit, .{ .name = "ghostty_vtmux_set_kitty_limit" });
 +        @export(&c.vtmux_kitty_loading, .{ .name = "ghostty_vtmux_kitty_loading" });
 +        @export(&c.vtmux_drop_kitty_loading, .{ .name = "ghostty_vtmux_drop_kitty_loading" });
          @export(&c.vtmux_kitty_placement_active_pos, .{ .name = "ghostty_vtmux_kitty_placement_active_pos" });
-         if (features.snapshot) {
-             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+         @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+         @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 1e0ff58e3..13d5409b0 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -263,6 +263,8 @@ pub const vtmux_primary_size = vtmux_state.primary_size;
+@@ -268,6 +268,8 @@ pub const vtmux_primary_size = vtmux_state.primary_size;
  pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
  pub const vtmux_kitty_storage = vtmux_state.kitty_storage;
  pub const vtmux_set_kitty_limit = vtmux_state.set_kitty_limit;
@@ -43,9 +46,10 @@ diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
  pub const snapshot_decoder_set = snapshot.decoder_set;
  pub const snapshot_decoder_get = snapshot.decoder_get;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 250d54a99..88ec0e30a 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
-@@ -1631,6 +1631,45 @@ pub fn set_kitty_limit(
+@@ -1654,6 +1654,45 @@ pub fn set_kitty_limit(
      return .success;
  }
  
@@ -92,6 +96,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
      const testing = std.testing;
      var a: terminal_c.Terminal = null;
 diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
+index ef1c40457..e538f9095 100644
 --- a/src/terminal/kitty/graphics_exec.zig
 +++ b/src/terminal/kitty/graphics_exec.zig
 @@ -476,6 +476,16 @@ fn transmitAnimationFrame(
@@ -125,10 +130,10 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
          encodeError(&result, err);
          return result;
      };
-@@ -1005,6 +1010,72 @@ fn delete(
-     return .{};
- }
- 
+@@ -1081,6 +1086,72 @@ fn abandonLoad(
+ /// If the transmission fails or is abandoned (see abandonLoad), the old
+ /// image is still deleted, so every way a transmission ends leaves the
+ /// same images behind as deleting the old image at the start would.
 +/// vtmux patch 0043: a pending (chunked) load holds no more than its
 +/// storage's limit, which no image it could complete to may exceed
 +/// (`addImage`). The chunk past it frees what the load holds, the chunks
@@ -198,8 +203,19 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
  fn loadAndAddImage(
      io: std.Io,
      alloc: Allocator,
-@@ -1022,6 +1093,8 @@ fn loadAndAddImage(
-     var loading: LoadingImage = if (storage.loading) |loading| loading: {
+@@ -1099,12 +1170,18 @@ fn loadAndAddImage(
+         // If this chunk is rejected, the image being replaced is deleted.
+         // The load itself stays in progress, so a later chunk can still
+         // complete it.
+-        errdefer if (replacedImageId(loading)) |id| {
++        //
++        // vtmux: read before vtmuxReserve, which frees the load when it
++        // ends past its storage's limit.
++        const replaced_id = replacedImageId(loading);
++        errdefer if (replaced_id) |id| {
+             deleteReplacedImage(io, alloc, terminal, id);
+         };
+ 
          // Note: we do NOT want to call "cmd.toOwnedData" here because
          // we're _copying_ the data. We want the command data to be freed.
 +        if (try vtmuxReserve(storage, alloc, cmd.data.len, t.more_chunks) == .over)
@@ -207,9 +223,9 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
          try loading.addData(alloc, cmd.data);
  
          // If we have more then we're done
-@@ -1046,7 +1119,7 @@ fn loadAndAddImage(
-             } });
-         }
+@@ -1127,7 +1204,7 @@ fn loadAndAddImage(
+             deleteReplacedImage(io, alloc, terminal, t.image_id);
+         };
  
 -        break :loading try .init(io, alloc, cmd, storage.image_limits);
 +        break :loading try vtmuxInit(io, alloc, storage, cmd);
@@ -217,6 +233,7 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
  
      // We only want to deinit on error. If we're chunking, then we don't
 diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+index 281bb02e0..7b7208040 100644
 --- a/src/terminal/kitty/graphics_image.zig
 +++ b/src/terminal/kitty/graphics_image.zig
 @@ -44,6 +44,10 @@ pub const LoadingImage = struct {

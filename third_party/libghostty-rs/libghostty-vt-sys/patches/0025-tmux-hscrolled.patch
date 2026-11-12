@@ -27,23 +27,23 @@ index adcc99d2d..ef8792824 100644
  }
  #endif
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 88cea3e5f..46537320a 100644
+index ba32443b2..21950ba6d 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -389,6 +389,8 @@ comptime {
+@@ -366,6 +366,8 @@ comptime {
          @export(&c.vtmux_importer_finish, .{ .name = "ghostty_vtmux_importer_finish" });
          @export(&c.vtmux_importer_free, .{ .name = "ghostty_vtmux_importer_free" });
          @export(&c.vtmux_set_active_screen, .{ .name = "ghostty_vtmux_set_active_screen" });
 +        @export(&c.vtmux_set_hscrolled, .{ .name = "ghostty_vtmux_set_hscrolled" });
 +        @export(&c.vtmux_take_hscrolled, .{ .name = "ghostty_vtmux_take_hscrolled" });
-         if (features.snapshot) {
-             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
-             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+         @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode_alloc, .{ .name = "ghostty_snapshot_encode_alloc" });
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index fbb16dc2c..e5b98c589 100644
+index 2755b0792..62b3b52f1 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -459,6 +459,12 @@ recycle_node: ?*List.Node = null,
+@@ -466,6 +466,12 @@ grow_hint_next: usize = 0,
  /// Limits for scrollback.
  limits: Limits,
  
@@ -56,7 +56,7 @@ index fbb16dc2c..e5b98c589 100644
  /// The total number of rows represented by this PageList. This is used
  /// specifically for scrollbar information so we can have the total size.
  total_rows: usize,
-@@ -1333,6 +1339,55 @@ pub const Resize = struct {
+@@ -1387,6 +1393,55 @@ pub const Resize = struct {
      };
  };
  
@@ -112,7 +112,7 @@ index fbb16dc2c..e5b98c589 100644
  /// Resize
  /// TODO: docs
  pub fn resize(self: *PageList, opts: Resize) Allocator.Error!void {
-@@ -1554,6 +1609,11 @@ fn resizeCols(
+@@ -1620,6 +1675,11 @@ fn resizeCols(
  
      // Reflow all our rows.
      {
@@ -122,9 +122,9 @@ index fbb16dc2c..e5b98c589 100644
 +            t.join_to = 0;
 +        }
          var reflow_cursor: ReflowCursor = .init(first_rewritten_node);
-         while (it.next()) |row| {
-             try reflow_cursor.reflowRow(
-@@ -1840,6 +1900,16 @@ const ReflowCursor = struct {
+ 
+         // Check each row against `blank.start` before reflowing it,
+@@ -1925,6 +1985,16 @@ const ReflowCursor = struct {
              }
          }
  
@@ -141,9 +141,9 @@ index fbb16dc2c..e5b98c589 100644
          // Handle tracked pin adjustments. We also note whether any
          // tracked pin is on this row at all so that the per-cell loop
          // below can skip pin scans entirely for the overwhelmingly
-@@ -1921,6 +1991,24 @@ const ReflowCursor = struct {
- 
-         self.copyRowMetadata(src_row);
+@@ -2024,6 +2094,24 @@ const ReflowCursor = struct {
+             self.copyRowMetadata(src_row);
+         }
  
 +        // vtmux: the destination rows this row's cells start (tmux_hscrolled).
 +        const tmux_rows_start = self.total_rows;
@@ -166,7 +166,7 @@ index fbb16dc2c..e5b98c589 100644
          var x: usize = 0;
          while (x < cols_len) {
              if (self.pending_wrap) {
-@@ -3217,6 +3305,10 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+@@ -3384,6 +3472,10 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
                  // Account for our trimmed rows in the total row cache
                  self.total_rows -= trimmed;
  
@@ -177,7 +177,7 @@ index fbb16dc2c..e5b98c589 100644
                  // If we didn't trim enough, just modify our row count and this
                  // will create additional history.
                  self.rows = rows;
-@@ -3225,6 +3317,24 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+@@ -3392,6 +3484,24 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
              // Making rows larger we adjust our row count, and then grow
              // to the row count.
              .gt => gt: {
@@ -203,10 +203,10 @@ index fbb16dc2c..e5b98c589 100644
                  // we want to try to preserve the y value of the old cursor.
                  // In other words, we don't want to "pull down" scrollback.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index e6bb83cc0..06701afb9 100644
+index 2a24164ca..ffa5e5ed5 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15539,6 +15539,87 @@ test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
+@@ -16257,6 +16257,87 @@ test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
      }
  }
  
@@ -295,10 +295,10 @@ index e6bb83cc0..06701afb9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index d3f1513f2..7220c3ebc 100644
+index 1e5375117..2b74a76b0 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -251,6 +251,8 @@ pub const vtmux_importer_page = vtmux_state.importer_page;
+@@ -256,6 +256,8 @@ pub const vtmux_importer_page = vtmux_state.importer_page;
  pub const vtmux_importer_finish = vtmux_state.importer_finish;
  pub const vtmux_importer_free = vtmux_state.importer_free;
  pub const vtmux_set_active_screen = vtmux_state.set_active_screen;
@@ -308,10 +308,10 @@ index d3f1513f2..7220c3ebc 100644
  pub const snapshot_decoder_get = snapshot.decoder_get;
  pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
-index 8bedd797c..5dc23eecf 100644
+index 76bbdda58..c603a0fc3 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
-@@ -1447,6 +1447,35 @@ pub fn set_active_screen(
+@@ -1470,6 +1470,35 @@ pub fn set_active_screen(
      return .success;
  }
  

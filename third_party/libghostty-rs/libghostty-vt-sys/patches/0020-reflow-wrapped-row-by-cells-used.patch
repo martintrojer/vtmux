@@ -1,7 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 713168677..e274dc0fd 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1774,17 +1774,15 @@
+@@ -1859,17 +1859,15 @@ const ReflowCursor = struct {
          // (grid_reflow_split) or joined to the one before it
          // (grid_reflow_join) takes only its cellused cells.
          //
@@ -28,7 +29,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
  
          // Calculate the columns in this row. First up we trim non-semantic
          // rightmost blanks.
-@@ -1882,7 +1880,12 @@
+@@ -1967,7 +1965,12 @@ const ReflowCursor = struct {
  
          // Defer processing of blank rows so that blank rows
          // at the end of the page list are never written.
@@ -43,9 +44,10 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
              return;
          }
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 2503cf3bb..1bd68ac4e 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15426,6 +15426,48 @@
+@@ -16144,6 +16144,48 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
      }
  }
  

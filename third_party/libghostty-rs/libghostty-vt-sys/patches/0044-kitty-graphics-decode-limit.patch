@@ -1,4 +1,5 @@
 diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
+index e538f9095..13d91bb1c 100644
 --- a/src/terminal/kitty/graphics_exec.zig
 +++ b/src/terminal/kitty/graphics_exec.zig
 @@ -184,6 +184,8 @@ fn query(
@@ -10,7 +11,7 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
  
      var img = loading.complete(alloc) catch |err| {
          encodeError(&result, err);
-@@ -1060,12 +1062,17 @@ fn vtmuxInit(
+@@ -1136,12 +1138,17 @@ fn vtmuxInit(
      cmd: *const Command,
  ) !LoadingImage {
      const t = cmd.transmission().?;
@@ -31,6 +32,7 @@ diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_
          try loading.data.ensureTotalCapacityPrecise(alloc, cmd.data.len);
          try loading.addData(alloc, cmd.data);
 diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+index 7b7208040..8783d10c1 100644
 --- a/src/terminal/kitty/graphics_image.zig
 +++ b/src/terminal/kitty/graphics_image.zig
 @@ -48,6 +48,12 @@ pub const LoadingImage = struct {

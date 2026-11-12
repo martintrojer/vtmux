@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 946a55e45..762ec5634 100644
+index e274dc0fd..2755b0792 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1683,10 +1683,18 @@ const ReflowCursor = struct {
+@@ -1768,10 +1768,18 @@ const ReflowCursor = struct {
      /// cell's width and one more for each padding cell (grid_reflow,
      /// grid_reflow_split, grid_reflow_join: `gc.data.width`; a padding
      /// cell reads back as width 1, grid_get_cell1). So a tab of width w
@@ -23,7 +23,7 @@ index 946a55e45..762ec5634 100644
      /// This is the final row count of the reflowed pages.
      total_rows: usize,
  
-@@ -1735,6 +1743,7 @@ const ReflowCursor = struct {
+@@ -1820,6 +1828,7 @@ const ReflowCursor = struct {
              .new_rows = 0,
              .prev_wrap = false,
              .tab_extra = 0,
@@ -31,7 +31,7 @@ index 946a55e45..762ec5634 100644
  
              // Initially whatever size our input node is.
              .total_rows = node.rows(),
-@@ -1759,6 +1768,7 @@ const ReflowCursor = struct {
+@@ -1844,6 +1853,7 @@ const ReflowCursor = struct {
          // vtmux: read before anything below can reinitialize the cursor.
          const prev_wrap = self.prev_wrap;
          defer self.prev_wrap = src_row.wrap;
@@ -39,7 +39,7 @@ index 946a55e45..762ec5634 100644
  
          // vtmux: where the destination cursor is: 0 starts a line (deferred
          // line breaks and pending wrap reset the column), anything else
-@@ -1804,7 +1814,7 @@ const ReflowCursor = struct {
+@@ -1887,7 +1897,7 @@ const ReflowCursor = struct {
                  used
              else
                  @max(used, @min(cols_len, new_cols)));
@@ -48,8 +48,8 @@ index 946a55e45..762ec5634 100644
                  cols_len = @intCast(used);
  
              // If the row has a semantic prompt then the blank row is meaningful
-@@ -1917,18 +1927,42 @@ const ReflowCursor = struct {
-                 self.page_row.wrap_continuation = true;
+@@ -2034,18 +2044,42 @@ const ReflowCursor = struct {
+                 }
              }
  
 +            // vtmux: a wide character's padding that an earlier reflow
@@ -95,7 +95,7 @@ index 946a55e45..762ec5634 100644
                  @as(usize, self.x) + self.tab_extra + need > self.page.size.cols)
              {
                  self.pending_wrap = true;
-@@ -1946,7 +1980,8 @@ const ReflowCursor = struct {
+@@ -2063,7 +2097,8 @@ const ReflowCursor = struct {
              if (!row_has_pins) {
                  const max_run = @min(
                      cols_len - x,
@@ -105,7 +105,7 @@ index 946a55e45..762ec5634 100644
                  );
                  const window = cells[x..][0..max_run];
                  const run = bulkRunLength(window);
-@@ -1982,9 +2017,12 @@ const ReflowCursor = struct {
+@@ -2099,9 +2134,12 @@ const ReflowCursor = struct {
                  src_page,
              );
  
@@ -119,7 +119,7 @@ index 946a55e45..762ec5634 100644
              } else |_| {}
  
              // vtmux: the cells this row used are used in the new one.
-@@ -2000,6 +2038,17 @@ const ReflowCursor = struct {
+@@ -2117,6 +2155,17 @@ const ReflowCursor = struct {
                  }
              } else |_| {}
  
@@ -137,7 +137,7 @@ index 946a55e45..762ec5634 100644
              if (write_result) |result| switch (result) {
                  // Wrote the cell, move to the next.
                  .success => x += 1,
-@@ -2065,19 +2114,71 @@ const ReflowCursor = struct {
+@@ -2240,19 +2289,71 @@ const ReflowCursor = struct {
      }
  
      /// vtmux: the columns tmux's reflow counts for a cell (tab_extra): a
@@ -213,7 +213,7 @@ index 946a55e45..762ec5634 100644
      /// Compute and memoize the new-page capacity for the given source
      /// page. See the call site in reflowRow for details.
      fn computeAndMemoizeCap(
-@@ -2133,9 +2234,11 @@ const ReflowCursor = struct {
+@@ -2308,9 +2409,11 @@ const ReflowCursor = struct {
              // (see writeCell) so they are pure copies. The style
              // check is defensive so that a bg cell can never join or
              // extend a styled run.
@@ -226,7 +226,7 @@ index 946a55e45..762ec5634 100644
          };
      }
  
-@@ -2180,20 +2283,16 @@ const ReflowCursor = struct {
+@@ -2355,20 +2458,16 @@ const ReflowCursor = struct {
          if (cells.len == 0) return 0;
          const first = cells[0];
  
@@ -252,7 +252,7 @@ index 946a55e45..762ec5634 100644
  
          // Only text cells can contain a placeholder; for bg color
          // tags the content bits are a color, so we skip the check for
-@@ -2240,17 +2339,7 @@ const ReflowCursor = struct {
+@@ -2415,17 +2514,7 @@ const ReflowCursor = struct {
                      continue;
                  }
  
@@ -271,7 +271,7 @@ index 946a55e45..762ec5634 100644
  
                  break :outer;
              }
-@@ -2953,6 +3042,8 @@ const ReflowCursor = struct {
+@@ -3123,6 +3212,8 @@ const ReflowCursor = struct {
          // Remember our new row count so we can restore it
          // after reinitializing our cursor on the new page.
          const new_rows = self.new_rows;
@@ -280,7 +280,7 @@ index 946a55e45..762ec5634 100644
  
          const node = try list.createPage(.{ .cap = cap });
          errdefer comptime unreachable;
-@@ -2961,6 +3052,7 @@ const ReflowCursor = struct {
+@@ -3131,6 +3222,7 @@ const ReflowCursor = struct {
  
          self.* = .init(node);
          self.new_rows = new_rows;
@@ -288,7 +288,7 @@ index 946a55e45..762ec5634 100644
      }
  
      /// Performs `cursorScroll` or `cursorNewPage` as necessary
-@@ -19079,7 +19171,9 @@ test "PageList resize reflow less cols to wrap a wide char" {
+@@ -20194,7 +20286,9 @@ test "PageList resize reflow less cols to wrap a wide char" {
      // Resize
      try s.resize(.{ .cols = 2, .reflow = true });
      try testing.expectEqual(@as(usize, 2), s.cols);
@@ -299,7 +299,7 @@ index 946a55e45..762ec5634 100644
  
      {
          try testing.expect(s.pages.first == s.pages.last);
-@@ -19105,6 +19199,13 @@ test "PageList resize reflow less cols to wrap a wide char" {
+@@ -20220,6 +20314,13 @@ test "PageList resize reflow less cols to wrap a wide char" {
              const rac = page.getRowAndCell(1, 1);
              try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
              try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
@@ -313,7 +313,7 @@ index 946a55e45..762ec5634 100644
          }
      }
  }
-@@ -19141,19 +19242,19 @@ test "PageList resize reflow less cols wide char bulk run" {
+@@ -20256,19 +20357,19 @@ test "PageList resize reflow less cols wide char bulk run" {
          }
      }
  
@@ -338,7 +338,7 @@ index 946a55e45..762ec5634 100644
              {
                  const rac = page.getRowAndCell(x, y);
                  try testing.expectEqual(
-@@ -19175,7 +19276,7 @@ test "PageList resize reflow less cols wide char bulk run" {
+@@ -20290,7 +20391,7 @@ test "PageList resize reflow less cols wide char bulk run" {
              try testing.expect(!rac.row.wrap_continuation);
          }
          {
@@ -347,7 +347,7 @@ index 946a55e45..762ec5634 100644
              try testing.expect(!rac.row.wrap);
              try testing.expect(rac.row.wrap_continuation);
          }
-@@ -19212,20 +19313,22 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+@@ -20327,20 +20428,22 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
          }
      }
  
@@ -376,7 +376,7 @@ index 946a55e45..762ec5634 100644
              {
                  const rac = page.getRowAndCell(x, y);
                  try testing.expectEqual(
-@@ -19244,13 +19347,14 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+@@ -20359,13 +20462,14 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
          {
              const rac = page.getRowAndCell(4, 0);
              try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
@@ -394,7 +394,7 @@ index 946a55e45..762ec5634 100644
          }
      }
  }
-@@ -19289,8 +19393,9 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20404,8 +20508,9 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
          }
      }
  
@@ -406,7 +406,7 @@ index 946a55e45..762ec5634 100644
      try s.resize(.{ .cols = 6, .reflow = true });
      try testing.expectEqual(@as(usize, 6), s.cols);
      try testing.expectEqual(@as(usize, 2), s.totalRows());
-@@ -19298,12 +19403,13 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20413,12 +20518,13 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
      {
          try testing.expect(s.pages.first == s.pages.last);
          const page = s.pages.first.?.page();
@@ -422,7 +422,7 @@ index 946a55e45..762ec5634 100644
              const rac = page.getRowAndCell(x, 1);
              try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
              try testing.expectEqual(c.wide, rac.cell.wide);
-@@ -19312,21 +19418,28 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20427,21 +20533,28 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
          try testing.expect(page.getRowAndCell(0, 1).row.wrap_continuation);
      }
  
@@ -456,7 +456,7 @@ index 946a55e45..762ec5634 100644
      }
  }
  
-@@ -19374,16 +19487,17 @@ test "PageList resize reflow less cols wide char bulk run styled" {
+@@ -20489,16 +20602,17 @@ test "PageList resize reflow less cols wide char bulk run styled" {
      }
  
      // Resize
@@ -477,7 +477,7 @@ index 946a55e45..762ec5634 100644
                  const rac = page.getRowAndCell(x, y);
                  const style_id = rac.cell.style_id;
                  try testing.expect(style_id != 0);
-@@ -19444,9 +19558,10 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+@@ -20559,9 +20673,10 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
      }
  
      // Resize
@@ -489,7 +489,7 @@ index 946a55e45..762ec5634 100644
  
      {
          try testing.expect(s.pages.first == s.pages.last);
-@@ -19466,7 +19581,7 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+@@ -20581,7 +20696,7 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
              try testing.expectEqual(stylepkg.default_id, rac.cell.style_id);
          }
          {
@@ -498,7 +498,7 @@ index 946a55e45..762ec5634 100644
              try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint.data);
              try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
          }
-@@ -19565,9 +19680,11 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
+@@ -20680,9 +20795,11 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
              try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
          }
          {
@@ -512,10 +512,10 @@ index 946a55e45..762ec5634 100644
  
          {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 3833d8d67..c5a29c7a9 100644
+index 2ca6d7fcf..2a24164ca 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15430,6 +15430,73 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+@@ -16190,6 +16190,73 @@ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      }
  }
  

@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 0c9187e90..af2828d0a 100644
+index 226de7081..5754cff64 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1672,6 +1672,11 @@ const ReflowCursor = struct {
+@@ -1757,6 +1757,11 @@ const ReflowCursor = struct {
      page_cell: *pagepkg.Cell,
      new_rows: usize,
  
@@ -14,7 +14,7 @@ index 0c9187e90..af2828d0a 100644
      /// This is the final row count of the reflowed pages.
      total_rows: usize,
  
-@@ -1718,6 +1723,7 @@ const ReflowCursor = struct {
+@@ -1803,6 +1808,7 @@ const ReflowCursor = struct {
              .page_row = &rows[0],
              .page_cell = &rows[0].cells.ptr(page.memory)[0],
              .new_rows = 0,
@@ -22,7 +22,7 @@ index 0c9187e90..af2828d0a 100644
  
              // Initially whatever size our input node is.
              .total_rows = node.rows(),
-@@ -1739,6 +1745,10 @@ const ReflowCursor = struct {
+@@ -1824,6 +1830,10 @@ const ReflowCursor = struct {
          const src_y = row.y;
          const cells = src_row.cells.ptr(src_page.memory)[0..src_page.size.cols];
  
@@ -33,7 +33,7 @@ index 0c9187e90..af2828d0a 100644
          // Calculate the columns in this row. First up we trim non-semantic
          // rightmost blanks.
          var cols_len = src_page.size.cols;
-@@ -1752,6 +1762,7 @@ const ReflowCursor = struct {
+@@ -1837,6 +1847,7 @@ const ReflowCursor = struct {
              // so we just consider pretend the first cell of the row isn't empty.
              if (cols_len == 0 and src_row.semantic_prompt != .none) cols_len = 1;
          }
@@ -41,7 +41,7 @@ index 0c9187e90..af2828d0a 100644
  
          // Handle tracked pin adjustments. We also note whether any
          // tracked pin is on this row at all so that the per-cell loop
-@@ -1797,13 +1808,32 @@ const ReflowCursor = struct {
+@@ -1882,13 +1893,32 @@ const ReflowCursor = struct {
              }
          }
  
@@ -79,10 +79,10 @@ index 0c9187e90..af2828d0a 100644
          }
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 3cc770783..09f762d33 100644
+index 286024bb2..f3a20b1f9 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15087,6 +15087,51 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -15834,6 +15834,51 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  }
  

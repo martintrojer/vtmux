@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index abd885603..e80dfa546 100644
+index 598ecd1ef..30fd97879 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -1518,10 +1518,10 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2150,10 +2150,10 @@ pub fn print(self: *Terminal, c: u21) !void {
      // Attach zero-width characters to our cell as grapheme data.
      if (width == 0) {
          @branchHint(.unlikely);

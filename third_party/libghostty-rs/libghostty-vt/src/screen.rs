@@ -89,7 +89,7 @@ impl GridRef<'_> {
     /// [`Terminal::grid_ref`] walks it from the top. `InvalidValue` past
     /// the end. (vtmux: `ghostty_grid_ref_down`, patch 0033.)
     pub fn down(&self, n: usize) -> Result<Self> {
-        let mut out = ffi::sized!(ffi::GridRef);
+        let mut out = ffi::GridRef::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_down(std::ptr::from_ref(&self.inner), n, &raw mut out) };
         from_result(result)?;
@@ -102,7 +102,7 @@ impl GridRef<'_> {
     /// As [`GridRef::down`], `n` rows above this one. (vtmux:
     /// `ghostty_grid_ref_up`, patch 0033.)
     pub fn up(&self, n: usize) -> Result<Self> {
-        let mut out = ffi::sized!(ffi::GridRef);
+        let mut out = ffi::GridRef::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_up(std::ptr::from_ref(&self.inner), n, &raw mut out) };
         from_result(result)?;
@@ -357,7 +357,7 @@ impl TrackedGridRef {
         if self.terminal != terminal.inner.ptr {
             return Err(Error::InvalidValue);
         }
-        let mut grid_ref = MaybeUninit::new(ffi::sized!(ffi::GridRef));
+        let mut grid_ref = MaybeUninit::new(ffi::GridRef::default());
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_ptr(), grid_ref.as_mut_ptr())
         };

@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index f2dc09530..311c9991d 100644
+index 2a444e2a5..d1a708b80 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1185,15 +1185,28 @@ pub fn clone(
+@@ -1195,15 +1195,28 @@ pub fn clone(
          const src_page = chunk.node.page();
          assert(node.capacity().rows >= chunk.end - chunk.start);
          defer dst_page.assertIntegrity();
@@ -39,7 +39,7 @@ index f2dc09530..311c9991d 100644
  
          total_rows += node.rows();
  
-@@ -1263,6 +1276,48 @@ pub fn clone(
+@@ -1273,6 +1286,48 @@ pub fn clone(
      return result;
  }
  
@@ -88,7 +88,7 @@ index f2dc09530..311c9991d 100644
  /// vtmux: a compressed node with a copy of `src`'s encoding over fresh
  /// backing memory of the same kind (pool item or heap), left untouched: the
  /// node's first page access decodes into it (`Node.restore`).
-@@ -15941,6 +15996,89 @@ test "PageList clone full dirty" {
+@@ -16947,6 +17002,89 @@ test "PageList clone full dirty" {
      try testing.expect(s2.isDirty(.{ .active = .{ .x = 0, .y = 23 } }));
  }
  

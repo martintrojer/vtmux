@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 206828b27..1fe6f925d 100644
+index 1bd68ac4e..a2e1e6dd1 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -1308,6 +1308,13 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1932,6 +1932,13 @@ pub fn print(self: *Terminal, c: u21) !void {
          return;
      }
  
@@ -16,7 +16,7 @@ index 206828b27..1fe6f925d 100644
      // After doing any printing, wrapping, scrolling, etc. we want to ensure
      // that our screen remains in a consistent state.
      defer self.screens.active.assertIntegrity();
-@@ -1585,9 +1592,6 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2221,9 +2228,6 @@ pub fn print(self: *Terminal, c: u21) !void {
          return;
      }
  
@@ -26,7 +26,7 @@ index 206828b27..1fe6f925d 100644
      if (self.screens.active.cursor.pending_wrap) {
          if (self.modes.get(.wraparound)) {
              try self.printWrap();
-@@ -16276,6 +16280,26 @@ test "Terminal: printRepeat stops at the end of the line (vtmux)" {
+@@ -17036,6 +17040,26 @@ test "Terminal: printRepeat stops at the end of the line (vtmux)" {
      }
  }
  

@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 06701afb9..e93a35d93 100644
+index ffa5e5ed5..b1ae52852 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -11,6 +11,7 @@ const tripwire = @import("../tripwire.zig");
@@ -10,7 +10,7 @@ index 06701afb9..e93a35d93 100644
  const unicode = @import("../unicode/main.zig");
  const uucode = @import("uucode");
  
-@@ -2638,6 +2639,14 @@ pub fn index(self: *Terminal) !void {
+@@ -3278,6 +3279,14 @@ pub fn index(self: *Terminal) !void {
              return;
          }
  
@@ -25,7 +25,7 @@ index 06701afb9..e93a35d93 100644
          // Slow path for left and right scrolling region margins.
          // scrollUp handles the kitty image adjustment itself.
          if (self.scrolling_region.left != 0 or
-@@ -3016,12 +3025,155 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+@@ -3656,12 +3665,155 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
          return;
      }
  
@@ -92,8 +92,8 @@ index 06701afb9..e93a35d93 100644
 +    screen.pages.limits.set(.lines, null);
 +    defer {
 +        screen.pages.limits = limits;
-+        screen.pages.limits.enforce(&screen.pages, .lines);
-+        screen.pages.limits.enforce(&screen.pages, .bytes);
++        screen.pages.limits.enforce(&screen.pages, .lines, .reclaim);
++        screen.pages.limits.enforce(&screen.pages, .bytes, .reclaim);
 +    }
 +
 +    try screen.cursorScrollAbove();
@@ -181,7 +181,7 @@ index 06701afb9..e93a35d93 100644
  /// vtmux: without history (the alternate screen) tmux scrolls a region up
  /// with grid_move_lines (grid_view_scroll_region_up), which unwraps the
  /// line above the region; with history grid_scroll_history_region does
-@@ -15241,8 +15393,9 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -15959,8 +16111,9 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  
      // SU in a region and LF at the bottom of a region that does not start
@@ -193,7 +193,7 @@ index 06701afb9..e93a35d93 100644
      for ([_]bool{ false, true }) |lf| {
          var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
          defer t.deinit(alloc);
-@@ -15274,6 +15427,128 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -15992,6 +16145,128 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  }
  
@@ -322,7 +322,7 @@ index 06701afb9..e93a35d93 100644
  test "Terminal: reflow keeps the line break after a blank continuation (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -19196,12 +19471,17 @@ test "Terminal: eraseDisplay complete ignores stale prompt on recycled row" {
+@@ -20935,12 +21210,17 @@ test "Terminal: eraseDisplay complete ignores stale prompt on recycled row" {
      try t.linefeed();
      t.setTopAndBottomMargin(0, 0);
  

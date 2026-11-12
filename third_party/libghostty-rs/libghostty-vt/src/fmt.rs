@@ -21,40 +21,66 @@ pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
 }
 
 /// Options for [creating a terminal formatter](Formatter::new).
+///
+/// vtmux: libghostty-vt 1.0 sets each option with `ghostty_formatter_set`
+/// after `ghostty_formatter_terminal_new`; [`Formatter::new`] sets every one
+/// of these, so the defaults are this struct's (plain, no unwrap, no trim,
+/// no extras), as the options struct of earlier versions gave.
 #[derive(Debug)]
 pub struct FormatterOptions<'t, 's> {
-    inner: ffi::FormatterTerminalOptions,
-    _phan: PhantomData<&'s Selection<'t>>,
+    emit: ffi::FormatterFormat::Type,
+    unwrap: bool,
+    trim: bool,
+    selection: Option<&'s Selection<'t>>,
+    extras: u32,
 }
+
+// GHOSTTY_FORMATTER_EXTRA_* (formatter.h).
+const EXTRA_PALETTE: u32 = 1 << 0;
+const EXTRA_MODES: u32 = 1 << 1;
+const EXTRA_SCROLLING_REGION: u32 = 1 << 2;
+const EXTRA_TABSTOPS: u32 = 1 << 3;
+const EXTRA_PWD: u32 = 1 << 4;
+const EXTRA_KEYBOARD: u32 = 1 << 5;
+const EXTRA_CURSOR: u32 = 1 << 6;
+const EXTRA_STYLE: u32 = 1 << 7;
+const EXTRA_HYPERLINK: u32 = 1 << 8;
+const EXTRA_PROTECTION: u32 = 1 << 9;
+const EXTRA_KITTY_KEYBOARD: u32 = 1 << 10;
+const EXTRA_CHARSETS: u32 = 1 << 11;
+
 impl<'t, 's> FormatterOptions<'t, 's> {
     /// Create a new set of options for [creating a terminal formatter](Formatter::new).
     pub fn new() -> Self {
         Self {
-            inner: ffi::FormatterTerminalOptions {
-                extra: ffi::FormatterTerminalExtra {
-                    screen: ffi::FormatterScreenExtra {
-                        ..ffi::sized!(ffi::FormatterScreenExtra)
-                    },
-                    ..ffi::sized!(ffi::FormatterTerminalExtra)
-                },
-                ..ffi::sized!(ffi::FormatterTerminalOptions)
-            },
-            _phan: PhantomData,
+            emit: ffi::FormatterFormat::PLAIN,
+            unwrap: false,
+            trim: false,
+            selection: None,
+            extras: 0,
         }
+    }
+    fn extra(mut self, bit: u32, value: bool) -> Self {
+        if value {
+            self.extras |= bit;
+        } else {
+            self.extras &= !bit;
+        }
+        self
     }
     /// Specify the output format to emit.
     pub fn with_format(mut self, value: Format) -> Self {
-        self.inner.emit = value.into();
+        self.emit = value.into();
         self
     }
     /// Specify whether to unwrap soft-wrapped lines.
     pub fn with_unwrap(mut self, value: bool) -> Self {
-        self.inner.unwrap = value;
+        self.unwrap = value;
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
     pub fn with_trim(mut self, value: bool) -> Self {
-        self.inner.trim = value;
+        self.trim = value;
         self
     }
     /// Specify the selection to restrict output to a range.
@@ -62,74 +88,63 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     /// If a selection is not given, the formatter defaults to formatting
     /// the entire screen.
     pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
-        self.inner.selection = &value.inner;
+        self.selection = Some(value);
         self
     }
-
-    // --- Extra settings --- //
 
     /// Specify whether to emit the palette using OSC 4 sequences.
-    pub fn with_palette(mut self, value: bool) -> Self {
-        self.inner.extra.palette = value;
-        self
+    pub fn with_palette(self, value: bool) -> Self {
+        self.extra(EXTRA_PALETTE, value)
     }
     /// Specify terminal modes that differ from their defaults using CSI h/l.
-    pub fn with_modes(mut self, value: bool) -> Self {
-        self.inner.extra.modes = value;
-        self
+    pub fn with_modes(self, value: bool) -> Self {
+        self.extra(EXTRA_MODES, value)
     }
     /// Specify whether to emit scrolling region state using DECSTBM and DECSLRM sequences.
-    pub fn with_scrolling_region(mut self, value: bool) -> Self {
-        self.inner.extra.scrolling_region = value;
-        self
+    pub fn with_scrolling_region(self, value: bool) -> Self {
+        self.extra(EXTRA_SCROLLING_REGION, value)
     }
     /// Specify tabstop positions by clearing all tabs and setting each one.
-    pub fn with_tabstops(mut self, value: bool) -> Self {
-        self.inner.extra.tabstops = value;
-        self
+    pub fn with_tabstops(self, value: bool) -> Self {
+        self.extra(EXTRA_TABSTOPS, value)
     }
     /// Specify the present working directory using OSC 7.
-    pub fn with_pwd(mut self, value: bool) -> Self {
-        self.inner.extra.pwd = value;
-        self
+    pub fn with_pwd(self, value: bool) -> Self {
+        self.extra(EXTRA_PWD, value)
     }
     /// Specify keyboard modes such as ModifyOtherKeys.
-    pub fn with_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.keyboard = value;
-        self
+    pub fn with_keyboard(self, value: bool) -> Self {
+        self.extra(EXTRA_KEYBOARD, value)
     }
-
-    // --- Screen settings --- //
-
     /// Specify whether to emit cursor position using CUP (CSI H).
-    pub fn with_cursor(mut self, value: bool) -> Self {
-        self.inner.extra.screen.cursor = value;
-        self
+    pub fn with_cursor(self, value: bool) -> Self {
+        self.extra(EXTRA_CURSOR, value)
     }
     /// Emit current SGR style state based on the cursor's active style_id.
-    pub fn with_style(mut self, value: bool) -> Self {
-        self.inner.extra.screen.style = value;
-        self
+    pub fn with_style(self, value: bool) -> Self {
+        self.extra(EXTRA_STYLE, value)
     }
     /// Emit current hyperlink state using OSC 8 sequences.
-    pub fn with_hyperlink(mut self, value: bool) -> Self {
-        self.inner.extra.screen.hyperlink = value;
-        self
+    pub fn with_hyperlink(self, value: bool) -> Self {
+        self.extra(EXTRA_HYPERLINK, value)
     }
     /// Emit character protection mode using DECSCA.
-    pub fn with_protection(mut self, value: bool) -> Self {
-        self.inner.extra.screen.protection = value;
-        self
+    pub fn with_protection(self, value: bool) -> Self {
+        self.extra(EXTRA_PROTECTION, value)
     }
     /// Emit Kitty keyboard protocol state using CSI > u and CSI = sequences.
-    pub fn with_kitty_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.screen.kitty_keyboard = value;
-        self
+    pub fn with_kitty_keyboard(self, value: bool) -> Self {
+        self.extra(EXTRA_KITTY_KEYBOARD, value)
     }
     /// Emit character set designations and invocations.
-    pub fn with_charsets(mut self, value: bool) -> Self {
-        self.inner.extra.screen.charsets = value;
-        self
+    pub fn with_charsets(self, value: bool) -> Self {
+        self.extra(EXTRA_CHARSETS, value)
+    }
+}
+
+impl Default for FormatterOptions<'_, '_> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -164,19 +179,34 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
 
         let result = unsafe {
-            ffi::ghostty_formatter_terminal_new(
-                alloc,
-                &raw mut raw,
-                terminal.inner.as_raw(),
-                opts.inner,
-            )
+            ffi::ghostty_formatter_terminal_new(alloc, &raw mut raw, terminal.inner.as_raw())
         };
         from_result(result)?;
 
-        Ok(Self {
+        let this = Self {
             inner: Object::new(raw)?,
             _terminal: PhantomData,
-        })
+        };
+        let set = |option, value: *const std::ffi::c_void| {
+            from_result(unsafe { ffi::ghostty_formatter_set(this.inner.as_raw(), option, value) })
+        };
+        set(ffi::FormatterOption::EMIT, (&raw const opts.emit).cast())?;
+        set(
+            ffi::FormatterOption::UNWRAP,
+            (&raw const opts.unwrap).cast(),
+        )?;
+        set(ffi::FormatterOption::TRIM, (&raw const opts.trim).cast())?;
+        set(
+            ffi::FormatterOption::EXTRAS,
+            (&raw const opts.extras).cast(),
+        )?;
+        if let Some(selection) = opts.selection {
+            set(
+                ffi::FormatterOption::SELECTION,
+                (&raw const selection.inner).cast(),
+            )?;
+        }
+        Ok(this)
     }
 
     /// Run the formatter and return an allocated buffer with the output.

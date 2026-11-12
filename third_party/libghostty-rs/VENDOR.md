@@ -22,33 +22,131 @@ per-file diff against upstream this file keeps.
 
 ## Where the Ghostty source comes from
 
-The sys crate's build script downloads GitHub's archive of
-`GHOSTTY_COMMIT` with curl, checks it with `zig fetch` against
-`GHOSTTY_HASH` (Zig's package hash: of the files, not of the compressed
-bytes, so `git archive` of the commit gives the same), extracts it into
-`OUT_DIR/ghostty-src` and applies `patches/*.patch` (name order, `git
-apply` in a fresh `git init`, so a target dir inside another repository
-does not take the paths). The packaged crate carries the patches (230 KiB
-compressed), not Ghostty (150 MB unpacked, 40 MB as a tarball: over the
-10 MB crate limit, and a hand-picked subset of it would need re-picking at
-every bump). `GHOSTTY_SOURCE_TARBALL=<absolute path>` uses a tarball
-already downloaded (an offline build: `git archive --format=tar.gz
-<commit>` of a clone works too, with or without `--prefix`),
-`GHOSTTY_SOURCE_URL` a mirror. Zig's own dependencies
-(uucode, zigimg and others) come from `deps.files.ghostty.org` or Zig's
-global cache, as before (`GHOSTTY_ZIG_SYSTEM_DIR` for a sandbox). The
-script stops with what to install when `zig` is missing or not
-`ZIG_VERSION` (0.17), or curl, tar or git is missing. docs.rs builds with
-`DOCS_RS` set, which skips the native build: the checked-in bindings are
-enough for rustdoc.
+A libghostty-vt release, by tag (`vt-<version>`), never a commit: 1.0.1
+(tag `vt-1.0.1`, 2026-11-11). The sys crate's build script downloads, with
+curl, the release's two files from
+`https://release.files.ghostty.org/libghostty-vt/<version>/`:
+
+| file | SHA-256 (`GHOSTTY_SOURCE_SHA256`, `GHOSTTY_DEPS_SHA256` in `build.rs`) |
+|---|---|
+| `libghostty-vt-1.0.1.tar.gz` (the library's source, `LIB_VERSION` 1.0.1) | `333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa` |
+| `libghostty-vt-1.0.1-deps.tar.gz` (every Zig package it needs, unpacked by package hash) | `91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d` |
+
+The checksums are the release's `SHA256SUMS` (signed with Ghostty's
+minisign key `RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV`);
+the script checks each file before it extracts anything (SHA-256 in Rust,
+no tool needed). It extracts the source into `OUT_DIR/ghostty-src` and the
+packages into `OUT_DIR/ghostty-deps`, applies `patches/*.patch` (name
+order, `git apply` in a fresh `git init`, so a target dir inside another
+repository does not take the paths), and builds with `zig build --system
+OUT_DIR/ghostty-deps`: Zig makes no network request. The Zig global cache
+is `OUT_DIR/zig-global-cache`, set through `ZIG_GLOBAL_CACHE_DIR` (Zig 0.17
+has no `--global-cache-dir` flag, and `--system` with the user's own cache
+crashes it). Offline, `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL`
+name local copies (absolute paths), and `GHOSTTY_RELEASE_URL` names a
+mirror of the release directory. The packaged crate carries the patches,
+not Ghostty (4.5 MB and 5.9 MB of tarballs). `GHOSTTY_SOURCE_DIR` (a local
+checkout, patches not applied) still fetches its own packages unless
+`GHOSTTY_ZIG_SYSTEM_DIR` names them. The script stops with what to install
+when `zig` is missing or not `ZIG_VERSION` (0.17), or curl, tar or git is
+missing. docs.rs builds with `DOCS_RS` set, which skips the native build:
+the checked-in bindings are enough for rustdoc.
 
 ## Why vendored
 
-The published 0.2.2 pins ghostty `a887df42c`, which predates the fix for
-GHSA-w9q4-5jvv-mcv4 (ghostty `e257bb45`, PR #14857) and the runtime
-`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` setter. No newer libghostty-vt is
-published, and the sys crate only takes a `GHOSTTY_SOURCE_DIR` override, so
-the pin is bumped here.
+The published libghostty-rs 0.2.2 pins ghostty `a887df42c`, which predates
+the fix for GHSA-w9q4-5jvv-mcv4 (ghostty `e257bb45`, PR #14857), and none
+of vtmux's patches. 1.0.1 contains `e257bb45`.
+
+### Why not a distro `libghostty-vt.so.1`
+
+vtmux links the patched library statically and cannot use a system one.
+Patches that add C API, which the soname 1 library lacks (the link fails):
+0005, 0006, 0007, 0017, 0025, 0027, 0028, 0033, 0038, 0042, 0043 (every
+`ghostty_vtmux_*`, `ghostty_grid_ref_row_cells`/`_hyperlink_id`/`_down`/
+`_up`, `ghostty_terminal_clone_screen`, `ghostty_unicode_set_*`). Patches
+that change what existing calls return, which would link and then read
+wrong data: 0002 (`GHOSTTY_CELL_DATA_TAB`), 0010
+(`GHOSTTY_CELL_DATA_COLOR_PALETTE_256`, `GhosttyStyleFlags` bits 11-12),
+0034 (`GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS`), 0040 (bounds). The rest make
+Ghostty's grid behave as tmux's (wrap, cells used, reflow, tabs, clusters,
+the alternate screen), which a stock library does not. Live upgrade also
+reads its pages raw (`PATCH_STACK`), so it must be exactly this build.
+
+## libghostty-vt 1.0.1 (from commit 3bd54e025)
+
+Every patch was rebased onto the release (a scratch repository with
+`3bd54e025` plus the old stack and the release tarball as a commit, then
+`git cherry-pick` patch by patch). 40 stay, as separate patches (squashing
+is a later task); two are dropped because 1.0.1 has them:
+
+- **0001-keep-one-free-page-resident, dropped.** 1.0.1's `PageList.zig`
+  frees a page the line limit prunes with `DestroyMode.retain` (zeroed in
+  place, not decommitted; `Limits.enforce(.lines, .retain)` in `grow`) and
+  keeps up to `page_preheat` free pool items. Same effect: bench.py
+  `throughput` (100 MB through a 2000-line history, which prunes all
+  the time) 1.02 s plain and 1.22 s with SGR, against 1.02 s and 1.63 s
+  for 3.8-beta3 (`docs/test-health/2026-11-12-ghostty-vt-1.0.1.md`).
+- **0018-reflow-hyperlink-map-full, dropped.** 1.0.1 sizes the hyperlink
+  map by its own capacity dimension (`Capacity.hyperlink_cells`), so one
+  `increaseCapacity(.hyperlink_cells)` always grows it. The patch's test
+  ("reflow keeps the links of a page full of them") passes on 1.0.1's own
+  code (`-Doptimize=ReleaseSafe`, 35 ms; in Debug the per-print
+  integrity checks make it over 2.5 min, so it is not kept).
+
+Reworked for 1.0.1 (the rest applied with mechanical conflict fixes, such
+as `lib_vt.zig`'s export list losing its feature `if`s):
+
+- 0002: `PrintSliceSimpleMask` is a top-level constant now; `tab` is in it.
+- 0003: only the trailing-row half stays (1.0.1's `retain` covers the
+  `keepWarm` half): a row `Row.blank` marks, or all-zero cells, gets only
+  its header reset, and stays marked blank. bench.py `scale` (400 idle
+  panes): 20.3 KB/pane, 3.8-beta3 20.1.
+- 0007: printable ASCII now has its own print path (`printSliceFill` over
+  `u8`); it goes to `print()` while an override reaches into ASCII.
+- 0009: the ground-state loop moved into `Stream.printRuns`.
+- 0010: `GhosttyStyle` is a frozen 16-byte struct whose flags are the
+  core's `Style.Flags`, so the palette form is `GhosttyStyleFlags` bits 11
+  and 12 (`GHOSTTY_STYLE_FLAG_VTMUX_FG_PALETTE_256`, `..._BG_...`, size
+  unchanged) and the SGR rules live in `Style.withAttribute`.
+- 0013, 0034: `Row` lost a spare bit to `blank` (`tmux_used` u16, the two
+  line flags, 4 bits left). `printSliceMixed`, new in 1.0 (mixed-width runs
+  in one call), sizes and clusters by Ghostty's table and keeps no tmux
+  bookkeeping, so vtmux never takes it (`printSliceTransition` returns
+  null) and mixed text goes through `printSliceFill` batches, as before.
+- 0017: the state's `GhosttyStyle`s shrank (`GhosttyVtmuxScreenState` 232
+  to 112 bytes, `GhosttyVtmuxState` 10 120 to 9 880); an imported page
+  sizes the new hyperlink map for its linked cells (it failed with
+  `GHOSTTY_INVALID_VALUE` on a page with many links).
+- 0029: merged with 1.0.1's reflow prompt marks (a destination row keeps
+  the prompt mark of the row that starts it; the empty rows tmux leaves
+  are continuations); `scrollClear` counts a blank-marked row by its
+  `tmux_used` alone.
+- 0037: the kept last cell also in 1.0's two new fast paths (a linked
+  wrap goes to `print()`).
+- 0043: the replaced image's id is read before a chunk past the limit
+  frees the load (1.0.1 deletes the replaced image on every failed load).
+
+Upstream tests that assert Ghostty's model where vtmux keeps tmux's were
+changed with the patch that changes the behaviour ("eraseLine on a blank
+row keeps it blank" in 0029, "scrollClear skips blank rows and stops at a
+spacer" in 0029, "manifest describes the frozen style layout" in 0010);
+"C header types are all in the type registry" skips `GhosttyVtmux*` and
+`GhosttyUnicodeWidthRange` (0007). `zig build test-lib-vt
+-Demit-lib-vt=true -Dapp-runtime=none` (Debug, `--system` on the deps):
+7258/7342 pass, 78 skip, and the two failures this host had before
+(`Terminal: tabClear single`, which patch 0002 changes, and the kitty
+temporary-file test, which fails on the unpatched release here too).
+
+Bindings: no libclang on the host, so `bindings.rs` was updated by hand
+from a diff of `zig translate-c` of the old and new headers: enum values
+(1.0 numbers most option enums from 1, with `INVALID` = 0), removed `size`
+fields (`GridRef`, `Selection`, the clipboard, notification, progress,
+program-status and semantic-prompt records), `GhosttyStyle`'s new layout,
+`AllocatorVtable.reserved`, `setopt` renamed `set`, setters that now return
+`GhosttyResult`, and the removed formatter-options structs. Every size,
+alignment and offset `bindings.rs` asserts was then checked against the
+C headers with `zig cc` (405 of them, all equal).
 
 ## Local changes
 
@@ -98,13 +196,29 @@ Recorded per commit in git history; the list is kept current:
   `vtmux-ghostty-vt` at vtmux's version, licence MIT, vtmux's repository,
   an `include` list (above); the redundant dev-dependency on the sys crate
   is gone.
-- `libghostty-vt-sys/build.rs`: the Ghostty source is GitHub's archive of
-  the commit, checked with `zig fetch` (above), where upstream cloned it
-  with git; the Zig version is checked first.
-- `libghostty-vt-sys/build.rs`: `GHOSTTY_COMMIT` = `3bd54e025cc3` (ghostty
-  main, 2026-10-31), which contains `e257bb45`.
-- `libghostty-vt-sys/src/bindings.rs`: regenerated from that commit's
-  headers with `gen-bindings`, then `cargo fmt`.
+- `libghostty-vt-sys/build.rs`: the Ghostty source and its Zig packages
+  are the libghostty-vt release's two tarballs, checked by SHA-256 and
+  built with `zig build --system` (above), where upstream cloned a commit
+  with git and let Zig fetch; the Zig version is checked first.
+- `libghostty-vt-sys/build.rs`: `GHOSTTY_VERSION` = `1.0.1` (tag
+  `vt-1.0.1`, 2026-11-11), which contains `e257bb45`. Before it,
+  `GHOSTTY_COMMIT` `3bd54e025cc3` (ghostty main, 2026-10-31).
+- `libghostty-vt-sys/src/bindings.rs`: generated from `3bd54e025`'s
+  headers with `gen-bindings`, then updated by hand for 1.0.1 (above,
+  *libghostty-vt 1.0.1*).
+- `libghostty-vt/src`: the 1.0 C API, kept behind the same Rust API:
+  `Style` from `GhosttyStyleFlags`; `Formatter` sets its options with
+  `ghostty_formatter_set` (`FormatterOptions` is a Rust struct now, its
+  defaults the old zeroed options'); `Terminal::format_selection_alloc`/
+  `_buf` and `selection::FormatOptions` are gone with their C calls (a
+  `Formatter` with `with_selection` does it); `set_scrollback_max_bytes`/
+  `_lines(None)` pass `usize::MAX`, since 1.0 reads NULL as the default
+  limit; `GridRef`, `Selection` and the callback records have no `size`;
+  key and mouse setters ignore their new `GhosttyResult`;
+  `PlacementIteration::set_layer` passes a layer mask; `ImageData::data`
+  reads `PIXELS` (a `GhosttyString`); the OSC window title is a
+  `GhosttyString`; `CellIteration::graphemes_buf` passes a
+  `GhosttyCodepointBuffer`.
 - `libghostty-vt/src`: API drift from `a887df42c`, ported in the shape
   libghostty-rs master uses:
   - `ghostty_terminal_new(alloc, &t, cols, rows)`: `GhosttyTerminalOptions`
@@ -138,7 +252,8 @@ Recorded per commit in git history; the list is kept current:
   layout): cargo counts a missing file as changed, so every cargo
   command reran the script and rebuilt `libghostty-vt-sys` and every
   crate above it, `target/debug/vtmux` included.
-- `patches/0001-keep-one-free-page-resident.patch` (`PageList.zig`
+- Dropped with 1.0.1 (its `DestroyMode.retain` does it), kept for the
+  record: `patches/0001-keep-one-free-page-resident.patch` (`PageList.zig`
   `destroyNodeExt`, `keepWarm`): a freed pool page is zeroed in place
   instead of decommitted while no other free page is resident. With a
   line limit and no byte limit, Ghostty erases the oldest page each time
@@ -633,7 +748,8 @@ Recorded per commit in git history; the list is kept current:
   vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
   candidate as is (it carries vtmux's patch bits).
 
-- `patches/0018-reflow-hyperlink-map-full.patch` (`PageList.zig`
+- Dropped with 1.0.1 (its `hyperlink_cells` capacity does it), kept for the
+  record: `patches/0018-reflow-hyperlink-map-full.patch` (`PageList.zig`
   `ReflowCursor.writeCell`): the reflow grows a destination page's
   hyperlink map until a cell's link fits, not once. Near
   `hyperlink_bytes`' 16-bit maximum a doubling (capped at the maximum)
@@ -1408,14 +1524,21 @@ Recorded per commit in git history; the list is kept current:
   `GhosttyString` (the directory); replaced by `set_kitty_image_temp_dir(
   Option<&str>)`, which passes the string or NULL. Upstream candidate.
 
-## Bumping ghostty
+## Bumping libghostty-vt
 
-1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
-   `libghostty-vt-sys/build.rs`, and `GHOSTTY_HASH` to what `zig fetch
-   https://github.com/ghostty-org/ghostty/archive/<commit>.tar.gz` prints.
-   Copy the commit's `LICENSE` to `libghostty-vt-sys/LICENSE-ghostty` if
-   it changed.
-2. Match Zig to the commit's `build.zig.zon` `minimum_zig_version` in
+Track releases by tag, never a commit (owner policy, 2026-11-11).
+
+1. Take the next `vt-<version>` release from
+   `https://release.files.ghostty.org/libghostty-vt/<version>/`: download
+   `libghostty-vt-<version>.tar.gz`, `-deps.tar.gz`, `SHA256SUMS` and
+   `SHA256SUMS.minisig`, and check the signature (`minisign -Vm SHA256SUMS
+   -P RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV`) and the
+   sums (`sha256sum -c --ignore-missing SHA256SUMS`). Set `GHOSTTY_VERSION`,
+   `GHOSTTY_SOURCE_SHA256` and `GHOSTTY_DEPS_SHA256` in
+   `libghostty-vt-sys/build.rs` from them. Copy the tarball's `LICENSE` to
+   `libghostty-vt-sys/LICENSE-ghostty` if it changed. Offline, point
+   `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` at the files.
+2. Match Zig to the release's `build.zig.zon` `minimum_zig_version` in
    `mise.toml`, `.github/actions/setup/action.yml` (`zig-version`), `ZIG_VERSION` in
    `libghostty-vt-sys/build.rs` and the README's install line.
 3. Regenerate the bindings from the new headers, in
@@ -1426,9 +1549,23 @@ Recorded per commit in git history; the list is kept current:
    and, on Fedora, `BINDGEN_EXTRA_CLANG_ARGS=-I/usr/lib/gcc/x86_64-redhat-linux/<N>/include`
    for `stddef.h`. Diff the old and new bindings for removed or changed
    functions, callback types and struct fields (a changed callback type
-   still compiles), and fix the wrapper.
-4. Re-apply or drop each `libghostty-vt-sys/patches/*.patch` (the build
-   fails if one no longer applies).
+   still compiles), and fix the wrapper. Without libclang, diff `zig
+   translate-c -lc -I<include> <include>/ghostty/vt.h` of the old and new
+   headers instead, edit `bindings.rs` by hand, and check every layout it
+   asserts against the headers with a C file of `offsetof`/`sizeof` built
+   by `zig cc` (as for 1.0.1). Read the changed "Output type" lines too: a
+   data key whose type changed still compiles.
+4. Rebase each `libghostty-vt-sys/patches/*.patch` (the build fails if
+   one no longer applies): in a scratch repository, commit the old release
+   with the patches one per commit, commit the new release's tree on its
+   own, and `git cherry-pick` the patches onto it, which resolves most
+   conflicts from the old blobs; then `git diff C^ C` each commit back into
+   its file. Drop a patch the release already contains, and say why here.
+   Run `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
+   --system <deps>` (Debug: some upstream tests need its safety checks)
+   before and after the patches, and compare the failures. Check 1.0-style
+   fast paths (`printSliceFill`, `printSliceMixed`) keep the tmux
+   bookkeeping of patches 0013 and 0034 and the widths of 0007.
 5. Patch 0017 reads and writes Terminal, Screen and page fields by name:
    a renamed or new field fails its build, and a new mode or terminal
    flag that should survive a live upgrade needs adding to

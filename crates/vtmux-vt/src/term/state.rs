@@ -497,7 +497,7 @@ fn ghostty_err(e: libghostty_vt::Error) -> StateError {
 fn color_from(c: ffi::StyleColor) -> Color {
     // SAFETY: the tag says which member of the union is set.
     unsafe {
-        match c.tag {
+        match ffi::StyleColorTag::Type::from(c.tag) {
             ffi::StyleColorTag::PALETTE => Color::Palette(c.value.palette),
             ffi::StyleColorTag::RGB => Color::Rgb(c.value.rgb.r, c.value.rgb.g, c.value.rgb.b),
             _ => Color::Default,
@@ -505,28 +505,23 @@ fn color_from(c: ffi::StyleColor) -> Color {
     }
 }
 
+/// The C colour: a tag byte and three payload bytes, all written (a
+/// palette index is the first, the others zero).
 fn color_to(c: Color) -> ffi::StyleColor {
-    let mut out = ffi::StyleColor {
-        tag: ffi::StyleColorTag::NONE,
-        value: ffi::StyleColorValue { _padding: 0 },
+    let (tag, r, g, b) = match c {
+        Color::Default => (ffi::StyleColorTag::NONE, 0, 0, 0),
+        Color::Palette(n) | Color::Palette256(n) => (ffi::StyleColorTag::PALETTE, n, 0, 0),
+        Color::Rgb(r, g, b) => (ffi::StyleColorTag::RGB, r, g, b),
     };
-    match c {
-        Color::Default => {}
-        Color::Palette(n) | Color::Palette256(n) => {
-            out.tag = ffi::StyleColorTag::PALETTE;
-            out.value = ffi::StyleColorValue { palette: n };
-        }
-        Color::Rgb(r, g, b) => {
-            out.tag = ffi::StyleColorTag::RGB;
-            out.value = ffi::StyleColorValue {
-                rgb: ffi::ColorRgb { r, g, b },
-            };
-        }
+    ffi::StyleColor {
+        tag: u8::try_from(tag).unwrap_or(0),
+        value: ffi::StyleColorValue {
+            rgb: ffi::ColorRgb { r, g, b },
+        },
     }
-    out
 }
 
-fn underline_from(n: i32) -> Underline {
+fn underline_from(n: u16) -> Underline {
     match n {
         1 => Underline::Single,
         2 => Underline::Double,
@@ -537,7 +532,7 @@ fn underline_from(n: i32) -> Underline {
     }
 }
 
-fn underline_to(u: Underline) -> i32 {
+fn underline_to(u: Underline) -> u16 {
     match u {
         Underline::None => 0,
         Underline::Single => 1,
@@ -550,44 +545,50 @@ fn underline_to(u: Underline) -> i32 {
 
 impl StyleState {
     fn from_ffi(s: &ffi::Style) -> Self {
+        let on = |bit: ffi::StyleFlags| s.flags & bit != 0;
+        let fg_256 = on(ffi::STYLE_FLAG_VTMUX_FG_PALETTE_256);
+        let bg_256 = on(ffi::STYLE_FLAG_VTMUX_BG_PALETTE_256);
         Self {
             style: Style {
-                fg: color_from(s.fg_color).in_form(s.fg_palette_256),
-                bg: color_from(s.bg_color).in_form(s.bg_palette_256),
+                fg: color_from(s.fg_color).in_form(fg_256),
+                bg: color_from(s.bg_color).in_form(bg_256),
                 underline_color: color_from(s.underline_color),
-                bold: s.bold,
-                faint: s.faint,
-                italic: s.italic,
-                blink: s.blink,
-                inverse: s.inverse,
-                invisible: s.invisible,
-                strikethrough: s.strikethrough,
-                overline: s.overline,
-                underline: underline_from(s.underline),
+                bold: on(ffi::STYLE_FLAG_BOLD),
+                faint: on(ffi::STYLE_FLAG_FAINT),
+                italic: on(ffi::STYLE_FLAG_ITALIC),
+                blink: on(ffi::STYLE_FLAG_BLINK),
+                inverse: on(ffi::STYLE_FLAG_INVERSE),
+                invisible: on(ffi::STYLE_FLAG_INVISIBLE),
+                strikethrough: on(ffi::STYLE_FLAG_STRIKETHROUGH),
+                overline: on(ffi::STYLE_FLAG_OVERLINE),
+                underline: underline_from(
+                    (s.flags & ffi::STYLE_UNDERLINE_MASK) >> ffi::STYLE_UNDERLINE_SHIFT,
+                ),
             },
-            fg_256: s.fg_palette_256,
-            bg_256: s.bg_palette_256,
+            fg_256,
+            bg_256,
         }
     }
 
     fn to_ffi(self) -> ffi::Style {
         let s = self.style;
+        let bit = |on: bool, bit: ffi::StyleFlags| if on { bit } else { 0 };
         ffi::Style {
-            size: std::mem::size_of::<ffi::Style>(),
             fg_color: color_to(s.fg),
             bg_color: color_to(s.bg),
             underline_color: color_to(s.underline_color),
-            bold: s.bold,
-            italic: s.italic,
-            faint: s.faint,
-            blink: s.blink,
-            inverse: s.inverse,
-            invisible: s.invisible,
-            strikethrough: s.strikethrough,
-            overline: s.overline,
-            underline: underline_to(s.underline),
-            fg_palette_256: self.fg_256,
-            bg_palette_256: self.bg_256,
+            flags: bit(s.bold, ffi::STYLE_FLAG_BOLD)
+                | bit(s.italic, ffi::STYLE_FLAG_ITALIC)
+                | bit(s.faint, ffi::STYLE_FLAG_FAINT)
+                | bit(s.blink, ffi::STYLE_FLAG_BLINK)
+                | bit(s.inverse, ffi::STYLE_FLAG_INVERSE)
+                | bit(s.invisible, ffi::STYLE_FLAG_INVISIBLE)
+                | bit(s.strikethrough, ffi::STYLE_FLAG_STRIKETHROUGH)
+                | bit(s.overline, ffi::STYLE_FLAG_OVERLINE)
+                | (underline_to(s.underline) << ffi::STYLE_UNDERLINE_SHIFT)
+                | bit(self.fg_256, ffi::STYLE_FLAG_VTMUX_FG_PALETTE_256)
+                | bit(self.bg_256, ffi::STYLE_FLAG_VTMUX_BG_PALETTE_256),
+            reserved: 0,
         }
     }
 }

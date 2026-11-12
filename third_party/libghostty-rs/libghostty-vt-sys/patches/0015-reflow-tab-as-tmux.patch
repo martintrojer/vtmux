@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 10da16c03..69e5bfe56 100644
+index 779e05335..9d643a589 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1677,6 +1677,16 @@ const ReflowCursor = struct {
+@@ -1762,6 +1762,16 @@ const ReflowCursor = struct {
      /// middle of a row (init) does not lose it.
      prev_wrap: bool,
  
@@ -19,7 +19,7 @@ index 10da16c03..69e5bfe56 100644
      /// This is the final row count of the reflowed pages.
      total_rows: usize,
  
-@@ -1724,6 +1734,7 @@ const ReflowCursor = struct {
+@@ -1809,6 +1819,7 @@ const ReflowCursor = struct {
              .page_cell = &rows[0].cells.ptr(page.memory)[0],
              .new_rows = 0,
              .prev_wrap = false,
@@ -27,7 +27,7 @@ index 10da16c03..69e5bfe56 100644
  
              // Initially whatever size our input node is.
              .total_rows = node.rows(),
-@@ -1762,23 +1773,39 @@ const ReflowCursor = struct {
+@@ -1847,23 +1858,39 @@ const ReflowCursor = struct {
          // when drawn), but a line split over several rows
          // (grid_reflow_split) or joined to the one before it
          // (grid_reflow_join) takes only its cellused cells.
@@ -69,8 +69,8 @@ index 10da16c03..69e5bfe56 100644
  
              // If the row has a semantic prompt then the blank row is meaningful
              // so we just consider pretend the first cell of the row isn't empty.
-@@ -1890,6 +1917,24 @@ const ReflowCursor = struct {
-                 self.page_row.wrap_continuation = true;
+@@ -2004,6 +2031,24 @@ const ReflowCursor = struct {
+                 }
              }
  
 +            // vtmux: a cell that does not fit the row by tmux's measure
@@ -94,7 +94,7 @@ index 10da16c03..69e5bfe56 100644
              // Fast path: bulk-copy a run of simple cells directly
              // into the destination row. The vast majority of cells
              // are narrow cells or complete wide pairs, have no
-@@ -1901,7 +1946,7 @@ const ReflowCursor = struct {
+@@ -2015,7 +2060,7 @@ const ReflowCursor = struct {
              if (!row_has_pins) {
                  const max_run = @min(
                      cols_len - x,
@@ -103,7 +103,7 @@ index 10da16c03..69e5bfe56 100644
                  );
                  const window = cells[x..][0..max_run];
                  const run = bulkRunLength(window);
-@@ -1937,6 +1982,11 @@ const ReflowCursor = struct {
+@@ -2051,6 +2096,11 @@ const ReflowCursor = struct {
                  src_page,
              );
  
@@ -115,8 +115,8 @@ index 10da16c03..69e5bfe56 100644
              // vtmux: the cells this row used are used in the new one.
              // A cell was written if the cursor moved on (a spacer head
              // in the source is skipped without a write).
-@@ -2005,6 +2055,20 @@ const ReflowCursor = struct {
-         }
+@@ -2177,6 +2227,20 @@ const ReflowCursor = struct {
+         self.new_rows += 1;
      }
  
 +    /// vtmux: the columns tmux's reflow counts for a cell (tab_extra): a
@@ -136,7 +136,7 @@ index 10da16c03..69e5bfe56 100644
      /// Compute and memoize the new-page capacity for the given source
      /// page. See the call site in reflowRow for details.
      fn computeAndMemoizeCap(
-@@ -2039,6 +2103,8 @@ const ReflowCursor = struct {
+@@ -2211,6 +2275,8 @@ const ReflowCursor = struct {
              .codepoint => copyable: {
                  if (cell.wide != .narrow) break :copyable false;
                  if (cell.hyperlink) break :copyable false;
@@ -145,7 +145,7 @@ index 10da16c03..69e5bfe56 100644
                  if (comptime build_options.kitty_graphics) {
                      // Placeholders must set a row flag, so they take
                      // the slow path.
-@@ -2085,6 +2151,8 @@ const ReflowCursor = struct {
+@@ -2257,6 +2323,8 @@ const ReflowCursor = struct {
          "style_id",
          "wide",
          "hyperlink",
@@ -154,7 +154,7 @@ index 10da16c03..69e5bfe56 100644
      }, bulk_group_len);
  
      /// Masked compare helper for detecting the Kitty virtual
-@@ -2694,6 +2762,7 @@ const ReflowCursor = struct {
+@@ -2868,6 +2936,7 @@ const ReflowCursor = struct {
          const old_page = self.page;
          const old_row = self.page_row;
          const old_x = self.x;
@@ -162,7 +162,7 @@ index 10da16c03..69e5bfe56 100644
  
          // Our total row count never changes, because we're removing one
          // row from the last page and moving it into a new page.
-@@ -2709,6 +2778,7 @@ const ReflowCursor = struct {
+@@ -2883,6 +2952,7 @@ const ReflowCursor = struct {
  
          // Restore the x position of the cursor.
          self.cursorAbsolute(old_x, 0);
@@ -170,7 +170,7 @@ index 10da16c03..69e5bfe56 100644
  
          // Copy our old data. This should NOT fail because we have the
          // capacity of the old page which already fits the data we requested.
-@@ -2854,6 +2924,7 @@ const ReflowCursor = struct {
+@@ -3028,6 +3098,7 @@ const ReflowCursor = struct {
          self.pending_wrap = false;
          self.x = 0;
          self.y += 1;
@@ -179,10 +179,10 @@ index 10da16c03..69e5bfe56 100644
  
      /// Create a new page in the provided list with the provided
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 761c2a9f9..46ae5d8b6 100644
+index 1ed9e6f1b..e7fbe3d81 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15268,6 +15268,60 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+@@ -16021,6 +16021,60 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
      try testing.expect(!r1.wrap_continuation);
  }
  

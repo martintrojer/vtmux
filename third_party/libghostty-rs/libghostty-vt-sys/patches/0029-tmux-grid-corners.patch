@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index e5b98c589..f2dc09530 100644
+index 62b3b52f1..a248daa70 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1755,6 +1755,27 @@ const ReflowCursor = struct {
+@@ -1840,6 +1840,27 @@ const ReflowCursor = struct {
      /// dropped and made again where it falls now.
      src_in_tab: bool,
  
@@ -30,7 +30,7 @@ index e5b98c589..f2dc09530 100644
      /// This is the final row count of the reflowed pages.
      total_rows: usize,
  
-@@ -1804,6 +1825,9 @@ const ReflowCursor = struct {
+@@ -1889,6 +1910,9 @@ const ReflowCursor = struct {
              .prev_wrap = false,
              .tab_extra = 0,
              .src_in_tab = false,
@@ -40,7 +40,7 @@ index e5b98c589..f2dc09530 100644
  
              // Initially whatever size our input node is.
              .total_rows = node.rows(),
-@@ -1829,6 +1853,21 @@ const ReflowCursor = struct {
+@@ -1914,6 +1938,21 @@ const ReflowCursor = struct {
          const prev_wrap = self.prev_wrap;
          defer self.prev_wrap = src_row.wrap;
          if (!prev_wrap) self.src_in_tab = false;
@@ -62,7 +62,7 @@ index e5b98c589..f2dc09530 100644
  
          // vtmux: where the destination cursor is: 0 starts a line (deferred
          // line breaks and pending wrap reset the column), anything else
-@@ -1931,6 +1970,12 @@ const ReflowCursor = struct {
+@@ -2016,6 +2055,12 @@ const ReflowCursor = struct {
  
                  if (cursor_pin != null and p == cursor_pin.?) continue;
  
@@ -75,7 +75,7 @@ index e5b98c589..f2dc09530 100644
                  // If this pin is in the blanks on the right and past the end
                  // of the dst col width then we move it to the end of the dst
                  // col width instead.
-@@ -1989,6 +2034,17 @@ const ReflowCursor = struct {
+@@ -2074,6 +2119,17 @@ const ReflowCursor = struct {
              self.new_rows -= 1;
          }
  
@@ -90,10 +90,10 @@ index e5b98c589..f2dc09530 100644
 +            }
 +        }
 +
-         self.copyRowMetadata(src_row);
- 
-         // vtmux: the destination rows this row's cells start (tmux_hscrolled).
-@@ -2009,13 +2065,123 @@ const ReflowCursor = struct {
+         // A destination row takes the prompt mark of the source row that
+         // starts it. For example, widening from 4 to 8 columns joins a
+         // prompt row with its wrapped continuation, and the joined row is
+@@ -2112,9 +2168,84 @@ const ReflowCursor = struct {
              }
          };
  
@@ -178,7 +178,10 @@ index e5b98c589..f2dc09530 100644
                  self.page_row.wrap = true;
                  try self.cursorScrollOrNewPage(list, cap);
                  self.copyRowMetadata(src_row);
-                 self.page_row.wrap_continuation = true;
+@@ -2130,6 +2261,41 @@ const ReflowCursor = struct {
+                 if (self.page_row.semantic_prompt == .prompt) {
+                     self.page_row.semantic_prompt = .prompt_continuation;
+                 }
 +                try self.tmuxEmptyRows(list, cap, src_row, empty_rows);
 +            }
 +            carried = false;
@@ -217,7 +220,7 @@ index e5b98c589..f2dc09530 100644
              }
  
              // vtmux: a wide character's padding that an earlier reflow
-@@ -2082,6 +2248,9 @@ const ReflowCursor = struct {
+@@ -2196,6 +2362,9 @@ const ReflowCursor = struct {
                      if (x < used) self.page_row.tmuxRaiseUsed(
                          @as(usize, run_x) + @min(run, used - x),
                      );
@@ -227,7 +230,7 @@ index e5b98c589..f2dc09530 100644
                      x += run;
                      continue;
                  }
-@@ -2107,6 +2276,13 @@ const ReflowCursor = struct {
+@@ -2221,6 +2390,13 @@ const ReflowCursor = struct {
                  &cells[x],
                  src_page,
              );
@@ -241,7 +244,7 @@ index e5b98c589..f2dc09530 100644
  
              // vtmux: a tab's first cell costs its width, a wide
              // character's one more for its padding (tab_extra).
-@@ -2137,6 +2313,14 @@ const ReflowCursor = struct {
+@@ -2251,6 +2427,14 @@ const ReflowCursor = struct {
                          self.page.size.cols)
                  {
                      try self.tmuxWidePadding(list, cap, src_row, write_x);
@@ -256,7 +259,7 @@ index e5b98c589..f2dc09530 100644
                  }
              } else |_| {}
  
-@@ -2202,6 +2386,28 @@ const ReflowCursor = struct {
+@@ -2316,6 +2500,32 @@ const ReflowCursor = struct {
          if (!src_row.wrap) {
              self.new_rows += 1;
          }
@@ -281,11 +284,15 @@ index e5b98c589..f2dc09530 100644
 +            try self.cursorScrollOrNewPage(list, cap);
 +            self.copyRowMetadata(src_row);
 +            self.page_row.wrap_continuation = true;
++            // A continuation is never a prompt start (as in reflowRow).
++            if (self.page_row.semantic_prompt == .prompt) {
++                self.page_row.semantic_prompt = .prompt_continuation;
++            }
 +        }
      }
  
-     /// vtmux: the columns tmux's reflow counts for a cell (tab_extra): a
-@@ -3135,6 +3341,9 @@ const ReflowCursor = struct {
+     /// Reflow the provided row in to this cursor as one blank row that
+@@ -3302,6 +3512,9 @@ const ReflowCursor = struct {
          const new_rows = self.new_rows;
          // vtmux: and where the source line is (src_in_tab).
          const src_in_tab = self.src_in_tab;
@@ -295,7 +302,7 @@ index e5b98c589..f2dc09530 100644
  
          const node = try list.createPage(.{ .cap = cap });
          errdefer comptime unreachable;
-@@ -3144,6 +3353,9 @@ const ReflowCursor = struct {
+@@ -3311,6 +3524,9 @@ const ReflowCursor = struct {
          self.* = .init(node);
          self.new_rows = new_rows;
          self.src_in_tab = src_in_tab;
@@ -305,27 +312,55 @@ index e5b98c589..f2dc09530 100644
      }
  
      /// Performs `cursorScroll` or `cursorNewPage` as necessary
-@@ -4038,9 +4250,12 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
+@@ -4228,16 +4444,17 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
                  const rev_i = page.rows() - i - 1;
                  const row = rows[rev_i];
-                 const cells = row.cells.ptr(current_page.memory)[0..self.cols];
--                for (cells) |cell| {
--                    if (!cell.isEmpty()) break :non_empty self.rows - n;
--                }
+ 
+-                // A row marked blank holds only zero cells, which are
+-                // empty, so we don't need to read them. Shells that
+-                // clear this way (`CSI 22 J`, or `CSI 2 J` at a prompt)
+-                // usually have mostly blank rows below the content.
+-                if (!row.blank) {
 +                // vtmux: vtmux scrolls a clear into history with this
 +                // (scroll-on-clear), which tmux does up to the last line
 +                // with cells used (grid_view_clear_history: `cellused`),
 +                // erased ones included; a line only erased with a
-+                // background has none.
-+                if (row.tmuxCellsUsed(cells) > 0) break :non_empty self.rows - n;
++                // background has none. A row marked blank holds only zero
++                // cells, so only its mark counts and its cells aren't read.
++                const used = if (row.blank) row.tmux_used else used: {
+                     const cells = row.cells.ptr(current_page.memory)[0..self.cols];
+-                    if (!pagepkg.Cell.isEmptyAll(cells)) {
+-                        break :non_empty self.rows - n;
+-                    }
+-                }
++                    break :used row.tmuxCellsUsed(cells);
++                };
++                if (used > 0) break :non_empty self.rows - n;
  
                  n += 1;
                  if (n > self.rows) break :non_empty 0;
+@@ -16968,11 +17185,13 @@ test "PageList scrollClear skips blank rows and stops at a spacer" {
+     page.getRow(5).blank = true;
+     try page.verifyIntegrity(alloc);
+ 
+-    // Every row below the spacer is empty, so the text and the spacer
+-    // row scroll into history.
++    // vtmux: tmux scrolls up to the last line with cells used
++    // (grid_view_clear_history), and these rows were never written
++    // (tmux_used 0) but the text row, which is all that scrolls into
++    // history. Upstream also scrolls the spacer row.
+     const before = s.totalRows();
+     try s.scrollClear();
+-    try testing.expectEqual(@as(usize, 2), s.totalRows() - before);
++    try testing.expectEqual(@as(usize, 1), s.totalRows() - before);
+ }
+ 
+ test "PageList resize (no reflow) less rows trims blank lines" {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index e93a35d93..e5da8673c 100644
+index 64f08de4c..7930ab17a 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -2601,6 +2601,14 @@ pub fn index(self: *Terminal) !void {
+@@ -3359,6 +3359,14 @@ pub fn index(self: *Terminal) !void {
          screen.cursor.x >= self.scrolling_region.left and
          screen.cursor.x <= self.scrolling_region.right)
      {
@@ -340,7 +375,7 @@ index e93a35d93..e5da8673c 100644
          if (comptime build_options.kitty_graphics) {
              // Scrolling dirties the images because it updates their placements pins.
              screen.kitty_images.markDirty();
-@@ -2911,6 +2919,11 @@ pub fn setLeftAndRightMargin(self: *Terminal, left_req: usize, right_req: usize)
+@@ -3669,6 +3677,11 @@ pub fn setLeftAndRightMargin(self: *Terminal, left_req: usize, right_req: usize)
  
  /// Scroll the text down by one row.
  pub fn scrollDown(self: *Terminal, count: usize) void {
@@ -352,7 +387,7 @@ index e93a35d93..e5da8673c 100644
      // Preserve our x/y to restore.
      const old_x = self.screens.active.cursor.x;
      const old_y = self.screens.active.cursor.y;
-@@ -2951,6 +2964,11 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
+@@ -3709,6 +3722,11 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
  ///
  /// Does not change the (absolute) cursor position.
  pub fn scrollUp(self: *Terminal, count: usize) !void {
@@ -364,7 +399,7 @@ index e93a35d93..e5da8673c 100644
      // Preserve our x/y to restore.
      const old_x = self.screens.active.cursor.x;
      const old_y = self.screens.active.cursor.y;
-@@ -3022,6 +3040,7 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+@@ -3780,6 +3798,7 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
          for (0..adjusted_count) |_| try self.screens.active.cursorScrollAbove();
  
          self.tmuxFixContinuationsBelowRegion();
@@ -372,7 +407,7 @@ index e93a35d93..e5da8673c 100644
          return;
      }
  
-@@ -3174,14 +3193,21 @@ fn tmuxMoveRow(screen: *Screen, src: PageList.Pin, dst: PageList.Pin) void {
+@@ -3932,14 +3951,21 @@ fn tmuxMoveRow(screen: *Screen, src: PageList.Pin, dst: PageList.Pin) void {
      }
  }
  
@@ -398,7 +433,7 @@ index e93a35d93..e5da8673c 100644
      if (self.scrolling_region.top == 0) return;
      self.tmuxUnwrapAbove(self.scrolling_region.top);
  }
-@@ -3199,7 +3225,7 @@ fn tmuxUnwrapAboveRegionWithoutHistory(self: *Terminal) void {
+@@ -3957,7 +3983,7 @@ fn tmuxUnwrapAboveRegionWithoutHistory(self: *Terminal) void {
  /// screen does not reflow, so it skips this.
  fn tmuxFixRegionContinuations(self: *Terminal) void {
      const screen = self.screens.active;
@@ -407,7 +442,7 @@ index e93a35d93..e5da8673c 100644
      const bottom = screen.cursor.page_pin.*;
      if (bottom.up(self.scrolling_region.bottom - self.scrolling_region.top)) |top| {
          tmuxFixContinuationAt(top);
-@@ -3458,17 +3484,52 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -4216,17 +4242,52 @@ pub fn insertLines(self: *Terminal, count: usize) void {
  /// vtmux: CSI L as tmux does it: `insertLines`, and the cursor stays where
  /// it was, a pending wrap included (screen_write_insertline does not move
  /// it; Ghostty's goes to the left margin, as xterm's does).
@@ -462,7 +497,7 @@ index e93a35d93..e5da8673c 100644
      // Rare, but happens
      if (count == 0) return;
  
-@@ -3637,7 +3698,7 @@ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
+@@ -4395,7 +4456,7 @@ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
      // cursor, even when ny - ny2 underflows (the u_int count wraps so
      // grid_check_y passes and no line is cleared).
      if (!left_right) {
@@ -471,7 +506,7 @@ index e93a35d93..e5da8673c 100644
              self.tmuxUnwrapRow(start_y + (rem - adjusted_count) - 1);
          }
          self.tmuxUnwrapAbove(start_y);
-@@ -3680,7 +3741,20 @@ fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
+@@ -4438,7 +4499,20 @@ fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
  /// above the cursor is unwrapped by grid_move_lines, and the last moved
  /// line by the grid_clear of the freed lines. SU, which Ghostty also does
  /// with deleteLines, unwraps neither in tmux.
@@ -492,7 +527,7 @@ index e93a35d93..e5da8673c 100644
      const y = self.screens.active.cursor.y;
      const left_right = self.scrolling_region.left > 0 or
          self.scrolling_region.right < self.cols - 1;
-@@ -4223,6 +4297,20 @@ pub fn eraseLine(
+@@ -4981,6 +5055,20 @@ pub fn eraseLine(
      const pending_wrap = self.screens.active.cursor.pending_wrap;
      defer self.screens.active.cursor.pending_wrap = pending_wrap;
  
@@ -507,13 +542,13 @@ index e93a35d93..e5da8673c 100644
 +        .left => self.screens.active.cursor.x >= self.cols - 1,
 +        else => false,
 +    };
-+    if (whole_line and self.screens.active.cursor.style.bg_color == .none and
++    if (whole_line and self.screens.active.cursor.style.bg_color.tag == .none and
 +        self.tmuxLineUnwritten()) return;
 +
      // Get our start/end positions depending on mode.
      const start, const end = switch (mode) {
          .right => right: {
-@@ -4321,6 +4409,21 @@ pub fn eraseLine(
+@@ -5079,6 +5167,21 @@ pub fn eraseLine(
      );
  }
  
@@ -535,7 +570,7 @@ index e93a35d93..e5da8673c 100644
  /// Erase the display (ED, `CSI Ps J`). The mode picks what is erased:
  ///
  ///   - `below`: from the cursor to the end of the screen.
-@@ -15705,6 +15808,200 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+@@ -16806,6 +16909,200 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
      }
  }
  
@@ -736,11 +771,55 @@ index e93a35d93..e5da8673c 100644
  test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
+@@ -19136,19 +19433,23 @@ test "Terminal: blank bit moves with rows" {
+ test "Terminal: eraseLine on a blank row keeps it blank" {
+     const alloc = testing.allocator;
+ 
+-    // Every mode finds nothing to clear on a blank row, but still does
+-    // the bookkeeping it does on any row: the row is marked dirty, the
+-    // pending wrap is reset, and right and complete reset soft-wrap.
++    // vtmux: tmux's EL never moves the cursor, so the pending wrap stays
++    // (screen_write_clearline, screen_write_clearstartofline); EL 0 past
++    // the last column and EL 2 of a line never written change nothing,
++    // not even the wrap flag (screen_write_clearendofline,
++    // screen_write_clearline). Upstream resets the pending wrap and the
++    // wrap of EL 0 and EL 2 and marks the row dirty in every mode. The
++    // row stays blank in every mode.
+     // verifyIntegrity checks that a blank row's cells are all zero.
+     const Case = struct { csi.EraseLine, bool };
+     const cases = [_]Case{
+-        .{ .right, true },
+-        .{ .left, false },
+-        .{ .complete, true },
++        .{ .right, false },
++        .{ .left, true },
++        .{ .complete, false },
+     };
+ 
+     for (cases) |case| {
+-        const mode, const resets_wrap = case;
++        const mode, const dirty = case;
+ 
+         var t = try init(testing.io, alloc, .{ .rows = 3, .cols = 5 });
+         defer t.deinit(alloc);
+@@ -19161,9 +19462,9 @@ test "Terminal: eraseLine on a blank row keeps it blank" {
+ 
+         t.eraseLine(mode, false);
+         try testing.expect(testActiveRow(&t, 1).blank);
+-        try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 1 } }));
+-        try testing.expect(!t.screens.active.cursor.pending_wrap);
+-        try testing.expectEqual(!resets_wrap, testActiveRow(&t, 1).wrap);
++        try testing.expectEqual(dirty, t.isDirty(.{ .active = .{ .x = 0, .y = 1 } }));
++        try testing.expect(t.screens.active.cursor.pending_wrap);
++        try testing.expect(testActiveRow(&t, 1).wrap);
+         try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
+         try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 2 } }));
+         try t.screens.active.cursor.page_pin.node.page().verifyIntegrity(alloc);
 diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
-index d070ebb20..e37ac5965 100644
+index 7efa76741..255386a1a 100644
 --- a/src/terminal/stream.zig
 +++ b/src/terminal/stream.zig
-@@ -1878,7 +1878,7 @@ pub fn Stream(comptime H: type) type {
+@@ -1965,7 +1965,7 @@ pub fn Stream(comptime H: type) type {
                  'L' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.insert_lines, switch (input.params.len) {
                          0 => 1,
@@ -749,7 +828,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid IL command: {f}", .{input});
                              return;
-@@ -1896,7 +1896,7 @@ pub fn Stream(comptime H: type) type {
+@@ -1983,7 +1983,7 @@ pub fn Stream(comptime H: type) type {
                  'M' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.delete_lines, switch (input.params.len) {
                          0 => 1,
@@ -758,7 +837,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid DL command: {f}", .{input});
                              return;
-@@ -1913,7 +1913,7 @@ pub fn Stream(comptime H: type) type {
+@@ -2000,7 +2000,7 @@ pub fn Stream(comptime H: type) type {
                  'P' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.delete_chars, switch (input.params.len) {
                          0 => 1,
@@ -767,7 +846,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid delete characters command: {f}", .{input});
                              return;
-@@ -1931,7 +1931,7 @@ pub fn Stream(comptime H: type) type {
+@@ -2018,7 +2018,7 @@ pub fn Stream(comptime H: type) type {
                  'S' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.scroll_up, switch (input.params.len) {
                          0 => 1,
@@ -776,7 +855,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid scroll up command: {f}", .{input});
                              return;
-@@ -1948,7 +1948,7 @@ pub fn Stream(comptime H: type) type {
+@@ -2035,7 +2035,7 @@ pub fn Stream(comptime H: type) type {
                  'T' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.scroll_down, switch (input.params.len) {
                          0 => 1,
@@ -785,7 +864,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid scroll down command: {f}", .{input});
                              return;
-@@ -2029,7 +2029,7 @@ pub fn Stream(comptime H: type) type {
+@@ -2116,7 +2116,7 @@ pub fn Stream(comptime H: type) type {
                  'Z' => switch (input.intermediates.len) {
                      0 => self.handler.vt(.horizontal_tab_back, switch (input.params.len) {
                          0 => 1,
@@ -794,7 +873,7 @@ index d070ebb20..e37ac5965 100644
                          else => {
                              log.warn("invalid horizontal tab back command: {f}", .{input});
                              return;
-@@ -4826,6 +4826,49 @@ test "stream: insert characters explicit zero clamps to 1" {
+@@ -5007,6 +5007,49 @@ test "stream: insert characters explicit zero clamps to 1" {
      try testing.expectEqual(@as(usize, 1), s.handler.value.?);
  }
  

@@ -1,10 +1,10 @@
 diff --git a/include/ghostty/vt/grid_ref.h b/include/ghostty/vt/grid_ref.h
-index e32833393..12ef52309 100644
+index 31ebb81eb..7d9558b0a 100644
 --- a/include/ghostty/vt/grid_ref.h
 +++ b/include/ghostty/vt/grid_ref.h
-@@ -204,6 +204,26 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_hyperlink_uri(
+@@ -243,6 +243,26 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_hyperlink_uri(
      size_t buf_len,
-     size_t *out_len);
+     size_t *out_written);
  
 +/**
 + * Get the OSC 8 id of the hyperlink of the cell at the grid reference's
@@ -30,22 +30,22 @@ index e32833393..12ef52309 100644
   * Get the style of the cell at the grid reference's position.
   *
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index b59b7ef09..519f77f17 100644
+index 8a462a1f8..e33c371ef 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -419,6 +419,7 @@ comptime {
-             @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
-             @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
-             @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
-+            @export(&c.grid_ref_hyperlink_id, .{ .name = "ghostty_grid_ref_hyperlink_id" });
-             @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
-             @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
-             @export(&c.tracked_grid_ref_has_value, .{ .name = "ghostty_tracked_grid_ref_has_value" });
+@@ -391,6 +391,7 @@ comptime {
+         @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
+         @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
+         @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
++        @export(&c.grid_ref_hyperlink_id, .{ .name = "ghostty_grid_ref_hyperlink_id" });
+         @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
+         @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
+         @export(&c.tracked_grid_ref_has_value, .{ .name = "ghostty_tracked_grid_ref_has_value" });
 diff --git a/src/terminal/c/grid_ref.zig b/src/terminal/c/grid_ref.zig
-index 4fd649b0b..bc661c8b9 100644
+index ebb74faf6..85c9c7ac5 100644
 --- a/src/terminal/c/grid_ref.zig
 +++ b/src/terminal/c/grid_ref.zig
-@@ -146,6 +146,44 @@ pub fn grid_ref_hyperlink_uri(
+@@ -168,6 +168,44 @@ pub fn grid_ref_hyperlink_uri(
      return .success;
  }
  
@@ -88,13 +88,13 @@ index 4fd649b0b..bc661c8b9 100644
 +}
 +
  pub fn grid_ref_style(
-     ref: *const CGridRef,
+     ref_: ?*const CGridRef,
      out: ?*style_c.Style,
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index b32514a02..b250c7064 100644
+index 57fca67e5..53a0ea929 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -259,6 +259,7 @@ pub const grid_ref_row = grid_ref.grid_ref_row;
+@@ -265,6 +265,7 @@ pub const grid_ref_row = grid_ref.grid_ref_row;
  pub const grid_ref_graphemes = grid_ref.grid_ref_graphemes;
  pub const grid_ref_row_cells = grid_ref.grid_ref_row_cells;
  pub const grid_ref_hyperlink_uri = grid_ref.grid_ref_hyperlink_uri;

@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt.h b/include/ghostty/vt.h
-index cfa1017..a78a5f7 100644
+index f83662bdf..b22c786bf 100644
 --- a/include/ghostty/vt.h
 +++ b/include/ghostty/vt.h
-@@ -169,6 +169,7 @@ extern "C" {
+@@ -193,6 +193,7 @@ extern "C" {
  #include <ghostty/vt/size_report.h>
  #include <ghostty/vt/snapshot.h>
  #include <ghostty/vt/unicode.h>
@@ -12,7 +12,7 @@ index cfa1017..a78a5f7 100644
  #ifdef __cplusplus
 diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
 new file mode 100644
-index 0000000..adcc99d
+index 000000000..adcc99d2d
 --- /dev/null
 +++ b/include/ghostty/vt/vtmux_state.h
 @@ -0,0 +1,325 @@
@@ -342,13 +342,13 @@ index 0000000..adcc99d
 +
 +#endif /* GHOSTTY_VT_VTMUX_STATE_H */
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 12687a6..88cea3e 100644
+index 3705ec601..ba32443b2 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -381,6 +381,14 @@ comptime {
-         if (features.grid_introspection) {
-             @export(&c.terminal_grid_ref_track, .{ .name = "ghostty_terminal_grid_ref_track" });
-         }
+@@ -358,6 +358,14 @@ comptime {
+         @export(&c.terminal_grid_ref, .{ .name = "ghostty_terminal_grid_ref" });
+         @export(&c.terminal_point_from_grid_ref, .{ .name = "ghostty_terminal_point_from_grid_ref" });
+         @export(&c.terminal_grid_ref_track, .{ .name = "ghostty_terminal_grid_ref_track" });
 +        @export(&c.vtmux_page_count, .{ .name = "ghostty_vtmux_page_count" });
 +        @export(&c.vtmux_page_export, .{ .name = "ghostty_vtmux_page_export" });
 +        @export(&c.vtmux_state_export, .{ .name = "ghostty_vtmux_state_export" });
@@ -357,14 +357,14 @@ index 12687a6..88cea3e 100644
 +        @export(&c.vtmux_importer_finish, .{ .name = "ghostty_vtmux_importer_finish" });
 +        @export(&c.vtmux_importer_free, .{ .name = "ghostty_vtmux_importer_free" });
 +        @export(&c.vtmux_set_active_screen, .{ .name = "ghostty_vtmux_set_active_screen" });
-         if (features.snapshot) {
-             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
-             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+         @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode_alloc, .{ .name = "ghostty_snapshot_encode_alloc" });
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index b7ae455..d3f1513 100644
+index 9f25a9cc9..1e5375117 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -49,6 +49,7 @@ pub const style = @import("style.zig");
+@@ -51,6 +51,7 @@ pub const style = @import("style.zig");
  pub const sys = @import("sys.zig");
  pub const terminal = @import("terminal.zig");
  pub const unicode = @import("unicode.zig");
@@ -372,7 +372,7 @@ index b7ae455..d3f1513 100644
  
  // The full C API, unexported.
  pub const build_info = buildpkg.get;
-@@ -242,6 +243,14 @@ pub const snapshot_encode_alloc = snapshot.encode_alloc;
+@@ -247,6 +248,14 @@ pub const snapshot_encode_alloc = snapshot.encode_alloc;
  pub const snapshot_decoder_new = snapshot.decoder_new;
  pub const snapshot_decoder_new_buf = snapshot.decoder_new_buf;
  pub const snapshot_decoder_free = snapshot.decoder_free;
@@ -387,20 +387,20 @@ index b7ae455..d3f1513 100644
  pub const snapshot_decoder_set = snapshot.decoder_set;
  pub const snapshot_decoder_get = snapshot.decoder_get;
  pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
-@@ -298,6 +307,7 @@ test {
+@@ -304,6 +313,7 @@ test {
      _ = style;
      _ = sys;
      _ = terminal;
 +    _ = vtmux_state;
      _ = types;
+     _ = @import("abi_test.zig");
      _ = unicode;
- 
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
 new file mode 100644
-index 0000000..8af48eb
+index 000000000..76bbdda58
 --- /dev/null
 +++ b/src/terminal/c/vtmux_state.zig
-@@ -0,0 +1,1669 @@
+@@ -0,0 +1,1692 @@
 +//! vtmux: export and import the whole state of a terminal (see
 +//! include/ghostty/vt/vtmux_state.h).
 +//!
@@ -600,8 +600,8 @@ index 0000000..8af48eb
 +        std.debug.assert(@sizeOf(CRow) == 12 and @sizeOf(CCell) == 12);
 +        std.debug.assert(@sizeOf(CLink) == 24 and @sizeOf(CCapacity) == 20);
 +        std.debug.assert(@sizeOf(CPage) == 176 and @offsetOf(CPage, "capacity") == 156);
-+        std.debug.assert(@sizeOf(CScreenState) == 232 and @offsetOf(CScreenState, "saved_pen") == 144);
-+        std.debug.assert(@sizeOf(CState) == 10120 and @offsetOf(CState, "screens") == 9632);
++        std.debug.assert(@sizeOf(CScreenState) == 112 and @offsetOf(CScreenState, "saved_pen") == 82);
++        std.debug.assert(@sizeOf(CState) == 9880 and @offsetOf(CState, "screens") == 9628);
 +    }
 +    // Every mode fits the fixed table.
 +    std.debug.assert(@typeInfo(modespkg.Mode).@"enum".field_names.len <= max_modes);
@@ -1011,6 +1011,9 @@ index 0000000..8af48eb
 +        .rows = @max(rows, std.math.cast(u16, hint.rows) orelse return error.Invalid),
 +        .styles = std.math.cast(u16, hint.styles) orelse return error.Invalid,
 +        .hyperlink_bytes = std.math.cast(u16, hint.hyperlink_bytes) orelse return error.Invalid,
++        // libghostty-vt 1.0 sizes the hyperlink map on its own
++        // (`Capacity.hyperlink_cells`), which the hint does not carry.
++        .hyperlink_cells = linkCellsCapacity(page),
 +        .grapheme_bytes = hint.grapheme_bytes,
 +        .string_bytes = hint.string_bytes,
 +    } else try countedCapacity(page, rows);
@@ -1071,30 +1074,50 @@ index 0000000..8af48eb
 +    cap.string_bytes = std.math.cast(u32, @max(cap.string_bytes, string_bytes)) orelse
 +        return error.Invalid;
 +    cap.hyperlink_bytes = @intCast(@min(std.math.maxInt(u16), @max(cap.hyperlink_bytes, link_bytes)));
++    cap.hyperlink_cells = linkCellsCapacity(page);
 +    return cap;
 +}
 +
++/// The hyperlink map capacity for `page`'s linked cells: Ghostty's
++/// default or the count, whichever is more, clamped to the field (the
++/// map rounds it up, as `Page.capacity` counts it).
++fn linkCellsCapacity(page: *const CPage) size_HyperlinkCountInt {
++    var link_cells: usize = 0;
++    if (page.cells) |c| {
++        for (c[0..page.cells_len]) |cell| {
++            if (cell.link != 0) link_cells += 1;
++        }
++    }
++    const default: Capacity = .{ .cols = 1, .rows = 1 };
++    return @intCast(@min(
++        std.math.maxInt(size_HyperlinkCountInt),
++        @max(default.hyperlink_cells, link_cells),
++    ));
++}
++
++const size_HyperlinkCountInt = @import("../size.zig").HyperlinkCountInt;
++
 +fn styleColor(c: style_c.Color) stylepkg.Style.Color {
 +    return switch (c.tag) {
-+        .none => .none,
-+        .palette => .{ .palette = c.value.palette },
-+        .rgb => .{ .rgb = .{ .r = c.value.rgb.r, .g = c.value.rgb.g, .b = c.value.rgb.b } },
++        1 => .palette(c.value.palette),
++        2 => .rgb(.{ .r = c.value.rgb.r, .g = c.value.rgb.g, .b = c.value.rgb.b }),
++        else => .none,
 +    };
 +}
 +
++const sgr_underline = @FieldType(@FieldType(stylepkg.Style, "flags"), "underline");
++
 +fn styleFromC(s: style_c.Style) stylepkg.Style {
-+    var flags: @FieldType(stylepkg.Style, "flags") = .{};
-+    flags.bold = s.bold;
-+    flags.italic = s.italic;
-+    flags.faint = s.faint;
-+    flags.blink = s.blink;
-+    flags.inverse = s.inverse;
-+    flags.invisible = s.invisible;
-+    flags.strikethrough = s.strikethrough;
-+    flags.overline = s.overline;
-+    flags.underline = enumFromInt(@FieldType(@TypeOf(flags), "underline"), s.underline) orelse .none;
-+    flags.fg_palette_256 = s.fg_palette_256;
-+    flags.bg_palette_256 = s.bg_palette_256;
++    // The C flags are the internal flags (c/style.zig); reserved bits
++    // are dropped and an underline style past the known ones reads as
++    // none, as an export never writes either.
++    const Flags = @FieldType(stylepkg.Style, "flags");
++    var raw: u16 = @bitCast(s.flags);
++    raw &= ~@as(u16, @bitCast(Flags{ ._padding = std.math.maxInt(u3) }));
++    const underline_shift = @bitOffsetOf(Flags, "underline");
++    if (enumFromInt(sgr_underline, (raw >> underline_shift) & 0x7) == null)
++        raw &= ~(@as(u16, 0x7) << underline_shift);
++    const flags: Flags = @bitCast(raw);
 +    return .{
 +        .fg_color = styleColor(s.fg_color),
 +        .bg_color = styleColor(s.bg_color),
