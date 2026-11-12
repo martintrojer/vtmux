@@ -6382,6 +6382,107 @@ fn application_escape_mode_follows_the_appesc_feature() {
 /// none when it does not, whatever `mouse` is; `mouse on` then adds
 /// button mode (server-client.c:2294-2308) but not, under a menu, the
 /// panes' all-motion.
+/// `server_client_reset_state` (server-client.c:2197-2209, 2294-2308) takes
+/// the modes from `wp->screen`, which is the mode's own screen while a pane
+/// is in copy mode, a tree or the clock (`window_pane_set_mode`), and a
+/// mode's screen asks for no mouse. With `mouse` off the terminal stops
+/// reporting while the active pane is in a mode, so a drag selects in the
+/// terminal; with it on, a pane in a mode does not count for all-motion.
+/// For each step: the mouse tracking the client's terminal is left in.
+#[test]
+fn a_pane_in_a_mode_asks_the_terminal_for_no_mouse() {
+    use vtmux_vt::MouseTracking::{All, Button, None as Off};
+    par::each(&bins(), |bin| {
+        let what = bin.display().to_string();
+        let w = World::new(bin.clone());
+        // Each pane prints what it reads, raw: its input is its modes.
+        let pane = ["sh", "-c", "stty raw -echo; exec cat"];
+        let new = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23"];
+        assert!(w.cli(&[&new[..], &pane[..]].concat()).status.success());
+        assert!(w.cli(&["set", "-g", "mouse", "off"]).status.success());
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let a = w.attach_sized(&["attach", "-t", "a"], 80, 24);
+        let steps: [(&[&str], _); 10] = [
+            (&["send", "-t", "a:w.0", "-l", "\x1b[?1002h"], Button),
+            (&["copy-mode", "-t", "a:w.0"], Off),
+            (&["send", "-t", "a:w.0", "-X", "cancel"], Button),
+            (&["choose-tree", "-t", "a:w.0"], Off),
+            (&["send", "-t", "a:w.0", "q"], Button),
+            (&["set", "-g", "mouse", "on"], Button),
+            (&["send", "-t", "a:w.0", "-l", "\x1b[?1003h"], All),
+            (&["clock-mode", "-t", "a:w.0"], Button),
+            // A pane in a mode beside the active one does not count.
+            (
+                &["splitw", "-d", "-t", "a:w.0", "sh", "-c", "exec cat"],
+                Button,
+            ),
+            (&["selectp", "-t", "a:w.1"], Button),
+        ];
+        let tracking = |a: &Attached| a.screen().mouse_modes().tracking;
+        a.wait_labelled(&what, HANG, |a| status_row(a).starts_with("[a]"));
+        for (step, want) in steps {
+            assert!(w.cli(step).status.success(), "{what}: {step:?}");
+            let end = Instant::now() + Duration::from_secs(5);
+            while tracking(&a) != want {
+                assert!(
+                    Instant::now() < end,
+                    "{what}: after {step:?}: {:?}, not {want:?}",
+                    tracking(&a)
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            // A step that leaves the tracking as it was must not change it
+            // a moment later either.
+            thread::sleep(Duration::from_millis(300));
+            assert_eq!(tracking(&a), want, "{what}: after {step:?}");
+        }
+        // Leaving the mode with the other pane active: all-motion again.
+        assert!(w.cli(&["send", "-t", "a:w.0", "q"]).status.success());
+        a.wait_labelled(&what, Duration::from_secs(5), |a| tracking(a) == All);
+    });
+}
+
+/// `tty_update_features` (tty.c:552-575) ends in `tty_invalidate`
+/// (tty.c:2305-2327): every mode is written again, so capabilities a
+/// terminal's reply brings take effect at once. On `vt100` (no `kmous`,
+/// `Ss` or `Cs`) the pane's mouse mode, cursor style and colour reach the
+/// terminal only once its XTVERSION reply names Ghostty, whose features
+/// have them (tty-keys.c:1735-1736, tty-features.c:643).
+#[test]
+fn a_terminal_reply_that_adds_capabilities_writes_the_modes() {
+    use vtmux_vt::MouseTracking::{Button, None as Off};
+    par::each(&bins(), |bin| {
+        let what = bin.display().to_string();
+        let w = World::new(bin.clone());
+        let pane = ["sh", "-c", "stty raw -echo; exec cat"];
+        let new = ["new", "-d", "-s", "a", "-x", "80", "-y", "23"];
+        assert!(w.cli(&[&new[..], &pane[..]].concat()).status.success());
+        assert!(w.cli(&["set", "-g", "mouse", "off"]).status.success());
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let modes = "\x1b[?1002h\x1b[5 q\x1b]12;#ff0000\x07";
+        assert!(w.cli(&["send", "-t", "a", "-l", modes]).status.success());
+        common::wait("the pane's modes", || {
+            display(&w, "#{mouse_button_flag}#{cursor_shape}#{cursor_colour}") == "1bar#ff0000"
+        });
+        let mut a = w.attach_env(&["attach", "-t", "a"], 80, 24, &[("TERM", "vt100")]);
+        let seen = |a: &Attached| {
+            let t = a.screen();
+            (
+                t.mouse_modes().tracking,
+                t.screen_modes().cursor_shape,
+                t.cursor_colour(),
+            )
+        };
+        a.wait_labelled(&what, HANG, |a| status_row(a).starts_with("[a]"));
+        assert_eq!(seen(&a).0, Off, "{what}");
+        assert_eq!(seen(&a).2, None, "{what}");
+        // XTVERSION's reply, before the queries time out (5 s).
+        a.keys(b"\x1bP>|ghostty 1.2.0\x1b\\");
+        let want = (Button, vtmux_vt::CursorShape::Bar, Some((255, 0, 0)));
+        a.wait_labelled(&what, Duration::from_secs(5), |a| seen(a) == want);
+    });
+}
+
 #[test]
 fn outer_mouse_modes_under_a_menu() {
     let seen = par::map(&bins(), 2, |bin| {

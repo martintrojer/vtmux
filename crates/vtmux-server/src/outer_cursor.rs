@@ -62,6 +62,10 @@ struct Mode {
 pub struct OuterCursor {
     mode: Option<Mode>,
     shape: CursorShape,
+    /// The terminal had `Ss` when the shape was written: a reply that
+    /// brings it writes the shape again (`tty_update_features` ends in
+    /// `tty_invalidate`, tty.c:552-575).
+    had_ss: bool,
     colour: Option<(u8, u8, u8)>,
     /// What the terminal has is not known (a live upgrade carries none of
     /// it): the next style and colour are written whatever the last were,
@@ -176,7 +180,8 @@ impl OuterCursor {
             blinking,
             very_visible,
         };
-        if self.mode == Some(mode) && shape == self.shape {
+        let has_ss = term.has_name("Ss");
+        if self.mode == Some(mode) && shape == self.shape && self.had_ss == has_ss {
             return;
         }
         let code = |name: &str, p: &[Param]| term.code(name, p).unwrap_or_default();
@@ -207,7 +212,7 @@ impl OuterCursor {
                     CursorShape::Underline => 3,
                     _ => 5,
                 };
-                if term.has_name("Ss") {
+                if has_ss {
                     out.push_str(&ss(steady(n)));
                 } else if blinking {
                     out.push_str(&code("cvvis", &[]));
@@ -215,17 +220,20 @@ impl OuterCursor {
             }
         }
         self.shape = shape;
+        self.had_ss = has_ss;
         self.mode = Some(mode);
         self.style_unknown = false;
     }
 
     /// `tty_force_cursor_colour`: `Cs` with the colour as `rgb:rr/gg/bb`,
-    /// or `Cr` for none, when it is not what the terminal has.
+    /// or `Cr` for none, when it is not what the terminal has. A terminal
+    /// without the code is not given the colour, so it goes once a reply
+    /// brings `Cs` (tmux gets there by its redraws after
+    /// `tty_update_features`).
     fn force_colour(&mut self, term: &Term, colour: Option<(u8, u8, u8)>, out: &mut String) {
         if colour == self.colour && !self.colour_unknown {
             return;
         }
-        self.colour_unknown = false;
         let code = match colour {
             None => term.code("Cr", &[]),
             Some((r, g, b)) => {
@@ -233,7 +241,11 @@ impl OuterCursor {
                 term.code("Cs", &[Param::Str(&spec)])
             }
         };
-        out.push_str(&code.unwrap_or_default());
+        let Some(code) = code else {
+            return;
+        };
+        self.colour_unknown = false;
+        out.push_str(&code);
         self.colour = colour;
     }
 

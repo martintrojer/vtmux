@@ -346,9 +346,10 @@ pub struct ClientMouse {
     click_loc: Option<MouseLocation>,
     click_pane: Option<PaneId>,
     /// The outer terminal's mouse modes as last written (`tty->mode &
-    /// ALL_MOUSE_MODES`); `None` before the first update after the
+    /// ALL_MOUSE_MODES`), and whether it had `kmous` then (nothing was
+    /// written without); `None` before the first update after the
     /// terminal started (`tty_invalidate` sets every mode).
-    outer: Option<MouseTracking>,
+    outer: Option<(MouseTracking, bool)>,
 }
 
 impl ClientMouse {
@@ -1483,8 +1484,9 @@ impl Server {
 
     /// `server_client_reset_state` and `tty_update_mode` for the mouse
     /// modes of client `id`: with `mouse` on, button mode (all-motion when
-    /// a pane of the window asked for it); with it off, the active pane's
-    /// own mode. The bytes for a change, if any.
+    /// a pane of the window not in a mode asked for it); with it off, the
+    /// active pane's own mode, none while it is in a mode. The bytes for a
+    /// change, if any.
     pub(crate) fn outer_mouse_bytes(&mut self, id: ClientId) -> Vec<u8> {
         let Some(c) = self.clients.get(&id) else {
             return Vec::new();
@@ -1502,6 +1504,15 @@ impl Server {
         };
         let menu = self.model.windows.get(&w).and_then(|x| x.menu.as_ref());
         let overlay = c.popup.is_some() || menu.is_some();
+        // A pane's screen is its mode's while it is in one
+        // (window_pane_set_mode), and no mode's screen asks for the mouse.
+        let pane_tracking = |p: &crate::model::Pane| {
+            if p.modes.is_empty() {
+                p.term.mouse_modes().tracking
+            } else {
+                MouseTracking::None
+            }
+        };
         // The screen whose modes count: the popup's, the menu's (all
         // motion unless it was opened without a mouse), the active pane's,
         // or the status line's (no mouse modes) under a prompt.
@@ -1519,7 +1530,7 @@ impl Server {
             self.model
                 .panes
                 .get(&active)
-                .map_or(MouseTracking::None, |p| p.term.mouse_modes().tracking)
+                .map_or(MouseTracking::None, pane_tracking)
         };
         let tree = TreeId::Session(s);
         if self.model.number_option(tree, "mouse") != 0 {
@@ -1530,7 +1541,7 @@ impl Server {
                         self.model
                             .panes
                             .get(p)
-                            .is_some_and(|x| x.term.mouse_modes().tracking == MouseTracking::All)
+                            .is_some_and(|x| pane_tracking(x) == MouseTracking::All)
                     })
                 });
                 if any_all {
@@ -1547,13 +1558,14 @@ impl Server {
             }
         }
         let c = self.clients.get_mut(&id).expect("client");
-        if c.mouse.outer == Some(mode) {
+        if c.mouse.outer == Some((mode, kmous)) {
             return Vec::new();
         }
         // `outer` is `None` after tty_invalidate (every mode set), so the
         // first update after the terminal starts always writes
-        // (tty.c:2319-2320).
-        c.mouse.outer = Some(mode);
+        // (tty.c:2319-2320). A reply that brings `kmous` writes the modes
+        // too: tty_update_features ends in tty_invalidate (tty.c:552-575).
+        c.mouse.outer = Some((mode, kmous));
         if !kmous {
             return Vec::new();
         }
