@@ -103,7 +103,7 @@ On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `
 
 With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-beta.3`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
-Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets.
+Run as `vtmux`, it sits next to your tmux with its own sockets.
 
 ## Also
 
