@@ -370,10 +370,14 @@ impl<'a> PageOut<'a> {
         out.mark = None;
         out.time = 0;
         let start = r.cell_start as usize;
-        let cells = p
+        let all = p
             .cells
             .get(start..start + usize::from(r.cell_count))
             .unwrap_or_default();
+        // The cells the row keeps past the width (Ghostty patch 0046,
+        // `RowState::TMUX_KEPT`) go beside it ([`snap::Row::past`]): each
+        // an erased cell, its background.
+        let cells = past_out(all, p.cols, &mut out.past);
         let mut links: Vec<u16> = Vec::new();
         for (col, c) in cells.iter().enumerate() {
             let mut style = self
@@ -452,6 +456,33 @@ impl<'a> PageOut<'a> {
             r.flags & RowState::TMUX_HYPERLINK != 0,
         );
     }
+}
+
+/// A row's exported cells split at the page's width `cols`: its own,
+/// returned, and the cells it keeps past the width (Ghostty patch 0046,
+/// `RowState::TMUX_KEPT`) into `past` as their backgrounds
+/// ([`snap::Row::past`]). A row that keeps some has its own cells up to the
+/// width; they end where its default cells start, as the export ends a
+/// row without.
+fn past_out<'c>(all: &'c [CellState], cols: u16, past: &mut Vec<snap::Color>) -> &'c [CellState] {
+    let (cells, kept) = all.split_at(all.len().min(usize::from(cols)));
+    past.clear();
+    if kept.is_empty() {
+        return cells;
+    }
+    past.extend(kept.iter().map(|c| match c.flags & 3 {
+        KIND_BG_PALETTE if c.flags & BG_256 != 0 => {
+            snap::Color::Palette256(c.content.to_le_bytes()[0])
+        }
+        KIND_BG_PALETTE => snap::Color::Palette(c.content.to_le_bytes()[0]),
+        KIND_BG_RGB => {
+            let [blue, green, red, _] = c.content.to_le_bytes();
+            snap::Color::Rgb(red, green, blue)
+        }
+        _ => snap::Color::Default,
+    }));
+    let end = cells.iter().rposition(|c| *c != CellState::default());
+    &cells[..end.map_or(0, |i| i + 1)]
 }
 
 /// What a row's cells say of tmux's line flags: a cell in tmux's extended
@@ -679,6 +710,32 @@ impl PageIn {
         self.page.rows.len() >= self.target.unwrap_or(default_rows)
     }
 
+    /// The cells a row keeps past the width ([`snap::Row::past`]), after
+    /// default cells to the width from where the row's own end (the row
+    /// starts at cell `start`): whether it keeps any
+    /// (`RowState::TMUX_KEPT`).
+    fn push_past(&mut self, start: u32, past: &[snap::Color]) -> bool {
+        let Some(end) = past.iter().rposition(|c| *c != snap::Color::Default) else {
+            return false;
+        };
+        let width = start as usize + usize::from(self.page.cols);
+        self.page.cells.resize(width, CellState::default());
+        self.page.cells.extend(past[..=end].iter().map(|c| {
+            let (content, flags) = match *c {
+                snap::Color::Palette(n) => (u32::from(n), KIND_BG_PALETTE),
+                snap::Color::Palette256(n) => (u32::from(n), KIND_BG_PALETTE | BG_256),
+                snap::Color::Rgb(r, g, b) => (u32::from_le_bytes([b, g, r, 0]), KIND_BG_RGB),
+                snap::Color::Default => (0, 0),
+            };
+            CellState {
+                content,
+                flags,
+                ..CellState::default()
+            }
+        }));
+        true
+    }
+
     fn style(&mut self, s: &snap::Style) -> Result<u16, TermError> {
         if *s == snap::Style::default() {
             return Ok(0);
@@ -792,9 +849,13 @@ impl PageIn {
         if hyperlink {
             flags |= RowState::TMUX_HYPERLINK;
         }
+        if self.push_past(start, &row.past) {
+            flags |= RowState::TMUX_KEPT;
+        }
+        let count = self.page.cells.len() - start as usize;
         self.page.rows.push(RowState {
             cell_start: start,
-            cell_count: narrow::<u16>(row.cells.len() as u64, "row width")?,
+            cell_count: narrow::<u16>(count as u64, "row width")?,
             used: row.cells_used,
             flags,
             reserved: [0; 3],

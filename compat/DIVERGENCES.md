@@ -41,7 +41,6 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-029](#d-029) | A control client stalled after its exit is dropped 10 s sooner | Deferred | deferred |
 | [D-031](#d-031) | A few rare characters take Ghostty's width, not the host's `wcwidth` | Deferred | deferred |
 | [D-033](#d-033) | Attach also asks the terminal for palette colours 0-15 (for pane blend) | Spec decision | open |
-| [D-036](#d-036) | Widening a pane does not bring back cells cut when it was narrowed | Ghostty grid | open |
 | [D-037](#d-037) | A command right after `kill-server` starts a new server instead of failing | tmux bug | open |
 | [D-038](#d-038) | On the alternate screen, cells cut by narrowing are blank until the program redraws | Ghostty grid | open |
 | [D-039](#d-039) | A blank cell left of a vertical border is written as a space | Ghostty grid | open |
@@ -94,6 +93,7 @@ Closed (vtmux matches tmux):
 | [D-032](#d-032) | A scroll region below the top and history | closed |
 | [D-034](#d-034) | Search counts over long histories | closed |
 | [D-035](#d-035) | Control output backpressure | closed |
+| [D-036](#d-036) | Cells past the width a pane was narrowed to | closed |
 | [D-040](#d-040) | A tab wider than the pane on reflow | closed |
 
 ## Entries
@@ -582,7 +582,7 @@ Closed (vtmux matches tmux):
   - a line erased and rewritten shorter (tmux keeps the allocation);
   - a line whose run tmux flushed in two pieces: plain text with an escape sequence in it that changes nothing (`zz ESC[m out`: tmux allocates up to the second piece's end, 5/5 on a 20-column line; vtmux sees one run, 5/10), and likewise a run split by the end of a read;
   - a line whose characters past ASCII were overwritten;
-  - the rows a reflow makes; also the line flags after a run of resizes: 1-4 lines in about 550 show `-` where tmux shows `X` (narrow characters only, seeds 1, 2, 3, 5, 7 and 8 of a resize-storm probe, `panel_g2_persist`);
+  - the rows a reflow makes, and a line widened past the width it was allocated at (oracle `decawm_resize_alt` scene `bgerase`, annotated); also the line flags after a run of resizes: 1-4 lines in about 550 show `-` where tmux shows `X` (narrow characters only, seeds 1, 2, 3, 5, 7 and 8 of a resize-storm probe, `panel_g2_persist`);
   - a once-extended cell erased (`CLEARED` in vtmux);
   - `cellused` after an erase (vtmux counts the cells left);
   - under `-N`, the trailing blanks follow the same model.
@@ -739,16 +739,14 @@ Closed (vtmux matches tmux):
   - How panes interleave under a backlog depends on buffer timing in tmux too, and is pinned only by the unit tests.
 
 <a id="d-036"></a>
-### D-036: a line keeps no cells past the width it was narrowed to
+### D-036: closed (a line keeps its cells past the width it was narrowed to)
 
-- **Category:** Ghostty grid: a row holds as many cells as the pane is wide.
-- **Test:** oracle `reflow_cells_used` scene `grow` (annotated, the last `capture-pane -e`).
-- **tmux:** a line that fits the narrower width is moved as it is (`grid_reflow_move`, grid.c), so cells past the new width stay allocated (`cellsize`) and are drawn again when the pane widens. A line written `ab`, then erased to its end with a red background on 20 columns, narrowed to 10 and widened back to 20, is red to column 20.
-- **vtmux:** Ghostty's reflow copies a row into rows of the new width, so the cells past it are gone: the same line is red to column 10, then default. Narrowing itself matches (patch 0013 measures the line by tmux's `cellused` and keeps the background cells up to the new width).
-- **Evidence:**
-  - Reference tmux 3.8, `printf 'ab\033[41m\033[K\033[0m\r\nnext'` on 20x8, `resize-window -x 10`, then `-x 20`. `capture-pane -pe`: tmux `ab\e[41m` / `\e[49mnext`; vtmux `ab\e[41m        \e[49m` / `next` (eight red cells, then the default background).
-  - Widened past the first width the same way: a line erased in green and then written (`printf '\033[42m\033[K\033[0mafter-bg-erase\r\n'`, 20 -> 15 -> 25 columns, oracle `decawm_resize_alt` scene `bgerase`, annotated). tmux keeps the green cells to column 20 and its `capture-pane -pe` trims them (`after-bg-erase\e[42m`); vtmux has one green cell and default cells after it (`after-bg-erase\e[42m \e[49m`).
-  - 80 -> 60 -> 100 columns (review_reflow_cells_used): tmux `after-bg-erase\e[42m` (its cells kept to column 80, trimmed); vtmux `after-bg-erase\e[42m` and 46 green blanks to column 60, then `\e[49m`.
+- **Test:** oracle `reflow_keeps_cells_past_width` (a line erased red to its end from column 0 and after text, a wide character, red spaces written, two narrowings, history, a full-line and a partial erase at the narrow width, and the attached client's screen), `reflow_cells_used` scene `grow`.
+- **tmux:** a line that fits the narrower width is moved as it is (`grid_reflow_move`, grid.c), so cells past the new width stay allocated (`cellsize`) and are drawn again when the pane widens. A line split by the narrowing (`grid_reflow_split`) or emptied at the narrow width (`grid_empty_line`) keeps none.
+- **vtmux:** as tmux (Ghostty patch 0046). Ghostty's rows are as wide as the pane, so the cells past it, erased ones only (a background or nothing), sit past the row's width in its page; a full-row clear drops them, writes and partial erases keep them, and they go with the row into history and through a live upgrade.
+- **Residual:**
+  - A line that wraps at the narrow width keeps none (tmux joins the next line's cells over them and keeps the rest).
+  - A capture after widening past the first width runs to the new width, where tmux stops at the line's `cellsize` (D-027): `printf '\033[42m\033[K\033[0mafter-bg-erase\r\n'`, 20 -> 15 -> 25 columns, `capture-pane -pe`: tmux `after-bg-erase\e[42m`, vtmux `after-bg-erase\e[42m      \e[49m` (the same six green cells, then the default background). Oracle `decawm_resize_alt` scene `bgerase`, annotated.
 
 <a id="d-037"></a>
 ### D-037: a client that starts as `kill-server` finishes, or as the last session goes, finds no server, not a dropped connection

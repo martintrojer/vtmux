@@ -800,17 +800,6 @@
         ]
       },
       {
-        "divergence": {
-          "id": "D-036",
-          "expect": {
-            "kind": "cli",
-            "stdout": "ab\u001b[41m        \u001b[49m\nnext\n\n\n\n\n\n\n",
-            "stderr": "",
-            "exit": 0
-          }
-        }
-      },
-      {
         "run": [
           "capture-pane",
           "-p",
@@ -1628,7 +1617,7 @@
       }
     },
     {
-      "step": 90,
+      "step": 89,
       "observation": {
         "kind": "cli",
         "stdout": "ab\u001b[41m\n\u001b[49mnext\n\n\n\n\n\n\n",

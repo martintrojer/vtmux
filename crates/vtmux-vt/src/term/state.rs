@@ -232,8 +232,8 @@ pub struct RowState {
     /// tmux's `cellused` (Ghostty patch 0013).
     pub used: u16,
     /// [`RowState::WRAPPED`], [`RowState::CONTINUATION`], in bits 2-3
-    /// Ghostty's semantic prompt mark, then [`RowState::TMUX_EXTENDED`] and
-    /// [`RowState::TMUX_HYPERLINK`].
+    /// Ghostty's semantic prompt mark, then [`RowState::TMUX_EXTENDED`],
+    /// [`RowState::TMUX_HYPERLINK`] and [`RowState::TMUX_KEPT`].
     pub flags: u8,
     pub reserved: [u8; 3],
 }
@@ -248,6 +248,11 @@ impl RowState {
     pub const TMUX_EXTENDED: u8 = 0x10;
     /// tmux's `GRID_LINE_HYPERLINK` kept likewise.
     pub const TMUX_HYPERLINK: u8 = 0x20;
+    /// The row's cells go on past the page's width (Ghostty patch 0046):
+    /// tmux's line that fitted a narrower width keeps the cells an erase
+    /// left past it (`cellsize`, grid.c `grid_reflow_move`). Only such a
+    /// row has more cells than the width, and only erased ones past it.
+    pub const TMUX_KEPT: u8 = 0x40;
 
     #[must_use]
     pub fn wrapped(self) -> bool {

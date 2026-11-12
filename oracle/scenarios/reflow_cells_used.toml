@@ -8,8 +8,8 @@ size = [10, 8]
 # (grid_wrap_position). Each scene draws on 20x8, then a 10x8 client attaches
 # (status off) and the window follows it. CLI scenes at the end resize with
 # resize-window: an erased continuation (D-006's 5X scene), ECH over a whole
-# line, and widening back, where tmux still has the cells past the narrow
-# width (D-036).
+# line, and widening back, which shows the cells past the narrow width
+# again (cellsize).
 steps = [
   { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "10", "-y", "8", "cat", "-"] },
   { run = ["set", "-g", "status", "off"] },
@@ -107,7 +107,7 @@ steps = [
   { run = ["resize-window", "-t", "echline", "-x", "14"] },
   { run = ["display", "-p", "-t", "echline:", "#{history_size} #{cursor_x},#{cursor_y}"] },
   { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "echline:"] },
-  # grow: 20x8, narrowed to 10 and widened back: tmux keeps the red cells past column 10 (cellsize), vtmux has them to column 10 (D-036)
+  # grow: 20x8, narrowed to 10 and widened back: the line keeps its red cells past column 10 (cellsize)
   { run = ["new", "-d", "-s", "grow", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S grow; exec cat"] },
   { wait_for = "grow" },
   { run = ["resize-window", "-t", "grow", "-x", "10"] },
@@ -115,6 +115,5 @@ steps = [
   { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "grow:"] },
   { run = ["resize-window", "-t", "grow", "-x", "20"] },
   { run = ["display", "-p", "-t", "grow:", "#{history_size} #{cursor_x},#{cursor_y}"] },
-  { divergence = { id = "D-036", expect = { kind = "cli", stdout = "ab\u001b[41m        \u001b[49m\nnext\n\n\n\n\n\n\n", stderr = "", exit = 0 } } },
   { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "grow:"] },
 ]

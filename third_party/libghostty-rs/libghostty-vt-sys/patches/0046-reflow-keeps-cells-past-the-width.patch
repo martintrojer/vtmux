@@ -1,0 +1,555 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1675,14 +1675,16 @@ fn resizeCols(
+     // Create the first node that contains our reflow.
+     const first_rewritten_node = node: {
+         const page = self.pages.first.?.page();
++        // vtmux: room for the cells tmux keeps past the width (tmuxKeptCols).
++        const cap_cols = @max(cols, tmuxKeptCols(page, cols));
+         const cap = page.capacity.adjust(
+-            .{ .cols = cols },
++            .{ .cols = cap_cols },
+         ) catch |err| err: {
+             comptime assert(@TypeOf(err) == error{OutOfMemory});
+ 
+             // We verify all maxed out page layouts work.
+             var cap = page.capacity;
+-            cap.cols = cols;
++            cap.cols = cap_cols;
+ 
+             // We're growing columns so we can only get less rows so use
+             // the lesser of our capacity and size so we minimize wasted
+@@ -1693,6 +1695,7 @@ fn resizeCols(
+ 
+         const node = try self.createPage(.{ .cap = cap });
+         node.page().size.rows = 1;
++        node.page().size.cols = cols;
+         break :node node;
+     };
+ 
+@@ -1987,7 +1990,13 @@ const ReflowCursor = struct {
+         const src_page: *Page = row.node.page();
+         const src_row = row.rowAndCell().row;
+         const src_y = row.y;
+-        const cells = src_row.cells.ptr(src_page.memory)[0..src_page.size.cols];
++        // vtmux: the row's cells, and those it keeps past the width
++        // (Row.tmux_kept), which only a line moved whole takes (`cells`).
++        const row_cells = src_row.cells.ptr(src_page.memory)[0..if (src_row.tmux_kept)
++            src_page.capacity.cols
++        else
++            src_page.size.cols];
++        const vis_cells = row_cells[0..src_page.size.cols];
+ 
+         // vtmux: read before anything below can reinitialize the cursor.
+         const prev_wrap = self.prev_wrap;
+@@ -2003,7 +2012,7 @@ const ReflowCursor = struct {
+         // start of this row (a padding cell dropped below) is counted in
+         // tab_extra but is not on the row.
+         if (prev_wrap and !self.pending_wrap and self.new_rows == 0 and self.x > 0) {
+-            const padding_here = cells[0].tab == pagepkg.Cell.tab_continuation and
++            const padding_here = vis_cells[0].tab == pagepkg.Cell.tab_continuation and
+                 !self.src_in_tab;
+             if (@as(usize, self.x) + self.tab_extra - @intFromBool(padding_here) >=
+                 self.page.size.cols) self.pending_wrap = true;
+@@ -2031,17 +2040,32 @@ const ReflowCursor = struct {
+         // fit, tmux's dead-pane linefeed), which joins nothing to the line
+         // after it (grid_reflow_join). Upstream kept every cell of a
+         // wrapped row.
+-        const used: usize = src_row.tmuxCellsUsed(cells);
++        const used: usize = src_row.tmuxCellsUsed(vis_cells);
++
++        // vtmux: whether tmux moves this line whole (grid_reflow_move): an
++        // unwrapped line of its own that fits the new width by tmux's
++        // measure. It keeps its cells past the width (`cellsize`): the
++        // background an erase left past the new width stays with it
++        // (Row.tmux_kept, kept after the loop below), and the cells it
++        // kept past the old width come back as far as the new one goes.
++        const tmux_moved = !src_row.wrap and
++            (dst_x == 0 or (prev_wrap and used == 0)) and
++            used <= self.page.size.cols and
++            self.tmuxReflowWidth(vis_cells[0..used]) <= self.page.size.cols;
++        const cells = if (tmux_moved) row_cells else vis_cells;
+ 
+         // Calculate the columns in this row. First up we trim non-semantic
+         // rightmost blanks.
+-        var cols_len = src_page.size.cols;
++        var cols_len: size.CellCountInt = @intCast(cells.len);
+         if (src_row.wrap) cols_len = @intCast(used);
++        // vtmux: how far the cells of a line moved whole go (tmux_moved).
++        var kept_len: usize = 0;
+         if (!src_row.wrap) {
+             while (cols_len > 0) {
+                 if (!cells[cols_len - 1].isEmpty()) break;
+                 cols_len -= 1;
+             }
++            kept_len = cols_len;
+ 
+             // vtmux: see `used` above. A line that fits by its cells but
+             // not by tmux's measure (tab_extra) is split, so it takes only
+@@ -2073,9 +2097,10 @@ const ReflowCursor = struct {
+             self.page_row.wrap = true;
+             self.new_rows += 1;
+             if (src_row.semantic_prompt == .none) {
+-                var bg_len = src_page.size.cols;
++                var bg_len = cells.len;
+                 while (bg_len > 0 and cells[bg_len - 1].isEmpty()) bg_len -= 1;
+-                cols_len = @min(bg_len, self.page.size.cols);
++                cols_len = @intCast(@min(bg_len, self.page.size.cols));
++                kept_len = bg_len;
+             }
+         }
+ 
+@@ -2560,6 +2585,13 @@ const ReflowCursor = struct {
+             }
+         }
+ 
++        // vtmux: the cells of a line moved whole past the new width stay
++        // with it (tmux_moved).
++        if (tmux_moved and cols_len > 0) {
++            const w = self.page.size.cols;
++            self.page.tmuxKeep(self.page_row, if (kept_len > w) cells[w..kept_len] else &.{});
++        }
++
+         // If the source row isn't wrapped then we should scroll afterwards.
+         if (!src_row.wrap) {
+             self.new_rows += 1;
+@@ -2722,13 +2754,15 @@ const ReflowCursor = struct {
+         self: *ReflowCursor,
+         src_page: *const Page,
+     ) Capacity {
++        // vtmux: room for the cells tmux keeps past the width.
++        const cap_cols = @max(self.page.size.cols, tmuxKeptCols(src_page, self.page.size.cols));
+         const cap = src_page.capacity.adjust(
+-            .{ .cols = self.page.size.cols },
++            .{ .cols = cap_cols },
+         ) catch |err| err: {
+             comptime assert(@TypeOf(err) == error{OutOfMemory});
+ 
+             var cap = src_page.capacity;
+-            cap.cols = self.page.size.cols;
++            cap.cols = cap_cols;
+             // We're already a non-standard page. We don't want to
+             // inherit a massive set of rows, so cap it at our std size.
+             cap.rows = @min(src_page.size.rows, std_capacity.rows);
+@@ -3593,6 +3627,8 @@ const ReflowCursor = struct {
+         const node = try list.createPage(.{ .cap = cap });
+         errdefer comptime unreachable;
+         node.page().size.rows = 1;
++        // vtmux: the capacity may be wider (tmuxKeptCols).
++        node.page().size.cols = list.cols;
+         list.pages.insertAfter(self.node, node);
+ 
+         self.* = .init(node);
+@@ -3667,6 +3703,27 @@ const ReflowCursor = struct {
+     }
+ };
+ 
++/// vtmux: the capacity in columns a reflow to `cols` needs for the cells
++/// `page`'s lines keep past the width (ReflowCursor.reflowRow,
++/// tmux_moved): the furthest a line that fits `cols` by its used cells
++/// has a background cell, or 0 when none goes past `cols`.
++fn tmuxKeptCols(page: *const Page, cols: size.CellCountInt) size.CellCountInt {
++    var need: size.CellCountInt = 0;
++    const rows = page.rows.ptr(page.memory)[0..page.size.rows];
++    for (rows) |*row| {
++        if (row.wrap) continue;
++        const len = if (row.tmux_kept) page.capacity.cols else page.size.cols;
++        if (len <= cols or len <= need) continue;
++        const cells = row.cells.ptr(page.memory)[0..len];
++        var end: usize = len;
++        while (end > cols and end > need and cells[end - 1].isEmpty()) end -= 1;
++        if (end <= cols or end <= need) continue;
++        if (row.tmuxCellsUsed(cells[0..page.size.cols]) > cols) continue;
++        need = @intCast(end);
++    }
++    return need;
++}
++
+ /// vtmux: whether tmux holds a cell in its extended form
+ /// (grid_need_extended_cell; Row.tmux_extended): a wide character or its
+ /// padding, a non-ASCII character, more than one codepoint, a tab, a link,
+@@ -3916,6 +3973,14 @@ fn resizeWithoutReflowGrowCols(
+             if (cells[old_cols - 1].wide == .spacer_head) break :fast;
+         }
+ 
++        // vtmux: the cells past the old width are blank, also on a row
++        // that kept some for a reflow (Row.tmux_kept) or did until it was
++        // emptied: it keeps none. They hold no managed memory.
++        for (rows) |*row| {
++            for (row.cells.ptr(page.memory)[old_cols..cols]) |*cell| cell.* = .{};
++            row.tmux_kept = false;
++        }
++
+         page.size.cols = cols;
+         return;
+     }
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -17603,6 +17603,113 @@ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
+     }
+ }
+ 
++test "Terminal: reflow keeps erased cells past the width (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // ab, then EL 0 red on 20 columns: narrowed to 10 the line keeps its
++    // red cells past column 10 (grid_reflow_move), widened back to 20 it
++    // is red to column 20 again.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.printString("\nnext");
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        const narrow = t.screens.active.pages.getCell(.{ .active = .{ .x = 9, .y = 0 } }).?;
++        try testing.expect(narrow.row.tmux_kept);
++        try t.resize(alloc, .{ .cols = 20, .rows = 8 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("ab\nnext", str);
++        for (2..20) |x| {
++            const c = t.screens.active.pages.getCell(.{ .active = .{ .x = @intCast(x), .y = 0 } }).?;
++            try testing.expect(c.cell.content_tag == .bg_color_rgb);
++        }
++        const c19 = t.screens.active.pages.getCell(.{ .active = .{ .x = 19, .y = 0 } }).?;
++        try testing.expectEqual(@as(size.CellCountInt, 2), c19.row.tmux_used);
++        try testing.expect(!c19.row.tmux_kept);
++        // The line below kept nothing.
++        const n = t.screens.active.pages.getCell(.{ .active = .{ .x = 10, .y = 1 } }).?;
++        try testing.expect(n.cell.isEmpty());
++    }
++
++    // Narrowed twice and widened past the first width: the cells come
++    // back to where the line had them, no further.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 0, .g = 0, .b = 255 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.resize(alloc, .{ .cols = 15, .rows = 8 });
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        try t.resize(alloc, .{ .cols = 25, .rows = 8 });
++        for (0..25) |x| {
++            const c = t.screens.active.pages.getCell(.{ .active = .{ .x = @intCast(x), .y = 0 } }).?;
++            try testing.expectEqual(x < 20, c.cell.content_tag == .bg_color_rgb);
++        }
++    }
++
++    // A full-line clear at the narrow width empties the line
++    // (grid_empty_line): widened, it keeps nothing; a partial erase keeps
++    // the cells past the width.
++    inline for (.{ false, true }) |partial| {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        t.setCursorPos(1, if (partial) 5 else 1);
++        t.eraseLine(if (partial) .right else .complete, false);
++        try t.resize(alloc, .{ .cols = 20, .rows = 8 });
++        const c4 = t.screens.active.pages.getCell(.{ .active = .{ .x = 4, .y = 0 } }).?;
++        try testing.expect(c4.cell.isEmpty());
++        const c15 = t.screens.active.pages.getCell(.{ .active = .{ .x = 15, .y = 0 } }).?;
++        try testing.expectEqual(partial, c15.cell.content_tag == .bg_color_rgb);
++    }
++
++    // A line split by the narrowing (cellused past the new width) keeps
++    // nothing past it.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijkl");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        try t.resize(alloc, .{ .cols = 20, .rows = 8 });
++        const c15 = t.screens.active.pages.getCell(.{ .active = .{ .x = 15, .y = 0 } }).?;
++        try testing.expect(c15.cell.isEmpty());
++    }
++}
++
++test "Terminal: kept cells past the width survive a row copy and history (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // The red line scrolls into history after the narrowing; widened, the
++    // history row is red to column 20.
++    var t = try init(io_impl, alloc, .{ .rows = 3, .cols = 20, .max_scrollback_lines = 100 });
++    defer t.deinit(alloc);
++    try t.printString("h");
++    try t.setAttribute(.{ .@"8_bg" = .red });
++    t.eraseLine(.right, false);
++    try t.setAttribute(.unset);
++    try t.resize(alloc, .{ .cols = 10, .rows = 3 });
++    try t.printString("\n1\n2\n3\n4");
++    try t.resize(alloc, .{ .cols = 20, .rows = 3 });
++    const c = t.screens.active.pages.getCell(.{ .screen = .{ .x = 19, .y = 0 } }).?;
++    try testing.expect(c.cell.content_tag == .bg_color_palette);
++    try testing.expectEqual(@as(u8, 1), c.cell.content.color_palette.data);
++}
++
+ test "Terminal: reflow measures a line by the cells it used (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -322,6 +322,11 @@ fn rowFlags(row: *const Row) u8 {
+     return flags;
+ }
+ 
++/// vtmux: the row flag of a row whose cells go on past the page's width:
++/// the cells it keeps there (Row.tmux_kept, Page.tmuxKeptCells), erased
++/// cells only (Page.tmuxKeepable).
++const row_kept_flag: u8 = 0x40;
++
+ fn exportRows(alloc: Allocator, page: *const Page, out: *CPage) Result {
+     var rows: Out(CRow) = .{ .ptr = out.rows, .cap = out.rows_cap };
+     var cells: Out(CCell) = .{ .ptr = out.cells, .cap = out.cells_cap };
+@@ -341,14 +346,18 @@ fn exportRows(alloc: Allocator, page: *const Page, out: *CPage) Result {
+ 
+     for (0..page.size.rows) |y| {
+         const row = page.getRow(y);
+-        const row_cells = page.getCells(row);
++        // vtmux: with the cells it keeps past the width (row_kept_flag).
++        const row_cells = row.cells.ptr(page.memory)[0..if (row.tmux_kept)
++            page.capacity.cols
++        else
++            page.size.cols];
+         var count: usize = row_cells.len;
+         while (count > 0 and @as(u64, @bitCast(row_cells[count - 1])) == 0) count -= 1;
+         rows.push(.{
+             .cell_start = @intCast(cells.len),
+             .cell_count = @intCast(count),
+             .used = row.tmux_used,
+-            .flags = rowFlags(row),
++            .flags = rowFlags(row) | if (count > page.size.cols) row_kept_flag else 0,
+         });
+         for (row_cells[0..count]) |*cell| {
+             var flags: u16 = 0;
+@@ -616,7 +625,7 @@ fn capacityFor(page: *const CPage, use_hint: bool) error{Invalid}!Capacity {
+     if (page.cols == 0 or page.rows_len == 0) return error.Invalid;
+     const rows = std.math.cast(u16, page.rows_len) orelse return error.Invalid;
+     const hint = page.capacity;
+-    const cap: Capacity = if (use_hint and hint.rows != 0) .{
++    var cap: Capacity = if (use_hint and hint.rows != 0) .{
+         .cols = page.cols,
+         .rows = @max(rows, std.math.cast(u16, hint.rows) orelse return error.Invalid),
+         .styles = std.math.cast(u16, hint.styles) orelse return error.Invalid,
+@@ -627,6 +636,10 @@ fn capacityFor(page: *const CPage, use_hint: bool) error{Invalid}!Capacity {
+         .grapheme_bytes = hint.grapheme_bytes,
+         .string_bytes = hint.string_bytes,
+     } else try countedCapacity(page, rows);
++    // vtmux: room for the cells rows keep past the width (row_kept_flag).
++    if (page.rows) |r| for (r[0..page.rows_len]) |row| {
++        if (row.flags & row_kept_flag != 0) cap.cols = @max(cap.cols, row.cell_count);
++    };
+     if (Page.layout(cap).total_size > size_max_page) return error.Invalid;
+     return cap;
+ }
+@@ -818,10 +831,15 @@ fn importRows(
+         row.tmux_used = r.used;
+         row.tmux_extended = r.flags & 0x10 != 0;
+         row.tmux_hyperlink = r.flags & 0x20 != 0;
+-        const dst = page.getCells(row);
++        // vtmux: a row keeps cells past the width only with the flag, and
++        // only cells an erase leaves there (checked below).
++        const kept = r.flags & row_kept_flag != 0;
++        if (kept and r.cell_count <= page.size.cols) return error.Invalid;
++        row.tmux_kept = kept;
++        const dst = row.cells.ptr(page.memory)[0..if (kept) page.capacity.cols else page.size.cols];
+         if (r.cell_count > dst.len) return error.Invalid;
+         if (@as(usize, r.cell_start) + r.cell_count > cells.len) return error.Invalid;
+-        for (cells[r.cell_start..][0..r.cell_count], dst[0..r.cell_count]) |c, *cell| {
++        for (cells[r.cell_start..][0..r.cell_count], dst[0..r.cell_count], 0..) |c, *cell, x| {
+             var v: Cell = .{};
+             switch (c.flags & 0x3) {
+                 0, 1 => v.content = .{ .codepoint = .{ .data = std.math.cast(u21, c.content) orelse return error.Invalid } },
+@@ -860,6 +878,7 @@ fn importRows(
+                 row.kitty_virtual_placeholder = true;
+             }
+             cell.* = v;
++            if (x >= page.size.cols and !Page.tmuxKeepable(v)) return error.Invalid;
+             if (c.link != 0) {
+                 if (c.link >= link_ids.len) return error.Invalid;
+                 const id = link_ids[c.link];
+@@ -1774,6 +1793,80 @@ test "vtmux state: rows round trip into a fresh terminal" {
+     try testing.expect(sb.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row.tmux_hyperlink);
+ }
+ 
++test "vtmux state: the cells a row keeps past the width go with it" {
++    // vtmux: ab erased red on 20 columns, narrowed to 10: the row keeps
++    // its red cells past column 10 (Row.tmux_kept), and the import gets
++    // them, so widened back it is red to column 20.
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var a: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(null, &a, 20, 3));
++    defer terminal_c.free(a);
++    const input = "ab\x1b[41m\x1b[K\x1b[0m\r\nnext";
++    terminal_c.vt_write(a, input.ptr, input.len);
++    try a.?.terminal.resize(alloc, .{ .cols = 10, .rows = 3 });
++
++    var b: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(null, &b, 10, 3));
++    defer terminal_c.free(b);
++
++    var rows: [16]CRow = undefined;
++    var cells: [128]CCell = undefined;
++    var graphemes: [4]u32 = undefined;
++    var styles: [4]style_c.Style = undefined;
++    var links: [4]CLink = undefined;
++    var bytes: [16]u8 = undefined;
++    var imp: CImporter = null;
++    try testing.expectEqual(Result.success, importer_new(b, true, &imp));
++    var n: usize = 0;
++    try testing.expectEqual(Result.success, page_count(a, 0, &n));
++    for (0..n) |i| {
++        var page: CPage = .{
++            .size = @sizeOf(CPage),
++            .rows = &rows,
++            .rows_cap = rows.len,
++            .rows_len = 0,
++            .cells = &cells,
++            .cells_cap = cells.len,
++            .cells_len = 0,
++            .graphemes = &graphemes,
++            .graphemes_cap = graphemes.len,
++            .graphemes_len = 0,
++            .styles = &styles,
++            .styles_cap = styles.len,
++            .styles_len = 0,
++            .links = &links,
++            .links_cap = links.len,
++            .links_len = 0,
++            .bytes = &bytes,
++            .bytes_cap = bytes.len,
++            .bytes_len = 0,
++            .cols = 0,
++            .blob = false,
++            .capacity = .{},
++        };
++        try testing.expectEqual(Result.success, page_export(a, 0, i, true, &page));
++        try testing.expectEqual(@as(u8, row_kept_flag), rows[0].flags & row_kept_flag);
++        try testing.expectEqual(@as(u16, 20), rows[0].cell_count);
++        try testing.expectEqual(@as(u8, 0), rows[1].flags & row_kept_flag);
++        try testing.expectEqual(Result.success, importer_page(imp, 0, &page));
++    }
++    var state: CState = undefined;
++    state.size = @sizeOf(CState);
++    var state_bytes: [256]u8 = undefined;
++    state.bytes = &state_bytes;
++    state.bytes_cap = state_bytes.len;
++    try testing.expectEqual(Result.success, state_export(a, &state));
++    try testing.expectEqual(Result.success, importer_finish(imp, &state));
++
++    const tb = b.?.terminal;
++    try tb.resize(alloc, .{ .cols = 20, .rows = 3 });
++    for (2..20) |x| {
++        const c = tb.screens.active.pages.getCell(.{ .active = .{ .x = @intCast(x), .y = 0 } }).?;
++        try testing.expect(c.cell.content_tag == .bg_color_palette);
++    }
++}
++
+ test "vtmux state: malformed pages and states are refused" {
+     const testing = std.testing;
+     var b: terminal_c.Terminal = null;
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -945,6 +945,8 @@ pub const Page = struct {
+                 // vtmux: the row holds cells of both (Row.tmux_extended).
+                 copy.tmux_extended = copy.tmux_extended or dst_row.tmux_extended;
+                 copy.tmux_hyperlink = copy.tmux_hyperlink or dst_row.tmux_hyperlink;
++                // vtmux: the cells past the width are the dst row's.
++                copy.tmux_kept = dst_row.tmux_kept;
+             }
+ 
+             // Our cell offset remains the same
+@@ -1099,6 +1101,49 @@ pub const Page = struct {
+                 last.wide = .narrow;
+             }
+         }
++
++        // vtmux: a whole row copied at the same width takes the cells
++        // tmux keeps past the width with it (Row.tmux_kept), as far as
++        // this page holds them; at another width it keeps none.
++        if (dst_row.tmux_kept and (x_end - x_start) == self.size.cols) {
++            if (self.size.cols == other.size.cols) {
++                self.tmuxKeep(dst_row, other.tmuxKeptCells(src_row));
++            } else dst_row.tmux_kept = false;
++        }
++    }
++
++    /// vtmux: the cells of `row` past the page's width, up to its
++    /// capacity: tmux's cells past the width (`cellsize` over the pane's
++    /// width) when the row is `tmux_kept`, unused otherwise.
++    pub inline fn tmuxKeptCells(self: *const Page, row: *const Row) []Cell {
++        return row.cells.ptr(self.memory)[self.size.cols..self.capacity.cols];
++    }
++
++    /// vtmux: keep `kept` past the width of `row` (Row.tmux_kept), cut
++    /// at the page's capacity. Only cells an erase leaves (no text, no
++    /// managed memory: a background colour or nothing) are kept, which
++    /// is all tmux keeps past the cells a line used; the rest of the
++    /// capacity is emptied.
++    pub fn tmuxKeep(self: *Page, row: *Row, kept: []const Cell) void {
++        const dst = self.tmuxKeptCells(row);
++        var any = false;
++        for (dst, 0..) |*cell, i| {
++            cell.* = if (i < kept.len and tmuxKeepable(kept[i])) kept[i] else .{};
++            if (!cell.isEmpty()) any = true;
++        }
++        row.tmux_kept = any;
++    }
++
++    /// vtmux: whether a cell past a line's used cells is one tmux keeps
++    /// past the width: an erased cell (grid_clear_cell), its background
++    /// only.
++    pub inline fn tmuxKeepable(cell: Cell) bool {
++        return cell.style_id == stylepkg.default_id and !cell.hyperlink and
++            cell.wide == .narrow and cell.tab == 0 and switch (cell.content_tag) {
++            .bg_color_palette, .bg_color_rgb => true,
++            .codepoint => !cell.hasText(),
++            .codepoint_grapheme => false,
++        };
+     }
+ 
+     /// Get a single row. y must be valid.
+@@ -2336,7 +2381,17 @@ pub const Row = packed struct(u64) {
+     tmux_extended: bool = false,
+     tmux_hyperlink: bool = false,
+ 
+-    _padding: u4 = 0,
++    /// vtmux: the row keeps cells past the page's width
++    /// (Page.tmuxKeptCells): tmux's line that fitted a narrower width
++    /// keeps its `cellsize` cells (grid_reflow_move), the background an
++    /// erase left past it, which a wider pane shows again. Set by a
++    /// reflow, kept by writes and partial erases (grid_set_cell,
++    /// grid_clear within the width), reset when the row is emptied
++    /// (grid_empty_line: a full-row clear, Row.reset). Without it the
++    /// cells past the width mean nothing.
++    tmux_kept: bool = false,
++
++    _padding: u3 = 0,
+ 
+     /// The semantic prompt state of the row. See `semantic_prompt`.
+     pub const SemanticPrompt = enum(u2) {
+@@ -2435,6 +2490,7 @@ pub const Row = packed struct(u64) {
+         self.tmux_used = 0;
+         self.tmux_extended = false;
+         self.tmux_hyperlink = false;
++        self.tmux_kept = false;
+     }
+ 
+     pub inline fn tmuxRaiseUsed(self: *Row, end: usize) void {

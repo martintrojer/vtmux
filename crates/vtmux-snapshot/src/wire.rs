@@ -18,8 +18,10 @@
 //!
 //! A `many` field of rows may name a second tag (`1 / 13 => many rows`):
 //! the rows' kept line flags go under it, after them
-//! ([`crate::row::KeptRows`]); and a third (`1 / 13 / 14`) for the flags
-//! they lack ([`crate::row::Row::lacks`]).
+//! ([`crate::row::KeptRows`]); a third (`1 / 13 / 14`) for the flags
+//! they lack ([`crate::row::Row::lacks`]); and a fourth (`1 / 13 / 14 /
+//! 15`) for the cells they keep past the width
+//! ([`crate::row::PastRows`]).
 
 use crate::Error;
 use std::cell::Cell;
@@ -414,7 +416,7 @@ macro_rules! record {
     (
         $(#[$m:meta])*
         pub struct $name:ident {
-            $( $(#[$fm:meta])* $tag:literal $(/ $kept:literal $(/ $lacks:literal)?)? => $mode:ident $field:ident : $ty:ty ),* $(,)?
+            $( $(#[$fm:meta])* $tag:literal $(/ $kept:literal $(/ $lacks:literal $(/ $past:literal)?)?)? => $mode:ident $field:ident : $ty:ty ),* $(,)?
         }
     ) => {
         $(#[$m])*
@@ -429,7 +431,10 @@ macro_rules! record {
                     $crate::wire::$mode::put(out, $tag, &self.$field);
                     $(
                         $crate::row::kept::put(out, $kept, &self.$field);
-                        $( $crate::row::lacks::put(out, $lacks, &self.$field); )?
+                        $(
+                            $crate::row::lacks::put(out, $lacks, &self.$field);
+                            $( $crate::row::past::put(out, $past, &self.$field); )?
+                        )?
                     )?
                 )*
             }
@@ -444,7 +449,10 @@ macro_rules! record {
                             $tag => $crate::wire::$mode::get(&mut v.$field, body, cx)?,
                             $(
                                 $kept => $crate::row::kept::get(&mut v.$field, body, cx)?,
-                                $( $lacks => $crate::row::lacks::get(&mut v.$field, body, cx)?, )?
+                                $(
+                                    $lacks => $crate::row::lacks::get(&mut v.$field, body, cx)?,
+                                    $( $past => $crate::row::past::get(&mut v.$field, body, cx)?, )?
+                                )?
                             )?
                         )*
                         _ => {}

@@ -219,6 +219,13 @@ pub struct Row {
     /// one: a reader before it, or a run without the tag, gives the row
     /// the flags its cells say.
     pub lacks: KeptLineFlags,
+    /// The cells the row keeps past the width, from the column after the
+    /// last one on: tmux's line that fitted a narrower width keeps its
+    /// cells there (`cellsize`, grid.c `grid_reflow_move`), erased ones,
+    /// each its background (`Color::Default` for none), shown again when
+    /// the pane widens. Beside the rows like [`Row::kept`] ([`PastRows`]):
+    /// a reader before it keeps none, as its own build did.
+    pub past: Vec<Color>,
 }
 
 /// tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` as a row keeps
@@ -332,6 +339,138 @@ impl Value for KeptRows {
             next = u64::from(i) + 1;
         }
         Ok(k)
+    }
+}
+
+/// The cells rows of a run keep past the width ([`Row::past`]), by index in
+/// the run, ascending: beside the rows as [`KeptRows`], which a reader
+/// before it skips. Written per row as varints: `gap` (the rows skipped
+/// since the last entry), the cell count, then each cell's colour (0
+/// default, 1 + n palette n, 257 + n palette n in its 256-colour form, 513
+/// + 0xRRGGBB RGB).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PastRows(Vec<(u32, Vec<Color>)>);
+
+impl PastRows {
+    /// The cells each of `rows` keeps past the width.
+    #[must_use]
+    pub fn of(rows: &[Row]) -> Self {
+        let mut p = Self::default();
+        for (i, r) in rows.iter().enumerate() {
+            p.note(u32::try_from(i).unwrap_or(u32::MAX), &r.past);
+        }
+        p
+    }
+
+    /// Row `index`, past every row noted so far, keeps `past`.
+    fn note(&mut self, index: u32, past: &[Color]) {
+        if !past.is_empty() {
+            self.0.push((index, past.to_vec()));
+        }
+    }
+
+    /// Whether no row keeps a cell.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// One past the last row with cells: the rows the run must have.
+    fn needs(&self) -> u64 {
+        self.0.last().map_or(0, |&(i, _)| u64::from(i) + 1)
+    }
+
+    /// Put the cells back on `rows`; refuses a row they don't have.
+    fn apply(&self, rows: &mut [Row]) -> Result<(), Error> {
+        if self.needs() > rows.len() as u64 {
+            return Err(Error::Malformed("cells past the width past the rows"));
+        }
+        for (i, past) in &self.0 {
+            rows[*i as usize].past.clone_from(past);
+        }
+        Ok(())
+    }
+}
+
+/// A cell's colour in [`PastRows`]' encoding.
+fn past_code(colour: Color) -> u64 {
+    match colour {
+        Color::Default => 0,
+        Color::Palette(index) => 1 + u64::from(index),
+        Color::Palette256(index) => 257 + u64::from(index),
+        Color::Rgb(red, green, blue) => {
+            513 + (u64::from(red) << 16 | u64::from(green) << 8 | u64::from(blue))
+        }
+    }
+}
+
+/// [`past_code`] read back; `None` for a number of no colour.
+fn past_colour(code: u64) -> Option<Color> {
+    Some(match code {
+        0 => Color::Default,
+        1..=256 => Color::Palette(u8::try_from(code - 1).ok()?),
+        257..=512 => Color::Palette256(u8::try_from(code - 257).ok()?),
+        513..=0x0100_0200 => {
+            let [_, red, green, blue] = u32::try_from(code - 513).ok()?.to_be_bytes();
+            Color::Rgb(red, green, blue)
+        }
+        _ => return None,
+    })
+}
+
+impl Value for PastRows {
+    fn put(&self, out: &mut Vec<u8>) {
+        let mut next = 0;
+        for (index, past) in &self.0 {
+            put_varint(out, u64::from(*index) - next);
+            put_varint(out, past.len() as u64);
+            for &colour in past {
+                put_varint(out, past_code(colour));
+            }
+            next = u64::from(*index) + 1;
+        }
+    }
+    fn get(buf: &[u8], cx: &Ctx) -> Result<Self, Error> {
+        let mut reader = Reader::new(buf);
+        let mut rows = Self::default();
+        let mut next = 0u64;
+        while !reader.is_empty() {
+            let index = next
+                .checked_add(reader.varint()?)
+                .and_then(|at| u32::try_from(at).ok())
+                .ok_or(Error::Malformed("cells past the width past the rows"))?;
+            let count = usize::try_from(reader.varint()?)
+                .ok()
+                .filter(|&count| count > 0 && count <= MAX_COLS)
+                .ok_or(Error::Malformed("bad cells past the width"))?;
+            cx.charge(size_of::<(u32, Vec<Color>)>() + count * size_of::<Color>())?;
+            let mut past = Vec::with_capacity(count);
+            for _ in 0..count {
+                past.push(
+                    past_colour(reader.varint()?)
+                        .ok_or(Error::Malformed("bad cell colour past the width"))?,
+                );
+            }
+            rows.0.push((index, past));
+            next = u64::from(index) + 1;
+        }
+        Ok(rows)
+    }
+}
+
+/// Field mode `past` (`record!`'s `tag / kept_tag / lacks_tag / past_tag`):
+/// the [`PastRows`] of a `many` field of rows, after them under its own tag.
+pub(crate) mod past {
+    use super::{PastRows, Row};
+    use crate::Error;
+    use crate::wire::{Ctx, Value, one};
+
+    pub fn put(out: &mut Vec<u8>, tag: u64, rows: &[Row]) {
+        one::put(out, tag, &PastRows::of(rows));
+    }
+
+    pub fn get(rows: &mut [Row], buf: &[u8], cx: &Ctx) -> Result<(), Error> {
+        PastRows::get(buf, cx)?.apply(rows)
     }
 }
 
@@ -698,9 +837,10 @@ impl Row {
         }
         self.wrapped = flags & ROW_WRAPPED != 0;
         self.continuation = flags & ROW_CONTINUATION != 0;
-        // Beside the row, not in it ([`KeptRows`]).
+        // Beside the row, not in it ([`KeptRows`], [`PastRows`]).
         self.kept = KeptLineFlags::default();
         self.lacks = KeptLineFlags::default();
+        self.past.clear();
         self.prompt = match (flags >> ROW_PROMPT_SHIFT) & 3 {
             0 => RowPrompt::None,
             1 => RowPrompt::Prompt,
@@ -941,6 +1081,9 @@ pub struct HistoryPage {
     pub kept: KeptRows,
     /// The page's rows that lack line flags ([`Row::lacks`]), as `kept`.
     pub lacks: KeptRows,
+    /// The cells the page's rows keep past the width ([`Row::past`]), as
+    /// `kept`.
+    pub past: PastRows,
 }
 
 /// Builds a [`HistoryPage`] one row at a time, so a pane's history never
@@ -952,6 +1095,7 @@ pub struct PageBuilder {
     cells: u64,
     kept: KeptRows,
     lacks: KeptRows,
+    past: PastRows,
 }
 
 impl PageBuilder {
@@ -966,6 +1110,7 @@ impl PageBuilder {
         row.encode_into(&mut self.raw);
         self.kept.note(self.rows, row.kept);
         self.lacks.note(self.rows, row.lacks);
+        self.past.note(self.rows, &row.past);
         self.rows += 1;
         self.cells += row.cells.len() as u64;
     }
@@ -1009,6 +1154,7 @@ impl PageBuilder {
             ghostty: Vec::new(),
             kept: self.kept,
             lacks: self.lacks,
+            past: self.past,
         }
     }
 }
@@ -1083,8 +1229,12 @@ impl HistoryPage {
         if self.kept.needs().max(self.lacks.needs()) > u64::from(self.rows) {
             return Err(Error::Malformed("kept line flags past the rows"));
         }
+        if self.past.needs() > u64::from(self.rows) {
+            return Err(Error::Malformed("cells past the width past the rows"));
+        }
         let mut kept = self.kept.0.iter().peekable();
         let mut lacks = self.lacks.0.iter().peekable();
+        let mut past = self.past.0.iter().peekable();
         for i in 0..self.rows {
             row.decode_from(&mut r)?;
             if let Some(&(_, k)) = kept.next_if(|&&(at, _)| at == i) {
@@ -1092,6 +1242,9 @@ impl HistoryPage {
             }
             if let Some(&(_, k)) = lacks.next_if(|&&(at, _)| at == i) {
                 row.lacks = k;
+            }
+            if let Some((_, p)) = past.next_if(|(at, _)| *at == i) {
+                row.past.clone_from(p);
             }
             cells += row.cells.len() as u64;
             if cells > MAX_PAGE_CELLS {
@@ -1137,6 +1290,8 @@ impl Value for HistoryPage {
                 7 => one::get(&mut p.kept, body, cx)?,
                 // Skipped by a reader before it, as 7 ([`Row::lacks`]).
                 8 => one::get(&mut p.lacks, body, cx)?,
+                // Skipped by a reader before it, as 7 ([`Row::past`]).
+                9 => one::get(&mut p.past, body, cx)?,
                 _ => {}
             }
         }
@@ -1159,6 +1314,7 @@ impl HistoryPage {
         one::put(out, 6, &self.ghostty);
         one::put(out, 7, &self.kept);
         one::put(out, 8, &self.lacks);
+        one::put(out, 9, &self.past);
     }
 
     /// A page in Ghostty's own compressed form ([`HistoryPage::ghostty`]).
@@ -1256,6 +1412,7 @@ pub(crate) mod tests {
             // Added within v1, beside the row (kept_line_flags_go_beside_the_row_codec).
             kept: KeptLineFlags::default(),
             lacks: KeptLineFlags::default(),
+            past: Vec::new(),
         }
     }
 

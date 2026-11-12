@@ -171,8 +171,9 @@ record! {
     /// The alternate screen has no history.
     pub struct Screen {
         /// The visible rows, top first; tags 13 and 14 their line flags
-        /// ([`Row::kept`], [`Row::lacks`]).
-        1 / 13 / 14 => many rows: Vec<Row>,
+        /// ([`Row::kept`], [`Row::lacks`]), 15 the cells they keep past
+        /// the width ([`Row::past`]).
+        1 / 13 / 14 / 15 => many rows: Vec<Row>,
         /// History, oldest page first; each page's rows oldest first.
         2 => many history: Vec<HistoryPage>,
         3 => one cursor: Cursor,

@@ -160,6 +160,30 @@ fn kept_line_flags_round_trip() {
     assert!(flags(&b).starts_with("X X B\nHX b\n"), "{}", flags(&b));
 }
 
+/// The cells a line keeps past the width it was narrowed to (Ghostty
+/// patch 0046, tmux's `cellsize`) go with an export, so the imported pane
+/// widened shows them as the source does.
+#[test]
+fn cells_kept_past_the_width_round_trip() {
+    let line = |t: &PaneTerm| {
+        let o = CaptureOpts {
+            escapes: true,
+            keep_spaces: true,
+            ..CaptureOpts::default()
+        };
+        let out = String::from_utf8(capture(t, o)).unwrap();
+        out.lines().next().unwrap_or_default().to_owned()
+    };
+    let mut a = pane(20, 4, 20, b"ab\x1b[41m\x1b[K\x1b[0m\r\nnext");
+    a.resize(10, 4);
+    let mut b = round_trip(&mut a, CompressedPages::Rows, b"", "kept cells");
+    a.resize(20, 4);
+    b.resize(20, 4);
+    let red = format!("ab\x1b[41m{}", " ".repeat(18));
+    assert_eq!(line(&a), red);
+    assert_eq!(line(&b), red);
+}
+
 #[test]
 fn cursor_modes_charsets_tabs_and_region() {
     let bytes = b"\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[4h\x1b[?7l\

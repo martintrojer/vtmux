@@ -8,7 +8,8 @@ size = [14, 8]
 # it too, then wraps. The main screen reflows whatever DECAWM says
 # (window.c window_pane_resize). Then two resizes vtmux cannot follow:
 # the alternate screen narrowed and widened keeps no cells past the
-# narrow width (D-038), nor does a main-screen line that fitted (D-036).
+# narrow width (D-038); a main-screen line that fitted does, and a capture
+# after widening past the first width ends past it (D-027).
 steps = [
   { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "14", "-y", "8", "cat", "-"] },
   { run = ["set", "-g", "status", "off"] },
@@ -61,12 +62,12 @@ steps = [
   { run = ["display", "-p", "-t", "alt:", "#{history_size} #{cursor_x},#{cursor_y}"] },
   { divergence = { id = "D-038", expect = { kind = "cli", stdout = "abcdefghijklmn\n0123456789abcd\nshort\n\n\n\n\n\n", stderr = "", exit = 0 } } },
   { run = ["capture-pane", "-p", "-t", "alt:"] },
-  # bgerase: a line erased in green then written fits 15 columns and keeps its cells to 20 in tmux, which 25 columns show again (D-036)
+  # bgerase: a line erased in green then written fits 15 columns and keeps its cells to 20, which 25 columns show again; tmux's capture stops at its cellsize 20, vtmux's runs to 25 (D-027)
   { run = ["new", "-d", "-s", "bgerase", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf '\\033[42m\\033[K\\033[0mafter-bg-erase\\r\\n'; tmux wait-for -S bgerase; exec cat"] },
   { wait_for = "bgerase" },
   { run = ["resize-window", "-t", "bgerase", "-x", "15"] },
   { run = ["capture-pane", "-p", "-e", "-t", "bgerase:"] },
   { run = ["resize-window", "-t", "bgerase", "-x", "25"] },
-  { divergence = { id = "D-036", expect = { kind = "cli", stdout = "after-bg-erase\u001b[42m \u001b[49m\n\n\n\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { divergence = { id = "D-027", expect = { kind = "cli", stdout = "after-bg-erase\u001b[42m      \u001b[49m\n\n\n\n\n\n\n\n", stderr = "", exit = 0 } } },
   { run = ["capture-pane", "-p", "-e", "-t", "bgerase:"] },
 ]

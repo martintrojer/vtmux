@@ -1561,6 +1561,25 @@ fn an_ordinary_attached_client_requires_no_feature() {
         a.model.windows[&vtmux_core::ids::WindowId(0)].cell_pixels,
         (10, 20)
     );
+    // A line erased with a background, then the window narrowed: the row
+    // keeps its cells past the width (Ghostty patch 0046, `Row::past`).
+    a.pane_input(
+        vtmux_core::ids::PaneId(0),
+        b"ab\x1b[41m\x1b[K\x1b[0m\r\n",
+        false,
+    );
+    ok(&mut a, &dir, &["resize-window", "-t", "s:0", "-x", "60"]);
+    let narrowed = a.to_snapshot(snap::Meta::default());
+    let primary = &narrowed.panes[0].term.as_ref().unwrap().primary;
+    assert!(
+        primary.rows.iter().any(|r| r.past.len() == 20),
+        "{:?}",
+        primary
+            .rows
+            .iter()
+            .map(|r| r.past.len())
+            .collect::<Vec<_>>()
+    );
     // An editor up over history: the primary history it hides is read in
     // place (Ghostty patch 0038), and only the visible rows are kept. The
     // rows form also carries the copy the build before shows there.
@@ -1593,6 +1612,9 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert!(q.da && q.da2 && q.xtversion, "{q:?}");
     assert!(c.terminal_title.is_some(), "set-titles set one");
     assert!(!s.panes[0].term.as_ref().unwrap().inband_resize);
+    // The narrowed line, in history now, still keeps its cells.
+    let history = &s.panes[0].term.as_ref().unwrap().primary.history;
+    assert!(history.iter().any(|p| !p.past.is_empty()));
     let alt = s.panes[0].term.as_ref().unwrap().alt_entry.as_ref();
     assert!(alt.is_some_and(|alt| alt.has_saved && alt.history.is_empty()));
     assert_eq!(s.sessions[0].control_chars, Some(vec![3, 28, 127, 21]));

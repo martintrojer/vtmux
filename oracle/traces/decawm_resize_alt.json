@@ -436,10 +436,10 @@
       },
       {
         "divergence": {
-          "id": "D-036",
+          "id": "D-027",
           "expect": {
             "kind": "cli",
-            "stdout": "after-bg-erase\u001b[42m \u001b[49m\n\n\n\n\n\n\n\n",
+            "stdout": "after-bg-erase\u001b[42m      \u001b[49m\n\n\n\n\n\n\n\n",
             "stderr": "",
             "exit": 0
           }

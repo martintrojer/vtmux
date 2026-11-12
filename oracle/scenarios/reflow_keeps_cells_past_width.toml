@@ -1,0 +1,74 @@
+name = "reflow_keeps_cells_past_width"
+size = [40, 7]
+# A line that fits a narrower width is moved as it is (grid.c grid_reflow,
+# grid_reflow_move): the cells an erase with a background left past the new
+# width stay in the line (cellsize) and show again when the pane widens. A
+# line that is split (grid_reflow_split) or emptied (grid_empty_line: a
+# full-line clear) keeps none. Each scene draws on 40x6, narrows to 30 and
+# widens back with resize-window; capture-pane -N shows the cells kept
+# (not at 30 columns, where the line below keeps the cellsize 40 columns
+# gave it, D-027).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "40", "-y", "6", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # el: a whole line erased red (EL 0 from column 0), seen by an attached client
+  { run = ["new", "-d", "-s", "el", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S el; exec cat"] },
+  { wait_for = "el" },
+  { attach = { session = "el", id = "el" } },
+  { run = ["resize-window", "-t", "el", "-x", "30"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "el:"] },
+  { run = ["resize-window", "-t", "el", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "el:"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "el:"] },
+  { settle = { react = true } },
+  { screen = { id = "el" } },
+  # text: ab, then erased red to the end: cellused 2, the red cells kept past 30
+  { run = ["new", "-d", "-s", "text", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S text; exec cat"] },
+  { wait_for = "text" },
+  { run = ["resize-window", "-t", "text", "-x", "30"] },
+  { run = ["resize-window", "-t", "text", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "text:"] },
+  # spaces: 35 red spaces written (cellused 35): split at 30, joined back, nothing past 35
+  { run = ["new", "-d", "-s", "spaces", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '\\033[41m                                   \\033[0m\\r\\nnext'; tmux wait-for -S spaces; exec cat"] },
+  { wait_for = "spaces" },
+  { run = ["resize-window", "-t", "spaces", "-x", "30"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "spaces:"] },
+  { run = ["resize-window", "-t", "spaces", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "spaces:"] },
+  # wide: a wide character, then erased green to the end
+  { run = ["new", "-d", "-s", "wide", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '\\344\\270\\200x\\033[42m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S wide; exec cat"] },
+  { wait_for = "wide" },
+  { run = ["resize-window", "-t", "wide", "-x", "30"] },
+  { run = ["resize-window", "-t", "wide", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "wide:"] },
+  # twice: narrowed twice (40, 30, 20) and widened in one go: the cells past 20 are kept
+  { run = ["new", "-d", "-s", "twice", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[44m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S twice; exec cat"] },
+  { wait_for = "twice" },
+  { run = ["resize-window", "-t", "twice", "-x", "30"] },
+  { run = ["resize-window", "-t", "twice", "-x", "20"] },
+  { run = ["resize-window", "-t", "twice", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "twice:"] },
+  # history: the red line scrolled into history, then narrowed and widened
+  { run = ["new", "-d", "-s", "hist", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'h\\033[41m\\033[K\\033[0m\\r\\n1\\r\\n2\\r\\n3\\r\\n4\\r\\n5\\r\\n6\\r\\n7'; tmux wait-for -S hist; exec cat"] },
+  { wait_for = "hist" },
+  { run = ["resize-window", "-t", "hist", "-x", "30"] },
+  { run = ["resize-window", "-t", "hist", "-x", "40"] },
+  { run = ["display", "-p", "-t", "hist:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-S", "-", "-t", "hist:"] },
+  # clear: narrowed, then the line cleared whole (EL 2) at 30: widened, nothing kept
+  { run = ["new", "-d", "-s", "clear", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S cleara; tmux wait-for clearb; printf '\\033[1;1H\\033[2K\\033[2;5H'; tmux wait-for -S clearc; exec cat"] },
+  { wait_for = "cleara" },
+  { run = ["resize-window", "-t", "clear", "-x", "30"] },
+  { run = ["wait-for", "-S", "clearb"] },
+  { wait_for = "clearc" },
+  { run = ["resize-window", "-t", "clear", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "clear:"] },
+  # part: narrowed, then erased from column 10 to the end (EL 0) at 30: the cells past 30 stay
+  { run = ["new", "-d", "-s", "part", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'ab\\033[41m\\033[K\\033[0m\\r\\nnext'; tmux wait-for -S parta; tmux wait-for partb; printf '\\033[1;10H\\033[K\\033[2;5H'; tmux wait-for -S partc; exec cat"] },
+  { wait_for = "parta" },
+  { run = ["resize-window", "-t", "part", "-x", "30"] },
+  { run = ["wait-for", "-S", "partb"] },
+  { wait_for = "partc" },
+  { run = ["resize-window", "-t", "part", "-x", "40"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "part:"] },
+]

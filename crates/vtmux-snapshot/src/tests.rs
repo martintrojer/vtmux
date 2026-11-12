@@ -726,6 +726,72 @@ fn lacked_line_flags_round_trip_and_require_nothing() {
     assert_eq!(encode(&cleared), encode(&plain));
 }
 
+/// The cells rows keep past the width ([`Row::past`], added within v1
+/// beside a screen's rows and in a history page's record) round-trip and
+/// need no [`Meta::requires`] entry: a reader before them skips the tags
+/// and keeps no cells past the width, as its own build did.
+#[test]
+fn cells_past_the_width_round_trip_and_require_nothing() {
+    let plain = sample();
+    let mut s = sample();
+    let past = vec![
+        Color::Palette(1),
+        Color::Palette256(2),
+        Color::Default,
+        Color::Rgb(1, 2, 3),
+    ];
+    let row = Row {
+        past: past.clone(),
+        ..sample_row()
+    };
+    let term = s.panes[0].term.as_mut().unwrap();
+    term.primary.rows[1].past.clone_from(&past);
+    term.primary.history = vec![HistoryPage::from_rows(&[sample_row(), row.clone()], true)];
+    assert!(!term.primary.history[0].past.is_empty());
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back.meta.requires, Vec::<String>::new());
+    assert_eq!(back, s);
+    let t = back.panes[0].term.as_ref().unwrap();
+    assert_eq!(t.primary.rows[1].past, past);
+    assert_eq!(t.primary.history[0].decode_rows().unwrap()[1], row);
+    // The page's data and name don't depend on them.
+    let page = &t.primary.history[0];
+    let without = HistoryPage::from_rows(&[sample_row(), sample_row()], true);
+    assert_eq!((&page.data, page.hash), (&without.data, without.hash));
+
+    // Without them the stream is the sample's.
+    let mut cleared = back;
+    let term = cleared.panes[0].term.as_mut().unwrap();
+    term.primary.rows[1].past.clear();
+    term.primary
+        .history
+        .clone_from(&plain.panes[0].term.as_ref().unwrap().primary.history);
+    assert_eq!(encode(&cleared), encode(&plain));
+
+    // Cells for a row the run doesn't have, or of no colour, are refused.
+    let cx = crate::wire::Ctx::new(1);
+    let field = |v: &[u64]| {
+        let mut b = Vec::new();
+        for &x in v {
+            put_varint(&mut b, x);
+        }
+        b
+    };
+    assert!(PastRows::get(&field(&[0, 1, 0x0100_0201]), &cx).is_err());
+    assert!(PastRows::get(&field(&[0, 0]), &cx).is_err());
+    assert!(PastRows::get(&field(&[0, 2, 1]), &cx).is_err());
+    assert_eq!(
+        PastRows::get(&field(&[1, 1, 513 + 0x0001_0203]), &cx).unwrap(),
+        PastRows::of(&[
+            Row::default(),
+            Row {
+                past: vec![Color::Rgb(1, 2, 3)],
+                ..Row::default()
+            }
+        ])
+    );
+}
+
 #[test]
 fn a_stream_requiring_an_unknown_feature_is_refused() {
     let mut s = sample();

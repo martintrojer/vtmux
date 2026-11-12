@@ -1532,6 +1532,44 @@ Recorded per commit in git history; the list is kept current:
   model). Written on 3bd54e025 and carried onto 1.0.1 after the rebase
   (the same two additions; 1.0's non-exhaustive `RowData` keeps its `_`
   arm last).
+- `patches/0046-reflow-keeps-cells-past-the-width.patch` (`page.zig`
+  `Row.tmux_kept`, `Page.tmuxKeptCells`, `tmuxKeep`, `tmuxKeepable`,
+  `clonePartialRowFrom`, `Row.tmuxEmptied`; `PageList.zig`
+  `ReflowCursor.reflowRow`, `computeAndMemoizeCap`, `cursorNewPage`,
+  `resizeCols`, new `tmuxKeptCols`, `resizeWithoutReflowGrowCols`;
+  `c/vtmux_state.zig` `exportRows`, `capacityFor`, `importRows`): a line
+  that fits a narrower width keeps the cells past it, as tmux's
+  `grid_reflow_move` keeps the line's `cellsize`. Those are erased cells
+  (past `cellused`: a background or nothing, no style, text or link), so
+  they sit in the row's own cells past the page's width, in a destination
+  page whose capacity is as wide as they need, and hold no managed memory.
+  A row moved whole (unwrapped, a line of its own, fitting by tmux's
+  measure) takes its cells and those it kept to the new width and keeps
+  the rest; a widening shows them again. Writes and partial erases keep
+  them (`grid_set_cell`, `grid_clear` within the width), a full-row clear
+  drops them (`grid_empty_line`: `Row.reset`, `tmuxEmptied`, and 1.0's
+  `Screen.clearRows`, which rewrites the row header), a row split
+  or joined by a reflow keeps none (`grid_reflow_split`,
+  `grid_reflow_join`), a row copied whole to a page of the same width
+  takes them, and a widening without reflow (the alternate screen) clears
+  the cells past the old width as before. The state export writes them as
+  the row's cells past the width under row flag `0x40`, and the import
+  reads them back (the page as wide as they need, erased cells only).
+  Residual: a wrapped line keeps none, and a reflow's destination page
+  holds them only as far as its capacity (the widest its source page
+  needed). Upstream tests unchanged; new tests `Terminal: reflow keeps
+  erased cells past the width (vtmux)`, `Terminal: kept cells past the
+  width survive a row copy and history (vtmux)`, `vtmux state: the cells a
+  row keeps past the width go with it`; Rust `vtmux-snapshot`
+  `cells_past_the_width_round_trip_and_require_nothing`, `vtmux-server`
+  `an_ordinary_attached_client_requires_no_feature`; oracle
+  `reflow_keeps_cells_past_width`, `reflow_cells_used` scene `grow` (closes
+  D-036). The row bit takes one of the three spare bits 0013, 0034 and
+  1.0's `Row.blank` leave (`_padding: u3`); the paths that skip a blank
+  row's cells (`Screen.clearRows`, `trimTrailingBlankRows`) rewrite its
+  header, which drops them. Written on 3bd54e025 and ported onto 1.0.1 (the same code; 1.0.1
+  alone still loses the cells: the oracle scenario fails 8 steps on the
+  41-patch stack). Not an upstream candidate (tmux's model).
 - `libghostty-vt/src/kitty/graphics.rs`:
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a

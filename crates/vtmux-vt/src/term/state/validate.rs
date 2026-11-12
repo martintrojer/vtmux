@@ -444,7 +444,7 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
     // when it is used, else at least the rows given).
     let room = p.rows.len().max(cap.rows as usize);
     check(
-        room.saturating_mul(usize::from(cols)) <= MAX_PAGE_CELLS,
+        room.saturating_mul(usize::from(widest_row(p, cols))) <= MAX_PAGE_CELLS,
         "page cell count",
     )?;
     let most = capacity_bound(p);
@@ -459,11 +459,17 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
     for row in &p.rows {
         let start = row.cell_start as usize;
         let count = usize::from(row.cell_count);
-        check(start == next && count <= usize::from(cols), "row cells")?;
+        // A row goes on past the width only with the cells it keeps there
+        // ([`RowState::TMUX_KEPT`]), and then does.
+        let kept = row.flags & RowState::TMUX_KEPT != 0;
+        check(
+            start == next && (count <= usize::from(cols)) != kept,
+            "row cells",
+        )?;
         next = start + count;
         let cells = p.cells.get(start..next).ok_or(invalid("row cells"))?;
         check(
-            row.flags & !0x3f == 0 && (row.flags >> 2) & 3 != 3,
+            row.flags & !0x7f == 0 && (row.flags >> 2) & 3 != 3,
             "row flags",
         )?;
         // tmux's `cellused` outlives a narrowing without a reflow (the
@@ -520,6 +526,10 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
                         && c.link == 0),
                 "background cell with text attributes",
             )?;
+            check(
+                x < usize::from(cols) || keepable(c),
+                "cell kept past the width",
+            )?;
             let index = u32::try_from(start + x).map_err(|_| invalid("page cell count"))?;
             check(
                 graphemes.at(index)? == (kind == KIND_GRAPHEME),
@@ -529,6 +539,27 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
     }
     check(next == p.cells.len(), "page cells")?;
     check(graphemes.done(), "grapheme table")
+}
+
+/// How wide the page's rows are: the widest that keeps cells past the width
+/// ([`RowState::TMUX_KEPT`]), else the width.
+fn widest_row(p: &PageRows, cols: u16) -> u16 {
+    p.rows
+        .iter()
+        .filter(|r| r.flags & RowState::TMUX_KEPT != 0)
+        .map(|r| r.cell_count)
+        .fold(cols, u16::max)
+}
+
+/// Whether a cell may be kept past the width: what an erase leaves
+/// (Ghostty's `Page.tmuxKeepable`), a background or nothing.
+fn keepable(c: &super::CellState) -> bool {
+    let kind = c.flags & 3;
+    (kind >= KIND_PALETTE || (kind == KIND_TEXT && c.content == 0))
+        && (c.flags >> 2) & 3 == NARROW
+        && c.style == 0
+        && c.link == 0
+        && c.tab == 0
 }
 
 /// The page's grapheme table (cell index, count, codepoints, ...), read in

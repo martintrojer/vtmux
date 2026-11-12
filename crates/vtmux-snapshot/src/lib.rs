@@ -79,7 +79,10 @@
 //!   backspaces in bash), and those a row lacks though its cells say so
 //!   ([`Row::lacks`]: Ghostty's scroll in an RGB background with no
 //!   history). The older reader derives them from the cells, as its own
-//!   build held them.
+//!   build held them. So do the cells a row keeps past the width
+//!   ([`Row::past`], [`PastRows`]: a line erased with a background, then
+//!   the pane narrowed), which the older reader drops, as its own build
+//!   did.
 //! - Anything else (a tag's meaning, the row codec, the header) bumps
 //!   [`FORMAT_VERSION`] and adds a migration step and a golden file
 //!   `tests/golden/v<N>.snap`.
@@ -100,7 +103,7 @@ pub mod wire;
 pub use model::*;
 pub use row::{
     Cell, Color, Grapheme, Hash, HistoryPage, Hyperlink, KeptLineFlags, KeptRows, Osc133,
-    PageBuilder, Row, RowPrompt, Semantic, Style, Tab, Underline, Wide,
+    PageBuilder, PastRows, Row, RowPrompt, Semantic, Style, Tab, Underline, Wide,
 };
 pub use term::TermState;
 
