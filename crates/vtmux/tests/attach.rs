@@ -3401,37 +3401,48 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
 
 /// Entering the alternate screen flushes a pane's queued resize at once
 /// (`screen_write_alternateon`, screen-write.c:3157-3166); leaving it does not.
-/// The pane resizes twice 50 ms apart, so the second size waits on the
-/// 250 ms resize timer, then switches screens. The script records whether
-/// a SIGWINCH came within one `sleep 0.03` of the switch. (A loop of six
-/// `sleep 0.01` forks and execs each time: on macOS that took 100-185 ms,
-/// past the 250 ms timer's expiry, so leaving never looked SLOW.) To test leaving,
-/// the pane enters the alternate screen first, before the resizes.
+/// The pane resizes twice, so the second size waits on the 250 ms resize
+/// timer, then switches screens. The script records whether a SIGWINCH came
+/// within one `sleep 0.03` of the switch. To test leaving, the pane enters
+/// the alternate screen first, before the resizes.
 ///
-/// Both answers hang on wall-clock windows that a loaded host can miss, for
-/// tmux 3.8 as much as for us: the second resize reaching the server late
-/// (nothing queued to flush), the timer firing before the pane looks, or
-/// the 60 ms loop outlasting the timer. A miss lands on the other answer,
-/// so a run that shows the wrong one is repeated: the behaviour holds if
-/// some run in `TRIES` shows `want`. A run in which the timer could have
-/// fired first, which would show FAST for any sequence, is `VOID.`, never
-/// an answer: the script did not see exactly two resize signals before it
-/// switched (the attach's status line takes a row; the first resize, which
-/// tmux applies at once; the second waits on the timer), or the harness
-/// released `go` over `GO_WITHIN` after the second resize (the timer is
-/// 250 ms). What is left is the 30 ms after a switch that the timer's expiry
-/// must fall into by chance: a binary that does not flush on entering shows
-/// FAST only then (task `flake_resize_timer_window`).
+/// Every step waits for the state it needs, so the switch comes as soon
+/// after the second resize as the host allows: the attach's own size (the
+/// status line takes a row) reached the script, which prints `S1`, and its
+/// timer ran out; the client shows the first size (`W61` in the status
+/// line: the server applied it to the pane at once, which starts the timer)
+/// before the second is sent, then the second (`W62`: queued) before the
+/// harness releases `go`; the script polls for `go` without a fork once it
+/// has had both signals. (Polling with `sleep 0.01` forks and execs each
+/// time, 20-30 ms on macOS, and waiting for the second size with a CLI
+/// `display` took longer: the switch and the script's 30 ms window then
+/// ran past the timer's expiry, so leaving never looked SLOW on a macOS
+/// runner.)
+///
+/// What is left hangs on the 250 ms timer, for tmux 3.8 as much as for us:
+/// a loaded host can still be slow enough for its expiry to fall into the
+/// window, or the switch to come after it. A miss lands on the other
+/// answer, so a run that shows the wrong one is repeated: the behaviour
+/// holds if some run in `TRIES` shows `want`. A run in which the timer
+/// could have fired first, which would show FAST for any sequence, is
+/// `VOID.`, never an answer: the script did not see exactly two resize
+/// signals before it switched, or the harness released `go` over
+/// `GO_WITHIN` after it sent the first resize (before the timer started).
+/// What is left is the 30 ms after a switch that the timer's expiry must
+/// fall into by chance: a binary that does not flush on entering shows FAST
+/// only then (task `flake_resize_timer_window`).
 fn alternate_flush(
     bin: &std::path::Path,
     before: &'static str,
     seq: &'static str,
     go_delay: Duration,
 ) -> String {
-    const GO_WITHIN: Duration = Duration::from_millis(120);
+    const GO_WITHIN: Duration = Duration::from_millis(150);
     let script = format!(
         "w=0; trap 'w=$((w+1))' WINCH; printf '{before}P '; \
-         while [ ! -e go ]; do sleep 0.01; done; n=$w; printf '{seq}'; \
+         while [ $w -lt 2 ]; do \
+         if [ $w -eq 1 ] && [ -z \"$a\" ]; then a=1; printf 'S1 '; fi; sleep 0.01; done; \
+         while [ ! -e go ]; do :; done; n=$w; printf '{seq}'; \
          sleep 0.03; \
          if [ $n -ne 2 ]; then printf 'VOID.'; \
          elif [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
@@ -3448,32 +3459,39 @@ fn alternate_flush(
         .status
         .success()
     );
+    assert!(
+        w.cli(&["set", "-g", "status-right", "W#{client_width}"])
+            .status
+            .success()
+    );
+    let shown = || {
+        let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
     let mut a = w.attach_sized(&["attach", "-t", "a"], 60, 20);
-    a.wait(|a| a.text().contains("\x1b[?1049h"));
-    thread::sleep(Duration::from_millis(600));
-    a.resize(61, 20);
-    thread::sleep(Duration::from_millis(50));
-    a.resize(62, 20);
+    common::wait("the attach's size at the script", || shown().contains("S1"));
+    // The timer the attach's size started (250 ms) runs out, so the first
+    // resize is applied at once.
+    thread::sleep(Duration::from_millis(400));
     let resized = Instant::now();
-    // The server has the second size once the window has it.
-    common::wait("the window's second size", || {
-        String::from_utf8_lossy(
-            &w.cli(&["display", "-p", "-t", "a", "#{window_width}"])
-                .stdout,
-        )
-        .trim()
-            == "62"
-    });
+    a.resize(61, 20);
+    a.wait(|a| status_row(a).ends_with("W61"));
+    a.resize(62, 20);
+    a.wait(|a| status_row(a).ends_with("W62"));
     thread::sleep(go_delay);
     let late = resized.elapsed() > GO_WITHIN;
     std::fs::write(&go, b"").unwrap();
-    thread::sleep(Duration::from_millis(600));
-    let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
-    let shown = String::from_utf8_lossy(&o.stdout).into_owned();
+    let mut answer = String::new();
+    common::wait("the script's answer", || {
+        answer = shown();
+        ["VOID.", "FAST.", "SLOW."]
+            .iter()
+            .any(|v| answer.contains(v))
+    });
     if late {
-        format!("{shown} VOID.")
+        format!("{answer} VOID.")
     } else {
-        shown
+        answer
     }
 }
 
@@ -3503,10 +3521,10 @@ fn leaving_the_alternate_screen_waits_for_the_timer() {
 /// timer is still running or after it has fired, is void. Released at
 /// 400 ms the timer has fired before the switch, so nothing can come after
 /// it: not FAST either. Released at 200 ms the timer's expiry (250 ms) can
-/// fall into the script's window after the switch (the poll's `sleep 0.01`
-/// plus `sleep 0.03`; on a macOS runner each fork and exec of `sleep` takes
-/// 20-30 ms), so the script may print FAST: the expiry, not a flush, and
-/// that is why such a run is VOID (CI check-macos on 0831f68 and 69d90321).
+/// fall into the script's window after the switch (its `sleep 0.03`; on a
+/// macOS runner each fork and exec of `sleep` takes 20-30 ms more), so the
+/// script may print FAST: the expiry, not a flush, and that is why such a
+/// run is VOID (CI check-macos on 0831f68 and 69d90321).
 #[test]
 fn a_late_release_is_void_not_fast() {
     par::each(&bins(), |bin| {
