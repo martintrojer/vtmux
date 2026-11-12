@@ -92,7 +92,7 @@ Agent TUIs (`scripts/agent_tui.py`, a synthetic pi-like renderer: a spinner, str
 | 16 clients on one window of 4 panes | 3.0% | 5.3% | 1.7x | 25.5 MB (7.1) |
 | 32 clients on one window of 4 panes | 5.2% | 8.3% | 1.6x | 42.8 MB (9.2) |
 
-tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays per frame, so it wins on many panes and loses on many clients. Clients that show a window alike share its drawing and frame bytes, which took 32 clients from 5.2x tmux to 1.6x. A frame now costs one composed row per changed row, and a client's acknowledgement wakes no render: 5 clients on one window went from 1.85x tmux to 1.39x. Switching to a hidden full window (`C-b n` to its last byte) takes 2.5 ms against tmux's 5.1 ms.
+tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays per frame, so it wins on many panes and loses on many clients. Clients that show a window alike share its drawing and frame bytes: 32 clients cost 1.6x tmux. A frame costs one composed row per changed row, and a client's acknowledgement wakes no render: 5 clients on one window cost 1.39x tmux. Switching to a hidden full window (`C-b n` to its last byte) takes 2.5 ms against tmux's 5.1 ms.
 
 ## Latency
 
@@ -103,7 +103,7 @@ tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays pe
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | start with the owner's config until it answers | 102 ms | 101 ms | 0.99x |
 
-vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is now one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not.
+vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not.
 
 ## Big histories
 
@@ -136,7 +136,7 @@ The alternate screen leaves the primary history where it is, and vtmux reads it 
 
 10 x 100k meets the one-second target. Onto a build with another Ghostty pin, history travels as rows and is decoded twice, about a second per 100k lines; that is the upgrade after a pin bump, not the daily one. RSS after the upgrade is what the compressor would have left (146 MB at 10 x 100k, from 1.57 GB fresh).
 
-vim up over the history costs about what it costs without (1.6 s and 13.7 s at 1M lines). Onto another pin the stream also carries the history vim hides as the copy an older build reads, so a downgrade keeps it: twice the bytes, not twice the time. A downgrade onto a build from before that change with vim up over 1M lines takes 34 s.
+vim up over the history costs about what it costs without (1.6 s and 13.7 s at 1M lines). Onto another pin the stream also carries the history vim hides as the copy a build without Ghostty patch 0038 reads, so a downgrade keeps it: twice the bytes, not twice the time. A downgrade onto such a build with vim up over 1M lines takes 34 s.
 
 ## Binary and build profile
 
@@ -144,10 +144,10 @@ The release profile is fat LTO in one codegen unit, stripped. Against cargo's de
 
 | | default | vtmux's profile |
 |---|---|---|
-| stripped binary (tmux 3.8: 1.3 MB), 2026-11-09, before kitty graphics (10.4 MB now) | 10.7 MB | 10.0 MB |
+| stripped binary (tmux 3.8: 1.3 MB), a 2026-11-09 build without kitty graphics (today's: 10.4 MB) | 10.7 MB | 10.0 MB |
 | gzipped, in the release tarball | 4.41 MB | 4.28 MB |
 | server CPU, agent panes and many clients | | 7-18% less |
-| key echo p50 (2026-11-09; 0.30 ms since the render work) | 0.43 ms | 0.38 ms |
+| key echo p50 (a 2026-11-09 build; today's: 0.30 ms) | 0.43 ms | 0.38 ms |
 | output parsing (Ghostty's, untouched by LTO) | | flat |
 | build after touching `vtmux-core` | 108 s | 118 s |
 

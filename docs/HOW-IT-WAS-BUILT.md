@@ -1,10 +1,10 @@
 # How vtmux was built
 
-AI agents wrote most of vtmux. One human runs them and owns the result. tmux 3.8 is the spec, and machines check that vtmux matches it, on every push. Nobody reads every line by hand.
+AI agents write most of vtmux. One human runs them and owns the result. tmux 3.8 is the spec, and machines check that vtmux matches it, on every push. Nobody reads every line by hand.
 
 ## Who wrote it
 
-- **Agents wrote the code.** pi agents work as a crew: tasks, workers in their own worktrees, reviews, merges. One human, Martin Trojer, runs the crew, makes the design decisions and decides what lands.
+- **Agents write the code.** pi agents work as a crew: tasks, workers in their own worktrees, reviews, merges. One human, Martin Trojer, runs the crew, makes the design decisions and decides what lands.
 - **Design first.** Every design decision is written down and numbered (D1–D31, D33). A change that contradicts one updates the decision first.
 - **The size of it.** 1,177 commits from 29 October to 12 November 2026; about 211k lines of Rust, tests included.
 
@@ -22,8 +22,8 @@ Mechanically. The gate (`scripts/check.sh`) runs all of this:
 |---|---|---|
 | tmux's own test suite | the `regress/` tests from the 3.8 tag, unchanged, against vtmux | 173 of 174 pass; the one expected failure is recorded with its reason (it greps tmux's debug log) |
 | Behaviour oracle | scenarios recorded once from real tmux 3.8 (CLI output, control-mode streams, screens compared as grids), replayed against vtmux | 443 scenarios; any mismatch fails the gate |
-| Live upgrade | the same replay with vtmux upgrading itself in place after every third step, and after every step for the scenarios that once failed only that way | 437 of 443 run with upgrades; 6 skipped, each with the reason written down |
-| Divergences | every intended difference from tmux, with evidence, in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) | 74 entries: 22 tmux bugs not copied, 28 not done yet, 4 opt-in extensions, 9 other deliberate differences, 11 since fixed |
+| Live upgrade | the same replay with vtmux upgrading itself in place after every third step, and after every step for a short list of scenarios (in `scripts/check.sh`) | 437 of 443 run with upgrades; 6 skipped, each with the reason written down |
+| Divergences | every intended difference from tmux, with evidence, in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) | 74 entries: 22 tmux bugs not copied, 28 not done yet, 4 opt-in extensions, 9 other deliberate differences, 11 closed (vtmux matches tmux) |
 | Lints and unit tests | `cargo fmt`, `clippy` pedantic with warnings as errors, the workspace's tests | 1,615 `#[test]`s |
 | CI | the whole gate | Linux on every push; macOS on main, pull requests and weekly |
 
@@ -44,7 +44,7 @@ mise exec -- bash scripts/check.sh       # the whole gate, as CI runs it
 ## How it's reviewed
 
 - **Every change:** a second model reviews it in a fresh context before it merges.
-- **Every milestone:** a review panel drawn from two model families. The last one (3.8-beta3): 63 findings, every critical and high one fixed and re-reviewed. Panel records with their evidence are in [docs/test-health/](test-health/).
+- **Every milestone:** a review panel drawn from two model families. For 3.8-beta3: 63 findings, every critical and high one fixed and re-reviewed. Panel records with their evidence are in [docs/test-health/](test-health/).
 
 ## Unsafe code
 

@@ -27,7 +27,7 @@ Eight crates, published in this order, each after the crates it depends on:
 | `vtmux-vt`, `vtmux-core`, `vtmux-snapshot`, `vtmux-client`, `vtmux-server` | vtmux's own libraries (docs/ARCHITECTURE.md). ISC |
 | `vtmux` | The binary: what `cargo install vtmux` builds. ISC |
 
-The libraries promise no API: each depends on the exact version of the others (`=3.8.0-beta.1`), and their descriptions send people to `vtmux`. The names were free on 2026-11-09; the upstream names (`libghostty-vt`, `libghostty-vt-sys`) are upstream's. Each crate ships its sources only (`include` in its manifest: no tests, fixtures, examples or oracle traces) and its licence; the largest, `vtmux-server`, is about 800 KiB compressed, against crates.io's 10 MB limit.
+The libraries promise no API: each depends on the exact version of the others (`=3.8.0-beta.1`), and their descriptions send people to `vtmux`. The upstream names (`libghostty-vt`, `libghostty-vt-sys`) are upstream's. Each crate ships its sources only (`include` in its manifest: no tests, fixtures, examples or oracle traces) and its licence; the largest, `vtmux-server`, is about 800 KiB compressed, against crates.io's 10 MB limit.
 
 ### Dry run
 

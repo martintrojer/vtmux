@@ -38,7 +38,7 @@ mise upgrade vtmux
 tmux vtmux-upgrade -b "$(mise which vtmux)"
 ```
 
-Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary. Exit status: 0 upgraded, 1 not (the server runs on as it was), 2 upgraded without a part that did not read (stderr says which). The new binary must prove it read the server's state before it takes over, so `-b` naming anything else (a typo'd `/bin/echo`, a script) is refused with 1. Downgrading to an earlier beta still works.
+Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary. Exit status: 0 upgraded, 1 not (the server runs on as it was), 2 upgraded without a part that did not read (stderr says which). The new binary must prove it read the server's state before it takes over, so `-b` naming anything else (a typo'd `/bin/echo`, a script) is refused with 1. Downgrading to an earlier beta works too.
 
 Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-continuum work on vtmux as on tmux.
 
@@ -46,7 +46,7 @@ Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-conti
 
 The Ghostty engine in each pane speaks protocols tmux 3.8 drops. vtmux passes them through to programs that ask, and keeps tmux's behaviour for everyone else.
 
-Kitty keyboard protocol: Shift+Enter, C-i apart from Tab and Esc apart from Alt reach neovim, helix and agent TUIs that ask for them. Key tables and the prefix work as before.
+Kitty keyboard protocol: Shift+Enter, C-i apart from Tab and Esc apart from Alt reach neovim, helix and agent TUIs that ask for them. Key tables and the prefix work as in tmux.
 
 ```tmux
 %if "#{vtmux_version}"

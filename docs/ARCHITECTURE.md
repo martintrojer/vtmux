@@ -80,7 +80,7 @@ Steps 2 and 3 are why the cursor doesn't jump under heavy output (D14): tmux for
 
 1. The client forwards the bytes. The server decodes them into keys as tmux's `tty-keys.c` does, and swallows the terminal's replies to vtmux's own queries.
 2. A mouse report is located (`mouse.rs`: pane, border, status range) and becomes a key such as `MouseDown1Pane`.
-3. A key with a binding runs its command; any other is encoded for the active pane's modes and written to its pty. A program granted the kitty keyboard protocol (D29) gets libghostty's encoding instead (`pane_kitty.rs` ends the grant when the program that asked is gone).
+3. A key with a binding runs its command; any other is encoded for the active pane's modes and written to its pty. A program granted the kitty keyboard protocol (D29) gets libghostty's encoding instead (`pane_kitty.rs` ends the grant when the program that asked exits).
 
 ## Commands and control mode
 
@@ -117,7 +117,7 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
 
 - **Frozen frames.** A few protocol frames never change (`Hello`, `Stdin`, `StdinEof`, `Stdout`, `Stderr`, `Exit`, `Exec`, `Flags`, and `UpgradeRequest`/`UpgradeResult`/`UpgradeNotice`), so control clients of any version from protocol 9 on stay served and a newer client can ask an older server to upgrade. Every other frame may change with a protocol bump.
 - **Failure never loses panes.** A failed dry run leaves the server as it was. A resume that fails switches back to the old image on the same descriptors (Linux: `fexecve` of the executable it kept open). Failing that, it serves without the parts that don't read, then without terminal state, then with no sessions while it holds every pty open. Exit status: 0 upgraded, 1 not, 2 upgraded short of a part.
-- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. Across stacks an alternate screen's hidden history also goes as the copy a build from before Ghostty patch 0038 reads, mostly the primary's own pages, which the dry run reads once. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
+- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. Across stacks an alternate screen's hidden history also goes as the copy a build without Ghostty patch 0038 reads, mostly the primary's own pages, which the dry run reads once. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
 
 ## Terminal protocols tmux drops (D28)
 

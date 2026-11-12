@@ -87,8 +87,8 @@ wait-for`, a job) or change what a client sees (a mode, prompt or menu it closes
 a key held for `escape-time`, a mouse drag, a locked client), the server refuses at once and the runner tries after the next
 step. The summary counts upgrades inserted and put off. Scenarios whose observations an upgrade changes by
 design with no state to check, or that hit a known bug, are listed with why in `oracle/upgrade-every-skip.toml`
-and run without inserted upgrades; the replay prints the reason. `check.sh` also replays the scenarios that once
-failed only with an upgrade after every step (`--upgrade-every 1 --only <list>`, the list in the script).
+and run without inserted upgrades; the replay prints the reason. `check.sh` also replays a short list of scenarios
+with an upgrade after every step (`--upgrade-every 1 --only <list>`, the list in the script).
 
 ## Normalisation
 

@@ -25,7 +25,7 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'
 |---|---|---|---|
 | `vtmux-pane-inactive-blend` | window | `fg=<colour>[/<pct>],bg=<colour>[/<pct>]` | Blends every cell of the window's inactive panes toward the colours (`/pct` 0-100, default 100). `fg` and `bg` as colours are the outer terminal's defaults. `fg=bg/25,bg=bg/25` dims like Ghostty's `unfocused-split-opacity = 0.75`. |
 | `vtmux-pane-active-blend` | window | as above | The same, for the active pane. |
-| `vtmux-kitty-keys` | server | `off`, `on` | A program that asks for the kitty keyboard protocol gets kitty-encoded keys, typed or sent with `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as before. |
+| `vtmux-kitty-keys` | server | `off`, `on` | A program that asks for the kitty keyboard protocol gets kitty-encoded keys, typed or sent with `send-keys`: Shift+Enter, C-i apart from Tab, Escape apart from Alt. Bindings and the prefix are read as in tmux. |
 | `vtmux-notifications` | server | `off`, `on` | A pane's desktop notifications (OSC 9, OSC 777) reach attached Ghostty clients, from any window and from `display-popup -E` programs, at Ghostty's own rate limits. No `allow-passthrough` needed. |
 | `vtmux-inband-resize` | server | `off`, `on` | A program that sets mode 2048 gets each new size of its pane in-band, at once and after every resize, with no `SIGWINCH` race. |
 | `vtmux-graphics` | server | `off`, `on` | Kitty graphics without `allow-passthrough`: a program's images drawn by vtmux for Ghostty clients, clipped at pane edges, under popups, zoomed, in copy mode and across window switches. Apps that wrap for tmux (yazi) keep using passthrough. A live upgrade drops the images. |
