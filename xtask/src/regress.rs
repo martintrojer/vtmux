@@ -637,11 +637,13 @@ fn log_pty_holders(logs: &Path, name: &str) {
     }
     // A server holds its panes' masters with no controlling terminal, so ps
     // shows it on `??`; lsof names every process holding masters.
-    if let Ok(o) = Command::new("lsof")
-        .args(["-nP", "-w", "-F", "pc", "/dev/ptmx"])
-        .output()
-    {
-        let holders = ptmx_holders(&String::from_utf8_lossy(&o.stdout));
+    if let Some((_, out)) = reap::output_within(
+        Command::new("lsof")
+            .args(["-nP", "-w", "-F", "pc", "/dev/ptmx"])
+            .stderr(std::process::Stdio::null()),
+        reap::LSOF_LIMIT,
+    ) {
+        let holders = ptmx_holders(&String::from_utf8_lossy(&out));
         if !holders.is_empty() {
             note.push_str("--- PTY masters held (count pid command), from lsof /dev/ptmx:\n");
             for (n, pid, cmd) in holders {

@@ -29,7 +29,7 @@ use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, connect, socket};
 
@@ -78,6 +78,43 @@ pub fn pids_where(ps: &str, own: u32, keep: impl Fn(&str) -> bool) -> Vec<u32> {
             (pid != own && keep(args)).then_some(pid)
         })
         .collect()
+}
+
+/// How long an `lsof` may take: one stuck on a stale network mount must
+/// not hang reap, and `check.sh` with it (a full `lsof -U` takes a second
+/// or two).
+pub const LSOF_LIMIT: Duration = Duration::from_secs(20);
+
+/// `cmd`'s exit status and output, or `None` when it cannot start or has
+/// not ended within `limit` (it is killed then).
+pub fn output_within(
+    cmd: &mut Command,
+    limit: Duration,
+) -> Option<(std::process::ExitStatus, Vec<u8>)> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
+        out
+    });
+    let deadline = Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return reader.join().ok().map(|out| (status, out)),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            // Not joined: a process it started may hold the pipe open.
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 /// Servers younger than this are left alone: a gate, a harness run or a
@@ -191,13 +228,14 @@ pub fn held_sockets() -> Option<Vec<Held>> {
 #[cfg(target_os = "macos")]
 pub fn held_sockets() -> Option<Vec<Held>> {
     let lsof = |args: &[&str]| {
-        let out = Command::new("lsof")
-            .args(["-n", "-w", "-F", "pftn"])
-            .args(args)
-            .stderr(Stdio::null())
-            .output()
-            .ok()?;
-        (out.status.success() || !out.stdout.is_empty()).then_some(out.stdout)
+        let (status, out) = output_within(
+            Command::new("lsof")
+                .args(["-n", "-w", "-F", "pftn"])
+                .args(args)
+                .stderr(Stdio::null()),
+            LSOF_LIMIT,
+        )?;
+        (status.success() || !out.is_empty()).then_some(out)
     };
     let mut held = parse_lsof_sockets(&lsof(&["-U"])?);
     let relative: Vec<String> = held
@@ -729,6 +767,31 @@ mod tests {
         }
     }
 
+    /// A command that hangs (an `lsof` on a stale network mount) is
+    /// killed at the limit and reads as nothing, so reap goes on; one that
+    /// ends gives its output and status.
+    #[test]
+    fn a_hung_command_is_killed_at_its_limit() {
+        let start = Instant::now();
+        assert_eq!(
+            output_within(Command::new("sleep").arg("30"), Duration::from_millis(200)),
+            None
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            start.elapsed()
+        );
+        let (status, out) =
+            output_within(Command::new("echo").arg("p1"), Duration::from_secs(30)).unwrap();
+        assert!(status.success());
+        assert_eq!(out, b"p1\n");
+        assert_eq!(
+            output_within(&mut Command::new("/nonexistent/lsof"), LSOF_LIMIT),
+            None
+        );
+    }
+
     #[test]
     fn etime_formats() {
         let s = Duration::from_secs;
@@ -812,13 +875,14 @@ mod tests {
     }
 
     /// `lsof -F pftn` as macOS prints it: a process's files after its
-    /// `p` line, a socket's path whole (spaces too), a peer (`->0x...`) or
-    /// an unbound one not a path.
+    /// `p` line, each `f<fd>` then a line per field (an access mode `a`
+    /// too, from an lsof that adds it), a socket's path whole (spaces
+    /// too), a peer (`->0x...`) or an unbound one not a path.
     #[test]
     fn held_sockets_come_from_lsof_on_macos() {
-        let sockets = b"p501\nfcwd\ntDIR\nn/Users/u\nf3u\ntunix\nn/private/tmp/vtmux-501/rv a\n\
-            f4u\ntunix\nn->0x1f2e3d4c5b6a7980\nf5u\ntunix\nn\n\
-            p77\nf6u\ntunix\nnrel/rv2\nf7u\ntunix\nn/private/tmp/vtmux-501/rv a\n";
+        let sockets = b"p501\nfcwd\ntDIR\nn/Users/u\nf3\ntunix\nn/private/tmp/vtmux-501/rv a\n\
+            f4\ntunix\nn->0x1f2e3d4c5b6a7980\nf5\ntunix\nn\n\
+            p77\nf6\nau\ntunix\nnrel/rv2\nf7\nau\ntunix\nn/private/tmp/vtmux-501/rv a\n";
         assert_eq!(
             parse_lsof_sockets(sockets),
             [
