@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index a4fa13cad..0fc48494d 100644
+index 30fd97879..566aff4e9 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -704,8 +704,10 @@ fn printSliceFast(
+@@ -777,8 +777,10 @@ fn printSliceFast(
      // immediately eligible for the narrow fill with no further
      // checks.
      const cp0 = cps[0];
@@ -14,7 +14,7 @@ index a4fa13cad..0fc48494d 100644
      if (cp0 <= 0xFF) {
          // C0 control characters (0x00-0x0F) aren't printable. The
          // stream never sends these (they're routed to execute), but
-@@ -949,9 +951,11 @@ fn printSliceFill(
+@@ -1047,9 +1049,11 @@ fn printSliceFill(
              if (simd.lanes(u32)) |lanes| {
                  const V = @Vector(lanes, u32);
                  const lo: V = @splat(0x10);
@@ -27,7 +27,7 @@ index a4fa13cad..0fc48494d 100644
                      const in_range = (v >= lo) & (v <= hi);
                      if (!@reduce(.And, in_range)) {
                          const bits: @Int(.unsigned, lanes) = @bitCast(in_range);
-@@ -966,7 +970,7 @@ fn printSliceFill(
+@@ -1064,7 +1068,7 @@ fn printSliceFill(
          while (idx < cps.len) : (idx += 1) {
              const cp = cps[idx];
              if (comptime width == .narrow) {
@@ -36,7 +36,7 @@ index a4fa13cad..0fc48494d 100644
              }
              if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
                  if (!grapheme_cluster) continue;
-@@ -1509,7 +1513,12 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2139,7 +2143,12 @@ pub fn print(self: *Terminal, c: u21) !void {
      // non-single-width characters properly. We have a fast-path for
      // byte-sized characters since they're so common. We can ignore
      // control characters because they're always filtered prior.
@@ -50,7 +50,7 @@ index a4fa13cad..0fc48494d 100644
  
      // Note: it is possible to have a width of "3" and a width of "-1" from
      // uucode.x's wcwidth. We should look into those cases and handle them
-@@ -5623,6 +5632,36 @@ test "Terminal: input glitch text" {
+@@ -6265,6 +6274,36 @@ test "Terminal: input glitch text" {
      try testing.expect(page.capacity().grapheme_bytes > grapheme_cap);
  }
  
@@ -88,28 +88,28 @@ index a4fa13cad..0fc48494d 100644
      var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
      defer t.deinit(testing.allocator);
 diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
-index 281d01295..d070ebb20 100644
+index fba8383cc..7efa76741 100644
 --- a/src/terminal/stream.zig
 +++ b/src/terminal/stream.zig
-@@ -862,12 +862,11 @@ pub fn Stream(comptime H: type) type {
-                             // C0 controls execute rather than print.
-                             self.execute(@intCast(cp));
-                         } else {
--                            // C1 controls decoded from UTF-8 are ignored.
--                            logUnsupportedOnce(
--                                "ignoring UTF-8-decoded C1 controls, first: 0x{x}",
--                                .{cp},
--                                0x80,
--                            );
-+                            // vtmux: a C1 control decoded from UTF-8 is a
-+                            // zero-width character, as in tmux (wcwidth -1,
-+                            // utf8_width makes C1 zero), so it joins the
-+                            // previous cell. Upstream ignores it.
-+                            self.print(@intCast(cp));
-                         }
-                         i += 1;
-                         continue;
-@@ -1354,13 +1353,10 @@ pub fn Stream(comptime H: type) type {
+@@ -959,12 +959,11 @@ pub fn Stream(comptime H: type) type {
+                         // C0 controls execute rather than print.
+                         self.execute(@intCast(cp));
+                     } else {
+-                        // C1 controls decoded from UTF-8 are ignored.
+-                        logUnsupportedOnce(
+-                            "ignoring UTF-8-decoded C1 controls, first: 0x{x}",
+-                            .{cp},
+-                            0x80,
+-                        );
++                        // vtmux: a C1 control decoded from UTF-8 is a
++                        // zero-width character, as in tmux (wcwidth -1,
++                        // utf8_width makes C1 zero), so it joins the
++                        // previous cell. Upstream ignores it.
++                        self.print(@intCast(cp));
+                     }
+                     i += 1;
+                     continue;
+@@ -1441,13 +1440,10 @@ pub fn Stream(comptime H: type) type {
                      return;
                  }
  
@@ -126,7 +126,7 @@ index 281d01295..d070ebb20 100644
                      return;
                  }
  
-@@ -3831,7 +3827,7 @@ test "stream: ground state C0 controls are executed, not printed" {
+@@ -3915,7 +3911,7 @@ test "stream: ground state C0 controls are executed, not printed" {
      }
  }
  
@@ -135,7 +135,7 @@ index 281d01295..d070ebb20 100644
      const H = struct {
          buf: [128]u21 = undefined,
          len: usize = 0,
-@@ -3855,9 +3851,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+@@ -3939,9 +3935,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
          }
      };
  
@@ -149,7 +149,7 @@ index 281d01295..d070ebb20 100644
      for (0x80..0xA0) |c| {
          const enc: [2]u8 = .{ 0xC2, @intCast(c) };
  
-@@ -3868,18 +3865,20 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+@@ -3952,18 +3949,20 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
              s.next(enc[0]);
              s.next(enc[1]);
              s.next('B');
@@ -175,7 +175,7 @@ index 281d01295..d070ebb20 100644
              }
          }
  
-@@ -3891,9 +3890,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+@@ -3975,9 +3974,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
              input[32] = enc[0];
              input[33] = enc[1];
              s.nextSlice(&input);

@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
-index 2899989dd..73d501676 100644
+index 6dffd7444..f31c1985d 100644
 --- a/include/ghostty/vt/screen.h
 +++ b/include/ghostty/vt/screen.h
-@@ -224,6 +224,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
+@@ -238,6 +238,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
     * Output type: GhosttyColorRgb *
     */
    GHOSTTY_CELL_DATA_COLOR_RGB = 11,
@@ -19,18 +19,18 @@ index 2899989dd..73d501676 100644
  } GhosttyCellData;
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 1037e4e61..abd885603 100644
+index 30424fc2e..c0741e985 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -923,6 +923,7 @@ fn printSliceFill(
-         "style_id",
-         "wide",
-         "hyperlink",
-+        "tab",
-     }, 4);
+@@ -985,6 +985,7 @@ const PrintSliceSimpleMask = pagepkg.Mask(Cell, &.{
+     "style_id",
+     "wide",
+     "hyperlink",
++    "tab",
+ }, 4);
  
-     // The bit offset of the codepoint content within a Cell, used to
-@@ -1211,6 +1212,7 @@ fn printSliceFill(
+ /// The row-filling portion of the printSlice fast path, specialized by
+@@ -1348,6 +1349,7 @@ fn printSliceFill(
                  const cell = &cells[k + offset];
                  if (cell.wide != .narrow or
                      cell.hasGrapheme() or
@@ -38,7 +38,7 @@ index 1037e4e61..abd885603 100644
                      cell.hyperlink) break :fill;
              }
              for (0..general_count) |offset| {
-@@ -1685,6 +1687,9 @@ fn writeCell(
+@@ -2313,6 +2315,9 @@ fn writeCell(
  
      const cell = self.screens.active.cursor.page_cell;
  
@@ -48,7 +48,7 @@ index 1037e4e61..abd885603 100644
      // If the wide property of this cell is the same, then we don't
      // need to do the special handling here because the structure will
      // be the same. If it is NOT the same, then we may need to clear some
-@@ -2327,7 +2332,12 @@ pub fn cursorIsAtPrompt(self: *Terminal) bool {
+@@ -2955,7 +2960,12 @@ pub fn cursorIsAtPrompt(self: *Terminal) bool {
  
  /// Horizontal tab moves the cursor to the next tabstop, clearing
  /// the screen to the left the tabstop.
@@ -61,7 +61,7 @@ index 1037e4e61..abd885603 100644
      while (self.screens.active.cursor.x < self.scrolling_region.right) {
          // Move the cursor right
          self.screens.active.cursorRight(1);
-@@ -2335,8 +2345,74 @@ pub fn horizontalTab(self: *Terminal) void {
+@@ -2963,8 +2973,74 @@ pub fn horizontalTab(self: *Terminal) void {
          // If the last cursor position was a tabstop we return. We do
          // "last cursor position" because we want a space to be written
          // at the tabstop unless we're at the end (the while condition).
@@ -139,7 +139,7 @@ index 1037e4e61..abd885603 100644
  
  // Same as horizontalTab but moves to the previous tabstop instead of the next.
 diff --git a/src/terminal/c/cell.zig b/src/terminal/c/cell.zig
-index 5ae088169..d6256fb0c 100644
+index 3d2618099..eba7b5af0 100644
 --- a/src/terminal/c/cell.zig
 +++ b/src/terminal/c/cell.zig
 @@ -89,6 +89,11 @@ pub const CellData = enum(c_int) {
@@ -151,30 +151,30 @@ index 5ae088169..d6256fb0c 100644
 +    /// 255 for the other cells of a tab.
 +    tab = 12,
 +
+     _,
+ 
      /// Output type expected for querying the data of the given kind.
-     pub fn OutType(comptime self: CellData) type {
-         return switch (self) {
-@@ -101,6 +106,7 @@ pub const CellData = enum(c_int) {
+@@ -103,6 +108,7 @@ pub const CellData = enum(c_int) {
              .semantic_content => SemanticContent,
              .color_palette => u8,
              .color_rgb => color.RGB.C,
 +            .tab => u8,
+             _ => void,
          };
      }
- };
 @@ -169,6 +175,7 @@ fn getTyped(
              const rgb = cell.content.color_rgb;
              out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
          },
 +        .tab => out.* = cell.tab,
+         _ => comptime unreachable,
      }
  
-     return .success;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 48d405b5f..63fe56a9c 100644
+index 2a66d5b1e..87f13d366 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2218,7 +2218,15 @@ pub const Cell = packed struct(u64) {
+@@ -2439,7 +2439,15 @@ pub const Cell = packed struct(u64) {
      /// boundary points for content.
      semantic_content: SemanticContent = .output,
  
@@ -191,7 +191,7 @@ index 48d405b5f..63fe56a9c 100644
  
      pub const ContentTag = enum(u2) {
          /// A single codepoint, could be zero to be empty cell.
-@@ -2257,6 +2265,12 @@ pub const Cell = packed struct(u64) {
+@@ -2478,6 +2486,12 @@ pub const Cell = packed struct(u64) {
          spacer_head = 3,
      };
  
@@ -204,7 +204,7 @@ index 48d405b5f..63fe56a9c 100644
      pub const SemanticContent = enum(u2) {
          /// Regular output content, such as command output.
          output = 0,
-@@ -2312,6 +2326,7 @@ pub const Cell = packed struct(u64) {
+@@ -2533,6 +2547,7 @@ pub const Cell = packed struct(u64) {
          .style_id = .{ .type_name = "GhosttyStyleId" },
          .wide = .{ .type_name = "GhosttyCellWide" },
          .semantic_content = .{ .type_name = "GhosttyCellSemanticContent" },
@@ -213,7 +213,7 @@ index 48d405b5f..63fe56a9c 100644
      } });
  
 diff --git a/src/terminal/snapshot/grid.zig b/src/terminal/snapshot/grid.zig
-index 9c7d9bc23..f83cb0853 100644
+index e2923849c..291f940d8 100644
 --- a/src/terminal/snapshot/grid.zig
 +++ b/src/terminal/snapshot/grid.zig
 @@ -385,7 +385,8 @@ const native_matches_wire = native: {

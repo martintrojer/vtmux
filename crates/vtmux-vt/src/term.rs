@@ -220,24 +220,27 @@ fn inband_report(cols: u16, rows: u16, (xp, yp): (u32, u32)) -> Vec<u8> {
 /// Bytes in one pooled Ghostty page (`PagePool.item_size`, PageList.zig):
 /// the standard page layout rounded up to Zig's `std.heap.page_size_min`
 /// (`Page.layout`, page.zig), 4 KiB on Linux and x86-64 macOS, 16 KiB on
-/// aarch64 macOS. Measured by probing retention (unchanged from ghostty
-/// a887df42c to 3bd54e025); `history_budget_steps_by_page` guards it.
+/// aarch64 macOS. Measured by probing retention (401 408 from ghostty
+/// a887df42c to 3bd54e025; libghostty-vt 1.0.1's page, with its own
+/// hyperlink map capacity, is 397 312, which 16 KiB pages still round to
+/// 409 600); `history_budget_steps_by_page` guards it.
 #[cfg(test)]
 const PAGE_BYTES: usize = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
     409_600
 } else {
-    401_408
+    397_312
 };
 /// Bytes of a standard page left for row headers and cells once the
 /// styles, graphemes, strings and hyperlinks are laid out
 /// (`Capacity.availableBytesForGrid`, page.zig): the page minus a fixed
-/// 26 128 bytes of metadata. Fitted exactly to the rows per page Ghostty
-/// keeps at every width from 1 to 700 columns and at 800-20 000;
-/// `page_rows_matches_ghostty` guards it.
+/// 25 712 bytes of metadata (26 128 before libghostty-vt 1.0.1). Fitted
+/// exactly to the rows per page Ghostty keeps at every width from 1 to
+/// 700 columns and at 800-20 000 (371 600 to 371 607 bytes fit them all
+/// on Linux); `page_rows_matches_ghostty` guards it.
 const PAGE_GRID_BYTES: usize = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-    409_600 - 26_128
+    409_600 - 25_712
 } else {
-    401_408 - 26_128
+    397_312 - 25_712
 };
 /// Bytes per cell and per row header (`@sizeOf(Cell)`, `@sizeOf(Row)`).
 const CELL_BYTES: usize = 8;
@@ -4894,8 +4897,8 @@ pub fn compress_all_of<'a>(terms: impl IntoIterator<Item = &'a mut PaneTerm>) {
     // It runs none of the terminal's callbacks, so none of the `Rc`s
     // `PaneTerm` shares with them is touched, and Ghostty's terminal code
     // keeps no thread-local state (no `threadlocal` under `src/terminal`
-    // at the pinned commit; VENDOR.md, *Bumping ghostty*, says to check
-    // again). Moving that access to another thread for the call is
+    // in the pinned release; VENDOR.md, *Bumping libghostty-vt*, says to
+    // check again). Moving that access to another thread for the call is
     // therefore sound, though libghostty-vt does not promise it in
     // general (its crate docs, *Thread safety*).
     unsafe impl Send for Exclusive<'_> {}

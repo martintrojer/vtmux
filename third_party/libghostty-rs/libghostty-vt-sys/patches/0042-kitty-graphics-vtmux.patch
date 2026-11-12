@@ -1,4 +1,5 @@
 diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+index c7fdfc83b..aeceac3f4 100644
 --- a/include/ghostty/vt/vtmux_state.h
 +++ b/include/ghostty/vt/vtmux_state.h
 @@ -25,6 +25,7 @@
@@ -39,22 +40,24 @@ diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
  }
  #endif
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 44fe92e04..26e1e17ca 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -397,6 +397,9 @@ comptime {
+@@ -377,6 +377,9 @@ comptime {
          @export(&c.vtmux_set_alternate_saved, .{ .name = "ghostty_vtmux_set_alternate_saved" });
          @export(&c.vtmux_primary_size, .{ .name = "ghostty_vtmux_primary_size" });
          @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
 +        @export(&c.vtmux_kitty_storage, .{ .name = "ghostty_vtmux_kitty_storage" });
 +        @export(&c.vtmux_set_kitty_limit, .{ .name = "ghostty_vtmux_set_kitty_limit" });
 +        @export(&c.vtmux_kitty_placement_active_pos, .{ .name = "ghostty_vtmux_kitty_placement_active_pos" });
-         if (features.snapshot) {
-             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
-             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+         @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+         @export(&c.snapshot_encode_alloc, .{ .name = "ghostty_snapshot_encode_alloc" });
 diff --git a/src/terminal/c/kitty_graphics.zig b/src/terminal/c/kitty_graphics.zig
+index ae9741526..99788e750 100644
 --- a/src/terminal/c/kitty_graphics.zig
 +++ b/src/terminal/c/kitty_graphics.zig
-@@ -529,6 +529,53 @@ pub fn placement_viewport_pos(
+@@ -563,6 +563,53 @@ pub fn placement_viewport_pos(
      return .success;
  }
  
@@ -109,9 +112,10 @@ diff --git a/src/terminal/c/kitty_graphics.zig b/src/terminal/c/kitty_graphics.z
      iter_: PlacementIterator,
      image_: ImageHandle,
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 0561edf61..1e0ff58e3 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -258,6 +258,9 @@ pub const vtmux_alternate_saved = vtmux_state.alternate_saved;
+@@ -266,6 +266,9 @@ pub const vtmux_alternate_saved = vtmux_state.alternate_saved;
  pub const vtmux_set_alternate_saved = vtmux_state.set_alternate_saved;
  pub const vtmux_primary_size = vtmux_state.primary_size;
  pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
@@ -122,6 +126,7 @@ diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
  pub const snapshot_decoder_get = snapshot.decoder_get;
  pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index b989b243f..250d54a99 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
 @@ -14,6 +14,7 @@ const lib = @import("../lib.zig");
@@ -132,7 +137,7 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
  const ZigTerminal = @import("../Terminal.zig");
  const Screen = @import("../Screen.zig");
  const ScreenKey = @import("../ScreenSet.zig").Key;
-@@ -1585,6 +1586,51 @@ pub fn importer_primary_size(
+@@ -1608,6 +1609,51 @@ pub fn importer_primary_size(
      return .success;
  }
  

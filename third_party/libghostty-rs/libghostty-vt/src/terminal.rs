@@ -253,13 +253,13 @@ pub struct Options {
 #[non_exhaustive]
 pub enum CursorStyle {
     /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::TerminalCursorStyle::BAR,
+    Bar = ffi::CursorStyle::BAR,
     /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::TerminalCursorStyle::BLOCK,
+    Block = ffi::CursorStyle::BLOCK,
     /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::TerminalCursorStyle::UNDERLINE,
+    Underline = ffi::CursorStyle::UNDERLINE,
     /// Hollow block cursor.
-    BlockHollow = ffi::TerminalCursorStyle::BLOCK_HOLLOW,
+    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
@@ -331,7 +331,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// while the alternate one is up, so its history reads in place.
     /// (vtmux: `ghostty_terminal_vtmux_screen_grid_ref`, patch 0038.)
     pub fn vtmux_screen_grid_ref(&self, screen: u8, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_terminal_vtmux_screen_grid_ref(
                 self.inner.as_raw(),
@@ -416,7 +416,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Scroll the terminal viewport.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) }
+        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
     }
 
     /// Resolve a point in the terminal grid to a grid reference.
@@ -436,7 +436,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// that. This API is instead meant for less strictly performance-sensitive
     /// use cases.
     pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
         };
@@ -657,7 +657,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// This is the style that will be applied to newly printed characters.
     pub fn cursor_style(&self) -> Result<style::Style> {
-        self.get::<ffi::Style>(Data::CURSOR_STYLE)
+        self.get::<ffi::Style>(Data::CURSOR_SGR_STYLE)
             .and_then(std::convert::TryInto::try_into)
     }
     /// Get the current Kitty keyboard protocol flags.
@@ -750,7 +750,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// history pages. Zero disables scrollback and erases retained history;
     /// `None` removes the limit.
     pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
-        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
+        // libghostty-vt 1.0 reads NULL as the default limit, not as none:
+        // unlimited is usize::MAX (which the getter reports as None).
+        self.set(Opt::SCROLLBACK_MAX_BYTES, &v.unwrap_or(usize::MAX))?;
         Ok(self)
     }
 
@@ -771,7 +773,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// it is enforced again on every new row and on resize. `None` removes
     /// the limit.
     pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<&mut Self> {
-        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())?;
+        // libghostty-vt 1.0 reads NULL as the default limit, not as none:
+        // unlimited is usize::MAX (which the getter reports as None).
+        self.set(Opt::SCROLLBACK_MAX_LINES, &v.unwrap_or(usize::MAX))?;
         Ok(self)
     }
 
@@ -1835,14 +1839,12 @@ handlers! {
         ),
         to = <'t>DesktopNotificationFn(&'t [u8], &'t [u8]),
     ) |term, func| {
-        // SAFETY: libghostty passes a valid sized struct whose strings
-        // live for the duration of the callback. `size` covers both
-        // fields (they are the struct's first members after it).
+        // SAFETY: libghostty passes a valid struct whose strings live for
+        // the duration of the callback (a frozen layout since 1.0: no
+        // size field to check).
         let fields = unsafe {
             let n = &*notification;
-            let end = std::mem::offset_of!(ffi::TerminalDesktopNotification, body)
-                + std::mem::size_of::<ffi::String>();
-            (n.size >= end).then(|| (n.title.to_bytes(), n.body.to_bytes()))
+            Some((n.title.to_bytes(), n.body.to_bytes()))
         };
         if let Some((title, body)) = fields {
             func(&term, title, body);
@@ -1879,13 +1881,11 @@ handlers! {
             result,
             remember: false,
         };
-        // SAFETY: `write` is valid for the callback; `reply` (a member the
-        // size check proves present) is Ghostty's own answer function.
+        // SAFETY: `write` is valid for the callback (a frozen layout since
+        // libghostty-vt 1.0, no size field); `reply` is Ghostty's own
+        // answer function.
         unsafe {
-            let size = (*write).size;
-            let end = std::mem::offset_of!(ffi::ClipboardWrite, reply)
-                + std::mem::size_of::<ffi::ClipboardWriteReplyFn>();
-            if size >= end && let Some(answer) = (*write).reply {
+            if let Some(answer) = (*write).reply {
                 answer(write, &raw const reply);
             }
         }
@@ -2311,7 +2311,6 @@ mod miri_soundness {
     #[test]
     fn clipboard_write_with_no_representations() {
         let raw = ffi::ClipboardWrite {
-            size: std::mem::size_of::<ffi::ClipboardWrite>(),
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,

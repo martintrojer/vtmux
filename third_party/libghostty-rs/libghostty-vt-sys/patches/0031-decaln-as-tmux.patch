@@ -1,7 +1,8 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 7930ab17a..d7d741e7b 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -4730,15 +4730,11 @@
+@@ -5371,15 +5371,11 @@ pub fn eraseDisplay(
  ///
  /// Sets the cursor to the top left corner.
  pub fn decaln(self: *Terminal) !void {
@@ -22,7 +23,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
  
      // Reset margins, also sets cursor to top-left
      self.scrolling_region = .{
-@@ -4748,10 +4744,8 @@
+@@ -5389,10 +5385,8 @@ pub fn decaln(self: *Terminal) !void {
          .right = self.cols - 1,
      };
  
@@ -35,7 +36,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
      self.setCursorPos(1, 1);
  
      // Use clearRows instead of eraseDisplay because we must NOT respect
-@@ -4771,22 +4765,12 @@
+@@ -5413,22 +5407,12 @@ pub fn decaln(self: *Terminal) !void {
          @memset(cells, .{
              .content_tag = .codepoint,
              .content = .{ .codepoint = .{ .data = 'E' } },
@@ -59,7 +60,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
          // We messed with the page so assert its integrity here.
          page.assertIntegrity();
  
-@@ -14139,6 +14123,26 @@
+@@ -14857,6 +14841,26 @@ test "Terminal: decaln reset margins" {
      }
  }
  

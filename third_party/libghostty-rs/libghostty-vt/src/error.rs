@@ -76,16 +76,3 @@ pub(crate) fn from_result_with_len(code: ffi::Result::Type, len: usize) -> Resul
         _ => Err(Error::InvalidValue),
     }
 }
-
-pub(crate) fn from_optional_result_with_len(
-    code: ffi::Result::Type,
-    len: usize,
-) -> Result<Option<usize>> {
-    match code {
-        ffi::Result::SUCCESS => Ok(Some(len)),
-        ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
-        ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: len }),
-        ffi::Result::NO_VALUE => Ok(None),
-        _ => Err(Error::InvalidValue),
-    }
-}

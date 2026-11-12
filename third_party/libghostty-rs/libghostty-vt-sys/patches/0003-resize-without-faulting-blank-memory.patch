@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 3d78596ed..db074ee13 100644
+index 3474ae290..e758da131 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -3212,6 +3212,14 @@ fn trailingBlankLines(
+@@ -3405,6 +3405,14 @@ fn trailingBlankLines(
  /// IMPORTANT: This function does NOT update `total_rows`. It returns the
  /// number of rows trimmed, and the caller is responsible for decrementing
  /// `total_rows` by this amount.
@@ -17,7 +17,7 @@ index 3d78596ed..db074ee13 100644
  fn trimTrailingBlankRows(
      self: *PageList,
      max: size.CellCountInt,
-@@ -3250,7 +3258,15 @@ fn trimTrailingBlankRows(
+@@ -3444,7 +3452,18 @@ fn trimTrailingBlankRows(
          // cells. The retired storage is re-exposed by the grow()
          // fast path without any clearing, so it must be left in the
          // default state.
@@ -26,39 +26,14 @@ index 3d78596ed..db074ee13 100644
 +        // vtmux: cells that are already zero are not written again.
 +        // A blank row of a fresh page was never touched, and clearing
 +        // it would fault its memory in for nothing.
-+        const trim_row = row_pin.rowAndCell().row;
-+        if (!trim_row.managedMemory() and allZero(cells))
-+            trim_row.reset()
-+        else
++        const trim_row = rac.row;
++        if (!trim_row.managedMemory() and
++            (trim_row.blank or allZero(row_pin.cells(.all))))
++        {
++            // The same header resetRow leaves: zeroed and blank.
++            trim_row.* = .{ .cells = trim_row.cells, .blank = true, .dirty = true };
++        } else
 +            row_pin.node.page().resetRow(trim_row);
  
          row_pin.node.page().size.rows -= 1;
          if (row_pin.node.page().size.rows == 0) {
-@@ -5130,7 +5146,7 @@ fn destroyNodeExt(
-             // it would only fault the whole page back in.
-             const item: *align(std.heap.page_size_min) [std_size]u8 =
-                 @ptrCast(@alignCast(page.memory.ptr));
--            if (keepWarm(pool, item))
-+            if (keepWarm(pool, item, page))
-                 @memset(page.memory, 0)
-             else
-                 _ = terminal_mem.decommit(.zero, item, page.memory.len);
-@@ -5147,12 +5163,17 @@ fn destroyNodeExt(
- }
- 
- /// Whether a freed pool item should stay resident: only while no other
--/// free item does.
-+/// free item does, and only for a page with every row in use (the line
-+/// limit's pruned page, whose memory is resident anyway). Zeroing a page
-+/// that used a few of its rows, such as the one a reflow replaces, would
-+/// fault the whole item in.
- fn keepWarm(
-     pool: *MemoryPool,
-     item: *align(std.heap.page_size_min) [std_size]u8,
-+    page: *const Page,
- ) bool {
-     if (comptime wasm_page_pool) return false;
-+    if (page.size.rows < page.capacity.rows) return false;
-     if (pool.warm) |warm| {
-         for (pool.pages.free.items) |free| {
-             if (free == warm) return false;

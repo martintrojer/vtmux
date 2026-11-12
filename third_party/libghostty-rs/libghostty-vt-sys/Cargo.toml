@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.90"
 build = "build.rs"
 links = "ghostty-vt"
-description = "Raw FFI bindings to Ghostty's libghostty-vt, built from a pinned Ghostty commit with vtmux's patches (vtmux's fork of libghostty-vt-sys)"
+description = "Raw FFI bindings to Ghostty's libghostty-vt, built from a pinned libghostty-vt release with vtmux's patches (vtmux's fork of libghostty-vt-sys)"
 readme = "README.md"
 # Upstream libghostty-rs is MIT OR Apache-2.0, taken here under MIT; Ghostty,
 # which the build script downloads, patches and links in, is MIT.

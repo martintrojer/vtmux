@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
-index 73d501676..a3592975b 100644
+index f31c1985d..d12f68588 100644
 --- a/include/ghostty/vt/screen.h
 +++ b/include/ghostty/vt/screen.h
-@@ -233,6 +233,13 @@ typedef enum GHOSTTY_ENUM_TYPED {
+@@ -247,6 +247,13 @@ typedef enum GHOSTTY_ENUM_TYPED {
     * Output type: uint8_t *
     */
    GHOSTTY_CELL_DATA_TAB = 12,
@@ -17,90 +17,42 @@ index 73d501676..a3592975b 100644
  } GhosttyCellData;
  
 diff --git a/include/ghostty/vt/style.h b/include/ghostty/vt/style.h
-index b6bf860eb..93f5e2460 100644
+index 42fdf567e..e44fdfe52 100644
 --- a/include/ghostty/vt/style.h
 +++ b/include/ghostty/vt/style.h
-@@ -105,6 +105,8 @@ typedef struct {
-   bool strikethrough;
-   bool overline;
-   int underline; /**< One of GHOSTTY_SGR_UNDERLINE_* values */
-+  bool fg_palette_256; /**< vtmux: fg set by 38;5;N */
-+  bool bg_palette_256; /**< vtmux: bg set by 48;5;N */
- } GhosttyStyle;
+@@ -127,7 +127,8 @@ typedef struct {
+  * |----------|-----------------------------------------------------|
+  * | 0 to 7   | On/off attributes, one GHOSTTY_STYLE_FLAG_* per bit |
+  * | 8 to 10  | Underline style, a GhosttySgrUnderline value        |
+- * | 11 to 15 | Reserved, always zero                               |
++ * | 11, 12   | vtmux: GHOSTTY_STYLE_FLAG_VTMUX_*_PALETTE_256        |
++ * | 13 to 15 | Reserved, always zero                               |
+  *
+  * Test an attribute with a bitwise AND against its GHOSTTY_STYLE_FLAG_*
+  * mask. Read the underline style with GHOSTTY_STYLE_UNDERLINE().
+@@ -152,6 +153,17 @@ typedef uint16_t GhosttyStyleFlags;
+ #define GHOSTTY_STYLE_FLAG_STRIKETHROUGH ((GhosttyStyleFlags)(1u << 6))
+ /** Overlined text. @ingroup style */
+ #define GHOSTTY_STYLE_FLAG_OVERLINE ((GhosttyStyleFlags)(1u << 7))
++/**
++ * vtmux: the foreground palette colour was set by `38;5;N` rather than
++ * `30-37` or `90-97` (tmux's COLOUR_FLAG_256). Not in upstream Ghostty.
++ * @ingroup style
++ */
++#define GHOSTTY_STYLE_FLAG_VTMUX_FG_PALETTE_256 ((GhosttyStyleFlags)(1u << 11))
++/**
++ * vtmux: the background palette colour was set by `48;5;N`.
++ * @ingroup style
++ */
++#define GHOSTTY_STYLE_FLAG_VTMUX_BG_PALETTE_256 ((GhosttyStyleFlags)(1u << 12))
  
  /**
-diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index b1b6b13cd..900359205 100644
---- a/src/terminal/Screen.zig
-+++ b/src/terminal/Screen.zig
-@@ -2545,6 +2545,7 @@ pub fn setAttribute(
-         },
- 
-         .direct_color_fg => |rgb| {
-+            self.cursor.style.flags.fg_palette_256 = false;
-             self.cursor.style.fg_color = .{
-                 .rgb = .{
-                     .r = rgb.r,
-@@ -2555,6 +2556,7 @@ pub fn setAttribute(
-         },
- 
-         .direct_color_bg => |rgb| {
-+            self.cursor.style.flags.bg_palette_256 = false;
-             self.cursor.style.bg_color = .{
-                 .rgb = .{
-                     .r = rgb.r,
-@@ -2565,30 +2567,44 @@ pub fn setAttribute(
-         },
- 
-         .@"8_fg" => |n| {
-+            self.cursor.style.flags.fg_palette_256 = false;
-             self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
-         },
- 
-         .@"8_bg" => |n| {
-+            self.cursor.style.flags.bg_palette_256 = false;
-             self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
-         },
- 
--        .reset_fg => self.cursor.style.fg_color = .none,
-+        .reset_fg => {
-+            self.cursor.style.flags.fg_palette_256 = false;
-+            self.cursor.style.fg_color = .none;
-+        },
- 
--        .reset_bg => self.cursor.style.bg_color = .none,
-+        .reset_bg => {
-+            self.cursor.style.flags.bg_palette_256 = false;
-+            self.cursor.style.bg_color = .none;
-+        },
- 
-         .@"8_bright_fg" => |n| {
-+            self.cursor.style.flags.fg_palette_256 = false;
-             self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
-         },
- 
-         .@"8_bright_bg" => |n| {
-+            self.cursor.style.flags.bg_palette_256 = false;
-             self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
-         },
- 
-+        // vtmux: tmux keeps COLOUR_FLAG_256 on a `38;5;N` colour
-+        // (input.c input_csi_dispatch_sgr_256_do).
-         .@"256_fg" => |idx| {
-+            self.cursor.style.flags.fg_palette_256 = true;
-             self.cursor.style.fg_color = .{ .palette = idx };
-         },
- 
-         .@"256_bg" => |idx| {
-+            self.cursor.style.flags.bg_palette_256 = true;
-             self.cursor.style.bg_color = .{ .palette = idx };
-         },
- 
+  * The lowest bit of the underline style in GhosttyStyleFlags.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 0fc48494d..8fca1c61d 100644
+index 566aff4e9..675c3172f 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -14806,6 +14806,34 @@ test "Terminal: eraseLine resets wrap" {
+@@ -15553,6 +15553,34 @@ test "Terminal: eraseLine resets wrap" {
      }
  }
  
@@ -136,7 +88,7 @@ index 0fc48494d..8fca1c61d 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/c/cell.zig b/src/terminal/c/cell.zig
-index d6256fb0c..918e71cc1 100644
+index eba7b5af0..38a9a43df 100644
 --- a/src/terminal/c/cell.zig
 +++ b/src/terminal/c/cell.zig
 @@ -94,6 +94,10 @@ pub const CellData = enum(c_int) {
@@ -147,62 +99,102 @@ index d6256fb0c..918e71cc1 100644
 +    /// `48;5;N` (bool).
 +    color_palette_256 = 13,
 +
+     _,
+ 
      /// Output type expected for querying the data of the given kind.
-     pub fn OutType(comptime self: CellData) type {
-         return switch (self) {
-@@ -107,6 +111,7 @@ pub const CellData = enum(c_int) {
+@@ -109,6 +113,7 @@ pub const CellData = enum(c_int) {
              .color_palette => u8,
              .color_rgb => color.RGB.C,
              .tab => u8,
 +            .color_palette_256 => bool,
+             _ => void,
          };
      }
- };
-@@ -176,6 +181,7 @@ fn getTyped(
-             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
+@@ -177,6 +182,7 @@ fn getTyped(
          },
          .tab => out.* = cell.tab,
+         _ => comptime unreachable,
 +        .color_palette_256 => out.* = cell.content.color_palette.palette_256,
      }
  
      return .success;
 diff --git a/src/terminal/c/style.zig b/src/terminal/c/style.zig
-index 259fccc99..385409146 100644
+index 8f7f357b8..2ff21357a 100644
 --- a/src/terminal/c/style.zig
 +++ b/src/terminal/c/style.zig
-@@ -70,6 +70,9 @@ pub const Style = extern struct {
-     strikethrough: bool,
-     overline: bool,
-     underline: c_int,
-+    /// vtmux: the colour was set by `38;5;N` / `48;5;N`.
-+    fg_palette_256: bool,
-+    bg_palette_256: bool,
- 
-     /// The default (empty) style in C representation. C
-     pub const default: Style = .{
-@@ -85,6 +88,8 @@ pub const Style = extern struct {
-         .strikethrough = false,
-         .overline = false,
-         .underline = 0,
-+        .fg_palette_256 = false,
-+        .bg_palette_256 = false,
-     };
- 
-     // fromStyle writes the eight bool fields as one 8-byte store,
-@@ -136,6 +141,8 @@ pub const Style = extern struct {
-         };
- 
-         out.underline = @backingInt(s.flags.underline);
-+        out.fg_palette_256 = s.flags.fg_palette_256;
-+        out.bg_palette_256 = s.flags.bg_palette_256;
+@@ -90,7 +90,10 @@ comptime {
      }
+     assert(@bitOffsetOf(Flags, "underline") == 8);
+     assert(@bitSizeOf(sgr.Attribute.Underline) == 3);
+-    assert(@bitOffsetOf(Flags, "_padding") == 11);
++    // vtmux: the two palette-form bits (GHOSTTY_STYLE_FLAG_VTMUX_*).
++    assert(@bitOffsetOf(Flags, "fg_palette_256") == 11);
++    assert(@bitOffsetOf(Flags, "bg_palette_256") == 12);
++    assert(@bitOffsetOf(Flags, "_padding") == 13);
+ }
  
-     pub fn fromStyle(s: style.Style) Style {
+ /// The GhosttyStyleFlags entry in the type manifest. The padding bits
+@@ -130,7 +133,7 @@ pub const Style = extern struct {
+     /// they appear when the struct is viewed as a native u128.
+     const reserved_bits: u128 = bits: {
+         var s: Style = .default;
+-        s.flags = .{ ._padding = std.math.maxInt(u5) };
++        s.flags = .{ ._padding = std.math.maxInt(u3) };
+         s.reserved = 0xFFFF;
+         break :bits s.toBits();
+     };
+@@ -229,12 +232,12 @@ test "style write produces the frozen byte layout" {
+ 
+     const with_padding = padding: {
+         // Every padding bit set, plus bold so the flags are not empty.
+-        const flags_pad: u128 = 0x1F << (96 + 11);
++        const flags_pad: u128 = 0x7 << (96 + 13);
+         const style_pad: u128 = 0xFFFF << 112;
+         break :padding @as(style.Style, @bitCast(flags_pad | style_pad | (1 << 96)));
+     };
+     const only_padding = padding: {
+-        const flags_pad: u128 = 0x1F << (96 + 11);
++        const flags_pad: u128 = 0x7 << (96 + 13);
+         const style_pad: u128 = 0xFFFF << 112;
+         break :padding @as(style.Style, @bitCast(flags_pad | style_pad));
+     };
+@@ -301,7 +304,7 @@ test "style write produces the frozen byte layout" {
+ test "style_is_default ignores reserved bits" {
+     var s: Style = .default;
+     s.reserved = 0xFFFF;
+-    s.flags = .{ ._padding = std.math.maxInt(u5) };
++    s.flags = .{ ._padding = std.math.maxInt(u3) };
+     try testing.expect(style_is_default(&s));
+     s.flags.overline = true;
+     try testing.expect(!style_is_default(&s));
+diff --git a/src/terminal/c/types.zig b/src/terminal/c/types.zig
+index cb662f3f8..40481f055 100644
+--- a/src/terminal/c/types.zig
++++ b/src/terminal/c/types.zig
+@@ -1527,7 +1527,8 @@ test "manifest describes the frozen style layout" {
+     try std.testing.expectEqualStrings("packed", flags_desc.get("kind").?.string);
+     try std.testing.expectEqualStrings("u16", flags_desc.get("underlying").?.string);
+     const flag_bits = flags_desc.get("bits").?.object;
+-    try std.testing.expectEqual(@as(usize, 9), flag_bits.count());
++    // vtmux: 9 upstream, plus the two palette-form bits (patch 0010).
++    try std.testing.expectEqual(@as(usize, 11), flag_bits.count());
+     const expected_flags = [_]struct { []const u8, i64, i64, []const u8 }{
+         .{ "bold", 0, 1, "bool" },
+         .{ "italic", 1, 1, "bool" },
+@@ -1538,6 +1539,8 @@ test "manifest describes the frozen style layout" {
+         .{ "strikethrough", 6, 1, "bool" },
+         .{ "overline", 7, 1, "bool" },
+         .{ "underline", 8, 3, "GhosttySgrUnderline" },
++        .{ "fg_palette_256", 11, 1, "bool" },
++        .{ "bg_palette_256", 12, 1, "bool" },
+     };
+     for (expected_flags) |entry| {
+         const name, const lsb, const width, const type_name = entry;
 diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
-index 137cdce02..c3e4c25fb 100644
+index 3ba5173c8..8376f6c02 100644
 --- a/src/terminal/formatter.zig
 +++ b/src/terminal/formatter.zig
-@@ -5891,8 +5891,10 @@ test "Screen vt with style" {
+@@ -5887,8 +5887,10 @@ test "Screen vt with style" {
  
      s2.nextSlice(output);
  
@@ -215,7 +207,7 @@ index 137cdce02..c3e4c25fb 100644
  
      // Verify pin map
      try testing.expectEqual(output.len, pin_map.count());
-@@ -8033,18 +8035,28 @@ test "Terminal vt restores gaps and cells that only have a background" {
+@@ -8029,18 +8031,28 @@ test "Terminal vt restores gaps and cells that only have a background" {
                  b.cell.codepoint(),
              ),
              .bg_color_palette => try testing.expectEqual(
@@ -248,10 +240,10 @@ index 137cdce02..c3e4c25fb 100644
      const testing = std.testing;
      const alloc = testing.allocator;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 63fe56a9c..1f26a2c3c 100644
+index 87f13d366..2ef863ee7 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2190,7 +2190,10 @@ pub const Cell = packed struct(u64) {
+@@ -2411,7 +2411,10 @@ pub const Cell = packed struct(u64) {
          /// The content is an empty cell with a background color.
          color_palette: packed struct(u24) {
              data: u8,
@@ -264,10 +256,10 @@ index 63fe56a9c..1f26a2c3c 100644
          color_rgb: RGB,
      } = .{ .codepoint = .{ .data = 0 } },
 diff --git a/src/terminal/style.zig b/src/terminal/style.zig
-index 70f141f65..06a1c30b4 100644
+index 5413dcd5f..0e1b420dc 100644
 --- a/src/terminal/style.zig
 +++ b/src/terminal/style.zig
-@@ -38,7 +38,12 @@ pub const Style = struct {
+@@ -43,7 +43,12 @@ pub const Style = packed struct(u128) {
          strikethrough: bool = false,
          overline: bool = false,
          underline: sgr.Attribute.Underline = .none,
@@ -281,7 +273,58 @@ index 70f141f65..06a1c30b4 100644
      };
  
      /// The color for an SGR attribute. A color can come from multiple
-@@ -232,7 +237,10 @@ pub const Style = struct {
+@@ -166,15 +171,42 @@ pub const Style = packed struct(u128) {
+             .strikethrough => s.flags.strikethrough = true,
+             .reset_strikethrough => s.flags.strikethrough = false,
+ 
+-            .direct_color_fg => |rgb| s.fg_color = .rgb(rgb),
+-            .@"8_fg", .@"8_bright_fg" => |n| s.fg_color = .palette(@backingInt(n)),
+-            .@"256_fg" => |idx| s.fg_color = .palette(idx),
+-            .reset_fg => s.fg_color = .none,
++            // vtmux: tmux keeps COLOUR_FLAG_256 on a `38;5;N` colour
++            // (input.c input_csi_dispatch_sgr_256_do); any other
++            // foreground or background change clears it.
++            .direct_color_fg => |rgb| {
++                s.flags.fg_palette_256 = false;
++                s.fg_color = .rgb(rgb);
++            },
++            .@"8_fg", .@"8_bright_fg" => |n| {
++                s.flags.fg_palette_256 = false;
++                s.fg_color = .palette(@backingInt(n));
++            },
++            .@"256_fg" => |idx| {
++                s.flags.fg_palette_256 = true;
++                s.fg_color = .palette(idx);
++            },
++            .reset_fg => {
++                s.flags.fg_palette_256 = false;
++                s.fg_color = .none;
++            },
+ 
+-            .direct_color_bg => |rgb| s.bg_color = .rgb(rgb),
+-            .@"8_bg", .@"8_bright_bg" => |n| s.bg_color = .palette(@backingInt(n)),
+-            .@"256_bg" => |idx| s.bg_color = .palette(idx),
+-            .reset_bg => s.bg_color = .none,
++            .direct_color_bg => |rgb| {
++                s.flags.bg_palette_256 = false;
++                s.bg_color = .rgb(rgb);
++            },
++            .@"8_bg", .@"8_bright_bg" => |n| {
++                s.flags.bg_palette_256 = false;
++                s.bg_color = .palette(@backingInt(n));
++            },
++            .@"256_bg" => |idx| {
++                s.flags.bg_palette_256 = true;
++                s.bg_color = .palette(idx);
++            },
++            .reset_bg => {
++                s.flags.bg_palette_256 = false;
++                s.bg_color = .none;
++            },
+ 
+             .underline_color => |rgb| s.underline_color = .rgb(rgb),
+             .@"256_underline_color" => |idx| s.underline_color = .palette(idx),
+@@ -296,7 +328,10 @@ pub const Style = packed struct(u128) {
              .none => null,
              .palette => |idx| .{
                  .content_tag = .bg_color_palette,

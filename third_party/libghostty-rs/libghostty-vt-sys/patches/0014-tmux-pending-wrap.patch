@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index b2bba5f1f..761c2a9f9 100644
+index f1d4970a6..1ed9e6f1b 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -570,6 +570,17 @@ pub fn printRepeat(self: *Terminal, count_req: usize) !void {
@@ -20,7 +20,7 @@ index b2bba5f1f..761c2a9f9 100644
      // Print the repeated codepoint in slices so that eligible runs
      // take the batched printSlice fast path. printSlice is semantically
      // identical to calling print per codepoint: ineligible characters
-@@ -1852,6 +1863,10 @@ fn printWrap(self: *Terminal) !void {
+@@ -2492,6 +2503,10 @@ fn printWrap(self: *Terminal) !void {
      const mark_wrap = cursor.x == self.cols - 1;
      if (mark_wrap) cursor.page_row.wrap = true;
  
@@ -31,7 +31,7 @@ index b2bba5f1f..761c2a9f9 100644
      // Get the old semantic prompt so we can extend it to the next
      // line. We need to do this before we index() because we may
      // modify memory.
-@@ -1930,6 +1945,22 @@ pub fn linefeed(self: *Terminal) !void {
+@@ -2570,6 +2585,22 @@ pub fn linefeed(self: *Terminal) !void {
  
  /// Backspace moves the cursor back a column (but not less than 0).
  pub fn backspace(self: *Terminal) void {
@@ -54,7 +54,7 @@ index b2bba5f1f..761c2a9f9 100644
      self.cursorLeft(1);
  }
  
-@@ -1997,6 +2028,15 @@ pub fn cursorLeft(self: *Terminal, count_req: usize) void {
+@@ -2637,6 +2668,15 @@ pub fn cursorLeft(self: *Terminal, count_req: usize) void {
  
      var count = @max(count_req, 1);
  
@@ -70,7 +70,7 @@ index b2bba5f1f..761c2a9f9 100644
      // If we are in no wrap mode, then we move the cursor left and exit
      // since this is the fastest and most typical path. Like cursorRight,
      // we stop at the left margin unless the cursor is already left of it.
-@@ -2138,7 +2178,11 @@ pub fn restoreCursor(self: *Terminal) void {
+@@ -2778,7 +2818,11 @@ pub fn restoreCursor(self: *Terminal) void {
  
      self.screens.active.charset = saved.charset;
      self.modes.set(.origin, saved.origin);
@@ -83,7 +83,7 @@ index b2bba5f1f..761c2a9f9 100644
      self.screens.active.cursor.protected = saved.protected;
      self.screens.active.cursorAbsolute(
          @min(saved.x, self.cols - 1),
-@@ -2438,6 +2482,10 @@ fn clearTabAtCursor(self: *Terminal) void {
+@@ -3078,6 +3122,10 @@ fn clearTabAtCursor(self: *Terminal) void {
  
  // Same as horizontalTab but moves to the previous tabstop instead of the next.
  pub fn horizontalTabBack(self: *Terminal) void {
@@ -94,7 +94,7 @@ index b2bba5f1f..761c2a9f9 100644
      // With origin mode enabled, our leftmost limit is the left margin.
      const left_limit = if (self.modes.get(.origin)) self.scrolling_region.left else 0;
  
-@@ -2486,8 +2534,9 @@ pub fn tabReset(self: *Terminal) void {
+@@ -3126,8 +3174,9 @@ pub fn tabReset(self: *Terminal) void {
  pub fn index(self: *Terminal) !void {
      const screen: *Screen = self.screens.active;
  
@@ -106,7 +106,7 @@ index b2bba5f1f..761c2a9f9 100644
  
      // We handle our cursor semantic prompt state AFTER doing the
      // scrolling, because we may need to apply to new rows.
-@@ -2693,7 +2742,11 @@ pub fn reverseIndex(self: *Terminal) void {
+@@ -3333,7 +3382,11 @@ pub fn reverseIndex(self: *Terminal) void {
          self.screens.active.cursor.x < self.scrolling_region.left or
          self.screens.active.cursor.x > self.scrolling_region.right)
      {
@@ -118,7 +118,7 @@ index b2bba5f1f..761c2a9f9 100644
          return;
      }
  
-@@ -2769,7 +2822,11 @@ fn cursorPosForSet(self: *const Terminal) struct { row: usize, col: usize } {
+@@ -3409,7 +3462,11 @@ fn cursorPosForSet(self: *const Terminal) struct { row: usize, col: usize } {
  /// Move the cursor to the given row (1-indexed), keeping its column (VPA).
  /// In origin mode the row is relative to the top margin.
  pub fn setCursorRow(self: *Terminal, row: usize) void {
@@ -130,7 +130,7 @@ index b2bba5f1f..761c2a9f9 100644
  }
  
  /// Move the cursor to the given column (1-indexed), keeping its row (CHA
-@@ -3233,6 +3290,17 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3873,6 +3930,17 @@ pub fn insertLines(self: *Terminal, count: usize) void {
      self.insertLinesRows(count, false);
  }
  
@@ -148,7 +148,7 @@ index b2bba5f1f..761c2a9f9 100644
  /// `insertLines`; `sd` for SD and RI, which tmux does as single-line
  /// grid_view_scroll_region_down steps (screen_write_scrolldown).
  fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
-@@ -3457,7 +3525,13 @@ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
+@@ -4097,7 +4165,13 @@ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
          self.screens.active.cursor.x >= self.scrolling_region.left and
          self.screens.active.cursor.x <= self.scrolling_region.right;
      const rem = if (applies) self.scrolling_region.bottom - y + 1 else 0;
@@ -162,7 +162,7 @@ index b2bba5f1f..761c2a9f9 100644
      if (!applies) return;
      const moved = rem - @min(count, rem);
      self.tmuxUnwrapAbove(y);
-@@ -3651,6 +3725,11 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4291,6 +4365,11 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
  ///
  /// The inserted cells are colored according to the current SGR state.
  pub fn insertBlanks(self: *Terminal, count: usize) void {
@@ -174,7 +174,7 @@ index b2bba5f1f..761c2a9f9 100644
      // Unset pending wrap state without wrapping. Note: this purposely
      // happens BEFORE the scroll region check below, because that's what
      // xterm does.
-@@ -3758,6 +3837,9 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+@@ -4398,6 +4477,9 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
  pub fn deleteChars(self: *Terminal, count_req: usize) void {
      if (count_req == 0) return;
  
@@ -184,7 +184,7 @@ index b2bba5f1f..761c2a9f9 100644
      // If our cursor is outside the margins then do nothing. We DO reset
      // wrap state still so this must remain below the above logic.
      if (self.screens.active.cursor.x < self.scrolling_region.left or
-@@ -3904,6 +3986,9 @@ fn cursorInScrollingRegion(self: *const Terminal) bool {
+@@ -4544,6 +4626,9 @@ fn cursorInScrollingRegion(self: *const Terminal) bool {
  }
  
  pub fn eraseChars(self: *Terminal, count_req: usize) void {
@@ -194,7 +194,7 @@ index b2bba5f1f..761c2a9f9 100644
      const count = end: {
          const remaining = self.cols - self.screens.active.cursor.x;
          var end = @min(remaining, @max(count_req, 1));
-@@ -3967,6 +4052,12 @@ pub fn eraseLine(
+@@ -4607,6 +4692,12 @@ pub fn eraseLine(
      mode: csi.EraseLine,
      protected_req: bool,
  ) void {
@@ -207,7 +207,7 @@ index b2bba5f1f..761c2a9f9 100644
      // Get our start/end positions depending on mode.
      const start, const end = switch (mode) {
          .right => right: {
-@@ -4033,10 +4124,6 @@ pub fn eraseLine(
+@@ -4673,10 +4764,6 @@ pub fn eraseLine(
          },
      };
  
@@ -218,7 +218,7 @@ index b2bba5f1f..761c2a9f9 100644
      // We always mark our row as dirty
      self.screens.active.cursorMarkDirty();
  
-@@ -4189,8 +4276,8 @@ pub fn eraseDisplay(
+@@ -4830,8 +4917,8 @@ pub fn eraseDisplay(
              // the last history line.
              self.tmuxUnwrapAbove(0);
  
@@ -229,7 +229,7 @@ index b2bba5f1f..761c2a9f9 100644
  
              if (comptime build_options.kitty_graphics) {
                  // ED2 clears visible placements but preserves graphics that
-@@ -4245,8 +4332,8 @@ pub fn eraseDisplay(
+@@ -4886,8 +4973,8 @@ pub fn eraseDisplay(
                  self.tmuxUnwrapAbove(0);
              }
  
@@ -240,7 +240,7 @@ index b2bba5f1f..761c2a9f9 100644
          },
  
          .scrollback => self.screens.active.eraseHistory(null),
-@@ -6899,9 +6986,11 @@ test "Terminal: VS15 narrows wide cell under restored pending cursor" {
+@@ -7547,9 +7634,11 @@ test "Terminal: VS15 narrows wide cell under restored pending cursor" {
      try t.print(0x2614);
  
      // Restoring also restores pending_wrap, so grapheme lookup selects the
@@ -254,7 +254,7 @@ index b2bba5f1f..761c2a9f9 100644
      try t.print(0xFE0E);
  
      try testing.expectEqual(@as(usize, 4), t.screens.active.cursor.x);
-@@ -8106,9 +8195,10 @@ test "Terminal: print with wraparound disabled clears pending wrap after CBT" {
+@@ -8754,9 +8843,10 @@ test "Terminal: print with wraparound disabled clears pending wrap after CBT" {
          t.modes.set(.wraparound, wrap_on_fill);
          try t.printString("abcdef");
          t.modes.set(.wraparound, false);
@@ -267,7 +267,7 @@ index b2bba5f1f..761c2a9f9 100644
          try t.print('x');
          try testing.expect(!t.screens.active.cursor.pending_wrap);
  
-@@ -8553,7 +8643,7 @@ test "Terminal: linefeed and carriage return" {
+@@ -9306,7 +9396,7 @@ test "Terminal: linefeed and carriage return" {
      }
  }
  
@@ -276,7 +276,7 @@ index b2bba5f1f..761c2a9f9 100644
      var t = try init(testing.io, testing.allocator, .{ .cols = 5, .rows = 80 });
      defer t.deinit(testing.allocator);
  
-@@ -8564,7 +8654,9 @@ test "Terminal: linefeed unsets pending wrap" {
+@@ -9317,7 +9407,9 @@ test "Terminal: linefeed unsets pending wrap" {
      try t.linefeed();
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
@@ -287,7 +287,7 @@ index b2bba5f1f..761c2a9f9 100644
  }
  
  test "Terminal: linefeed mode automatic carriage return" {
-@@ -10678,7 +10770,7 @@ test "Terminal: eraseChars wide character" {
+@@ -11431,7 +11523,7 @@ test "Terminal: eraseChars wide character" {
      }
  }
  
@@ -296,7 +296,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -10686,14 +10778,15 @@ test "Terminal: eraseChars resets pending wrap" {
+@@ -11439,14 +11531,15 @@ test "Terminal: eraseChars resets pending wrap" {
  
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
@@ -314,7 +314,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -11998,7 +12091,7 @@ test "Terminal: backspace at left margin" {
+@@ -12751,7 +12844,7 @@ test "Terminal: backspace at left margin" {
      }
  }
  
@@ -323,7 +323,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -12010,14 +12103,16 @@ test "Terminal: cursorLeft unsets pending wrap state" {
+@@ -12763,14 +12856,16 @@ test "Terminal: cursorLeft unsets pending wrap state" {
      try testing.expect(!t.screens.active.cursor.pending_wrap);
      try t.print('X');
  
@@ -342,7 +342,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -12032,7 +12127,8 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
+@@ -12785,7 +12880,8 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
      {
          const str = try t.plainString(testing.allocator);
          defer testing.allocator.free(str);
@@ -352,7 +352,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -12075,7 +12171,10 @@ test "Terminal: cursorLeft reverse wrap with pending wrap above top margin" {
+@@ -12828,7 +12924,10 @@ test "Terminal: cursorLeft reverse wrap with pending wrap above top margin" {
      t.setLeftAndRightMargin(2, 5);
      t.setTopAndBottomMargin(3, 5);
      t.restoreCursor();
@@ -364,7 +364,7 @@ index b2bba5f1f..761c2a9f9 100644
  
      t.cursorLeft(1);
      try testing.expect(!t.screens.active.cursor.pending_wrap);
-@@ -13640,7 +13739,9 @@ test "Terminal: insertBlanks outside left/right scroll region" {
+@@ -14393,7 +14492,9 @@ test "Terminal: insertBlanks outside left/right scroll region" {
      t.clearDirty();
      t.insertBlanks(2);
      try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
@@ -375,7 +375,7 @@ index b2bba5f1f..761c2a9f9 100644
      try t.print('X');
  
      {
-@@ -14124,7 +14225,7 @@ test "Terminal: deleteChars should shift left" {
+@@ -14877,7 +14978,7 @@ test "Terminal: deleteChars should shift left" {
      }
  }
  
@@ -384,7 +384,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -14132,14 +14233,16 @@ test "Terminal: deleteChars resets pending wrap" {
+@@ -14885,14 +14986,16 @@ test "Terminal: deleteChars resets pending wrap" {
  
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
@@ -403,7 +403,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -14799,7 +14902,7 @@ test "Terminal: saveCursor position" {
+@@ -15552,7 +15655,7 @@ test "Terminal: saveCursor position" {
      }
  }
  
@@ -412,7 +412,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -14813,10 +14916,12 @@ test "Terminal: saveCursor pending wrap state" {
+@@ -15566,10 +15669,12 @@ test "Terminal: saveCursor pending wrap state" {
      t.restoreCursor();
      try t.print('X');
  
@@ -426,7 +426,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -15297,6 +15402,109 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+@@ -16050,6 +16155,109 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
      try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
  }
  
@@ -536,7 +536,7 @@ index b2bba5f1f..761c2a9f9 100644
  test "Terminal: eraseLine resets wrap" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -15511,7 +15719,7 @@ test "Terminal: eraseLine simple erase left" {
+@@ -16264,7 +16472,7 @@ test "Terminal: eraseLine simple erase left" {
      }
  }
  
@@ -545,7 +545,7 @@ index b2bba5f1f..761c2a9f9 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -15522,13 +15730,15 @@ test "Terminal: eraseLine left resets wrap" {
+@@ -16275,13 +16483,15 @@ test "Terminal: eraseLine left resets wrap" {
      t.clearDirty();
      t.eraseLine(.left, false);
      try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
@@ -563,7 +563,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -15881,20 +16091,30 @@ test "Terminal: printRepeat simple" {
+@@ -16634,20 +16844,30 @@ test "Terminal: printRepeat simple" {
      }
  }
  
@@ -596,7 +596,7 @@ index b2bba5f1f..761c2a9f9 100644
      }
  }
  
-@@ -17996,6 +18216,12 @@ test "Terminal: resize pending wrap live and saved cursors" {
+@@ -19770,6 +19990,12 @@ test "Terminal: resize pending wrap live and saved cursors" {
  
              try t.resize(alloc, .{ .cols = case.cols, .rows = 6 });
              if (restore) t.restoreCursor();
@@ -610,10 +610,10 @@ index b2bba5f1f..761c2a9f9 100644
  
              try t.print('X');
 diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
-index c3e4c25fb..2b7ef336b 100644
+index 8376f6c02..dd60da5f2 100644
 --- a/src/terminal/formatter.zig
 +++ b/src/terminal/formatter.zig
-@@ -5719,6 +5719,11 @@ test "Terminal vt cursor preserves pending wrap" {
+@@ -5715,6 +5715,11 @@ test "Terminal vt cursor preserves pending wrap" {
  }
  
  test "Terminal vt cursor preserves pending wrap over a blank cell" {
@@ -626,10 +626,10 @@ index c3e4c25fb..2b7ef336b 100644
      const alloc = testing.allocator;
      const io = testing.io;
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
-index 1da0e2819..d65491550 100644
+index f36546cd5..7e77d18f3 100644
 --- a/src/terminal/stream_terminal.zig
 +++ b/src/terminal/stream_terminal.zig
-@@ -663,7 +663,7 @@ pub const Handler = struct {
+@@ -673,7 +673,7 @@ pub const Handler = struct {
              .erase_line_right_unless_pending_wrap => self.terminal.eraseLine(.right_unless_pending_wrap, value),
              .delete_chars => self.terminal.deleteChars(value),
              .erase_chars => self.terminal.eraseChars(value),

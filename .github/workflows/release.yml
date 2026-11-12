@@ -52,7 +52,7 @@ jobs:
           reference-tmux: "false"
           rust-cache: "false"
           targets: ${{ matrix.target }}
-      # vtmux-ghostty-vt-sys's build script downloads the pinned ghostty commit,
+      # vtmux-ghostty-vt-sys's build script downloads the pinned libghostty-vt release,
       # applies the vendored patches and builds it with Zig (ReleaseFast,
       # baseline CPU).
       - name: Build and package

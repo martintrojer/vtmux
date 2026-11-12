@@ -94,7 +94,7 @@ esac
 
 cp LICENSE README.md CHANGELOG.md "$stage/"
 # libghostty-vt is linked in statically: ship its licence and Ghostty's (the
-# pinned commit's, kept beside the patches).
+# pinned release's, kept beside the patches).
 cp third_party/libghostty-rs/LICENSE "$stage/licenses/libghostty-rs-LICENSE"
 cp third_party/libghostty-rs/libghostty-vt-sys/LICENSE-ghostty "$stage/licenses/ghostty-LICENSE"
 

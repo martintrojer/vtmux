@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/grid_ref.h b/include/ghostty/vt/grid_ref.h
-index c43791dc2..e32833393 100644
+index 5bbe41b3c..31ebb81eb 100644
 --- a/include/ghostty/vt/grid_ref.h
 +++ b/include/ghostty/vt/grid_ref.h
-@@ -137,6 +137,20 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_cell(const GhosttyGridRef *ref,
+@@ -136,6 +136,20 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_cell(const GhosttyGridRef *ref,
  GHOSTTY_API GhosttyResult ghostty_grid_ref_row(const GhosttyGridRef *ref,
                                     GhosttyRow *out_row);
  
@@ -24,10 +24,10 @@ index c43791dc2..e32833393 100644
   * Get the grapheme cluster codepoints for the cell at the grid reference's
   * position.
 diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
-index b58655659..3cb479cca 100644
+index bb887c01b..ef68a1ac1 100644
 --- a/include/ghostty/vt/terminal.h
 +++ b/include/ghostty/vt/terminal.h
-@@ -3245,6 +3245,25 @@ GHOSTTY_API GhosttyResult ghostty_terminal_new(const GhosttyAllocator* allocator
+@@ -3128,6 +3128,25 @@ GHOSTTY_API GhosttyResult ghostty_terminal_new(const GhosttyAllocator* allocator
   */
  GHOSTTY_API void ghostty_terminal_free(GhosttyTerminal terminal);
  
@@ -54,30 +54,30 @@ index b58655659..3cb479cca 100644
   * Perform a full reset of the terminal (RIS).
   *
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 06252080a..b59b7ef09 100644
+index 440031a2e..8a462a1f8 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -326,6 +326,7 @@ comptime {
-         }
+@@ -311,6 +311,7 @@ comptime {
+         @export(&c.render_state_free, .{ .name = "ghostty_render_state_free" });
          @export(&c.terminal_new, .{ .name = "ghostty_terminal_new" });
          @export(&c.terminal_free, .{ .name = "ghostty_terminal_free" });
 +        @export(&c.terminal_clone_screen, .{ .name = "ghostty_terminal_clone_screen" });
          @export(&c.terminal_reset, .{ .name = "ghostty_terminal_reset" });
          @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
          @export(&c.terminal_set, .{ .name = "ghostty_terminal_set" });
-@@ -416,6 +417,7 @@ comptime {
-             @export(&c.grid_ref_cell, .{ .name = "ghostty_grid_ref_cell" });
-             @export(&c.grid_ref_row, .{ .name = "ghostty_grid_ref_row" });
-             @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
-+            @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
-             @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
-             @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
-             @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
+@@ -388,6 +389,7 @@ comptime {
+         @export(&c.grid_ref_cell, .{ .name = "ghostty_grid_ref_cell" });
+         @export(&c.grid_ref_row, .{ .name = "ghostty_grid_ref_row" });
+         @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
++        @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
+         @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
+         @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
+         @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index dc2be684d..0c9187e90 100644
+index 5bc8fb3f2..226de7081 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1135,6 +1135,33 @@ pub fn clone(
+@@ -1145,6 +1145,33 @@ pub fn clone(
      var total_rows: usize = 0;
      var page_size: usize = 0;
      while (it.next()) |chunk| {
@@ -111,7 +111,7 @@ index dc2be684d..0c9187e90 100644
          // Clone the page. We have to use createPageExt here because
          // we don't know if the source page has a standard size.
          const node = try createPageExt(
-@@ -1230,6 +1257,46 @@ pub fn clone(
+@@ -1240,6 +1267,46 @@ pub fn clone(
      return result;
  }
  
@@ -158,7 +158,7 @@ index dc2be684d..0c9187e90 100644
  /// Resize options
  pub const Resize = struct {
      /// The new cols/cells of the screen.
-@@ -9672,17 +9739,72 @@ test "PageList compression restores through page access" {
+@@ -10406,17 +10473,72 @@ test "PageList compression restores through page access" {
      try testing.expect(!node.isCompressed());
      try testing.expectEqualSlices(u8, expected, node.page().memory);
  
@@ -235,10 +235,10 @@ index dc2be684d..0c9187e90 100644
  
  test "PageList compression uses temporary scratch for oversized pages" {
 diff --git a/src/terminal/c/grid_ref.zig b/src/terminal/c/grid_ref.zig
-index 20f49be91..4fd649b0b 100644
+index bdf9654e1..ebb74faf6 100644
 --- a/src/terminal/c/grid_ref.zig
 +++ b/src/terminal/c/grid_ref.zig
-@@ -58,6 +58,25 @@ pub fn grid_ref_row(
+@@ -74,6 +74,25 @@ pub fn grid_ref_row(
      return .success;
  }
  
@@ -262,13 +262,13 @@ index 20f49be91..4fd649b0b 100644
 +}
 +
  pub fn grid_ref_graphemes(
-     ref: *const CGridRef,
-     out_buf: ?[*]u32,
+     ref_: ?*const CGridRef,
+     buf_: ?[*]u32,
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index a0c0dc33c..b32514a02 100644
+index 3c32b58b1..57fca67e5 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -189,6 +189,7 @@ pub const sys_set = sys.set;
+@@ -194,6 +194,7 @@ pub const sys_set = sys.set;
  
  pub const terminal_new = terminal.new;
  pub const terminal_free = terminal.free;
@@ -276,7 +276,7 @@ index a0c0dc33c..b32514a02 100644
  pub const terminal_reset = terminal.reset;
  pub const terminal_resize = terminal.resize;
  pub const terminal_set = terminal.set;
-@@ -256,6 +257,7 @@ pub const unicode_grapheme_width = unicode.grapheme_width;
+@@ -262,6 +263,7 @@ pub const unicode_grapheme_width = unicode.grapheme_width;
  pub const grid_ref_cell = grid_ref.grid_ref_cell;
  pub const grid_ref_row = grid_ref.grid_ref_row;
  pub const grid_ref_graphemes = grid_ref.grid_ref_graphemes;
@@ -285,10 +285,10 @@ index a0c0dc33c..b32514a02 100644
  pub const grid_ref_style = grid_ref.grid_ref_style;
  pub const tracked_grid_ref_free = grid_ref_tracked.tracked_grid_ref_free;
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
-index 5f047f489..f2678a534 100644
+index a5f6a3184..1b5a4248c 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -1054,6 +1054,40 @@ fn new_(
+@@ -1063,6 +1063,40 @@ fn new_(
      );
  }
  
@@ -328,4 +328,4 @@ index 5f047f489..f2678a534 100644
 +
  pub fn vt_write(
      terminal_: Terminal,
-     ptr: [*]const u8,
+     ptr_: ?[*]const u8,

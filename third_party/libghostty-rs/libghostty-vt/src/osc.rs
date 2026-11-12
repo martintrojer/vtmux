@@ -1,6 +1,6 @@
 //! Handling OSC (Operating System Command) escape sequences.
 
-use std::{ffi::CStr, marker::PhantomData, mem::MaybeUninit};
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -148,7 +148,7 @@ impl<'p> Command<'p, '_> {
     }
 
     fn window_title(&self) -> Option<&'p str> {
-        let mut value = MaybeUninit::<*const std::ffi::c_char>::uninit();
+        let mut value = MaybeUninit::<ffi::String>::uninit();
         let result = unsafe {
             ffi::ghostty_osc_command_data(
                 self.inner.as_raw(),
@@ -156,16 +156,13 @@ impl<'p> Command<'p, '_> {
                 value.as_mut_ptr().cast(),
             )
         };
-        if !result {
+        if result != ffi::Result::SUCCESS {
             return None;
         }
-        // SAFETY: osc.h specifies const char **, a NUL-terminated string
-        // owned by the parser and valid for our exclusive parser borrow 'p.
-        let ptr = unsafe { value.assume_init() };
-        if ptr.is_null() {
-            return None;
-        }
-        unsafe { CStr::from_ptr(ptr) }.to_str().ok()
+        // SAFETY: osc.h (libghostty-vt 1.0) specifies a GhosttyString owned
+        // by the parser and valid for our exclusive parser borrow 'p.
+        let title = unsafe { value.assume_init() };
+        std::str::from_utf8(unsafe { title.to_bytes() }).ok()
     }
 }
 

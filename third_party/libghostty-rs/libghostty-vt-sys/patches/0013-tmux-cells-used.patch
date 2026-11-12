@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index af2828d0a..10da16c03 100644
+index 5754cff64..779e05335 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1749,6 +1749,21 @@ const ReflowCursor = struct {
+@@ -1834,6 +1834,21 @@ const ReflowCursor = struct {
          const prev_wrap = self.prev_wrap;
          defer self.prev_wrap = src_row.wrap;
  
@@ -24,7 +24,7 @@ index af2828d0a..10da16c03 100644
          // Calculate the columns in this row. First up we trim non-semantic
          // rightmost blanks.
          var cols_len = src_page.size.cols;
-@@ -1758,11 +1773,37 @@ const ReflowCursor = struct {
+@@ -1843,11 +1858,37 @@ const ReflowCursor = struct {
                  cols_len -= 1;
              }
  
@@ -63,7 +63,7 @@ index af2828d0a..10da16c03 100644
  
          // Handle tracked pin adjustments. We also note whether any
          // tracked pin is on this row at all so that the per-cell loop
-@@ -1774,7 +1815,7 @@ const ReflowCursor = struct {
+@@ -1859,7 +1900,7 @@ const ReflowCursor = struct {
          var row_has_pins = false;
          {
              // Deferred line breaks and pending wrap reset the destination column.
@@ -72,7 +72,7 @@ index af2828d0a..10da16c03 100644
  
              const pin_keys = list.tracked_pins.keys();
              for (pin_keys) |p| {
-@@ -1790,7 +1831,7 @@ const ReflowCursor = struct {
+@@ -1875,7 +1916,7 @@ const ReflowCursor = struct {
                  // col width instead.
                  if (p.x >= cols_len) p.x = @min(
                      p.x,
@@ -81,7 +81,7 @@ index af2828d0a..10da16c03 100644
                  );
  
                  // We increase our col len to at least include this pin.
-@@ -1804,32 +1845,14 @@ const ReflowCursor = struct {
+@@ -1889,32 +1930,14 @@ const ReflowCursor = struct {
          // before the next write and must reflow with it.
          if (cursor_pin) |p| {
              if (p.node == row.node and p.y == src_y) {
@@ -118,7 +118,7 @@ index af2828d0a..10da16c03 100644
          // Defer processing of blank rows so that blank rows
          // at the end of the page list are never written.
          if (cols_len == 0) {
-@@ -1882,7 +1905,12 @@ const ReflowCursor = struct {
+@@ -1996,7 +2019,12 @@ const ReflowCursor = struct {
                  );
                  const window = cells[x..][0..max_run];
                  const run = bulkRunLength(window);
@@ -131,7 +131,7 @@ index af2828d0a..10da16c03 100644
                      x += run;
                      continue;
                  }
-@@ -1902,11 +1930,27 @@ const ReflowCursor = struct {
+@@ -2016,11 +2044,27 @@ const ReflowCursor = struct {
                  }
              }
  
@@ -162,10 +162,10 @@ index af2828d0a..10da16c03 100644
                  .success => x += 1,
  
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index 0c48df85d..17a3bc130 100644
+index feab8bf7e..61e8033bc 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -9193,8 +9193,11 @@ test "Screen: resize less cols reflows cursor after empty cells" {
+@@ -9303,8 +9303,11 @@ test "Screen: resize less cols reflows cursor after empty cells" {
  
      try s.resize(.{ .cols = 5, .rows = 3 });
  
@@ -180,19 +180,32 @@ index 0c48df85d..17a3bc130 100644
  
  test "Screen: resize more cols with wide spacer head" {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 09f762d33..b2bba5f1f 100644
+index f3a20b1f9..f1d4970a6 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -1252,6 +1252,8 @@ fn printSliceFill(
-         if (k > 0) {
+@@ -1396,6 +1396,8 @@ fn printSliceFill(
              assert(k % cells_per_cp == 0);
-             cursor.page_row.dirty = true;
+ 
+             cursor.page_row.markWritten();
 +            // vtmux: tmux's cellused (grid_set_cells).
 +            cursor.page_row.tmuxRaiseUsed(@as(usize, cursor.x) + k);
              if (style_id != style.default_id) cursor.page_row.styled = true;
-             self.previous_char = @intCast(cps[printed + k / cells_per_cp - 1]);
-             printed += k / cells_per_cp;
-@@ -1701,6 +1703,12 @@ fn writeCell(
+ 
+             // Every cell written has the hyperlink flag from the
+@@ -1632,6 +1634,12 @@ inline fn printSliceTransition(
+     grapheme_cluster: bool,
+     allow_unicode: bool,
+ ) ?unicode.Properties {
++    // vtmux: never. printSliceMixed sizes codepoints by Ghostty's table
++    // and clusters by Ghostty's rules, and keeps none of tmux's row
++    // bookkeeping (cellused, GRID_LINE_EXTENDED); vtmux's width overrides
++    // (0007), clustering (0027) and line flags (0013, 0034) need the
++    // batches of printSliceFill and print(), as before 1.0.
++    if (comptime true) return null;
+     if (!allow_unicode) return null;
+     if (cp < 0x10) return null;
+     if (comptime build_options.kitty_graphics) {
+@@ -2335,6 +2343,12 @@ fn writeCell(
      // vtmux: writing over part of a tab clears all of it.
      if (cell.tab != 0) self.clearTabAtCursor();
  
@@ -205,7 +218,7 @@ index 09f762d33..b2bba5f1f 100644
      // If the wide property of this cell is the same, then we don't
      // need to do the special handling here because the structure will
      // be the same. If it is NOT the same, then we may need to clear some
-@@ -2409,6 +2417,8 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
+@@ -3043,6 +3057,8 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
  
      row[from].tab = @intCast(width);
      for (from + 1..to) |x| row[x].tab = Cell.tab_continuation;
@@ -214,7 +227,7 @@ index 09f762d33..b2bba5f1f 100644
      self.screens.active.cursorMarkDirty();
  }
  
-@@ -3724,6 +3734,10 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+@@ -4358,6 +4374,10 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
              const dst: *Cell = @ptrCast(x + adjusted_count);
              page.swapCells(src, dst);
          }
@@ -225,7 +238,7 @@ index 09f762d33..b2bba5f1f 100644
      }
  
      // Insert blanks. The blanks preserve the background color.
-@@ -3779,6 +3793,12 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+@@ -4413,6 +4433,12 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
              const dst: *Cell = @ptrCast(x);
              page.swapCells(src, dst);
          }
@@ -238,7 +251,7 @@ index 09f762d33..b2bba5f1f 100644
      }
  
      // Insert blanks. The blanks preserve the background color.
-@@ -3909,6 +3929,13 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -4543,6 +4569,13 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // Reset our row's soft-wrap.
      self.screens.active.cursorResetWrap();
  
@@ -252,7 +265,7 @@ index 09f762d33..b2bba5f1f 100644
      // Mark our cursor row as dirty
      self.screens.active.cursorMarkDirty();
  
-@@ -3955,6 +3982,7 @@ pub fn eraseLine(
+@@ -4589,6 +4622,7 @@ pub fn eraseLine(
              if (x == 0) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -260,7 +273,7 @@ index 09f762d33..b2bba5f1f 100644
              }
  
              // If our X is a wide spacer tail then we need to erase the
-@@ -3974,6 +4002,7 @@ pub fn eraseLine(
+@@ -4608,6 +4642,7 @@ pub fn eraseLine(
              if (x >= self.cols - 1) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -268,7 +281,7 @@ index 09f762d33..b2bba5f1f 100644
              }
  
              // If our x is a wide char we need to delete the tail too.
-@@ -3990,8 +4019,10 @@ pub fn eraseLine(
+@@ -4624,8 +4659,10 @@ pub fn eraseLine(
              // continue onto the next row.
              self.screens.active.cursorResetWrap();
  
@@ -280,7 +293,7 @@ index 09f762d33..b2bba5f1f 100644
  
              break :complete .{ 0, self.cols };
          },
-@@ -15132,6 +15163,140 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+@@ -15879,6 +15916,140 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
      try testing.expect(!r1.wrap_continuation);
  }
  
@@ -422,14 +435,14 @@ index 09f762d33..b2bba5f1f 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 1f26a2c3c..b71717388 100644
+index 2ef863ee7..bfae3bd31 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2109,7 +2109,18 @@ pub const Row = packed struct(u64) {
-     /// screen.
-     dirty: bool = false,
+@@ -2304,7 +2304,18 @@ pub const Row = packed struct(u64) {
+     /// `PageList.trimTrailingBlankRows` don't read them.
+     blank: bool = false,
  
--    _padding: u23 = 0,
+-    _padding: u22 = 0,
 +    /// vtmux: tmux's `cellused` (grid.c `struct grid_line`): how far the
 +    /// row has been written, a high-water mark that printing raises and
 +    /// erasing does not lower (grid_set_cell raises it, grid_clear keeps
@@ -441,11 +454,11 @@ index 1f26a2c3c..b71717388 100644
 +    /// from somewhere that does not keep it measures by its text.
 +    tmux_used: size.CellCountInt = 0,
 +
-+    _padding: u7 = 0,
++    _padding: u6 = 0,
  
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {
-@@ -2166,6 +2177,27 @@ pub const Row = packed struct(u64) {
+@@ -2387,6 +2398,27 @@ pub const Row = packed struct(u64) {
          assert(!self.managedMemory());
          self.* = .{ .cells = self.cells, .dirty = true };
      }

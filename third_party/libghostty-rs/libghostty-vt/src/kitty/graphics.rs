@@ -425,11 +425,10 @@ impl<'t> Image<'t> {
     ///
     /// Valid as long as the underlying terminal is not mutated.
     pub fn data(&self) -> Result<&'t [u8]> {
-        let ptr = self.get::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?;
-        let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
+        let pixels = self.get::<ffi::String>(ffi::KittyGraphicsImageData::PIXELS)?;
 
         // SAFETY: We trust libghostty to return valid results
-        Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
+        Ok(unsafe { pixels.to_bytes() })
     }
 }
 
@@ -524,10 +523,14 @@ impl<'t, 'alloc> PlacementIteration<'t, 'alloc> {
 
     /// Set the z-layer filter for the iterator.
     pub fn set_layer(&self, layer: Layer) -> Result<()> {
-        self.set::<ffi::KittyPlacementLayer::Type>(
-            ffi::KittyGraphicsPlacementIteratorOption::LAYER,
-            &layer.into(),
-        )
+        // libghostty-vt 1.0 takes a mask of GhosttyImageLayer bits (0: all).
+        let mask: u32 = match layer {
+            Layer::All => 0,
+            Layer::BelowBg => 1 << ffi::ImageLayer::BELOW_BACKGROUND,
+            Layer::BelowText => 1 << ffi::ImageLayer::BELOW_TEXT,
+            Layer::AboveText => 1 << ffi::ImageLayer::ABOVE_TEXT,
+        };
+        self.set::<u32>(ffi::KittyGraphicsPlacementIteratorOption::LAYER, &mask)
     }
 
     /// Compute the rendered pixel size of the current placement.
@@ -796,19 +799,18 @@ pub struct SourceRect {
 }
 
 /// Z-layer classification for kitty graphics placements.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Layer {
     /// Match all placements; apply no filtering (default behavior).
     #[default]
-    All = ffi::KittyPlacementLayer::ALL,
+    All,
     /// Match placements positioned below the cell background (z < [`i32::MIN`] / 2).
-    BelowBg = ffi::KittyPlacementLayer::BELOW_BG,
+    BelowBg,
     /// Match placements positioned above the cell background and below text
     /// ([`i32::MIN`] / 2 ≤ z < 0).
-    BelowText = ffi::KittyPlacementLayer::BELOW_TEXT,
+    BelowText,
     /// Match placements positioned above text (z ≥ 0).
-    AboveText = ffi::KittyPlacementLayer::ABOVE_TEXT,
+    AboveText,
 }
 
 /// Pixel format of a Kitty graphics image.

@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
-index a3592975b..f60b83775 100644
+index d12f68588..3603e2690 100644
 --- a/include/ghostty/vt/screen.h
 +++ b/include/ghostty/vt/screen.h
-@@ -330,6 +330,14 @@ typedef enum GHOSTTY_ENUM_TYPED {
+@@ -344,6 +344,14 @@ typedef enum GHOSTTY_ENUM_TYPED {
     * Output type: bool *
     */
    GHOSTTY_ROW_DATA_DIRTY = 8,
@@ -33,13 +33,13 @@ index 46cf8be97..c7fdfc83b 100644
  /**
   * One row. Its cells are `cells[cell_start .. cell_start + cell_count]`
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index f2dc09530..cf8313276 100644
+index a248daa70..2a444e2a5 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -2046,6 +2046,15 @@ const ReflowCursor = struct {
+@@ -2149,6 +2149,15 @@ const ReflowCursor = struct {
+         {
+             self.copyRowMetadata(src_row);
          }
- 
-         self.copyRowMetadata(src_row);
 +        // vtmux: a line tmux moves, splits or joins onto keeps its line
 +        // flags on its first row (grid_reflow_move, grid_reflow_split's
 +        // first line, grid_reflow_join's target); the rows it makes and
@@ -52,7 +52,7 @@ index f2dc09530..cf8313276 100644
  
          // vtmux: the destination rows this row's cells start (tmux_hscrolled).
          const tmux_rows_start = self.total_rows;
-@@ -2836,11 +2845,17 @@ const ReflowCursor = struct {
+@@ -3012,11 +3021,17 @@ const ReflowCursor = struct {
                      // These are guaranteed to have no style or grapheme
                      // data associated with them so we can fast path them.
                      self.page_cell.* = cell.*;
@@ -70,7 +70,7 @@ index f2dc09530..cf8313276 100644
              // These will create issues by trying to clone managed memory that
              // isn't set if the current dst row needs to be moved to a new page.
              // They'll be fixed once we do properly copy the relevant memory.
-@@ -3422,6 +3437,24 @@ const ReflowCursor = struct {
+@@ -3593,6 +3608,24 @@ const ReflowCursor = struct {
      }
  };
  
@@ -87,7 +87,7 @@ index f2dc09530..cf8313276 100644
 +        return true;
 +    if (!cell.hasStyling()) return false;
 +    const s = page.styles.get(page.memory, cell.style_id);
-+    return s.fg_color == .rgb or s.bg_color == .rgb or s.underline_color != .none or
++    return s.fg_color.tag == .rgb or s.bg_color.tag == .rgb or s.underline_color.tag != .none or
 +        s.flags.strikethrough or s.flags.overline or
 +        (s.flags.underline != .none and s.flags.underline != .single);
 +}
@@ -96,7 +96,7 @@ index f2dc09530..cf8313276 100644
      // We only set the new minimums if we're not reflowing. If we are
      // reflowing, then the outer resize call handles this for us.
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index c1b3b99d2..55139fbed 100644
+index 136fa5ebb..efdb3ff00 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
 @@ -1005,7 +1005,7 @@ pub fn cursorDownScroll(self: *Screen) !void {
@@ -108,9 +108,9 @@ index c1b3b99d2..55139fbed 100644
  
              self.cursorMarkDirty();
          } else {
-@@ -1226,6 +1226,9 @@ pub fn cursorScrollAbove(self: *Screen) !void {
-             const cell_current: [*]pagepkg.Cell = @ptrCast(self.cursor.page_cell);
+@@ -1231,6 +1231,9 @@ pub fn cursorScrollAbove(self: *Screen) !void {
              const cells = cell_current - self.cursor.x;
+             self.cursor.page_row.blank = false;
              @memset(cells[0..self.pages.cols], blank_cell);
 +            // vtmux: tmux clears the new line in an RGB background with
 +            // extended cells (grid_empty_line).
@@ -118,7 +118,7 @@ index c1b3b99d2..55139fbed 100644
          }
      }
  }
-@@ -1305,7 +1308,7 @@ fn cursorScrollAboveRotate(
+@@ -1310,7 +1313,7 @@ fn cursorScrollAboveRotate(
      // The recycled storage becomes the new blank cursor row and must
      // not retain metadata (wrap state, semantic prompt) from the row
      // whose content was moved to the next page.
@@ -127,39 +127,40 @@ index c1b3b99d2..55139fbed 100644
  
      // Mark the whole page as dirty.
      //
-@@ -1384,7 +1387,7 @@ pub fn cursorScrollRegionUp(self: *Screen, limit: usize) !void {
-         // The row becomes the new blank cursor row after the rotation
+@@ -1391,7 +1394,11 @@ pub fn cursorScrollRegionUp(self: *Screen, limit: usize) !void {
          // below and must not retain metadata (wrap state, semantic
-         // prompt) from the discarded content.
--        row.reset();
-+        self.resetBlankRow(row);
-     }
+         // prompt) from the discarded content. This is Row.reset.
+         assert(!row.managedMemory());
+-        break :reset .{ .cells = row.cells, .dirty = true };
++        var reset_row: Row = .{ .cells = row.cells, .dirty = true };
++        // vtmux: tmux clears the line in an RGB background with extended
++        // cells (grid_empty_line).
++        if (self.blankCell().content_tag == .bg_color_rgb) reset_row.tmuxMarkExtended(false);
++        break :reset reset_row;
+     };
  
      // Rotate the region rows so the now-blank top row moves to the
-@@ -1879,6 +1882,9 @@ pub fn clearRows(
-             } else {
-                 self.clearCells(page, row, cells);
-                 row.* = .{ .cells = cells_offset };
+@@ -1927,6 +1934,9 @@ pub fn clearRows(
+                     .blank = row.blank,
+                     .dirty = true,
+                 };
 +                // vtmux: tmux empties the line and clears it in an RGB
 +                // background with extended cells (grid_empty_line).
 +                if (self.blankCell().content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
              }
- 
-             row.dirty = true;
-@@ -1985,7 +1991,11 @@ pub fn clearCells(
          }
      }
- 
--    @memset(cells, self.blankCell());
-+    const blank = self.blankCell();
-+    @memset(cells, blank);
+@@ -2050,6 +2060,9 @@ pub fn clearCells(
+     } else if (!blank.isZero()) {
+         row.blank = false;
+     }
 +    // vtmux: tmux clears a cell to an RGB background with an extended
 +    // cell (grid_clear_cell), which sets GRID_LINE_EXTENDED (Row.tmux_extended).
 +    if (blank.content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
  }
  
  /// Clear cells but only if they are not protected.
-@@ -2148,6 +2158,14 @@ pub fn splitCellBoundary(
+@@ -2212,6 +2225,14 @@ pub fn splitCellBoundary(
      }
  }
  
@@ -175,33 +176,33 @@ index c1b3b99d2..55139fbed 100644
  /// require preserving the bg color.
  pub inline fn blankCell(self: *const Screen) Cell {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index c80bc1e4f..e7ec9222a 100644
+index d7d741e7b..5abdb7ab5 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -942,6 +942,12 @@ inline fn printSliceStoreRun(
-     }
- }
+@@ -1039,6 +1039,12 @@ const PrintSliceSimpleMask = pagepkg.Mask(Cell, &.{
+     "tab",
+ }, 4);
  
 +/// vtmux: whether every codepoint is ASCII.
-+fn tmuxAllAscii(cps: []const u32) bool {
++fn tmuxAllAscii(cps: anytype) bool {
 +    for (cps) |cp| if (cp >= 0x80) return false;
 +    return true;
 +}
 +
  /// The row-filling portion of the printSlice fast path, specialized by
- /// width class. The first codepoint must already be validated by the
- /// caller (printSliceFast).
-@@ -979,6 +985,9 @@ fn printSliceFill(
+ /// width class and by whether the cells written are linked to the
+ /// cursor's hyperlink. The first codepoint must already be validated by
+@@ -1069,6 +1075,9 @@ fn printSliceFill(
      // can batch. For codepoints after the first, the previous codepoint
      // in the run is always written as a fresh, single-codepoint cell,
      // so the grapheme break check against it is exact.
 +    // vtmux: whether the run has a character past ASCII (tmux's extended
 +    // cell, see writeCell); the vectorised scan below takes ASCII only.
 +    var run_ascii = cps[0] < 0x80;
-     const run_len: usize = run: {
-         var idx: usize = 1;
- 
-@@ -1011,17 +1020,29 @@ fn printSliceFill(
+     const run_len: usize = if (comptime Cp == u8) ascii: {
+         // Printable ASCII is always narrow and eligible: one run with
+         // nothing to scan.
+@@ -1109,13 +1118,22 @@ fn printSliceFill(
          while (idx < cps.len) : (idx += 1) {
              const cp = cps[idx];
              if (comptime width == .narrow) {
@@ -227,26 +228,30 @@ index c80bc1e4f..e7ec9222a 100644
                      break :run idx;
                  }
                  var state: uucode.grapheme.BreakState = .default;
--                if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) continue;
-+                if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) {
+@@ -1123,7 +1141,10 @@ fn printSliceFill(
+                     unicode.table.get(@intCast(cps[idx - 1])).grapheme_break,
+                     unicode.table.get(@intCast(cp)).grapheme_break,
+                     &state,
+-                )) continue;
++                )) {
 +                    run_ascii = false;
 +                    continue;
 +                }
              }
              break :run idx;
          }
-@@ -1300,6 +1321,10 @@ fn printSliceFill(
-             cursor.page_row.dirty = true;
+@@ -1444,6 +1465,10 @@ fn printSliceFill(
+             cursor.page_row.markWritten();
              // vtmux: tmux's cellused (grid_set_cells).
              cursor.page_row.tmuxRaiseUsed(@as(usize, cursor.x) + k);
 +            // vtmux: tmux's GRID_LINE_EXTENDED (see writeCell).
 +            if (width == .wide or self.tmuxPenExtended() or
 +                (!run_ascii and !tmuxAllAscii(cps[printed..][0 .. k / cells_per_cp])))
-+                cursor.page_row.tmuxMarkExtended(false);
++                cursor.page_row.tmuxMarkExtended(linked);
              if (style_id != style.default_id) cursor.page_row.styled = true;
-             self.previous_char = @intCast(cps[printed + k / cells_per_cp - 1]);
-             printed += k / cells_per_cp;
-@@ -1643,6 +1668,9 @@ pub fn print(self: *Terminal, c: u21) !void {
+ 
+             // Every cell written has the hyperlink flag from the
+@@ -2279,6 +2304,9 @@ pub fn print(self: *Terminal, c: u21) !void {
                  prev.cell.codepoint(),
              });
              self.screens.active.cursorMarkDirty();
@@ -256,7 +261,7 @@ index c80bc1e4f..e7ec9222a 100644
              try self.screens.active.appendGrapheme(prev.cell, c);
              return;
          }
-@@ -1707,6 +1735,8 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2343,6 +2371,8 @@ pub fn print(self: *Terminal, c: u21) !void {
              if (!emoji) return;
          }
  
@@ -265,7 +270,7 @@ index c80bc1e4f..e7ec9222a 100644
          try self.screens.active.appendGrapheme(prev, c);
          return;
      }
-@@ -1809,6 +1839,11 @@ fn printCell(
+@@ -2445,6 +2475,11 @@ fn printCell(
      wide: Cell.Wide,
      set: charsets.Charset,
  ) void {
@@ -277,7 +282,7 @@ index c80bc1e4f..e7ec9222a 100644
      const c: u21 = c: {
          // TODO: non-utf8 handling, gr
  
-@@ -1831,6 +1866,31 @@ fn printCell(
+@@ -2467,6 +2502,31 @@ fn printCell(
      @call(.always_inline, writeCell, .{ self, c, wide });
  }
  
@@ -291,7 +296,7 @@ index c80bc1e4f..e7ec9222a 100644
 +    if (cursor.hyperlink_id != 0) return true;
 +    if (cursor.style_id == style.default_id) return false;
 +    const s = &cursor.style;
-+    return s.fg_color == .rgb or s.bg_color == .rgb or s.underline_color != .none or
++    return s.fg_color.tag == .rgb or s.bg_color.tag == .rgb or s.underline_color.tag != .none or
 +        s.flags.strikethrough or s.flags.overline or
 +        (s.flags.underline != .none and s.flags.underline != .single);
 +}
@@ -309,7 +314,7 @@ index c80bc1e4f..e7ec9222a 100644
  /// Writes c into the cell under the cursor as it is, without a charset.
  fn writeCell(
      self: *Terminal,
-@@ -1871,6 +1931,7 @@ fn writeCell(
+@@ -2511,6 +2571,7 @@ fn writeCell(
                      self.screens.active.cursor.page_row,
                      spacer_cell[0..1],
                  );
@@ -317,7 +322,7 @@ index c80bc1e4f..e7ec9222a 100644
  
                  // If we're near the left edge, a wide char may have
                  // wrapped from the previous row, leaving a spacer_head
-@@ -1897,6 +1958,7 @@ fn writeCell(
+@@ -2537,6 +2598,7 @@ fn writeCell(
                      self.screens.active.cursor.page_row,
                      wide_cell[0..1],
                  );
@@ -325,7 +330,7 @@ index c80bc1e4f..e7ec9222a 100644
                  // If we're near the left edge, a wide char may have
                  // wrapped from the previous row, leaving a spacer_head
                  // at the end of that row. Clear it so the previous row
-@@ -1947,6 +2009,15 @@ fn writeCell(
+@@ -2587,6 +2649,15 @@ fn writeCell(
          .semantic_content = self.screens.active.cursor.semantic_content,
      };
  
@@ -341,7 +346,7 @@ index c80bc1e4f..e7ec9222a 100644
      if (style_changed) {
          var page = self.screens.active.cursor.page_pin.node.page();
  
-@@ -2593,8 +2664,10 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
+@@ -3233,8 +3304,10 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
  
      row[from].tab = @intCast(width);
      for (from + 1..to) |x| row[x].tab = Cell.tab_continuation;
@@ -353,7 +358,7 @@ index c80bc1e4f..e7ec9222a 100644
      self.screens.active.cursorMarkDirty();
  }
  
-@@ -3261,7 +3334,7 @@ fn tmuxScrollRegionUpIntoHistory(self: *Terminal) !void {
+@@ -3901,7 +3974,7 @@ fn tmuxScrollRegionUpIntoHistory(self: *Terminal) !void {
          const page = p.node.page();
          const row = p.rowAndCell().row;
          screen.clearCells(page, row, page.getCells(row));
@@ -362,7 +367,7 @@ index c80bc1e4f..e7ec9222a 100644
          const rac = p.rowAndCell();
          screen.cursor.page_row = rac.row;
          screen.cursor.page_cell = rac.cell;
-@@ -3797,7 +3870,7 @@ fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bo
+@@ -4437,7 +4510,7 @@ fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bo
              // storage it recycles. With left/right margins the row
              // keeps content outside the margins so the metadata is
              // preserved, matching the shift case above.
@@ -371,7 +376,7 @@ index c80bc1e4f..e7ec9222a 100644
          }
  
          // Mark the row as dirty
-@@ -4050,7 +4123,7 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4690,7 +4763,7 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
              // storage it recycles. With left/right margins the row
              // keeps content outside the margins so the metadata is
              // preserved, matching the shift case above.
@@ -380,7 +385,7 @@ index c80bc1e4f..e7ec9222a 100644
          }
  
          // Mark the row as dirty
-@@ -4374,7 +4447,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -5014,7 +5087,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
      // is emptied (cellused 0) and the line above unwrapped.
      if (self.screens.active.cursor.x == 0 and count >= self.cols) {
@@ -389,7 +394,7 @@ index c80bc1e4f..e7ec9222a 100644
          self.tmuxUnwrapAbove(self.screens.active.cursor.y);
      }
  
-@@ -4444,7 +4517,7 @@ pub fn eraseLine(
+@@ -5084,7 +5157,7 @@ pub fn eraseLine(
              if (x == 0) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -398,7 +403,7 @@ index c80bc1e4f..e7ec9222a 100644
              }
  
              // If our X is a wide spacer tail then we need to erase the
-@@ -4464,7 +4537,7 @@ pub fn eraseLine(
+@@ -5104,7 +5177,7 @@ pub fn eraseLine(
              if (x >= self.cols - 1) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -407,7 +412,7 @@ index c80bc1e4f..e7ec9222a 100644
              }
  
              // If our x is a wide char we need to delete the tail too.
-@@ -4484,7 +4557,7 @@ pub fn eraseLine(
+@@ -5124,7 +5197,7 @@ pub fn eraseLine(
              // vtmux: tmux's grid_clear_lines also unwraps the line above,
              // and empties the line (cellused 0).
              self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -416,7 +421,7 @@ index c80bc1e4f..e7ec9222a 100644
  
              break :complete .{ 0, self.cols };
          },
-@@ -6845,9 +6918,11 @@ test "Terminal: print over wide char at 0,0" {
+@@ -7458,9 +7531,11 @@ test "Terminal: print over wide char at 0,0" {
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
@@ -429,7 +434,7 @@ index c80bc1e4f..e7ec9222a 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
  
-@@ -6903,9 +6978,10 @@ test "Terminal: print over wide spacer tail" {
+@@ -7516,9 +7591,10 @@ test "Terminal: print over wide spacer tail" {
      try t.print('X');
  
      {
@@ -441,7 +446,7 @@ index c80bc1e4f..e7ec9222a 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
-@@ -8418,9 +8494,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
+@@ -9031,9 +9107,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
      try testing.expectEqual(@as(usize, 0), page.graphemeCount());
  
      {
@@ -454,7 +459,7 @@ index c80bc1e4f..e7ec9222a 100644
      }
  }
  
-@@ -16757,6 +16835,141 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+@@ -17475,6 +17553,141 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
      try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
  }
  
@@ -597,7 +602,7 @@ index c80bc1e4f..e7ec9222a 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/c/row.zig b/src/terminal/c/row.zig
-index b0da5c457..44402909a 100644
+index c56498b4d..471b2e0e6 100644
 --- a/src/terminal/c/row.zig
 +++ b/src/terminal/c/row.zig
 @@ -51,6 +51,12 @@ pub const RowData = enum(c_int) {
@@ -610,28 +615,30 @@ index b0da5c457..44402909a 100644
 +    /// Output type: uint8_t *
 +    tmux_line_flags = 9,
 +
+     _,
+ 
      /// Output type expected for querying the data of the given kind.
-     pub fn OutType(comptime self: RowData) type {
-         return switch (self) {
-@@ -58,6 +64,7 @@ pub const RowData = enum(c_int) {
+@@ -60,6 +66,8 @@ pub const RowData = enum(c_int) {
              .wrap, .wrap_continuation, .grapheme, .styled, .hyperlink => bool,
              .kitty_virtual_placeholder, .dirty => bool,
              .semantic_prompt => SemanticPrompt,
 +            .tmux_line_flags => u8,
++
+             _ => void,
          };
      }
- };
-@@ -120,6 +127,8 @@ fn getTyped(
+@@ -120,6 +128,9 @@ fn getTyped(
          .semantic_prompt => out.* = @fromBackingInt(@backingInt(row.semantic_prompt)),
          .kitty_virtual_placeholder => out.* = row.kitty_virtual_placeholder,
          .dirty => out.* = row.dirty,
 +        .tmux_line_flags => out.* = @as(u8, @intFromBool(row.tmux_extended)) |
 +            @as(u8, @intFromBool(row.tmux_hyperlink)) << 1,
++
+         _ => comptime unreachable,
      }
  
-     return .success;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
-index 5594f210d..e1350ba16 100644
+index 59997047a..b989b243f 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
 @@ -316,6 +316,8 @@ fn rowFlags(row: *const Row) u8 {
@@ -643,7 +650,7 @@ index 5594f210d..e1350ba16 100644
      return flags;
  }
  
-@@ -790,6 +792,8 @@ fn importRows(
+@@ -813,6 +815,8 @@ fn importRows(
          row.wrap_continuation = r.flags & 0x02 != 0;
          row.semantic_prompt = enumFromInt(Row.SemanticPrompt, (r.flags >> 2) & 0x3) orelse .none;
          row.tmux_used = r.used;
@@ -652,7 +659,7 @@ index 5594f210d..e1350ba16 100644
          const dst = page.getCells(row);
          if (r.cell_count > dst.len) return error.Invalid;
          if (@as(usize, r.cell_start) + r.cell_count > cells.len) return error.Invalid;
-@@ -1651,6 +1655,15 @@ test "vtmux state: rows round trip into a fresh terminal" {
+@@ -1674,6 +1678,15 @@ test "vtmux state: rows round trip into a fresh terminal" {
      const str_b = try sb.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
      defer testing.allocator.free(str_b);
      try testing.expectEqualStrings(str_a, str_b);
@@ -669,12 +676,12 @@ index 5594f210d..e1350ba16 100644
  
  test "vtmux state: malformed pages and states are refused" {
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index b71717388..b916ef2cc 100644
+index bfae3bd31..28783515d 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -898,6 +898,9 @@ pub const Page = struct {
-                 copy.hyperlink = dst_row.hyperlink;
-                 copy.styled = dst_row.styled;
+@@ -942,6 +942,9 @@ pub const Page = struct {
+                 // Empty only if both the copied and kept parts were.
+                 copy.blank = dst_row.blank and src_row.blank;
                  copy.dirty |= dst_row.dirty;
 +                // vtmux: the row holds cells of both (Row.tmux_extended).
 +                copy.tmux_extended = copy.tmux_extended or dst_row.tmux_extended;
@@ -682,23 +689,22 @@ index b71717388..b916ef2cc 100644
              }
  
              // Our cell offset remains the same
-@@ -1107,6 +1110,11 @@ pub const Page = struct {
-         // Clear our destination now matter what
-         self.clearCells(dst_row, dst_left, dst_left + len);
+@@ -1153,6 +1156,10 @@ pub const Page = struct {
  
+         // The source cells may have content.
+         dst_row.blank = false;
 +        // vtmux: the cells bring the line flags of the row they come from
 +        // (Row.tmux_extended).
 +        if (src_row.tmux_extended) dst_row.tmux_extended = true;
 +        if (src_row.tmux_hyperlink) dst_row.tmux_hyperlink = true;
-+
+ 
          // If src has no managed memory, this is very fast.
          if (!src_row.managedMemory()) {
-             fastmem.copy(Cell, dst_cells, src_cells);
-@@ -2120,7 +2128,21 @@ pub const Row = packed struct(u64) {
+@@ -2315,7 +2322,21 @@ pub const Row = packed struct(u64) {
      /// from somewhere that does not keep it measures by its text.
      tmux_used: size.CellCountInt = 0,
  
--    _padding: u7 = 0,
+-    _padding: u6 = 0,
 +    /// vtmux: tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK`
 +    /// (grid.c `grid_extended_cell`): a cell on the row has needed tmux's
 +    /// extended cell form (a wide or non-ASCII character, an RGB colour,
@@ -713,11 +719,11 @@ index b71717388..b916ef2cc 100644
 +    tmux_extended: bool = false,
 +    tmux_hyperlink: bool = false,
 +
-+    _padding: u5 = 0,
++    _padding: u4 = 0,
  
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {
-@@ -2180,6 +2202,21 @@ pub const Row = packed struct(u64) {
+@@ -2401,6 +2422,21 @@ pub const Row = packed struct(u64) {
  
      /// vtmux: cells up to `end` (exclusive) have been written
      /// (grid_set_cell's `cellused` update).

@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
-index e4d62c818..e6361602b 100644
+index bef64b826..9ccf03bab 100644
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
-@@ -145,6 +145,30 @@ GHOSTTY_API size_t ghostty_unicode_grapheme_width(const uint32_t *cps,
+@@ -148,6 +148,30 @@ GHOSTTY_API size_t ghostty_unicode_grapheme_width(const uint32_t *cps,
                                                    size_t len,
                                                    uint8_t *width);
  
@@ -34,10 +34,10 @@ index e4d62c818..e6361602b 100644
  }
  #endif
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 519f77f17..12687a6b3 100644
+index e33c371ef..3705ec601 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -251,6 +251,7 @@ comptime {
+@@ -246,6 +246,7 @@ comptime {
          @export(&c.mode_report_encode, .{ .name = "ghostty_mode_report_encode" });
          @export(&c.unicode_codepoint_width, .{ .name = "ghostty_unicode_codepoint_width" });
          @export(&c.unicode_grapheme_width, .{ .name = "ghostty_unicode_grapheme_width" });
@@ -46,10 +46,23 @@ index 519f77f17..12687a6b3 100644
          @export(&c.style_default, .{ .name = "ghostty_style_default" });
          @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index abd885603..0db4b4647 100644
+index c0741e985..598ecd1ef 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -704,6 +704,8 @@ fn printSliceFast(
+@@ -742,6 +742,12 @@ fn printSliceFast(
+     allow_unicode: bool,
+ ) !usize {
+     // Printable ASCII is always narrow and eligible.
++    //
++    // vtmux: unless a width override reaches into it (patch 0007): then
++    // print() takes each codepoint.
++    if (comptime Cp == u8) {
++        if (unicode.widths().narrow_max < 0x7F) return 0;
++    }
+     if (comptime Cp == u8) return self.printSliceFill(
+         .narrow,
+         linked,
+@@ -771,6 +777,8 @@ fn printSliceFast(
      // immediately eligible for the narrow fill with no further
      // checks.
      const cp0 = cps[0];
@@ -58,7 +71,7 @@ index abd885603..0db4b4647 100644
      if (cp0 <= 0xFF) {
          // C0 control characters (0x00-0x0F) aren't printable. The
          // stream never sends these (they're routed to execute), but
-@@ -770,7 +772,7 @@ fn printSliceFast(
+@@ -839,7 +847,7 @@ fn printSliceFast(
      // specialized at comptime by width class, so this switch selects
      // between the two instantiations rather than passing the width
      // through as an argument.
@@ -66,8 +79,8 @@ index abd885603..0db4b4647 100644
 +    return switch (unicode.printWidth(@intCast(cp0))) {
          1 => self.printSliceFill(
              .narrow,
-             cps,
-@@ -812,7 +814,7 @@ inline fn printSliceEligible(cp: u32, comptime width: PrintSliceWidth) bool {
+             linked,
+@@ -885,7 +893,7 @@ inline fn printSliceEligible(cp: u32, comptime width: PrintSliceWidth) bool {
          if (cp == kitty.graphics.unicode.placeholder) return false;
      }
  
@@ -76,7 +89,7 @@ index abd885603..0db4b4647 100644
          .narrow => 1,
          .wide => 2,
      });
-@@ -947,7 +949,7 @@ fn printSliceFill(
+@@ -1039,7 +1047,7 @@ fn printSliceFill(
              if (simd.lanes(u32)) |lanes| {
                  const V = @Vector(lanes, u32);
                  const lo: V = @splat(0x10);
@@ -85,7 +98,7 @@ index abd885603..0db4b4647 100644
                  while (idx + lanes <= cps.len) {
                      const v: V = cps[idx..][0..lanes].*;
                      const in_range = (v >= lo) & (v <= hi);
-@@ -964,7 +966,7 @@ fn printSliceFill(
+@@ -1056,7 +1064,7 @@ fn printSliceFill(
          while (idx < cps.len) : (idx += 1) {
              const cp = cps[idx];
              if (comptime width == .narrow) {
@@ -94,7 +107,7 @@ index abd885603..0db4b4647 100644
              }
              if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
                  if (!grapheme_cluster) continue;
-@@ -1507,7 +1509,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2131,7 +2139,7 @@ pub fn print(self: *Terminal, c: u21) !void {
      // non-single-width characters properly. We have a fast-path for
      // byte-sized characters since they're so common. We can ignore
      // control characters because they're always filtered prior.
@@ -103,7 +116,7 @@ index abd885603..0db4b4647 100644
  
      // Note: it is possible to have a width of "3" and a width of "-1" from
      // uucode.x's wcwidth. We should look into those cases and handle them
-@@ -5709,6 +5711,39 @@ test "Terminal: print wide char" {
+@@ -6345,6 +6353,39 @@ test "Terminal: print wide char" {
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
  }
  
@@ -143,11 +156,26 @@ index abd885603..0db4b4647 100644
  test "Terminal: print wide char at edge creates spacer head" {
      var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
      defer t.deinit(testing.allocator);
+diff --git a/src/terminal/c/abi_test.zig b/src/terminal/c/abi_test.zig
+index f92b6bb00..2d6dcf1f9 100644
+--- a/src/terminal/c/abi_test.zig
++++ b/src/terminal/c/abi_test.zig
+@@ -148,6 +148,10 @@ test "C header types are all in the type registry" {
+     inline for (comptime @typeInfo(c).@"struct".decl_names) |name| {
+         if (comptime !std.mem.startsWith(u8, name, "Ghostty")) continue;
+         if (comptime @TypeOf(@field(c, name)) != type) continue;
++        // vtmux: its own API (patches 0007, 0017 and after) is not part
++        // of upstream's frozen ABI and so not in its registry.
++        if (comptime std.mem.startsWith(u8, name, "GhosttyVtmux") or
++            std.mem.eql(u8, name, "GhosttyUnicodeWidthRange")) continue;
+ 
+         // Integer typedefs are skipped here. An integer typedef cannot be
+         // told apart from an enum without the enumerators before it.
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index b250c7064..b7ae455c5 100644
+index 53a0ea929..9f25a9cc9 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -253,6 +253,7 @@ pub const type_json = types.get_json;
+@@ -259,6 +259,7 @@ pub const sized_init = types.sized_init;
  
  pub const unicode_codepoint_width = unicode.codepoint_width;
  pub const unicode_grapheme_width = unicode.grapheme_width;

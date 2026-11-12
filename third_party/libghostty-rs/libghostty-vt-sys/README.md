@@ -2,18 +2,21 @@
 
 Raw FFI bindings for libghostty-vt: [vtmux](https://github.com/martintrojer/vtmux)'s
 fork of [libghostty-rs](https://github.com/uzaaft/libghostty-rs)'s
-`libghostty-vt-sys`, on a pinned [Ghostty](https://github.com/ghostty-org/ghostty)
-commit with vtmux's patches (`VENDOR.md` in vtmux's repository lists every
-one). The library is still `libghostty_vt_sys`. Built for vtmux: no API is
-promised to anyone else.
+`libghostty-vt-sys`, on a pinned libghostty-vt release of
+[Ghostty](https://github.com/ghostty-org/ghostty) (1.0.1) with vtmux's
+patches (`VENDOR.md` in vtmux's repository lists every one). The library is
+still `libghostty_vt_sys`. Built for vtmux: no API is promised to anyone
+else.
 
 Building it needs [Zig](https://ziglang.org/download/) 0.17 on `PATH`
 (`mise use -g zig@0.17`), and curl, tar and git: the build script downloads
-GitHub's archive of the pinned commit, checks its Zig package hash, and
-applies the patches shipped in this crate. Offline, set
-`GHOSTTY_SOURCE_TARBALL` to the absolute path of a copy of that archive (or
-of `git archive --format=tar.gz` of the commit); `GHOSTTY_SOURCE_URL` names
-a mirror.
+the release's source and Zig-package tarballs from
+release.files.ghostty.org, checks their SHA-256, applies the patches
+shipped in this crate and builds with `zig build --system`, so Zig fetches
+nothing. Offline, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL`
+to the absolute paths of copies of `libghostty-vt-<version>.tar.gz` and
+`libghostty-vt-<version>-deps.tar.gz`; `GHOSTTY_RELEASE_URL` names a mirror
+of the release directory.
 
 MIT (`LICENSE`, libghostty-rs's; upstream is MIT OR Apache-2.0). Ghostty is
 MIT too (`LICENSE-ghostty`).

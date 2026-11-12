@@ -1,7 +1,8 @@
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 7b0bacdf7..59997047a 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
-@@ -1188,9 +1188,13 @@
+@@ -1211,9 +1211,13 @@ fn installScreen(
              ) orelse break :click .none },
          };
      };

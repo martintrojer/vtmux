@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
-index e6361602b..4c21e7aae 100644
+index 9ccf03bab..bc0d02b13 100644
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
-@@ -27,6 +27,7 @@
+@@ -30,6 +30,7 @@
   * @{
   */
  
@@ -10,7 +10,7 @@ index e6361602b..4c21e7aae 100644
  #include <stddef.h>
  #include <stdint.h>
  #include <ghostty/vt/types.h>
-@@ -169,6 +170,20 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
+@@ -172,6 +173,20 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
      const GhosttyUnicodeWidthRange *ranges,
      size_t len);
  
@@ -32,10 +32,10 @@ index e6361602b..4c21e7aae 100644
  }
  #endif
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 46537320a..693ec3b8f 100644
+index 21950ba6d..347f2d5ef 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -252,6 +252,7 @@ comptime {
+@@ -247,6 +247,7 @@ comptime {
          @export(&c.unicode_codepoint_width, .{ .name = "ghostty_unicode_codepoint_width" });
          @export(&c.unicode_grapheme_width, .{ .name = "ghostty_unicode_grapheme_width" });
          @export(&c.unicode_set_width_overrides, .{ .name = "ghostty_unicode_set_width_overrides" });
@@ -44,10 +44,10 @@ index 46537320a..693ec3b8f 100644
          @export(&c.style_default, .{ .name = "ghostty_style_default" });
          @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 06701afb9..077f4a77c 100644
+index b1ae52852..bf58aac99 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -719,6 +719,20 @@ fn printSliceFast(
+@@ -793,6 +793,20 @@ fn printSliceFast(
      // and so does a C1 control (zero width there).
      if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
      if (cp0 >= 0x80 and cp0 <= 0x9F) return 0;
@@ -68,7 +68,7 @@ index 06701afb9..077f4a77c 100644
      if (cp0 <= 0xFF) {
          // C0 control characters (0x00-0x0F) aren't printable. The
          // stream never sends these (they're routed to execute), but
-@@ -769,6 +783,12 @@ fn printSliceFast(
+@@ -845,6 +859,12 @@ fn printSliceFast(
          // cluster state machine replay; only print() can do that.
          if (prev.hasGrapheme()) return 0;
  
@@ -81,7 +81,7 @@ index 06701afb9..077f4a77c 100644
          // A simple single-codepoint previous cell: print() would run
          // exactly this break check from the default state.
          var state: uucode.grapheme.BreakState = .default;
-@@ -985,6 +1005,11 @@ fn printSliceFill(
+@@ -1084,6 +1104,11 @@ fn printSliceFill(
              }
              if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
                  if (!grapheme_cluster) continue;
@@ -91,9 +91,9 @@ index 06701afb9..077f4a77c 100644
 +                    break :run idx;
 +                }
                  var state: uucode.grapheme.BreakState = .default;
-                 if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) continue;
-             }
-@@ -1299,6 +1324,66 @@ inline fn printSliceCheckExpected(style_id: style.Id) u64 {
+                 if (unicode.graphemeBreak(
+                     unicode.table.get(@intCast(cps[idx - 1])).grapheme_break,
+@@ -1924,6 +1949,66 @@ inline fn printSliceCheckExpected(style_id: style.Id) u64 {
      return @bitCast(e);
  }
  
@@ -160,7 +160,7 @@ index 06701afb9..077f4a77c 100644
  pub fn print(self: *Terminal, c: u21) !void {
      // log.debug("print={x} y={} x={}", .{ c, self.screens.active.cursor.y, self.screens.active.cursor.x });
  
-@@ -1336,11 +1421,17 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1964,11 +2049,17 @@ pub fn print(self: *Terminal, c: u21) !void {
      else
          self.scrolling_region.right + 1;
  
@@ -179,7 +179,7 @@ index 06701afb9..077f4a77c 100644
          self.modes.get(.grapheme_cluster) and
          self.screens.active.cursor.x > 0)
      grapheme: {
-@@ -1383,8 +1474,26 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2011,8 +2102,26 @@ pub fn print(self: *Terminal, c: u21) !void {
          // necessarily a grapheme break.
          if (prev.cell.codepoint() == 0) break :grapheme;
  
@@ -207,7 +207,7 @@ index 06701afb9..077f4a77c 100644
              var state: uucode.grapheme.BreakState = .default;
              if (prev.cell.hasGrapheme()) {
                  const cps = self.screens.active.cursor.page_pin.node.page().lookupGrapheme(prev.cell).?;
-@@ -1408,7 +1517,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -2044,7 +2153,7 @@ pub fn print(self: *Terminal, c: u21) !void {
          // If we can NOT break, this means that "c" is part of a grapheme
          // with the previous char.
          if (!grapheme_break) {
@@ -216,7 +216,7 @@ index 06701afb9..077f4a77c 100644
                  .ignore => return,
                  .wide => wide: {
                      if (prev.cell.wide == .wide) break :wide;
-@@ -6140,6 +6249,84 @@ test "Terminal: width overrides (vtmux)" {
+@@ -6905,6 +7014,84 @@ test "Terminal: width overrides (vtmux)" {
      try testing.expectEqual(@as(usize, 9), t.screens.active.cursor.x);
  }
  
@@ -302,10 +302,10 @@ index 06701afb9..077f4a77c 100644
      var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
      defer t.deinit(testing.allocator);
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index 7220c3ebc..b069cab61 100644
+index 2b74a76b0..0c4489a9c 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -265,6 +265,7 @@ pub const type_json = types.get_json;
+@@ -271,6 +271,7 @@ pub const sized_init = types.sized_init;
  pub const unicode_codepoint_width = unicode.codepoint_width;
  pub const unicode_grapheme_width = unicode.grapheme_width;
  pub const unicode_set_width_overrides = unicode.set_width_overrides;

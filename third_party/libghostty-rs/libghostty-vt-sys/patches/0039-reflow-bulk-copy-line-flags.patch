@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 0e23089..3921a6f 100644
+index d1a708b80..e39c8b37f 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -2789,6 +2789,10 @@ const ReflowCursor = struct {
+@@ -2965,6 +2965,10 @@ const ReflowCursor = struct {
              for (dst_cells) |*cell| cell.style_id = dst_style_id;
          }
          if (dst_style_id != stylepkg.default_id) self.page_row.styled = true;
@@ -13,7 +13,7 @@ index 0e23089..3921a6f 100644
  
          // Advance the cursor, matching what repeated cursorForward
          // calls after each cell write would have done.
-@@ -3510,6 +3514,20 @@ fn tmuxCellExtended(cell: *const pagepkg.Cell, page: *const Page) bool {
+@@ -3681,6 +3685,20 @@ fn tmuxCellExtended(cell: *const pagepkg.Cell, page: *const Page) bool {
          (s.flags.underline != .none and s.flags.underline != .single);
  }
  
@@ -35,10 +35,10 @@ index 0e23089..3921a6f 100644
      // We only set the new minimums if we're not reflowing. If we are
      // reflowing, then the outer resize call handles this for us.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 07d0fa3..372d7e4 100644
+index dd9013d36..38a156495 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -17041,6 +17041,51 @@ test "Terminal: tmux line flags (vtmux)" {
+@@ -17771,6 +17771,51 @@ test "Terminal: tmux line flags (vtmux)" {
      try testing.expect(!row.at(&t, 5).tmux_hyperlink);
  }
  

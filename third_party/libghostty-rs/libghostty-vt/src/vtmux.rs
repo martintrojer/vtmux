@@ -282,14 +282,11 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
         &mut self,
         saved: Option<(u16, u16, ffi::Style)>,
     ) -> Result<()> {
-        let raw = saved.map(|(x, y, mut pen)| {
-            pen.size = std::mem::size_of::<ffi::Style>();
-            ffi::VtmuxAltSaved {
-                size: std::mem::size_of::<ffi::VtmuxAltSaved>(),
-                x,
-                y,
-                pen,
-            }
+        let raw = saved.map(|(x, y, pen)| ffi::VtmuxAltSaved {
+            size: std::mem::size_of::<ffi::VtmuxAltSaved>(),
+            x,
+            y,
+            pen,
         });
         let ptr = raw.as_ref().map_or(std::ptr::null(), std::ptr::from_ref);
         from_result(unsafe { ffi::ghostty_vtmux_set_alternate_saved(self.inner.as_raw(), ptr) })

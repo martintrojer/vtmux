@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 24e58d579..946a55e45 100644
+index 9d643a589..713168677 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -2043,6 +2043,15 @@ const ReflowCursor = struct {
+@@ -2157,6 +2157,15 @@ const ReflowCursor = struct {
                      // Move our last row to a new page.
                      try self.moveLastRowToNewPage(list, cap);
  
@@ -18,7 +18,7 @@ index 24e58d579..946a55e45 100644
                      // Do NOT increment x so that we retry writing
                      // the same existing cell.
                  },
-@@ -19925,6 +19934,97 @@ test "PageList resize reflow grapheme map capacity exceeded" {
+@@ -21037,6 +21046,99 @@ test "PageList resize reflow grapheme map capacity exceeded" {
      try testing.expectEqual(@as(usize, 2), s.cols);
  }
  
@@ -65,6 +65,8 @@ index 24e58d579..946a55e45 100644
 +        var node = if (p == 0) s.pages.first.? else s.pages.last.?;
 +        while (node.page().capacity.hyperlink_bytes < max_link_bytes)
 +            node = try s.increaseCapacity(node, .hyperlink_bytes);
++        while (node.page().hyperlinkCapacity() < per_page)
++            node = try s.increaseCapacity(node, .hyperlink_cells);
 +        while (node.page().graphemeCapacity() < per_page or
 +            node.page().capacity.grapheme_bytes < per_page * 64)
 +            node = try s.increaseCapacity(node, .grapheme_bytes);
