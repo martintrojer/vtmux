@@ -124,4 +124,6 @@ Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8
 
 [How it was built](https://github.com/martintrojer/vtmux/blob/main/docs/HOW-IT-WAS-BUILT.md): agents, tmux 3.8 as the spec, and the checks.
 
+[Security](https://github.com/martintrojer/vtmux/blob/main/SECURITY.md): reporting and threat model.
+
 ISC license.
