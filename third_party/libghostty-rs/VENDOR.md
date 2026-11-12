@@ -74,389 +74,96 @@ Ghostty's grid behave as tmux's (wrap, cells used, reflow, tabs, clusters,
 the alternate screen), which a stock library does not. Live upgrade also
 reads its pages raw (`PATCH_STACK`), so it must be exactly this build.
 
-## libghostty-vt 1.0.1 (from commit 3bd54e025)
+## The patches on libghostty-vt 1.0.1
 
-Every patch was rebased onto the release (a scratch repository with
-`3bd54e025` plus the old stack and the release tarball as a commit, then
-`git cherry-pick` patch by patch). 40 stay, as separate patches (squashing
-is a later task), and 0045, written on the old pin meanwhile, was carried
-onto 1.0.1 after them (41 in all); two are dropped because 1.0.1 has them:
+1.0.1 has two things vtmux needs, so no patch does them:
 
-- **0001-keep-one-free-page-resident, dropped.** 1.0.1's `PageList.zig`
-  frees a page the line limit prunes with `DestroyMode.retain` (zeroed in
-  place, not decommitted; `Limits.enforce(.lines, .retain)` in `grow`) and
-  keeps up to `page_preheat` free pool items. Same effect: bench.py
-  `throughput` (100 MB through a 2000-line history, which prunes all
-  the time) 1.02 s plain and 1.22 s with SGR, against 1.02 s and 1.63 s
-  for 3.8-beta3 (`docs/test-health/2026-11-12-ghostty-vt-1.0.1.md`).
-- **0018-reflow-hyperlink-map-full, dropped.** 1.0.1 sizes the hyperlink
-  map by its own capacity dimension (`Capacity.hyperlink_cells`), so one
-  `increaseCapacity(.hyperlink_cells)` always grows it. The patch's test
-  ("reflow keeps the links of a page full of them") passes on 1.0.1's own
-  code (`-Doptimize=ReleaseSafe`, 35 ms; in Debug the per-print
-  integrity checks make it over 2.5 min, so it is not kept).
+- A page the line limit prunes is zeroed in place, not decommitted
+  (`DestroyMode.retain`, `Limits.enforce(.lines, .retain)` in `grow`), and
+  up to `page_preheat` free pool items stay resident. A flood through a
+  full history does not fault every new page back in: bench.py
+  `throughput` (100 MB through a 2000-line history) takes 1.02 s plain and
+  1.22 s with SGR (`docs/test-health/2026-11-12-ghostty-vt-1.0.1.md`).
+- The hyperlink map has its own capacity dimension
+  (`Capacity.hyperlink_cells`), so one `increaseCapacity(.hyperlink_cells)`
+  always makes room for a reflowed cell's link.
 
-Reworked for 1.0.1 (the rest applied with mechanical conflict fixes, such
-as `lib_vt.zig`'s export list losing its feature `if`s):
+How the patches fit 1.0.1's code:
 
-- 0002: `PrintSliceSimpleMask` is a top-level constant now; `tab` is in it.
-- 0003: only the trailing-row half stays (1.0.1's `retain` covers the
-  `keepWarm` half): a row `Row.blank` marks, or all-zero cells, gets only
-  its header reset, and stays marked blank. bench.py `scale` (400 idle
-  panes): 20.3 KB/pane, 3.8-beta3 20.1.
-- 0007: printable ASCII now has its own print path (`printSliceFill` over
+- 0002: `tab` is in `PrintSliceSimpleMask`, a top-level constant.
+- 0003: a trailing blank row (one `Row.blank` marks, or all-zero cells)
+  gets only its header reset and stays marked blank; 1.0.1's `retain`
+  does the rest. bench.py `scale` (400 idle panes): 20.3 KB a pane.
+- 0007: printable ASCII has its own print path (`printSliceFill` over
   `u8`); it goes to `print()` while an override reaches into ASCII.
-- 0009: the ground-state loop moved into `Stream.printRuns`.
+- 0009: the ground-state loop is `Stream.printRuns`.
 - 0010: `GhosttyStyle` is a frozen 16-byte struct whose flags are the
   core's `Style.Flags`, so the palette form is `GhosttyStyleFlags` bits 11
-  and 12 (`GHOSTTY_STYLE_FLAG_VTMUX_FG_PALETTE_256`, `..._BG_...`, size
-  unchanged) and the SGR rules live in `Style.withAttribute`.
-- 0013, 0034: `Row` lost a spare bit to `blank` (`tmux_used` u16, the two
-  line flags, 4 bits left). `printSliceMixed`, new in 1.0 (mixed-width runs
-  in one call), sizes and clusters by Ghostty's table and keeps no tmux
-  bookkeeping, so vtmux never takes it (`printSliceTransition` returns
-  null) and mixed text goes through `printSliceFill` batches, as before.
-- 0017: the state's `GhosttyStyle`s shrank (`GhosttyVtmuxScreenState` 232
-  to 112 bytes, `GhosttyVtmuxState` 10 120 to 9 880); an imported page
-  sizes the new hyperlink map for its linked cells (it failed with
-  `GHOSTTY_INVALID_VALUE` on a page with many links).
-- 0029: merged with 1.0.1's reflow prompt marks (a destination row keeps
-  the prompt mark of the row that starts it; the empty rows tmux leaves
-  are continuations); `scrollClear` counts a blank-marked row by its
-  `tmux_used` alone.
-- 0037: the kept last cell also in 1.0's two new fast paths (a linked
-  wrap goes to `print()`).
+  and 12 (`GHOSTTY_STYLE_FLAG_VTMUX_FG_PALETTE_256`, `..._BG_...`) and the
+  SGR rules are in `Style.withAttribute`.
+- 0013, 0034, 0046: `Row` holds `tmux_used` (u16), the two line flags and
+  `tmux_kept` beside 1.0.1's `blank`, 3 spare bits left. `printSliceMixed`
+  (mixed-width runs in one call) sizes and clusters by Ghostty's table and
+  keeps no tmux bookkeeping, so vtmux never takes it
+  (`printSliceTransition` returns null) and mixed text goes through
+  `printSliceFill` batches.
+- 0017: `GhosttyVtmuxScreenState` is 112 bytes, `GhosttyVtmuxState`
+  9 880; an imported page sizes the hyperlink map for its linked cells.
+- 0029: a reflowed row keeps the prompt mark of the row that starts it,
+  and the empty rows tmux leaves are continuations (1.0.1's prompt
+  marks); `scrollClear` counts a blank-marked row by its `tmux_used`.
+- 0037: the kept last cell holds in 1.0's two print fast paths too (a
+  linked wrap goes to `print()`).
 - 0043: the replaced image's id is read before a chunk past the limit
   frees the load (1.0.1 deletes the replaced image on every failed load).
 
-Upstream tests that assert Ghostty's model where vtmux keeps tmux's were
-changed with the patch that changes the behaviour ("eraseLine on a blank
-row keeps it blank" in 0029, "scrollClear skips blank rows and stops at a
-spacer" in 0029, "manifest describes the frozen style layout" in 0010);
-"C header types are all in the type registry" skips `GhosttyVtmux*` and
-`GhosttyUnicodeWidthRange` (0007). `zig build test-lib-vt
--Demit-lib-vt=true -Dapp-runtime=none` (Debug, `--system` on the deps):
-7258/7342 pass, 78 skip, and the two failures this host had before
-(`Terminal: tabClear single`, which patch 0002 changes, and the kitty
-temporary-file test, which fails on the unpatched release here too).
+Upstream tests that assert Ghostty's model where vtmux keeps tmux's change
+with the patch that changes the behaviour: "eraseLine on a blank row keeps
+it blank" and "scrollClear skips blank rows and stops at a spacer" (0029),
+"manifest describes the frozen style layout" (0010), "Terminal: tabClear
+single" (0002: the tab's mark makes the row dirty, the clear itself does
+not); "C header types are all in the type registry" skips `GhosttyVtmux*`
+and `GhosttyUnicodeWidthRange` (0007). `check.sh`'s `ghostty-zig` stage
+(`scripts/ghostty-zig-tests.sh`) runs the suite's tests of the modules the
+patches change on the patched tree, in Debug: 4341 of 4367 pass and 26
+skip. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
+-Dapp-runtime=none --system <deps>`) passes too, but for "image load:
+temporary file outside directory prefix is rejected" when the tree is
+under `/tmp`, which Ghostty trusts as a temporary directory (it fails so on
+the unpatched release as well).
 
-Bindings: no libclang on the host, so `bindings.rs` was updated by hand
-from a diff of `zig translate-c` of the old and new headers: enum values
-(1.0 numbers most option enums from 1, with `INVALID` = 0), removed `size`
-fields (`GridRef`, `Selection`, the clipboard, notification, progress,
-program-status and semantic-prompt records), `GhosttyStyle`'s new layout,
-`AllocatorVtable.reserved`, `setopt` renamed `set`, setters that now return
-`GhosttyResult`, and the removed formatter-options structs.
-`libghostty-vt/tests/abi.rs` keeps them honest. It restates every
+`bindings.rs` is edited by hand from a diff of `zig translate-c` of the old
+and new headers when the host has no libclang: enum values (1.0 numbers
+most option enums from 1, with `INVALID` = 0), struct layouts (`GridRef`,
+`Selection` and the records without a `size` field, `GhosttyStyle`),
+`AllocatorVtable.reserved`, setters that return `GhosttyResult`.
+`libghostty-vt/tests/abi.rs` keeps it honest. It restates every
 `extern "C"` function of `bindings.rs` in C, so a different signature is a
 `conflicting types` error. It compares every callback type and every
 struct or union field with `__builtin_types_compatible_p`, and turns every
 size, alignment and offset `bindings.rs` asserts into a `_Static_assert`.
 All of it is compiled by `zig cc` against the headers of the library the
-build made (1,082 checks). It found what the first hand edit missed:
-`ghostty_key_event_set_utf8` takes a `GhosttyString` by value, not a
-pointer and a length (which pass in the same registers on x86-64 and
-aarch64, so nothing broke), and the output buffers of the encoders and
-reports are `uint8_t *`, not `char *`. Enum values are not in the test;
-they were compared from the `translate-c` diff.
+build made (1,082 checks): a `GhosttyString` passed by value where a
+pointer and a length are declared, or `char *` where the header says
+`uint8_t *`, fails it. Enum values are not in the test; compare them from
+the `translate-c` diff.
 
 ## Local changes
 
-Recorded per commit in git history; the list is kept current:
+The patches (`libghostty-vt-sys/patches`, applied in name order) by theme, then
+the changes outside them. Each patch has its note under its theme.
 
-- `patches/0041-unicode-options-thread-safe.patch`: the width overrides
-  are one atomic pointer to an immutable table (ranges and the printer's
-  narrow bound), never freed: setting the same ranges again reuses their
-  table, so the memory kept is one table per distinct set. The clustering
-  flags are one atomic byte. No lock anywhere; `printSliceFast`,
-  `printSliceFill` and `print` read the table and flags once per call,
-  except the narrow bound in `printSliceFill`'s scalar loop, read per
-  character: holding it in a register cost that loop 5% on UTF-8 text.
-  Printing speed matches the build without this patch. This covers
-  printing as well as both width queries, so the Rust setters (including
-  vtmux-vt's) remain safe. The server sets them from its single-threaded
-  `set_option` (`codepoint-widths`, tmux `utf8.c`
-  `utf8_update_width_cache`; clustering, `screen-write.c`
-  `screen_write_combine`). A subprocess test runs two writers and two
-  readers, including terminal printing; it segfaulted before the patch and
-  segfaults with a setter that frees the old table.
+| theme | patches | what and why | upstreamable |
+|---|---|---|---|
+| [Grid semantics](#grid-semantics) | 0011, 0013, 0014, 0016, 0025, 0026, 0028, 0029, 0031, 0034, 0037, 0045, 0046 | tmux's line model in Ghostty's grid: `GRID_LINE_WRAPPED` as grid.c `grid_clear_lines` and screen-write.c `screen_write_linefeed` keep it, `cellused` per line (grid.c `struct grid_line`), the cursor past the last column (screen-write.c `screen_write_cell`), DECAWM, `hscrolled`, a region scroll into history (grid-view.c `grid_view_scroll_region_up`), the alternate screen (screen.c `screen_alternate_on`), DECALN (`screen_write_alignmenttest`), the line flags (grid.c `grid_extended_cell`) and the cells a line keeps past a narrower width (`grid_reflow_move`). `capture-pane`, formats and copy mode read tmux's grid; scripts parse them. | no |
+| [Reflow](#reflow) | 0012, 0015, 0019, 0020, 0023, 0024, 0039 | A resize reflows lines as grid.c `grid_reflow` does: blank continuations stay lines (`grid_reflow_join`), a tab costs its width and its padding cells and a wide character splits from its padding (`grid_reflow_split`), a wrapped row joins by its used cells, the cursor at a line's end goes to the end of its cells (`grid_wrap_position`), line flags survive the bulk copy, and a cell that fails for lack of room is written again whole. | partly (0019, a bug fix) |
+| [Widths and clusters](#widths-and-clusters) | 0007, 0008, 0009, 0021, 0027, 0041 | tmux's character widths and clusters: width overrides (utf8.c `utf8_update_width_cache`, the `codepoint-widths` option), a zero-width character joined to the cell before as screen-write.c `screen_write_combine` does, C1 controls as zero-width (wcwidth -1), REP of the last character whatever its width (input.c `ictx->last`), tmux's clustering rules, and the process-wide options safe to set while another thread prints. | partly (0041; 0008 and 0009 as options) |
+| [Memory and pages](#memory-and-pages) | 0003, 0004, 0035, 0040 | Memory a pane does not use is not touched: a resize does not fault in blank rows, compression goes in bounded steps from vtmux's idle loop, a whole-page clone copies the page's memory, and a grid reference is checked against its page before a native read. vtmux keeps hundreds of idle panes and their history. | yes |
+| [State export, import and clones](#state-export-import-and-clones) | 0005, 0006, 0017, 0030, 0033, 0038 | A terminal's whole state out and into a fresh one, page by page (live upgrade, vtmux's D27), frozen copies of a screen (copy mode, synchronized output), the primary screen read in place under the alternate one (tmux keeps the primary grid there, screen.c `screen_alternate_on`), a cell's hyperlink id, and grid references that step row to row. | partly (0017, 0033) |
+| [Kitty graphics](#kitty-graphics) | 0042, 0043, 0044 | Kitty graphics as vtmux serves them behind `vtmux-graphics` (vtmux's D33; tmux 3.8 drops the protocol): per-screen image storage and limits through the C API, unfinished loads held to the limit, a decode capped at it. | partly (0043, 0044) |
+| [Misc: cells and styles](#misc-cells-and-styles) | 0002, 0010, 0022 | Cells and styles as tmux keeps them: a tab as one TAB cell and its padding (input.c `input_c0_dispatch`, grid.c `GRID_FLAG_TAB`, printed as a tab by `grid_string_cells`), a palette colour's 256-colour form (input.c `input_csi_dispatch_sgr_256_do`, so `capture-pane -e` writes `38;5;N`), and DECCOLM that never resizes (input.c `input_csi_dispatch_sm_private` only homes and clears). | partly (0002, 0010) |
 
-- `libghostty-vt/src/alloc.rs` (`allocator_api`): `From<&A>` borrows the
-  original allocator for the adapter lifetime; `From<A>` kept a pointer
-  to its destroyed parameter. Tests check the callback context, allocate,
-  free, grow and shrink, and reject owned or too-short-lived allocators
-  at compile time. vtmux does not enable this optional feature.
-
-- `libghostty-vt/src/osc.rs`: window titles read the `const char **`
-  output specified by `osc.h`, then borrow and validate the parser-owned
-  C string. The generic getter previously fabricated a Rust `&str` with
-  a zero length. Tests cover ASCII, empty and UTF-8 titles.
-
-- `patches/0040-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
-  coordinates against the page before any native reader dereferences a
-  cell. `GridRef::with_x` remains safe; out-of-range readers return
-  `InvalidValue` even in ReleaseFast. Both vtmux capture call sites take
-  columns from `row_cells`, already within the page. The Rust test checks
-  the last valid column, the first invalid one and `u16::MAX`.
-
-- `libghostty-vt/src/key.rs`, `mouse.rs`: growable encoders reserve the
-  required output length relative to the vector length, not its remaining
-  capacity. Tests cover empty and prefixed buffers one byte short.
-
-- `libghostty-vt/Cargo.toml`: `path` on the `libghostty-vt-sys` dependency.
-- Both `Cargo.toml`s: published as `vtmux-ghostty-vt-sys` and
-  `vtmux-ghostty-vt` at vtmux's version, licence MIT, vtmux's repository,
-  an `include` list (above); the redundant dev-dependency on the sys crate
-  is gone.
-- `libghostty-vt-sys/build.rs`: the Ghostty source and its Zig packages
-  are the libghostty-vt release's two tarballs, checked by SHA-256 and
-  built with `zig build --system` (above), where upstream cloned a commit
-  with git and let Zig fetch; the Zig version is checked first.
-- `libghostty-vt-sys/build.rs`: `GHOSTTY_VERSION` = `1.0.1` (tag
-  `vt-1.0.1`, 2026-11-11), which contains `e257bb45`. Before it,
-  `GHOSTTY_COMMIT` `3bd54e025cc3` (ghostty main, 2026-10-31).
-- `libghostty-vt-sys/src/bindings.rs`: generated from `3bd54e025`'s
-  headers with `gen-bindings`, then updated by hand for 1.0.1 (above,
-  *libghostty-vt 1.0.1*).
-- `libghostty-vt/src`: the 1.0 C API, kept behind the same Rust API:
-  `Style` from `GhosttyStyleFlags`; `Formatter` sets its options with
-  `ghostty_formatter_set` (`FormatterOptions` is a Rust struct now, its
-  defaults the old zeroed options'); `Terminal::format_selection_alloc`/
-  `_buf` and `selection::FormatOptions` are gone with their C calls (a
-  `Formatter` with `with_selection` does it); `set_scrollback_max_bytes`/
-  `_lines(None)` pass `usize::MAX`, since 1.0 reads NULL as the default
-  limit; `GridRef`, `Selection` and the callback records have no `size`;
-  key and mouse setters ignore their new `GhosttyResult`;
-  `PlacementIteration::set_layer` passes a layer mask; `ImageData::data`
-  reads `PIXELS` (a `GhosttyString`); the OSC window title is a
-  `GhosttyString`; `CellIteration::graphemes_buf` passes a
-  `GhosttyCodepointBuffer`.
-- `libghostty-vt/src`: API drift from `a887df42c`, ported in the shape
-  libghostty-rs master uses:
-  - `ghostty_terminal_new(alloc, &t, cols, rows)`: `GhosttyTerminalOptions`
-    is gone. `TerminalOptions` stays; `max_scrollback` (always bytes) is
-    applied through the new `Terminal::set_scrollback_max_bytes`.
-  - `ghostty_terminal_mode_get/set` are gone: `Terminal::mode`/`set_mode`
-    go through `TERMINAL_DATA_MODE`/`TERMINAL_OPT_MODE`.
-  - `ghostty_render_state_colors_get` is gone: `RENDER_STATE_DATA_COLORS`.
-  - The clipboard-write callback returns `void` and answers through the
-    request's `reply` function; the wrapper's trampoline calls it.
-  - New `Terminal::scrollback_max_bytes`/`set_scrollback_max_bytes`.
-- `libghostty-vt/src/terminal.rs`: `Terminal::scrollback_max_lines` and
-  `set_scrollback_max_lines` (`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES`,
-  `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`, already in the bindings);
-  vtmux keeps history by line count with it.
-- `libghostty-vt/src/terminal.rs`: `Terminal::memory_usage`
-  (`GHOSTTY_TERMINAL_DATA_MEMORY_USAGE`, a sized struct, already in the
-  bindings) re-exported as `terminal::MemoryUsage`; vtmux's compression
-  tests read compressed pages and resident bytes from it.
-- `libghostty-vt/src/terminal.rs`: `Terminal::on_desktop_notification`
-  (`GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION`, `GhosttyTerminalDesktopNotification`,
-  already in the bindings): the title and body of an OSC 9 (not ConEmu)
-  or OSC 777 notification, as bytes. vtmux sends them on to Ghostty
-  clients (spec D30).
-- `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
-  (name order, `git apply`) to the fetched ghostty; the source stamp
-  records the commit and the patch contents. Not applied to a
-  `GHOSTTY_SOURCE_DIR` tree.
-- `libghostty-vt-sys/build.rs`: `rerun-if-changed=build.rs`, not
-  upstream's `crates/libghostty-vt-sys/build.rs` (a path of its repo
-  layout): cargo counts a missing file as changed, so every cargo
-  command reran the script and rebuilt `libghostty-vt-sys` and every
-  crate above it, `target/debug/vtmux` included.
-- Dropped with 1.0.1 (its `DestroyMode.retain` does it), kept for the
-  record: `patches/0001-keep-one-free-page-resident.patch` (`PageList.zig`
-  `destroyNodeExt`, `keepWarm`): a freed pool page is zeroed in place
-  instead of decommitted while no other free page is resident. With a
-  line limit and no byte limit, Ghostty erases the oldest page each time
-  output fills one (`Limits.enforce`), `madvise(MADV_DONTNEED)` on Linux;
-  the next page comes from the same pool item and faults all 98 of its
-  4 KiB pages back in. vtmux's 1M-line flood went from 0.26 s to 0.91 s
-  (506k minor faults) without it, 0.27 s with it
-  (`docs/test-health/2026-11-01-history-memory.md`). Upstream candidate.
-  ghostty's `zig build test-lib-vt` with it: 6977/7053 pass, 74 skip; the
-  one failure (`kitty.graphics_image` "temporary file outside directory
-  prefix is rejected", in both test binaries) fails the same way on
-  unpatched 3bd54e025 on this host.
-
-- `patches/0002-tab-cell-mark.patch` (`page.zig` `Cell.tab`,
-  `Terminal.zig` `horizontalTab`/`markTab`/`writeCell`,
-  `c/cell.zig`, `include/ghostty/vt/screen.h`, the snapshot codec's
-  layout probe): a horizontal tab that moves over blank cells all alike
-  (tmux's HT rule, input.c `input_c0_dispatch`) marks the cells in 8
-  spare bits of `Cell` (width of the tab on the first cell, 255 on the
-  others), `GHOSTTY_CELL_DATA_TAB` reads it, and writing over any cell of
-  a tab clears the whole mark (`screen_write_overwrite`); the print
-  fast path skips a cell that carries a mark. Other erase and shift
-  operations drop the mark with the cell, as they do for tmux's TAB cell
-  when the cell is cleared. The bits are not in the snapshot wire
-  format, so a tab does not survive a snapshot round trip. `Cell.tab` and
-  `Cell::tab()` are reflected in `bindings.rs` and `screen.rs`.
-  Upstream candidate if Ghostty ever wants tab cells (`vtmux-vt`
-  `capture.rs` is the one consumer). Not run: ghostty's own
-  `zig build test-lib-vt` (`zig build` of the library with the patch
-  passes and vtmux's goldens exercise it).
-
-  Checked by diffing the old and new bindings: no constant was renumbered
-  or removed, and struct layouts only grew at the end (`ClipboardWrite`,
-  `TerminalScrollViewportValue`).
-
-- `patches/0003-resize-without-faulting-blank-memory.patch`
-  (`PageList.zig` `trimTrailingBlankRows`, `keepWarm`): idle panes stay
-  small after a resize. A height shrink trims trailing blank rows with
-  `resetRow`, which memsets cells that are already zero and faults them
-  in (200x50 to 200x25: +40 KB); an all-zero row without managed memory
-  now only gets its header reset. `keepWarm` (patch 0001) now keeps a
-  freed page resident only when every row of it was in use (the line
-  limit's pruned page). The page a width reflow replaces used only a few
-  rows, and zeroing it faulted the whole 400 KB pool item in.
-  `scripts/bench.py scale` (400 idle panes): 33.2 to 15.3 KB/pane; a
-  width change of an 80x24 pane: 400 KB to 8.5 KB. The 1M-line flood
-  keeps its 0.72 s. ghostty's `zig build test-lib-vt
-  -Dtest-filter=PageList` passes with it.
-
-- `patches/0004-work-bounded-compression.patch` (`PageList.zig`,
-  `compress/Page.zig`): oversized resident pages (`compression.Page.chunked`)
-  are encoded from an owned snapshot in 128 KiB LZ4 blocks per incremental
-  call. Snapshot work is capped at 4 MiB; bigger pages remain resident.
-  Publication validates node generation, activity, metadata and source bytes;
-  every failed or no-op attempt advances. Grid page layout and pruning are
-  unchanged. Full mode and prepend compress an oversized page as one chunked
-  job (`compressPage` sends it to `compressPageChunked`); smaller pages keep
-  the original block encoding. Encoded storage uses the page allocator and
-  shrinks in place with `remap`, falling back to dupe and free when the
-  allocator can't remap. The chunked format decodes through restore and
-  `cloneBuf` (chunk by chunk).
-  Constraint: `compression.Page` must stay at its upstream size (a comptime
-  assert): the chunked bookkeeping lives outside the struct. Growing it
-  (the round-2 version added two fields, so a PageList node went from 488 to
-  512 bytes) made every frame's cell copy fault in more pages and slowed a
-  busy pane by 16-20% p50/p95 with no compression running (task
-  hist_compress_r3).
-  Tests: `zig build test-lib-vt -Dtest-filter="chunked Page" -Doptimize=ReleaseSafe`
-  and `-Dtest-filter="PageList incremental compression"`; the full upstream
-  suite is not yet run.
-
-- `patches/0005-clone-screen.patch` (`c/terminal.zig`, `c/grid_ref.zig`,
-  `lib_vt.zig`, `c/main.zig`, `include/ghostty/vt/{terminal,grid_ref}.h`,
-  `PageList.zig` `clone`/`cloneCompressedNode`): copy-mode entry takes a
-  frozen copy of the pane's screen instead of reading every row through
-  per-cell `grid_ref` calls (4.3 s on 100k lines; each call walked the
-  page list from the top).
-  - `ghostty_terminal_clone_screen`: `Screen.clone` of the active screen
-    (history included) into a new terminal of the same size. Only the
-    grid, cursor and selection are copied.
-  - `ghostty_grid_ref_row_cells`: all cells of a grid ref's row in one
-    call, so a row read walks the page list once.
-  - `PageList.clone` copies a whole compressed page compressed: the copy
-    gets the encoding (duplicated) over fresh backing memory of the same
-    kind (pool item or heap) and decodes on first access, and the source
-    is not restored. Upstream restored every compressed page to clone it,
-    which cost about 60 ms on 100k lines and left the source pane's
-    history uncompressed. The upstream test "PageList compression restores
-    through page access" now expects the clone to stay compressed; a new
-    test, "PageList clone keeps compressed history compressed", checks
-    every row reads back the same.
-  Wrapper: `Terminal::clone_screen`, `GridRef::row_cells`,
-  `GridRef::with_x` (`libghostty-vt/src`), bindings added by hand to
-  `bindings.rs`. Clone of 100k history lines at 120x40 (release, in
-  process, `crates/vtmux-server/examples/copy_entry.rs`): 46 ms resident,
-  5.6 ms compressed. Tests: `zig build test-lib-vt -Dtest-filter=PageList
-  -Doptimize=ReleaseSafe` (697 pass), `-Dtest-filter=Screen` (553 pass),
-  `-Dtest-filter=compress` (191 pass, 6 skip).
-
-- `patches/0006-hyperlink-id.patch` (`c/grid_ref.zig`, `c/main.zig`,
-  `lib_vt.zig`, `include/ghostty/vt/grid_ref.h`): `ghostty_grid_ref_hyperlink_id`
-  reads the OSC 8 id of a cell's hyperlink (explicit bytes, or Ghostty's
-  implicit counter for a link opened without `id=`), wrapped as
-  `GridRef::hyperlink_id` / `screen::HyperlinkId` in `screen.rs` and
-  `bindings.rs`. `capture-pane` needs it to tell links apart as tmux does
-  (`hyperlinks_put`: same URI and id are one link): `-e` writes `id=` in
-  its OSC 8, `-H` lists each link once, `-R` prints `linkid=`. Read-only,
-  no layout change. Not run: ghostty's own `zig build test-lib-vt`
-  (`zig build` of the library with the patch passes and vtmux's
-  `cli.rs` `capture_pane_*` tests exercise it).
-
-- `patches/0007-width-overrides.patch` (`unicode/main.zig`,
-  `terminal/Terminal.zig` `print`/`printSliceFast`/`printSliceFill`,
-  `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
-  `include/ghostty/vt/unicode.h`): tmux's `codepoint-widths` for the pane
-  grid. `ghostty_unicode_set_width_overrides` sets process-wide ranges
-  (sorted, not overlapping, widths 0 to 2; binary-searched, a no-op check
-  while empty) that the printer and `codepointWidth` take over the table,
-  as tmux's one width cache does. The printer's "0x00-0xFF is narrow"
-  shortcuts (`print`, the batched narrow run and its SIMD scan) stop at
-  0x7F while an override reaches below 0x100. Cells already printed keep
-  their width. Wrapped as `unicode::set_width_overrides` in
-  `libghostty-vt/src/unicode.rs`, the binding added by hand to
-  `bindings.rs`. Tests: new `Terminal: width overrides (vtmux)` and
-  `set_width_overrides` (`zig build test-lib-vt -Dtest-filter=width`);
-  the full `zig build test-lib-vt` gives 3247 pass, 37 skip and the same
-  two failures as without the patch (`tabClear single`, and the kitty
-  temp-file test noted under 0001) on this host.
-
-- `patches/0008-cluster-keeps-zero-width.patch` (`Terminal.zig` `print`):
-  vtmux runs every pane with grapheme clustering (mode 2027), which is
-  how tmux's `screen_write_combine` groups regional-indicator pairs, emoji
-  modifiers and ZWJ sequences. Upstream drops a zero-width character that
-  starts a new grapheme in that mode (U+200B, U+2028, U+2029); tmux and
-  Ghostty without the mode attach it to the previous cell, so this patch
-  removes the early return and it is attached in both modes. Test:
-  `Terminal: zero-width character after grapheme cluster is kept (vtmux)`
-  (in patch 0009's file, which adds it). Upstream candidate only as an
-  option: dropping is a deliberate choice there.
-
-- `patches/0009-c1-is-zero-width.patch` (`stream.zig` ground-state UTF-8
-  paths, `Terminal.zig` `print`, `printSliceFast`, `printSliceFill`): a C1
-  control decoded from UTF-8 (U+0080-U+009F) is printed as a zero-width
-  character that joins the previous cell, as tmux's `utf8_width` makes it
-  (wcwidth -1, a C1 control, 0). Upstream ignores it. `print` gives it
-  width 0, and the batched narrow run (its SIMD scan now stops at 0x7F, the
-  scalar loop takes 0xA0-0xFF) leaves it to `print`. The upstream test
-  `stream: ground state UTF-8-decoded C1 controls are ignored` is now
-  `... are printed (vtmux)`. Tests: `zig build test-lib-vt
-  -Dtest-filter=vtmux` (45/45 steps), `-Dtest-filter=stream` (597 pass),
-  `-Dtest-filter="Terminal: "`: 1011/1013, the same two `tabClear single`
-  failures as the unpatched tree (patch 0002 marks the tab cells and
-  dirties the row). Throughput: a 21.9 MB ASCII, 19.5 MB Latin-1 and 15 MB
-  CJK flood through one `PaneTerm` (80x24, release) take 0.10/0.13/0.13 s,
-  against 0.16/0.16/0.15 s on main before this and the scanner's ASCII run.
-- `libghostty-vt/src/screen.rs`: `Cell::bits`, the cell's `u64`. `vtmux-vt`
-  (`capture.rs` `CellBits`) decodes `page.zig`'s packed `Cell` from it
-  instead of seven `ghostty_cell_get` calls per cell (copy mode reading a
-  27-cell row: 2.2 to 1.65 µs, release, with the row kept).
-  `cell_bits_match_the_getters` checks the decoding against the getters, so
-  a bump that moves a field fails there.
-- `libghostty-vt/src/screen.rs`: `GridRef::row_cells` writes the row's
-  cells straight into the caller's `Vec` (its spare capacity, at least 256
-  cells), where it allocated and zeroed a 256-cell buffer per call and
-  copied from it; `Cell` is `#[repr(transparent)]` over `ffi::Cell` for
-  that. A capture of a 1M-line history reads a row per line: the
-  allocation, memset and copy were about 10% of `capture-pane -S -`
-  (`docs/test-health/2026-11-09-performance-detail.md`, *Reading all of a history*).
-
-- `patches/0010-palette-256-form.patch` (`style.zig` `Style.Flags`,
-  `bgCell`, `Screen.zig` `setAttribute`, `page.zig` `Cell.content`,
-  `c/style.zig`, `c/cell.zig`, `include/ghostty/vt/{style,screen}.h`):
-  tmux keeps `COLOUR_FLAG_256` on a colour set by `38;5;N`/`48;5;N`
-  (input.c `input_csi_dispatch_sgr_256_do`), so `capture-pane -e` writes
-  `38;5;1` back apart from `31`, and an 8-colour terminal gets `38;5;9` as
-  plain red where `91` is bold (tty.c `tty_check_fg`). Ghostty kept one
-  palette index. Two spare `Style.Flags` bits (`fg_palette_256`,
-  `bg_palette_256`) record the form; any other foreground or background
-  change clears its bit. A cell erased with such a background carries the
-  bit in its `color_palette` content (`palette_256`). C: two `bool`s at
-  the end of the sized `GhosttyStyle` (offsets 68 and 69, the size stays
-  72) and `GHOSTTY_CELL_DATA_COLOR_PALETTE_256`; Rust: `Style::fg_palette_256`
-  / `bg_palette_256` and `Cell::bg_color_palette_256` (`style.rs`,
-  `screen.rs`, `bindings.rs` by hand). The VT formatter still writes every
-  palette colour as `38;5;N`, so its two round-trip tests ("Screen vt
-  with style", "Terminal vt restores gaps and cells that only have a
-  background") compare styles without the bits; the snapshot codec drops
-  them. Tests: new `Terminal: 256-colour SGR keeps its form (vtmux)`;
-  the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
-  gives 3251 pass, 37 skip and the known `tabClear single` failure (see
-  0009). Upstream candidate only for a consumer that needs the SGR form.
+### Grid semantics
 
 - `patches/0011-tmux-wrap-bookkeeping.patch` (`Terminal.zig`
   `insertLines`, `deleteLines`, `scrollDown`, `scrollUp`, `index`,
@@ -500,26 +207,6 @@ Recorded per commit in git history; the list is kept current:
   (vtmux)`. Not an upstream candidate (it is tmux's model, not a
   terminal's).
 
-- `patches/0012-reflow-blank-continuation.patch` (`PageList.zig`
-  `ReflowCursor.reflowRow`, new field `prev_wrap`): a blank row under a
-  wrapped line reflows as tmux's `grid_reflow_join` does. A blank
-  continuation (a continuation row erased with ECH or EL 1, where tmux
-  keeps the erased cells in `cellused`) joins the wrapped line as one
-  blank cell and ends it, so the next line stays a line of its own;
-  upstream dropped the row and the line break with it, so a wider pane
-  joined the line after it. A blank row that is not a continuation
-  under a wrapped line (the empty line a region scroll adds,
-  `grid_empty_line`, `cellused` 0) stops the join: it stays a blank
-  line and the line above keeps its wrap flag. Tests: `Terminal: reflow
-  keeps the line break after a blank continuation (vtmux)`, `Terminal:
-  reflow keeps an empty line under a wrapped line (vtmux)`; oracle
-  `wrap_flag_resize`. With 0011 and 0012 the full `zig build
-  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` gives 3254 pass,
-  37 skip and the known `tabClear single` failure, plus the kitty
-  temporary-file test of 0001 when the tree is under `/tmp`. Upstream
-  candidate for the first half (a blank continuation keeping its line
-  break); the empty-line half is tmux's model.
-
 - `patches/0013-tmux-cells-used.patch` (`page.zig` `Row.tmux_used`,
   `tmuxRaiseUsed`, `tmuxCellsUsed`; `Terminal.zig` `writeCell`,
   `printSliceFill`, `markTab`, `insertBlanks`, `deleteChars`,
@@ -538,8 +225,8 @@ Recorded per commit in git history; the list is kept current:
   a row that fits the new width keeps its background cells up to the
   width (`grid_reflow_move`), one that splits or joins the wrapped line
   above takes only its used cells (`grid_reflow_split`,
-  `grid_reflow_join`), so a line erased with a background no longer
-  takes extra rows and written cells erased with the default background
+  `grid_reflow_join`), so a line erased with a background takes no
+  extra rows and written cells erased with the default background
   still do; a row under a wrapped line with none used is tmux's empty
   line (replacing patch 0012's continuation-flag test), and an erased
   continuation joins with all its erased cells (0012 joined one); a
@@ -595,6 +282,487 @@ Recorded per commit in git history; the list is kept current:
   and the kitty temporary-file test of 0001 (whose leak is the one
   reported).
 
+- `patches/0016-tmux-decawm.patch` (`Terminal.zig` `print`, `resize`):
+  DECAWM as tmux's `screen_write_cell` has it. A print that reaches the
+  last column sets the pending wrap only under autowrap (with it reset,
+  tmux's `cx` stays on the column, `not_wrap`), so a pending wrap is
+  always tmux's `cx` past the last column (patch 0014); a character
+  printed with the wrap pending and autowrap reset since does not fit and
+  is dropped ("Sanity check cursor position"), where upstream replaced
+  the last cell as xterm does. The main screen reflows on a resize
+  whatever DECAWM says (window.c `window_pane_resize`); upstream reflowed
+  only under wraparound. vtmux's `tmux_cursor` reports the column count
+  whenever the wrap is pending, and the scroll-on-clear ED sets autowrap
+  around the space that keeps one (closes D-030). Upstream tests: "resize
+  with wraparound off" now expects the reflow, "resize less cols without
+  reflow cutting wide char tail" resizes the alternate screen. New test
+  `Terminal: DECAWM as tmux (vtmux)`. Not an upstream candidate.
+
+- `patches/0025-tmux-hscrolled.patch` (`PageList.zig` new field
+  `tmux_hscrolled` and `TmuxHscrolled`, `resizeWithoutReflow`,
+  `resizeCols`, `ReflowCursor.reflowRow`; `c/vtmux_state.zig`
+  `set_hscrolled`, `take_hscrolled`; `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/vtmux_state.h`): tmux's `hscrolled` (grid.c `struct
+  grid`) through a resize of the primary screen. tmux pulls back into a
+  taller screen only the history lines it counts as scrolled, at most
+  `hscrolled` of them, wherever the cursor is, and adds the rest blank at
+  the bottom; a shorter screen adds the lines it pushes into history
+  (screen.c `screen_resize_y`). Upstream pulled every history row it had
+  when the cursor was on the last row and none otherwise (vtmux moved the
+  cursor there to get tmux's pull, `grow_pulling_history`, now gone).
+  `grid_reflow` then moves `hscrolled` as if it were the index of a line
+  from the top: `grid_reflow_split` adds a split line's extra lines when
+  the line's index is not past it, `grid_reflow_join` takes away each
+  line it consumes before it or stops at the line they join. The reflow
+  cursor reproduces that: a source row that starts a line (a line's first
+  row, a row after a full one, the empty line under a wrapped one, or the
+  rest of a row a join took part of) is tmux's split or move, with as many
+  lines as destination rows its cells start, and a row joined whole is a
+  consumed line. `origin`, the rows above tmux's oldest history line that
+  Ghostty still keeps (it prunes whole pages), are left out of both
+  indexes. So a narrowing under a short first line keeps it, a long first
+  line runs it on through the split lines after it, and rows a clear or a
+  narrowing put in history stay there when the screen grows: oracle
+  `reflow_wide_padding_history` (scenes `pshort`, `plong`, `clear`,
+  `emoji`, `deccolm`). vtmux sets it before each primary resize
+  (`ghostty_vtmux_set_hscrolled`) and reads it after Ghostty's resizes,
+  before its own fix-ups (`ghostty_vtmux_take_hscrolled`); vtmux-vt keeps
+  the count between resizes (`PaneTerm::hscrolled`: scrolls add,
+  `grid_view_clear_history` and `grid_clear_history` reset, at most
+  `hsize`), and the live-upgrade state and snapshot carry it
+  (`HistoryState` tag 11). Wrapper: `Terminal::vtmux_set_hscrolled`,
+  `vtmux_take_hscrolled` (`vtmux.rs`, `bindings.rs` by hand). Test:
+  `Terminal: tmux hscrolled through resizes (vtmux)`. With it,
+  `-Doptimize=ReleaseSafe` `-Dtest-filter=reflow` 152/152 (153 in the C
+  test binary), `PageList` 349/349, `resize` 227/227, `Screen` 276/276,
+  `vtmux` 65/65; Debug `-Dtest-filter="Terminal: "` 521/522 with the known
+  `tabClear single` failure. Not an upstream candidate (tmux's model).
+
+- `patches/0026-region-scroll-into-history.patch` (`Terminal.zig` `index`,
+  `scrollUp`, new `tmuxRegionScrollsIntoHistory`,
+  `tmuxScrollRegionUpIntoHistory`, `tmuxRotationPin`, `tmuxMoveRow`): a
+  full-width scroll region that does not start at the top feeds history on
+  the primary screen, as tmux's `grid_view_scroll_region_up` (grid-view.c)
+  does for any region of a grid with history with
+  `grid_scroll_history_region` (grid.c): the region's top row becomes the
+  newest history row with its wrap flag, the rows above the region stay, the
+  rest of the region moves up and its bottom row is cleared with the cursor's
+  background. LF/IND at the region's bottom and SU (once a line, at most the
+  region's height, `screen_write_scrollup`) take it. Upstream made history
+  only from a region at the top and moved a lower one in place, so the line
+  was lost (vtmux D-032). It is the top-region scroll (`cursorScrollAbove`:
+  row 0 into history, the rows down to the region's bottom up a row), then a
+  rotation of the newest history row and the rows above the region down by
+  one: `rotateOnceR` when they are in one page, else row by row upwards with
+  the blank cursor row holding the moving row (a swap of `Row`s in one page,
+  `clonePartialRowGrowCapacity` across pages, which replaces only the
+  destination's page, so the pins above it stay valid). Ghostty's
+  history limits are lifted for the step and enforced after it: a page the
+  scroll pruned (a byte budget, or `history-limit 0`'s zero bytes) would
+  otherwise take the old row 0 with it. Continuation flags (patch 0011)
+  follow on the history row, active row 0 (under the region's old top row,
+  as tmux's history line stays wrapped above it), the region's new top row
+  and the row below the region. The alternate screen, left/right margins
+  and a screen with Kitty image placements keep upstream's in-place path
+  (vtmux stores no images). The upstream test "eraseDisplay complete
+  ignores stale prompt on recycled row" now expects the region's prompt row
+  in history and checks the clear adds none. New test `Terminal: a region
+  below the top scrolls into history as tmux's does (vtmux)` (the D-032
+  evidence, SU over the region's height, the wrap flag, the background, and
+  a styled rotation across a page boundary at every offset); vtmux goldens
+  `cap_region_scroll_history`, `fmt_region_scroll_history_size`, regress
+  `input-raw-scroll.sh`, oracle `region_scroll_history`. With it,
+  `-Doptimize=ReleaseSafe` with the filters `PageList`, `Screen`, `vtmux`,
+  `reflow`, `scroll`, `index`, `stream`, `eraseDisplay`, `prompt`,
+  `insertLines`, `deleteLines`: 1132/1132 and 1160/1160; Debug
+  `-Dtest-filter="Terminal: "` 522/523 and 523/524, the known `tabClear
+  single` failure; Debug `-Dtest-filter=kitty`: the known kitty
+  temporary-file failure only (the tree under `/tmp`). Cost (release,
+  in process, 200k lines through an 80x24 `PaneTerm`, history 2000):
+  region from the top 0.025 s either way; a region from row 1 0.026 s
+  before (no history) and 0.036 s after; from row 20 0.026 s and 0.042 s.
+  Not an upstream candidate (tmux's model).
+
+- `patches/0028-tmux-alternate-screen.patch` (`Terminal.zig` new fields
+  `tmux_alternate`, `tmux_alt_saved` and `TmuxAltSaved`,
+  `tmuxSwitchScreenMode`, `tmuxRestoreAltCursor`, `resize`,
+  `switchScreen`, `switchScreenMode`, `fullReset`; `c/vtmux_state.zig`
+  `set_tmux_alternate`, `alternate_saved`, `set_alternate_saved`,
+  `primary_size`, `importer_primary_size`, the importer's per-screen size;
+  `c/main.zig`, `lib_vt.zig`, `include/ghostty/vt/vtmux_state.h`): with
+  `tmux_alternate` set, modes 47, 1047 and 1049 switch screens as tmux's
+  `screen_alternate_on` and `screen_alternate_off` do (screen.c; input.c
+  `input_csi_dispatch_sm_private`, `_rm_private`), and the primary screen
+  is not resized while the alternate one is up (window.c
+  `window_pane_resize` resizes only the alternate grid). Every mode clears
+  the alternate screen as it comes up (upstream's 47 kept what it had) and
+  keeps the cursor; only 1049 saves the cursor and pen, in a terminal-wide
+  slot apart from DECSC's (`tmux_alt_saved`, tmux's `saved_cx`, `saved_cy`,
+  `saved_cell`), restored by `?1049l` even off the alternate screen and
+  from an earlier one, never with the charsets or origin mode; `?1049h` on
+  an alternate screen already up saves nothing. DECSC's slot is tmux's
+  input context's, so both screens share it (copied at each switch), and
+  `resize` leaves it as it is (input.c `input_save_state`; DECRC clamps
+  it, `input_restore_state`): upstream moved it with its row as a tracked
+  pin, to the top-left once the row left the screen, and the pin kept the
+  blank rows under it from being trimmed, so a shorter alternate screen
+  lost the rows its cursor was on.
+  Upstream used DECSC's per-screen slot for 1049 and resized and reflowed
+  the primary at every resize, with its own cursor. When the alternate
+  screen ends at another size, the terminal takes the primary's size with
+  the cursor tmux resizes it with (the saved one, or the alternate
+  screen's back at that size: `min(y, rows - 1)`, a pending wrap as
+  tmux's `cx` past the last column) and drops the alternate screen; the
+  caller resizes back (vtmux: `PaneTerm::alternate_ended`, through its
+  usual primary resize, so patch 0025 moves `hscrolled` and the rows under
+  the cursor go first). `switchScreen` and `fullReset` resize a primary
+  left at another size before showing it. The state export and import
+  carry the primary's size (`primary_size`, `importer_primary_size`: its
+  pages and cursor at that size, only with an alternate screen) and the
+  1049 slot (`alternate_saved`, `set_alternate_saved`) outside
+  `GhosttyVtmuxState`, so patch 0017's layout is unchanged. Wrapper:
+  `Terminal::vtmux_set_tmux_alternate`, `vtmux_alternate_saved`,
+  `vtmux_set_alternate_saved`, `vtmux_primary_size`,
+  `Importer::primary_size` (`vtmux.rs`; `VtmuxAltSaved` and the
+  functions in `bindings.rs` by hand). Tests: `Terminal: tmux alternate
+  screen leaves the primary at its size (vtmux)`, `Terminal: tmux
+  alternate screen cursor slots (vtmux)`, `Terminal: tmux saved cursor is
+  not moved by a resize (vtmux)`. With it, `-Doptimize=ReleaseSafe`
+  `-Dtest-filter=vtmux` 68/68 (72 in the C test binary), `resize`,
+  `PageList`, `reflow` and `Screen` pass; Debug `-Dtest-filter="Terminal: "`
+  1049/1051 with the known `tabClear single` failure in each test binary.
+  Oracle `alt_screen_exit`, `alt_screen_cleared_narrowed`,
+  `alt_screen_cursor_slots`, `alt_screen_history_clears`,
+  `alt_screen_saved_cursor_resize`. Not an upstream
+  candidate (tmux's model).
+
+- `patches/0029-tmux-grid-corners.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, `tmuxEmptyRows`, new fields `tmux_empties`,
+  `tmux_joined`, `tmux_padding_made`, `scrollClear`; `Terminal.zig`
+  `eraseLine`, `tmuxLineUnwritten`, `index`, `scrollUp`, `scrollDown`,
+  `tmuxUnwrapAboveRegionWithoutHistory`, `tmuxFixRegionContinuations`,
+  `insertLinesTmux`, `insertLinesRowsTmux`, `tmuxOutsideRegion`,
+  `deleteLinesTmux`; `stream.zig` `csiDispatch`): corners of tmux's grid
+  bookkeeping (D-040 closed, D-006 narrowed).
+  - Reflow of a cell wider than the pane (a tab, D-040). tmux's
+    `grid_reflow_split` moves to the next line before every cell for
+    which `width + gc.data.width > sx`, also with nothing on the line
+    yet, so the first cell of a split (`at`) that is wider than the pane
+    gets an empty row before it, and a line of that one cell (`at` 0)
+    two: the line emptied and the one skipped. `grid_reflow_join` skips
+    empty wrapped lines (no cells used) looking for the next cell; when
+    that cell does not fit, even with the width at 0, and the join has
+    consumed no line yet, it removes nothing and each empty line stays a
+    row; once it has, the skipped lines go with it. A line tmux fills
+    exactly (`width == sx`, tab_extra counted) joins nothing, so the row
+    after it starts a line of its own (a wrap pending is set for it; a
+    wide character's padding cell that tmux has at the start of that row
+    is not counted), as does a row whose first cell is the padding a full
+    row's wide character left on a row of its own (`tmuxWidePadding`).
+    reflowRow follows which cells start a line tmux splits as its own (a
+    row starting a line, or the rest of a row a join stopped in) and adds
+    the empty rows (`tmuxEmptyRows`). Pins marking where an emptied line
+    starts (vtmux's oldest history row, OSC 133 marks) stay on it (tmux
+    keeps the original line, `first`); the cursor goes with the cell
+    (`grid_unwrap_position` skips lines with no cells used). A pin on an
+    empty wrapped row does not make it a blank cell (raising the row's
+    length to write it would give the joined line a blank).
+  - EL 2 (and EL 0 from column 0, EL 1 from the last column) does nothing
+    to a line never written to (`cellsize` 0: no cell used, every cell
+    blank, no tab or background) in the default background
+    (`screen_write_clearline`), so it unwraps nothing; such a wrapped
+    line comes from the reflow above.
+  - `scrollClear` (`CSI 22 J`, which vtmux sends only for scroll-on-clear)
+    scrolls the rows up to the last with cells used (`tmuxCellsUsed`,
+    erased ones included), as `grid_view_clear_history` takes
+    `cellused`; Ghostty took the last row with a non-empty cell, so a
+    clear after an erased row scrolled one row less, and a row only
+    erased with a background one more.
+  - Without history (`no_scrollback`: the alternate screen, and a pane
+    made with history-limit 0, which vtmux gives no scrollback bytes) a
+    region scrolled up goes through `grid_move_lines`
+    (`grid_view_scroll_region_up` without `GRID_HISTORY`): a region of two
+    rows unwraps the line moved to its top (`py >= dy + ny`), so a line a
+    print wrapped onto the bottom row of a two-row pane loses its flag as
+    it scrolls; a region of one row (a one-row pane) moves nothing, so LF
+    and SU leave the row as it is. SD and RI at the top margin
+    (`grid_view_scroll_region_down`) move nothing in a one-row pane,
+    history or not. The continuation fix-up after a region scroll
+    (`tmuxFixRegionContinuations`, patch 0011) now skips the alternate
+    screen only, not every screen without scrollback: the primary screen
+    of a pane without history reflows.
+  - IL and DL with the cursor above or below the scroll region work on
+    the whole screen from the cursor's row (`screen_write_insertline`,
+    `screen_write_deleteline`: `grid_view_insert_lines`,
+    `grid_view_delete_lines`), where Ghostty (as xterm) did nothing. DL is
+    the region's DL with the region the whole screen; IL is
+    `grid_move_lines` alone (no `grid_clear`, so not its unwrap), and a
+    count reaching the bottom moves no line and changes nothing. The
+    cursor stays, as in the region (patch 0011).
+  - A zero count is 1 for IL, DL, DCH, SU, SD and CBT (`stream.zig`
+    `csiDispatch`: `@max(1, params[0])`, as ICH had): tmux reads every
+    count with `input_get(ictx, 0, 1, 1)` (input.c), where Ghostty passed
+    the 0 on and `insertLinesTmux`, `deleteLinesTmux`, `deleteChars`,
+    `scrollUp`, `scrollDown` and CBT's loop do nothing for it. A sweep of
+    every count final (`@ A B C D E F G H I L M P S T X Z a b d e` and
+    backquote, counts 0, 1, 2, 65535) against tmux 3.8 found only these
+    six; the others already took 0 as 1. Not changed: extra parameters
+    (`CSI 3;1 L`: tmux uses the first, Ghostty drops the sequence) and a
+    colon in a later parameter.
+
+  Tests: new `stream: a zero count is one for IL, DL, DCH, SU, SD and CBT
+  (vtmux)` (fails without the change), `Terminal: reflow leaves empty rows before a tab wider than
+  the pane (vtmux)` (fails without the PageList change: no empty rows)
+  and `Terminal: tmux grid bookkeeping corners (vtmux)`; oracle
+  `reflow_wide_tab`, `wrap_flag_corners`, `reflow_tmux_quirks` (scene
+  `tabwide`), `csi_zero_count` (every count final with
+  0, IL and DL in, above and below a region, ED 2 after a background). A random reflow probe against tmux 3.8
+  (780 seeds of letters, tabs, wide characters, erases and CRLF on
+  20x6, 2 to 7 resizes of 2 to 20 columns, some of the height) matches
+  but for the 14 seeds of D-041. `-Doptimize=ReleaseSafe` with test filters
+  reflow, PageList, Screen, resize, scroll, insertLines, deleteLines,
+  eraseLine, eraseDisplay, index and vtmux: 1761/1761 over the two test
+  binaries; Debug `-Dtest-filter="Terminal: "` 1047/1049 with the known
+  `tabClear single` failure in each. Not an upstream candidate (tmux's
+  model).
+
+- `patches/0031-decaln-as-tmux.patch` (`Terminal.zig` `decaln`): DECALN
+  fills the screen with default cells holding E, puts the cursor top
+  left and resets the region, and leaves the pen and origin mode alone,
+  as tmux's `screen_write_alignmenttest` (screen-write.c:
+  `grid_default_cell`). Ghostty wrote the Es in the pen's colours, then
+  kept only those colours in the pen (bold, blink and the rest were lost
+  for what followed) and turned origin mode off. No D4 arbiter verdict:
+  xterm's DECALN fills with its current video attributes, so neither
+  Ghostty's nor tmux's, and esctest checks only the Es, the margins and
+  the cursor; so tmux's. Test: new `Terminal: decaln writes default cells and keeps the
+  pen and origin mode (vtmux)` (Ghostty's `decaln preserves color`
+  still passes: the row SD inserts takes the pen's background); Rust
+  `term::tests::decaln_writes_default_cells`; oracle `decaln_as_tmux`.
+  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
+  -Dtest-filter=decaln -Dtest-filter=DECALN` (Debug) passes. Found by
+  `scripts/emu_fuzz.py`. Not an upstream candidate (tmux's model).
+
+- `patches/0034-tmux-line-flags.patch` (`page.zig` `Row.tmux_extended`,
+  `Row.tmux_hyperlink`, `tmuxMarkExtended`, `tmuxEmptied`,
+  `clonePartialRowFrom`, `moveCells`; `Terminal.zig` `printCell`,
+  `writeCell`, `tmuxPenExtended`, `tmuxWrittenBlank`, `printSliceFill`,
+  `markTab`, the grapheme attaches in `print`, `eraseChars`, `eraseLine`;
+  `Screen.zig` `clearRows`, `clearCells`; `PageList.zig`
+  `ReflowCursor.reflowRow`, `ReflowCursor.writeCell`, `tmuxCellExtended`;
+  `c/row.zig` and `screen.h` `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS`;
+  `c/vtmux_state.zig` and `vtmux_state.h` row flags `0x10`, `0x20`):
+  tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` per row (grid.c
+  `grid_extended_cell`), in two of the Row's seven spare bits (five
+  left), and the other half of a wide character a print overwrites
+  (D-027 narrowed; regress `input-unicode.sh` and `input-raw-unicode.sh`
+  pass).
+  - tmux sets the line flags when a cell needs its extended form
+    (`grid_need_extended_cell`: a wide or non-ASCII character, more than
+    one codepoint, an RGB colour, an underline colour, an attribute past
+    the first eight, a tab, a link; HYPERLINK for a link) and keeps them,
+    and the cell's extended entry, when the cell is overwritten or
+    erased, until the line is emptied (`grid_empty_line`). The bits are
+    set by the writes that make such a cell: `printCell` for a character
+    past ASCII before its charset mapping (line drawing maps ASCII and is
+    not one), `writeCell` for a wide character or an extended pen
+    (`tmuxPenExtended`; not on a spacer head, the cell tmux leaves
+    unwritten), the `printSlice` fast path (wide runs, an extended pen,
+    a run with a character past ASCII: the vectorised scan takes ASCII
+    only, so an ASCII run costs no extra pass), grapheme attaches, a tab
+    (`markTab`), an erase to an RGB background (`clearCells`, and
+    `clearRows` after it resets the row: tmux clears to an RGB background
+    with extended cells; `Screen.resetBlankRow` for the scroll paths that
+    reset a row after clearing it, and `cursorScrollAbove`, whose new
+    line is filled with the pen's blank cell by hand). They are reset where `tmux_used` is (patch
+    0013's full-row clears, now `tmuxEmptied`) and with the row
+    (`Row.reset`, `clearRows`). A reflow keeps them on the first row of a
+    line it moves, splits or joins onto (`grid_reflow_move`,
+    `grid_reflow_split`'s first line, `grid_reflow_join`'s target), and
+    sets them on a row it writes an extended cell to (`grid_set_cell`;
+    `tmuxCellExtended`, which takes a cell with vtmux's line-drawing mark,
+    Ghostty's protected bit, as ASCII). Cells moved between rows
+    (`moveCells`, a partial `clonePartialRowFrom`: left and right
+    margins, which tmux has not got) bring their row's bits. So a row
+    with an extended cell should always have the bit; vtmux's snapshot
+    stores the bits a row's cells don't imply, and those a row lacks
+    though its cells imply them (a path that misses the bit: `CSI S` in
+    an RGB background with no history), beside the rows under their own
+    tags (`vtmux_snapshot::KeptRows`, `Row::lacks`), which a build before
+    them skips.
+    Readers OR them with what the cells say now (vtmux `capture.rs`
+    `LineKept`).
+  - A narrow character over half of a wide one: tmux writes the other
+    half as a default cell (`screen_write_overwrite`,
+    `screen_write_clear_cell`), a space that counts as written, where
+    Ghostty erased it to an empty cell (`capture-pane -R` showed it
+    `CLEARED`). `tmuxWrittenBlank` makes the erased half a space when the
+    erase left a default cell (one the cursor's background coloured stays
+    a background cell; tmux keeps the old cell's background, which
+    Ghostty does not).
+  - `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS` (bit 0 EXTENDED, bit 1 HYPERLINK)
+    reads them; the state export and import carry them as row flags
+    `0x10` and `0x20` (`GHOSTTY_VTMUX_ROW_TMUX_EXTENDED`,
+    `GHOSTTY_VTMUX_ROW_TMUX_HYPERLINK`); a page in Ghostty's own form
+    carries the Row as it is. Wrapper: `screen.rs` `Row::tmux_line_flags`,
+    `RowData::TMUX_LINE_FLAGS` added to `bindings.rs` by hand.
+
+  Tests: new `Terminal: tmux line flags (vtmux)` (both print paths, a wide
+  character overwritten from either half, a partial and a full erase, a
+  non-ASCII fast-path run, a strikethrough pen, a link, ED) and
+  `Terminal: tmux line flags follow a reflow (vtmux)`, and `vtmux state:
+  rows round trip into a fresh terminal` checks the bits; vtmux's
+  `capture.rs` `line_flags_outlive_the_cells_that_set_them`,
+  `state_roundtrip.rs` `kept_line_flags_round_trip`, `snapshot_term.rs`
+  `kept_line_flags_cross_a_snapshot` (and its fuzzer, which found the
+  reflow and spacer-head cases), oracle `capture_line_flags`. New
+  `Terminal: a row scrolled in under an RGB pen is extended (vtmux)`
+  (fails without `resetBlankRow` and without the `cursorScrollAbove`
+  mark: a new line under an RGB pen had no bit, which the snapshot, giving
+  a row back the bits its cells say, then restored; the fuzzer found it
+  once main's generator took `?47h` and `CSI s`), vtmux's
+  `snapshot_term.rs` `rows_scrolled_in_under_an_rgb_background_round_trip`
+  (fails without them) and `capture.rs`
+  `a_line_scrolled_in_under_an_rgb_background_is_extended` (the reference's
+  flags; it passes without them, as readers OR the cells).
+  `Terminal: tmux line flags follow a reflow` is the one new test not
+  run without the change (its join case is the reflow fix the fuzzer
+  asked for). The upstream tests `Terminal: print over wide char at 0,0`,
+  `Terminal: print over wide spacer tail` and `Terminal: overwrite
+  multicodepoint grapheme clears grapheme data` now expect the written
+  space (` `, `"X "`). `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` (Debug, 0001-0034): 7039/7125, 76 skipped, 10
+  failed over the two test binaries: the known `tabClear single` and
+  kitty `temporary file outside directory prefix is rejected` (patch
+  0001's note) and those three upstream tests, before their expectations
+  were changed; after, `-Dtest-filter="Terminal: "` 1061/1063 with the
+  known `tabClear single` in each, and `-Dtest-filter=vtmux` 156/156.
+  Not an upstream candidate (tmux's model).
+
+- `patches/0037-wide-wrap-keeps-last-cell.patch` (`Terminal.zig` `print`,
+  `printSliceFast`): a wide character that does not fit the rest of the
+  row wraps and leaves the row's last cell as it was, its text, style
+  and link included, as tmux's `screen_write_cell` (screen-write.c: the
+  wrap comes before any cell is written); only an empty cell becomes the
+  spacer head, which is tmux's unwritten cell. Ghostty wrote a blank
+  spacer head over the cell in the pen's style and link, so `printf
+  '0123456789\033[10G\344\270\200'` on 10 columns lost the 9. The
+  batched path keeps the cell too (its mask check already means the
+  cell has the pen's style and no link or tab). Inside a right margin
+  the cell is still blanked (vtmux never sets one: tmux has no DECSLRM).
+  Two cells still become the default spacer head: in insert mode tmux
+  makes room before it wraps (`grid_view_insert_cells` at the last
+  column clears the cell to the default one, whatever the pen), so the
+  cell is cleared, text, style and link; and a blank with only a
+  background, which is mostly the fill of a line a wrap scrolled in
+  (Ghostty fills it with the pen's background, tmux's wrap linefeed
+  with the default, bg 8), so `capture-pane -e` ends the background
+  before it as tmux does and the next line opens it again. A wide
+  character's tail in the last column stays in insert mode too (tmux
+  keeps the character and clears its padding cell, which only `-J`
+  shows, as a space).
+  esctest has no case for a wide character that does not fit, so no D4
+  arbiter verdict: tmux's. The upstream test `print wide char at right
+  edge with hyperlink` now expects the spacer head without the link.
+  New test `Terminal: a wide char that wraps leaves the last cell as it
+  was (vtmux)` (both paths, insert mode, a background blank); Rust
+  `capture::tests::wide_wrap_keeps_last_cell`; oracle
+  `wide_wrap_keeps_last_cell`, `wide_wrap_insert_mode`,
+  `wide_wrap_scrolled_fill`. `zig build test-lib-vt
+  -Demit-lib-vt=true -Dapp-runtime=none` (Debug): 7047/7125 pass, 76
+  skip, the known `tabClear single` failure. Found by
+  `scripts/emu_fuzz.py --gen round2` (`widemargin`). Not an upstream
+  candidate (tmux's model).
+
+- `patches/0045-row-tmux-used.patch` (`c/row.zig` and `screen.h`
+  `GHOSTTY_ROW_DATA_TMUX_USED`; `Row::tmux_used` in `screen.rs` and
+  `RowData::TMUX_USED` in `bindings.rs`, by hand): a row's `tmux_used`
+  (patch 0013, tmux's `cellused`) through the row API, so `capture-pane -J`
+  and `-T` end a line where tmux does (grid.c `grid_string_cells`): at the
+  cells written, erased or not, where they read only the text before.
+  tmux-resurrect saves pane contents with `capture-pane -epJ`, and vim's
+  first screen has cells written then erased. Rust test `vtmux-vt`
+  `join_ends_lines_at_the_cells_written`, oracle
+  `capture_join_keeps_erased_cells`. Not an upstream candidate (tmux's
+  model). 1.0's non-exhaustive `RowData` keeps its `_` arm last.
+
+- `patches/0046-reflow-keeps-cells-past-the-width.patch` (`page.zig`
+  `Row.tmux_kept`, `Page.tmuxKeptCells`, `tmuxKeep`, `tmuxKeepable`,
+  `clonePartialRowFrom`, `Row.tmuxEmptied`; `PageList.zig`
+  `ReflowCursor.reflowRow`, `computeAndMemoizeCap`, `cursorNewPage`,
+  `resizeCols`, new `tmuxKeptCols`, `resizeWithoutReflowGrowCols`;
+  `Terminal.zig` `deleteChars`, `decaln`; `c/vtmux_state.zig`
+  `exportRows`, `capacityFor`, `importRows`): a line
+  that fits a narrower width keeps the cells past it, as tmux's
+  `grid_reflow_move` keeps the line's `cellsize`. Those are erased cells
+  (past `cellused`: a background or nothing, no style, text or link), so
+  they sit in the row's own cells past the page's width, in a destination
+  page whose capacity is as wide as they need, and hold no managed memory.
+  A row moved whole (unwrapped, a line of its own, fitting by tmux's
+  measure) takes its cells and those it kept to the new width and keeps
+  the rest; a widening shows them again. Writes and partial erases keep
+  them (`grid_set_cell`, `grid_clear` within the width), a full-row clear
+  drops them (`grid_empty_line`: `Row.reset`, `tmuxEmptied`, and 1.0's
+  `Screen.clearRows`, which rewrites the row header; DCH over the whole
+  width from column 0 is such a clear, `grid_view_delete_cells`, and now
+  empties the row and unwraps the one above as ECH does), DECALN keeps
+  them (`screen_write_alignmenttest` writes the width only; `decaln`
+  clears row by row and keeps the mark), lines moved by IL, DL and
+  scroll regions take them along and the lines those add have none, a
+  row split
+  or joined by a reflow keeps none (`grid_reflow_split`,
+  `grid_reflow_join`), a row copied whole to a page of the same width
+  takes them, and a widening without reflow (the alternate screen) clears
+  the cells past the old width as before. The state export writes them as
+  the row's cells past the width under row flag `0x40`, and the import
+  reads them back (the page as wide as they need, erased cells only).
+  Cost: a reflow measures a row by tmux's measure (`tmuxReflowWidth`)
+  only when it has cells past the new width, and `tmuxKeptCols` looks
+  past a row's last cell only when that cell is not empty (an erase to
+  the end of the line) or the row keeps cells already, so a page of
+  ordinary lines costs one cell a row: 20 reflows of a 90,000-line
+  history take 130 ticks against main's 131 (a first version that
+  measured every row took 145). Residual: a wrapped line keeps none, and
+  a reflow's destination page holds them only as far as its capacity
+  (the widest its source page needed, so a background that stops short
+  of the line's end, ECH, can be cut there). Upstream tests unchanged; new tests `Terminal: reflow keeps
+  erased cells past the width (vtmux)`, `Terminal: kept cells past the
+  width survive a row copy and history (vtmux)`, `vtmux state: the cells a
+  row keeps past the width go with it`; Rust `vtmux-snapshot`
+  `cells_past_the_width_round_trip_and_require_nothing`, `vtmux-server`
+  `an_ordinary_attached_client_requires_no_feature`; oracle
+  `reflow_keeps_cells_past_width`, `reflow_kept_cells_edits` (DCH, ICH,
+  IL, DL, SU, SD, DECALN, RIS, REP at the narrow width),
+  `reflow_cells_used` scene `grow` (closes
+  D-036). The row bit takes one of the three spare bits 0013, 0034 and
+  1.0's `Row.blank` leave (`_padding: u3`); the paths that skip a blank
+  row's cells (`Screen.clearRows`, `trimTrailingBlankRows`) rewrite its
+  header, which drops them. 1.0.1 alone loses the cells (the oracle
+  scenario fails 8 steps without the patch). Not an upstream candidate
+  (tmux's model).
+
+### Reflow
+
+- `patches/0012-reflow-blank-continuation.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, new field `prev_wrap`): a blank row under a
+  wrapped line reflows as tmux's `grid_reflow_join` does. A blank
+  continuation (a continuation row erased with ECH or EL 1, where tmux
+  keeps the erased cells in `cellused`) joins the wrapped line as one
+  blank cell and ends it, so the next line stays a line of its own;
+  upstream dropped the row and the line break with it, so a wider pane
+  joined the line after it. A blank row that is not a continuation
+  under a wrapped line (the empty line a region scroll adds,
+  `grid_empty_line`, `cellused` 0) stops the join: it stays a blank
+  line and the line above keeps its wrap flag. Tests: `Terminal: reflow
+  keeps the line break after a blank continuation (vtmux)`, `Terminal:
+  reflow keeps an empty line under a wrapped line (vtmux)`; oracle
+  `wrap_flag_resize`. With 0011 and 0012 the full `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` gives 3254 pass,
+  37 skip and the known `tabClear single` failure, plus the kitty
+  temporary-file test of 0001 when the tree is under `/tmp`. Upstream
+  candidate for the first half (a blank continuation keeping its line
+  break); the empty-line half is tmux's model.
+
 - `patches/0015-reflow-tab-as-tmux.patch` (`PageList.zig`
   `ReflowCursor.reflowRow`, new field `tab_extra`, `bulkCopyable`,
   `BulkRunMask`, `moveLastRowToNewPage`, `cursorScroll`): a reflow
@@ -612,27 +780,395 @@ Recorded per commit in git history; the list is kept current:
   fits by its cells but not by tmux's measure takes only its used cells,
   as a split does. A wrapped row with a used count (patch 0013) shorter
   than the width, which only such a wrap leaves, is measured by it when it
-  joins back. Tab cells leave the bulk copy, which no longer runs past
+  joins back. Tab cells leave the bulk copy, which does not run past
   `tab_extra`. Wide characters keep upstream's reflow (tmux also counts
   their padding cell). Test: `Terminal: reflow measures a tab as tmux does
   (vtmux)`; `zig build test-lib-vt -Dtest-filter=PageList` (348 pass).
   Not an upstream candidate (tmux's model).
 
-- `patches/0016-tmux-decawm.patch` (`Terminal.zig` `print`, `resize`):
-  DECAWM as tmux's `screen_write_cell` has it. A print that reaches the
-  last column sets the pending wrap only under autowrap (with it reset,
-  tmux's `cx` stays on the column, `not_wrap`), so a pending wrap is
-  always tmux's `cx` past the last column (patch 0014); a character
-  printed with the wrap pending and autowrap reset since does not fit and
-  is dropped ("Sanity check cursor position"), where upstream replaced
-  the last cell as xterm does. The main screen reflows on a resize
-  whatever DECAWM says (window.c `window_pane_resize`); upstream reflowed
-  only under wraparound. vtmux's `tmux_cursor` reports the column count
-  whenever the wrap is pending, and the scroll-on-clear ED sets autowrap
-  around the space that keeps one (closes D-030). Upstream tests: "resize
-  with wraparound off" now expects the reflow, "resize less cols without
-  reflow cutting wide char tail" resizes the alternate screen. New test
-  `Terminal: DECAWM as tmux (vtmux)`. Not an upstream candidate.
+- `patches/0019-reflow-retry-rewrites-the-whole-cell.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`): `writeCell` stores a cell's graphemes, then
+  its hyperlink, then its style. When the hyperlink (or style) is
+  OutOfSpace, `reflowRow` moves the row to a new page and writes the cell
+  again, but the moved row carried the graphemes already stored and the
+  retry stored them a second time: `setGraphemes`' `putNoClobber`
+  assertion in safe builds, a duplicate grapheme-map entry and a leaked
+  slice in fast ones (nothing a release build shows). The retry now clears
+  the half-written cell on the new page first. With 0018 the reflow
+  reaches this retry far more often: a page whose map is full now moves
+  its row instead of dropping the link. Narrowing gathers the short lines
+  of several source pages into one destination page, so live output dense
+  with OSC 8 links fills its hyperlink map or set. Found by worker-25's
+  import fuzz (2026-11-06) on live output: an 80x24 pane, 4000 lines of
+  per-cell `id=` links and graphemes, resized to 17 columns. Test:
+  `PageList resize reflow retries a cell with graphemes and a hyperlink on
+  a new page (vtmux)` (aborts in Debug and ReleaseSafe without the patch;
+  under 1 s in Debug); vtmux-vt
+  `reflow_keeps_every_link_past_a_full_hyperlink_map` (a dropped link in
+  the default build without 0018, an abort with 0018 alone under
+  `LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseSafe`). Not fixed: the hyperlink and
+  style set adds in `writeCell` still grow once and assume room, which a
+  page whose capacity is not one of the doubling steps could defeat (no
+  vtmux path makes such a page that the fuzz found). Upstream: not fixed
+  as of ghostty `e95bed633` (2026-11-04, the newest commit a local clone
+  has; judged from the commit log only, as GitHub was unreachable), which
+  sizes the hyperlink map apart from the set (`d20d208c5`) but keeps the
+  retry. Upstream candidate, together with 0018; to be reported.
+  worker-25's reproduction itself (80x24, 4000 lines of 20 grapheme
+  cells each its own `id=` link, 1000 ids, resized to 17 columns) is
+  vtmux-vt `reflow_to_17_columns_keeps_per_cell_links_and_graphemes`: an
+  abort at `setGraphemes`' `putNoClobber` under ReleaseSafe without 0018
+  and 0019, every cell and link kept with them. The full `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over
+  0001-0019: 7013 of 7091 pass, 76 skip, and `tabClear single` fails in
+  each test binary (the kitty temporary-file test of patch 0001's note
+  passes with the checkout outside `/tmp`).
+
+- `patches/0020-reflow-wrapped-row-by-cells-used.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`): a wrapped row reflows by its used cells
+  (patch 0013's `tmux_used`, at least its text) whatever they are, as
+  `grid_reflow_join` takes `cellused`. Patch 0015 measured a wrapped row
+  by them only when the count was not 0, and kept every cell of one with
+  none (for rows from Ghostty's snapshot codec, which vtmux does not use:
+  patch 0017 carries the count). But a row wraps with none used when
+  nothing was written to it: a wide character that does not fit an
+  empty row (Ghostty's spacer head is the cell tmux leaves unwritten), and
+  the empty last line a dead pane's linefeed marks wrapped (vtmux
+  `remain.rs` `mark_wrapped` makes the mark that way). Such a row joined
+  its full width of blanks to the line after it, so after a resize the
+  dead pane's line started 20 columns in (100 to 80 columns); and an
+  empty wrapped row was taken for a line break (`cols_len == 0` deferred
+  a new row), where tmux's join takes nothing from it and goes on, so the
+  pane kept one line more than tmux (`history_size` 8, tmux 7). Test:
+  `Terminal: reflow joins a wrapped row by the cells it used (vtmux)`
+  (two spaces before `DEAD` without the patch); vtmux oracle
+  `remain_on_exit_reflow`. The full `zig build test-lib-vt
+  -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0020: 3262 of
+  3301 and 3753 of 3792 pass, 38 skip each, and the known `tabClear
+  single` fails in each test binary. Not an upstream candidate (tmux's
+  model).
+
+- `patches/0023-reflow-cursor-at-line-end.patch` (`Screen.zig` `resize`): a
+  cursor at or past the end of the cells its line used goes to the end of the
+  reflowed line, as tmux's does (`grid_wrap_position` gives it `UINT_MAX`,
+  `grid_unwrap_position` the `cellused` of the line's last row): when that
+  row is full the cursor is past its last column, a pending wrap, where
+  upstream started a row of its own with it (18 characters on 20 columns
+  narrowed to 9: tmux and now vtmux `9,0` with `history_size` 1, vtmux
+  before `0,2` with 0). Before the reflow the cursor goes on the line's last
+  used cell with a wrap pending; the reflow moves it with that cell and
+  `resize` already drops the pending wrap, moving the cursor one on, unless
+  the cell ends a row. Main screen only (it reflows). vtmux's `PaneTerm::resize`
+  runs its blank-row fix-up for such a cursor too and moves it only by
+  VPA, which keeps a pending wrap (patch 0014). Test: `Terminal: reflow leaves
+  a cursor at the line's end past it (vtmux)` (fails without the change).
+  Not an upstream candidate.
+
+- `patches/0024-reflow-wide-character-as-tmux.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, `tmuxWidePadding`, `tmuxReflowWidth`,
+  `bulkRunLength`, `bulkCopyable`, `cursorNewPage`, new field
+  `src_in_tab`): a reflow measures a wide character as tmux's does: its cell
+  of width 2 and one padding cell, which reads back as width 1
+  (`grid_get_cell1`), 3 columns in all (`grid_reflow`, `grid_reflow_split`,
+  `grid_reflow_join`), so `一abcdefghijklmnop` on 20 columns narrowed to 9
+  is `一abcdef` / `ghijklmno` / `p`. The wide cell adds 1 to `tab_extra`
+  (patch 0015). tmux can split the two: a padding cell that does not fit
+  goes to the next row, which then starts with it (drawn blank,
+  `tty_draw_line`; skipped by `capture-pane`, `grid_string_cells`), even
+  when the line ends there. Ghostty keeps the spacer tail with its wide
+  cell, so `tmuxWidePadding` starts that row with a tab continuation cell
+  that no tab precedes (the reflow tracks `src_in_tab` to tell them apart):
+  vtmux-vt reads it as padding already (skipped by a capture, blank on
+  screen). A reflow drops such a cell and makes it again where the padding
+  falls; pins on it go to the cell before it, pins on a spacer tail whose
+  padding moves go with the padding (a cursor after `abcdefg一` narrowed to
+  9 goes to 1,1 as in tmux). Wide pairs leave the bulk copy (it copied
+  pairs as two columns), and so do tab cells erased with a background
+  (`bulkCopyable` let a tab over erased cells through, so patch 0015
+  measured it as one column: `一`, EL in green, two tabs, 40 -> 57 columns).
+  The cells past the used ones of a line that fits (the background it was
+  erased with) are copied up to the width without being measured, as
+  `grid_reflow_move` keeps them. Seven upstream wide-character reflow tests
+  ("less cols to wrap a wide char", the five "wide char bulk run" tests,
+  "to wrap a multi-codepoint grapheme with a spacer head") now expect
+  tmux's rows. New test `Terminal: reflow measures a wide character as tmux
+  does (vtmux)` (fails without the change). Cost: 20k lines of CJK at
+  120x40, five resizes (release, in a server): 0.05 s before, 0.11 s after
+  (tmux 0.23 s). Not an upstream candidate (tmux's model).
+
+  With 0021-0024 the full `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` (Debug, 40 min on a loaded host, run on a draft of
+  0024 without its last three changes: the background tab, the cells past
+  the used ones, the pins) gives 7017 of 7099 pass, 76 skip, and two
+  failures in each test binary: the known `tabClear single`, and the kitty
+  temporary-file test of patch 0001's note (the checkout was under `/tmp`);
+  "golden snapshot with a virtual placement" failed on that run, before the
+  fixture above was regenerated, and passes with it (`-Dtest-filter="golden
+  snapshot"`, 89/89). On the final patches, `-Doptimize=ReleaseSafe` with
+  `-Dtest-filter=PageList` 699/699, `reflow` 303/303, `vtmux` 130/130.
+
+- `patches/0039-reflow-bulk-copy-line-flags.patch` (`PageList.zig`
+  `ReflowCursor.copyRun`, new `tmuxRunExtended`): a reflow's bulk copy
+  of a run of narrow cells sharing a style sets `Row.tmux_extended` on the
+  row it lands on when a cell of the run is one tmux holds extended, as
+  `ReflowCursor.writeCell` does (patch 0034, `tmuxCellExtended`): tmux
+  writes every cell its reflow moves with `grid_set_cell` (grid.c
+  `grid_reflow_split`, `grid_reflow_join`). The run shares one style and
+  has no wide, tab, link or grapheme cell, so the first cell's style and
+  each cell's character and RGB background decide. Patch 0034 missed this
+  path: a row a reflow filled with overlined text, or a character past
+  ASCII amid plain ones, lacked the flag, and lost it for good once its
+  cells were overwritten (tmux keeps it); a live upgrade, which gave the
+  row the flags its cells said, did not. The fuzzer of vtmux's
+  `snapshot_term.rs` found it (seed 141). Test: new `Terminal: tmux line
+  flags follow a bulk-copied reflow (vtmux)` (an extended style, a
+  character past ASCII, an RGB background cell, each on rows with no pin;
+  fails without the change); `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` with `-Dtest-filter=vtmux` 233/233 and
+  `-Dtest-filter=PageList` 701/701 (Debug). Oracle
+  `reflow_line_flags_bulk`. Not an upstream candidate (tmux's model).
+
+### Widths and clusters
+
+- `patches/0007-width-overrides.patch` (`unicode/main.zig`,
+  `terminal/Terminal.zig` `print`/`printSliceFast`/`printSliceFill`,
+  `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/unicode.h`): tmux's `codepoint-widths` for the pane
+  grid. `ghostty_unicode_set_width_overrides` sets process-wide ranges
+  (sorted, not overlapping, widths 0 to 2; binary-searched, a no-op check
+  while empty) that the printer and `codepointWidth` take over the table,
+  as tmux's one width cache does. The printer's "0x00-0xFF is narrow"
+  shortcuts (`print`, the batched narrow run and its SIMD scan) stop at
+  0x7F while an override reaches below 0x100. Cells already printed keep
+  their width. Wrapped as `unicode::set_width_overrides` in
+  `libghostty-vt/src/unicode.rs`, the binding added by hand to
+  `bindings.rs`. Tests: new `Terminal: width overrides (vtmux)` and
+  `set_width_overrides` (`zig build test-lib-vt -Dtest-filter=width`);
+  the full `zig build test-lib-vt` gives 3247 pass, 37 skip and the same
+  two failures as without the patch (`tabClear single`, and the kitty
+  temp-file test noted under 0001) on this host.
+
+- `patches/0008-cluster-keeps-zero-width.patch` (`Terminal.zig` `print`):
+  vtmux runs every pane with grapheme clustering (mode 2027), which is
+  how tmux's `screen_write_combine` groups regional-indicator pairs, emoji
+  modifiers and ZWJ sequences. Upstream drops a zero-width character that
+  starts a new grapheme in that mode (U+200B, U+2028, U+2029); tmux and
+  Ghostty without the mode attach it to the previous cell, so this patch
+  removes the early return and it is attached in both modes. Test:
+  `Terminal: zero-width character after grapheme cluster is kept (vtmux)`
+  (in patch 0009's file, which adds it). Upstream candidate only as an
+  option: dropping is a deliberate choice there.
+
+- `patches/0009-c1-is-zero-width.patch` (`stream.zig` ground-state UTF-8
+  paths, `Terminal.zig` `print`, `printSliceFast`, `printSliceFill`): a C1
+  control decoded from UTF-8 (U+0080-U+009F) is printed as a zero-width
+  character that joins the previous cell, as tmux's `utf8_width` makes it
+  (wcwidth -1, a C1 control, 0). Upstream ignores it. `print` gives it
+  width 0, and the batched narrow run (its SIMD scan now stops at 0x7F, the
+  scalar loop takes 0xA0-0xFF) leaves it to `print`. The upstream test
+  `stream: ground state UTF-8-decoded C1 controls are ignored` is now
+  `... are printed (vtmux)`. Tests: `zig build test-lib-vt
+  -Dtest-filter=vtmux` (45/45 steps), `-Dtest-filter=stream` (597 pass),
+  `-Dtest-filter="Terminal: "`: 1011/1013, the same two `tabClear single`
+  failures as the unpatched tree (patch 0002 marks the tab cells and
+  dirties the row). Throughput: a 21.9 MB ASCII, 19.5 MB Latin-1 and 15 MB
+  CJK flood through one `PaneTerm` (80x24, release) take 0.10/0.13/0.13 s,
+  against 0.16/0.16/0.15 s on main before this and the scanner's ASCII run.
+
+- `patches/0021-rep-repeats-a-zero-width-character.patch` (`Terminal.zig`
+  `print`): REP repeats the last character printed, a zero-width one too.
+  tmux keeps every character it prints as `ictx->last` (input.c
+  `input_print`, `input_top_bit_set`), and `INPUT_CSI_REP` writes it again:
+  `e`, U+0301, `CSI 2 b`, `|` is one cell with three accents and `|` in
+  column 1. Upstream set `previous_char` only for a character that takes a
+  cell, so it repeated `e`. `print` now sets it before anything else. The
+  Ghostty snapshot fixture `kitty-virtual-v1.hex` records the previous
+  character, now the last combining mark (`snapshot/testdata`, regenerated
+  from its test's candidate; vtmux does not use that codec). Test:
+  `Terminal: printRepeat repeats a zero-width character (vtmux)` (fails
+  without the change). Not an upstream candidate as is (xterm repeats the
+  last graphic character).
+
+- `patches/0027-tmux-clusters.patch` (`unicode/main.zig` `tmux_clusters`,
+  `tmux_vs16_wide`, `setTmuxClusters`, `tmuxJamo`, `tmuxShouldCombine`,
+  `tmuxMayJoin`, `tmuxTextPresentation`; `Terminal.zig` `tmuxCombine`, `print`, `printSliceFast`,
+  `printSliceFill`; `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/unicode.h`): with a process-wide switch
+  (`ghostty_unicode_set_tmux_clusters(enabled, vs16_wide)`, off by default,
+  like patch 0007's overrides), mode 2027 joins characters into a cell as
+  tmux's `screen_write_combine` (screen-write.c) does instead of by UAX #29.
+  U+200D, U+FE0F and zero-width characters join the cell before, or are
+  dropped where there is none; U+FE0F makes a one-column cell two columns
+  while `vs16_wide` (tmux's `variation-selector-always-wide`), after any
+  character, not only an emoji variation base (upstream dropped it there),
+  and U+FE0E changes no width (upstream narrowed an emoji); any character
+  joins a cell that ends with a ZWJ (0xA0-0xFF too: the slice fast path
+  leaves a Latin-1 character after a cell with graphemes to `print`); two
+  lone regional indicators, and an emoji skin-tone modifier with one of
+  tmux's 72 bases in either order, join into two columns
+  (`utf8_should_combine`, utf8-combined.c); a character joining after a
+  ZWJ makes one of the nine text-presentation emoji tmux's table makes two
+  columns (U+261D, U+26F9, U+270C, U+270D, U+1F3CB, U+1F3CC, U+1F574,
+  U+1F575, U+1F590), one column alone in vtmux's grid (D-045), two
+  columns, as tmux's cell is and Ghostty draws the sequence; Hangul jamo join as
+  `hanguljamo_check_state` says (a medial or final jamo that cannot join is
+  dropped); U+3164 is dropped wherever it comes; a cell stops joining at 32
+  bytes of UTF-8 (`UTF8_SIZE`). Everything else, a spacing mark or a prepend
+  character included, takes a cell of its own. A cell on the last column
+  that U+FE0F would widen stays one column with the wrap pending: tmux puts
+  its padding past the edge, where Ghostty has no cell, and the next
+  character wraps in both. The slice fast path batches a character only
+  when `tmuxMayJoin` says tmux could not join it to the one before. vtmux
+  turns it on in the server (`vtmux_vt::set_tmux_clusters`), with tmux's
+  own width table (`utf8_default_width_cache`, less those nine) as
+  overrides under `codepoint-widths` (D-031); the oracle's observer stays on Ghostty's
+  rules. Wrapper: `unicode::set_tmux_clusters` (`libghostty-vt/src/unicode.rs`,
+  `bindings.rs` by hand). Tests: `Terminal: tmux clusters (vtmux)` (each case
+  through `print` and `printSlice`) and `tmux clustering rules (vtmux)`;
+  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug)
+  `-Dtest-filter=vtmux` 67/67 and 71/71, `print` 109/109 and 110/110,
+  `grapheme` 89/89 and 97/97 (the two test binaries); the switch is off
+  in Ghostty's own tests, so their behaviour is upstream's. Not an upstream
+  candidate (tmux's model).
+
+- `patches/0041-unicode-options-thread-safe.patch`: the width overrides
+  are one atomic pointer to an immutable table (ranges and the printer's
+  narrow bound), never freed: setting the same ranges again reuses their
+  table, so the memory kept is one table per distinct set. The clustering
+  flags are one atomic byte. No lock anywhere; `printSliceFast`,
+  `printSliceFill` and `print` read the table and flags once per call,
+  except the narrow bound in `printSliceFill`'s scalar loop, read per
+  character: holding it in a register cost that loop 5% on UTF-8 text.
+  Printing speed matches the build without this patch. This covers
+  printing as well as both width queries, so the Rust setters (including
+  vtmux-vt's) remain safe. The server sets them from its single-threaded
+  `set_option` (`codepoint-widths`, tmux `utf8.c`
+  `utf8_update_width_cache`; clustering, `screen-write.c`
+  `screen_write_combine`). A subprocess test runs two writers and two
+  readers, including terminal printing; it segfaulted before the patch and
+  segfaults with a setter that frees the old table.
+
+### Memory and pages
+
+- `patches/0003-resize-without-faulting-blank-memory.patch`
+  (`PageList.zig` `trimTrailingBlankRows`, `keepWarm`): idle panes stay
+  small after a resize. A height shrink trims trailing blank rows with
+  `resetRow`, which memsets cells that are already zero and faults them
+  in (200x50 to 200x25: +40 KB); an all-zero row without managed memory
+  now only gets its header reset. `keepWarm` (patch 0001) now keeps a
+  freed page resident only when every row of it was in use (the line
+  limit's pruned page). The page a width reflow replaces used only a few
+  rows, and zeroing it faulted the whole 400 KB pool item in.
+  `scripts/bench.py scale` (400 idle panes): 33.2 to 15.3 KB/pane; a
+  width change of an 80x24 pane: 400 KB to 8.5 KB. The 1M-line flood
+  keeps its 0.72 s. ghostty's `zig build test-lib-vt
+  -Dtest-filter=PageList` passes with it.
+
+- `patches/0004-work-bounded-compression.patch` (`PageList.zig`,
+  `compress/Page.zig`): oversized resident pages (`compression.Page.chunked`)
+  are encoded from an owned snapshot in 128 KiB LZ4 blocks per incremental
+  call. Snapshot work is capped at 4 MiB; bigger pages remain resident.
+  Publication validates node generation, activity, metadata and source bytes;
+  every failed or no-op attempt advances. Grid page layout and pruning are
+  unchanged. Full mode and prepend compress an oversized page as one chunked
+  job (`compressPage` sends it to `compressPageChunked`); smaller pages keep
+  the original block encoding. Encoded storage uses the page allocator and
+  shrinks in place with `remap`, falling back to dupe and free when the
+  allocator can't remap. The chunked format decodes through restore and
+  `cloneBuf` (chunk by chunk).
+  Constraint: `compression.Page` must stay at its upstream size (a comptime
+  assert): the chunked bookkeeping lives outside the struct. Growing it
+  (the round-2 version added two fields, so a PageList node went from 488 to
+  512 bytes) made every frame's cell copy fault in more pages and slowed a
+  busy pane by 16-20% p50/p95 with no compression running (task
+  hist_compress_r3).
+  Tests: `zig build test-lib-vt -Dtest-filter="chunked Page" -Doptimize=ReleaseSafe`
+  and `-Dtest-filter="PageList incremental compression"`; the full upstream
+  suite is not yet run.
+
+- `patches/0035-clone-whole-page-memory.patch` (`PageList.zig` `clone`,
+  new `cloneWholePage`): a resident page `PageList.clone` copies whole
+  (every row of it) goes as a copy of its memory, as `Page.cloneBuf`
+  does: the new page has the source's capacity, so its layout, and a
+  page keeps everything as offsets into its memory. Upstream cloned it
+  row by row (`Page.cloneFrom`), and a row with managed memory cell by
+  cell, adding each styled cell's style to the new page's set
+  (`clonePartialRowFrom`, `StyleSet.addWithId`): copy-mode entry
+  (`ghostty_terminal_clone_screen`, patch 0005) over 1M styled lines took
+  701-727 ms against 290-325 ms for plain ones (tmux 276-282). Now both
+  270-303 ms. The new page comes zeroed but for its row headers
+  (`createPageExt`, `initBuf`), and zero memory is an empty set or
+  allocator (`initAssumeZeroed`): the row headers and cells are copied
+  whole, the style set, the grapheme allocator and map, and the string
+  allocator with the hyperlink set and map each only when it holds
+  anything (else the copy keeps the fresh page's, empty). Memory a page
+  never touched is not committed, and reading it to copy it faults in a
+  zero page: a plain `cloneBuf` made copy mode's RSS over 1M lines 61 MB
+  bigger (2022 against 1961 MB), and one that skipped zero memory pages
+  made the first entry 20-30 ms slower. Now 1961 MB plain, 1971 MB
+  styled (the style set's whole region is copied). A partial page (the
+  clone's first or last, cut by `top`/`bot`) and a compressed page
+  (patch 0005) go as before. Test: new `PageList clone copies whole pages
+  with their styles and graphemes (vtmux)` (several pages of styled rows
+  and graphemes: every cell, style and cluster reads back the same, each
+  page is byte for byte its source's, which the row-by-row clone fails,
+  and changing the source changes nothing in the copy); `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none -Dtest-filter="PageList
+  clone"` (Debug) passes, and the whole `test-lib-vt` gives what it gives
+  without the patch (7047/7127 pass, 76 skip; the same two fail,
+  `Terminal: tabClear single` and `kitty.graphics_image` "temporary file
+  outside directory prefix is rejected", and the same one leak, in both
+  test binaries). Rust: `capture::tests::a_copy_of_whole_pages_reads_as_the_pane_did`
+  (links included). Upstream candidate: any full-page clone gains.
+
+- `patches/0040-grid-ref-bounds.patch`: `CGridRef.toPin` checks both
+  coordinates against the page before any native reader dereferences a
+  cell. `GridRef::with_x` remains safe; out-of-range readers return
+  `InvalidValue` even in ReleaseFast. Both vtmux capture call sites take
+  columns from `row_cells`, already within the page. The Rust test checks
+  the last valid column, the first invalid one and `u16::MAX`.
+
+### State export, import and clones
+
+- `patches/0005-clone-screen.patch` (`c/terminal.zig`, `c/grid_ref.zig`,
+  `lib_vt.zig`, `c/main.zig`, `include/ghostty/vt/{terminal,grid_ref}.h`,
+  `PageList.zig` `clone`/`cloneCompressedNode`): copy-mode entry takes a
+  frozen copy of the pane's screen instead of reading every row through
+  per-cell `grid_ref` calls (4.3 s on 100k lines; each call walked the
+  page list from the top).
+  - `ghostty_terminal_clone_screen`: `Screen.clone` of the active screen
+    (history included) into a new terminal of the same size. Only the
+    grid, cursor and selection are copied.
+  - `ghostty_grid_ref_row_cells`: all cells of a grid ref's row in one
+    call, so a row read walks the page list once.
+  - `PageList.clone` copies a whole compressed page compressed: the copy
+    gets the encoding (duplicated) over fresh backing memory of the same
+    kind (pool item or heap) and decodes on first access, and the source
+    is not restored. Upstream restored every compressed page to clone it,
+    which cost about 60 ms on 100k lines and left the source pane's
+    history uncompressed. The upstream test "PageList compression restores
+    through page access" now expects the clone to stay compressed; a new
+    test, "PageList clone keeps compressed history compressed", checks
+    every row reads back the same.
+  Wrapper: `Terminal::clone_screen`, `GridRef::row_cells`,
+  `GridRef::with_x` (`libghostty-vt/src`), bindings added by hand to
+  `bindings.rs`. Clone of 100k history lines at 120x40 (release, in
+  process, `crates/vtmux-server/examples/copy_entry.rs`): 46 ms resident,
+  5.6 ms compressed. Tests: `zig build test-lib-vt -Dtest-filter=PageList
+  -Doptimize=ReleaseSafe` (697 pass), `-Dtest-filter=Screen` (553 pass),
+  `-Dtest-filter=compress` (191 pass, 6 skip).
+
+- `patches/0006-hyperlink-id.patch` (`c/grid_ref.zig`, `c/main.zig`,
+  `lib_vt.zig`, `include/ghostty/vt/grid_ref.h`): `ghostty_grid_ref_hyperlink_id`
+  reads the OSC 8 id of a cell's hyperlink (explicit bytes, or Ghostty's
+  implicit counter for a link opened without `id=`), wrapped as
+  `GridRef::hyperlink_id` / `screen::HyperlinkId` in `screen.rs` and
+  `bindings.rs`. `capture-pane` needs it to tell links apart as tmux does
+  (`hyperlinks_put`: same URI and id are one link): `-e` writes `id=` in
+  its OSC 8, `-H` lists each link once, `-R` prints `linkid=`. Read-only,
+  no layout change. Not run: ghostty's own `zig build test-lib-vt`
+  (`zig build` of the library with the patch passes and vtmux's
+  `cli.rs` `capture_pane_*` tests exercise it).
 
 - `patches/0017-vtmux-state-export.patch` (new `src/terminal/c/vtmux_state.zig`
   and `include/ghostty/vt/vtmux_state.h`; exports in `c/main.zig`,
@@ -760,442 +1296,6 @@ Recorded per commit in git history; the list is kept current:
   vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
   candidate as is (it carries vtmux's patch bits).
 
-- Dropped with 1.0.1 (its `hyperlink_cells` capacity does it), kept for the
-  record: `patches/0018-reflow-hyperlink-map-full.patch` (`PageList.zig`
-  `ReflowCursor.writeCell`): the reflow grows a destination page's
-  hyperlink map until a cell's link fits, not once. Near
-  `hyperlink_bytes`' 16-bit maximum a doubling (capped at the maximum)
-  can leave the map's power-of-two capacity as it was, and the
-  `setHyperlink` after it failed: `unreachable` in safe builds, the
-  link dropped in others. Past the maximum the growth is `OutOfSpace`,
-  on which `reflowRow` already moves the row to a new page. Live input
-  reaches it: 3000 lines of 30 linked characters on 80 columns, then 17
-  columns (the narrower rows pack more linked cells into a page than the
-  source pages held), found by vtmux's import fuzz. Test: `Terminal:
-  reflow keeps the links of a page full of them (vtmux)` (fails before:
-  `unreachable` at the `setHyperlink`); vtmux's
-  `a_reflow_keeps_the_links_of_pages_full_of_them` (ReleaseFast: 3 of
-  90000 links dropped before). The full `zig build test-lib-vt
-  -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0018: 7009 of
-  7089 pass, 76 skip, and the two known failures in each test binary
-  (`tabClear single`, and the kitty temporary-file test of patch 0001's
-  note, the checkout under `/tmp`). Upstream candidate.
-
-- `patches/0019-reflow-retry-rewrites-the-whole-cell.patch` (`PageList.zig`
-  `ReflowCursor.reflowRow`): `writeCell` stores a cell's graphemes, then
-  its hyperlink, then its style. When the hyperlink (or style) is
-  OutOfSpace, `reflowRow` moves the row to a new page and writes the cell
-  again, but the moved row carried the graphemes already stored and the
-  retry stored them a second time: `setGraphemes`' `putNoClobber`
-  assertion in safe builds, a duplicate grapheme-map entry and a leaked
-  slice in fast ones (nothing a release build shows). The retry now clears
-  the half-written cell on the new page first. With 0018 the reflow
-  reaches this retry far more often: a page whose map is full now moves
-  its row instead of dropping the link. Narrowing gathers the short lines
-  of several source pages into one destination page, so live output dense
-  with OSC 8 links fills its hyperlink map or set. Found by worker-25's
-  import fuzz (2026-11-06) on live output: an 80x24 pane, 4000 lines of
-  per-cell `id=` links and graphemes, resized to 17 columns. Test:
-  `PageList resize reflow retries a cell with graphemes and a hyperlink on
-  a new page (vtmux)` (aborts in Debug and ReleaseSafe without the patch;
-  under 1 s in Debug); vtmux-vt
-  `reflow_keeps_every_link_past_a_full_hyperlink_map` (a dropped link in
-  the default build without 0018, an abort with 0018 alone under
-  `LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseSafe`). Not fixed: the hyperlink and
-  style set adds in `writeCell` still grow once and assume room, which a
-  page whose capacity is not one of the doubling steps could defeat (no
-  vtmux path makes such a page that the fuzz found). Upstream: not fixed
-  as of ghostty `e95bed633` (2026-11-04, the newest commit a local clone
-  has; judged from the commit log only, as GitHub was unreachable), which
-  sizes the hyperlink map apart from the set (`d20d208c5`) but keeps the
-  retry. Upstream candidate, together with 0018; to be reported.
-  worker-25's reproduction itself (80x24, 4000 lines of 20 grapheme
-  cells each its own `id=` link, 1000 ids, resized to 17 columns) is
-  vtmux-vt `reflow_to_17_columns_keeps_per_cell_links_and_graphemes`: an
-  abort at `setGraphemes`' `putNoClobber` under ReleaseSafe without 0018
-  and 0019, every cell and link kept with them. The full `zig build
-  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over
-  0001-0019: 7013 of 7091 pass, 76 skip, and `tabClear single` fails in
-  each test binary (the kitty temporary-file test of patch 0001's note
-  passes with the checkout outside `/tmp`).
-
-- `patches/0020-reflow-wrapped-row-by-cells-used.patch` (`PageList.zig`
-  `ReflowCursor.reflowRow`): a wrapped row reflows by its used cells
-  (patch 0013's `tmux_used`, at least its text) whatever they are, as
-  `grid_reflow_join` takes `cellused`. Patch 0015 measured a wrapped row
-  by them only when the count was not 0, and kept every cell of one with
-  none (for rows from Ghostty's snapshot codec, which vtmux does not use:
-  patch 0017 carries the count). But a row wraps with none used when
-  nothing was written to it: a wide character that does not fit an
-  empty row (Ghostty's spacer head is the cell tmux leaves unwritten), and
-  the empty last line a dead pane's linefeed marks wrapped (vtmux
-  `remain.rs` `mark_wrapped` makes the mark that way). Such a row joined
-  its full width of blanks to the line after it, so after a resize the
-  dead pane's line started 20 columns in (100 to 80 columns); and an
-  empty wrapped row was taken for a line break (`cols_len == 0` deferred
-  a new row), where tmux's join takes nothing from it and goes on, so the
-  pane kept one line more than tmux (`history_size` 8, tmux 7). Test:
-  `Terminal: reflow joins a wrapped row by the cells it used (vtmux)`
-  (two spaces before `DEAD` without the patch); vtmux oracle
-  `remain_on_exit_reflow`. The full `zig build test-lib-vt
-  -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0020: 3262 of
-  3301 and 3753 of 3792 pass, 38 skip each, and the known `tabClear
-  single` fails in each test binary. Not an upstream candidate (tmux's
-  model).
-
-- `patches/0021-rep-repeats-a-zero-width-character.patch` (`Terminal.zig`
-  `print`): REP repeats the last character printed, a zero-width one too.
-  tmux keeps every character it prints as `ictx->last` (input.c
-  `input_print`, `input_top_bit_set`), and `INPUT_CSI_REP` writes it again:
-  `e`, U+0301, `CSI 2 b`, `|` is one cell with three accents and `|` in
-  column 1. Upstream set `previous_char` only for a character that takes a
-  cell, so it repeated `e`. `print` now sets it before anything else. The
-  Ghostty snapshot fixture `kitty-virtual-v1.hex` records the previous
-  character, now the last combining mark (`snapshot/testdata`, regenerated
-  from its test's candidate; vtmux does not use that codec). Test:
-  `Terminal: printRepeat repeats a zero-width character (vtmux)` (fails
-  without the change). Not an upstream candidate as is (xterm repeats the
-  last graphic character).
-
-- `patches/0022-deccolm-never-resizes.patch` (`stream_terminal.zig`): DECCOLM
-  (`?3h`/`?3l`) never resizes the grid. With DEC mode 40 set first, upstream
-  resized it to 132 or 80 columns behind the pane's back and cleared it
-  without history; tmux has no 132-column mode and ignores mode 40
-  (input.c `input_csi_dispatch_sm_private`, `_rm_private` home the cursor
-  and clear the screen, which vtmux's `PaneTerm::deccolm` does, into history
-  under `scroll-on-clear`). Test: `DECCOLM never resizes, with DEC mode 40
-  or without (vtmux)` (fails without the change). Not an upstream
-  candidate.
-
-- `patches/0023-reflow-cursor-at-line-end.patch` (`Screen.zig` `resize`): a
-  cursor at or past the end of the cells its line used goes to the end of the
-  reflowed line, as tmux's does (`grid_wrap_position` gives it `UINT_MAX`,
-  `grid_unwrap_position` the `cellused` of the line's last row): when that
-  row is full the cursor is past its last column, a pending wrap, where
-  upstream started a row of its own with it (18 characters on 20 columns
-  narrowed to 9: tmux and now vtmux `9,0` with `history_size` 1, vtmux
-  before `0,2` with 0). Before the reflow the cursor goes on the line's last
-  used cell with a wrap pending; the reflow moves it with that cell and
-  `resize` already drops the pending wrap, moving the cursor one on, unless
-  the cell ends a row. Main screen only (it reflows). vtmux's `PaneTerm::resize`
-  no longer skips its blank-row fix-up for such a cursor and moves it only by
-  VPA, which keeps a pending wrap (patch 0014). Test: `Terminal: reflow leaves
-  a cursor at the line's end past it (vtmux)` (fails without the change).
-  Not an upstream candidate.
-
-- `patches/0024-reflow-wide-character-as-tmux.patch` (`PageList.zig`
-  `ReflowCursor.reflowRow`, `tmuxWidePadding`, `tmuxReflowWidth`,
-  `bulkRunLength`, `bulkCopyable`, `cursorNewPage`, new field
-  `src_in_tab`): a reflow measures a wide character as tmux's does: its cell
-  of width 2 and one padding cell, which reads back as width 1
-  (`grid_get_cell1`), 3 columns in all (`grid_reflow`, `grid_reflow_split`,
-  `grid_reflow_join`), so `一abcdefghijklmnop` on 20 columns narrowed to 9
-  is `一abcdef` / `ghijklmno` / `p`. The wide cell adds 1 to `tab_extra`
-  (patch 0015). tmux can split the two: a padding cell that does not fit
-  goes to the next row, which then starts with it (drawn blank,
-  `tty_draw_line`; skipped by `capture-pane`, `grid_string_cells`), even
-  when the line ends there. Ghostty keeps the spacer tail with its wide
-  cell, so `tmuxWidePadding` starts that row with a tab continuation cell
-  that no tab precedes (the reflow tracks `src_in_tab` to tell them apart):
-  vtmux-vt reads it as padding already (skipped by a capture, blank on
-  screen). A reflow drops such a cell and makes it again where the padding
-  falls; pins on it go to the cell before it, pins on a spacer tail whose
-  padding moves go with the padding (a cursor after `abcdefg一` narrowed to
-  9 goes to 1,1 as in tmux). Wide pairs leave the bulk copy (it copied
-  pairs as two columns), and so do tab cells erased with a background
-  (`bulkCopyable` let a tab over erased cells through, so patch 0015
-  measured it as one column: `一`, EL in green, two tabs, 40 -> 57 columns).
-  The cells past the used ones of a line that fits (the background it was
-  erased with) are copied up to the width without being measured, as
-  `grid_reflow_move` keeps them. Seven upstream wide-character reflow tests
-  ("less cols to wrap a wide char", the five "wide char bulk run" tests,
-  "to wrap a multi-codepoint grapheme with a spacer head") now expect
-  tmux's rows. New test `Terminal: reflow measures a wide character as tmux
-  does (vtmux)` (fails without the change). Cost: 20k lines of CJK at
-  120x40, five resizes (release, in a server): 0.05 s before, 0.11 s after
-  (tmux 0.23 s). Not an upstream candidate (tmux's model).
-
-  With 0021-0024 the full `zig build test-lib-vt -Demit-lib-vt=true
-  -Dapp-runtime=none` (Debug, 40 min on a loaded host, run on a draft of
-  0024 without its last three changes: the background tab, the cells past
-  the used ones, the pins) gives 7017 of 7099 pass, 76 skip, and two
-  failures in each test binary: the known `tabClear single`, and the kitty
-  temporary-file test of patch 0001's note (the checkout was under `/tmp`);
-  "golden snapshot with a virtual placement" failed on that run, before the
-  fixture above was regenerated, and passes with it (`-Dtest-filter="golden
-  snapshot"`, 89/89). On the final patches, `-Doptimize=ReleaseSafe` with
-  `-Dtest-filter=PageList` 699/699, `reflow` 303/303, `vtmux` 130/130.
-
-- `patches/0025-tmux-hscrolled.patch` (`PageList.zig` new field
-  `tmux_hscrolled` and `TmuxHscrolled`, `resizeWithoutReflow`,
-  `resizeCols`, `ReflowCursor.reflowRow`; `c/vtmux_state.zig`
-  `set_hscrolled`, `take_hscrolled`; `c/main.zig`, `lib_vt.zig`,
-  `include/ghostty/vt/vtmux_state.h`): tmux's `hscrolled` (grid.c `struct
-  grid`) through a resize of the primary screen. tmux pulls back into a
-  taller screen only the history lines it counts as scrolled, at most
-  `hscrolled` of them, wherever the cursor is, and adds the rest blank at
-  the bottom; a shorter screen adds the lines it pushes into history
-  (screen.c `screen_resize_y`). Upstream pulled every history row it had
-  when the cursor was on the last row and none otherwise (vtmux moved the
-  cursor there to get tmux's pull, `grow_pulling_history`, now gone).
-  `grid_reflow` then moves `hscrolled` as if it were the index of a line
-  from the top: `grid_reflow_split` adds a split line's extra lines when
-  the line's index is not past it, `grid_reflow_join` takes away each
-  line it consumes before it or stops at the line they join. The reflow
-  cursor reproduces that: a source row that starts a line (a line's first
-  row, a row after a full one, the empty line under a wrapped one, or the
-  rest of a row a join took part of) is tmux's split or move, with as many
-  lines as destination rows its cells start, and a row joined whole is a
-  consumed line. `origin`, the rows above tmux's oldest history line that
-  Ghostty still keeps (it prunes whole pages), are left out of both
-  indexes. So a narrowing under a short first line keeps it, a long first
-  line runs it on through the split lines after it, and rows a clear or a
-  narrowing put in history stay there when the screen grows: oracle
-  `reflow_wide_padding_history` (scenes `pshort`, `plong`, `clear`,
-  `emoji`, `deccolm`). vtmux sets it before each primary resize
-  (`ghostty_vtmux_set_hscrolled`) and reads it after Ghostty's resizes,
-  before its own fix-ups (`ghostty_vtmux_take_hscrolled`); vtmux-vt keeps
-  the count between resizes (`PaneTerm::hscrolled`: scrolls add,
-  `grid_view_clear_history` and `grid_clear_history` reset, at most
-  `hsize`), and the live-upgrade state and snapshot carry it
-  (`HistoryState` tag 11). Wrapper: `Terminal::vtmux_set_hscrolled`,
-  `vtmux_take_hscrolled` (`vtmux.rs`, `bindings.rs` by hand). Test:
-  `Terminal: tmux hscrolled through resizes (vtmux)`. With it,
-  `-Doptimize=ReleaseSafe` `-Dtest-filter=reflow` 152/152 (153 in the C
-  test binary), `PageList` 349/349, `resize` 227/227, `Screen` 276/276,
-  `vtmux` 65/65; Debug `-Dtest-filter="Terminal: "` 521/522 with the known
-  `tabClear single` failure. Not an upstream candidate (tmux's model).
-
-- `patches/0026-region-scroll-into-history.patch` (`Terminal.zig` `index`,
-  `scrollUp`, new `tmuxRegionScrollsIntoHistory`,
-  `tmuxScrollRegionUpIntoHistory`, `tmuxRotationPin`, `tmuxMoveRow`): a
-  full-width scroll region that does not start at the top feeds history on
-  the primary screen, as tmux's `grid_view_scroll_region_up` (grid-view.c)
-  does for any region of a grid with history with
-  `grid_scroll_history_region` (grid.c): the region's top row becomes the
-  newest history row with its wrap flag, the rows above the region stay, the
-  rest of the region moves up and its bottom row is cleared with the cursor's
-  background. LF/IND at the region's bottom and SU (once a line, at most the
-  region's height, `screen_write_scrollup`) take it. Upstream made history
-  only from a region at the top and moved a lower one in place, so the line
-  was lost (vtmux D-032). It is the top-region scroll (`cursorScrollAbove`:
-  row 0 into history, the rows down to the region's bottom up a row), then a
-  rotation of the newest history row and the rows above the region down by
-  one: `rotateOnceR` when they are in one page, else row by row upwards with
-  the blank cursor row holding the moving row (a swap of `Row`s in one page,
-  `clonePartialRowGrowCapacity` across pages, which replaces only the
-  destination's page, so the pins above it stay valid). Ghostty's
-  history limits are lifted for the step and enforced after it: a page the
-  scroll pruned (a byte budget, or `history-limit 0`'s zero bytes) would
-  otherwise take the old row 0 with it. Continuation flags (patch 0011)
-  follow on the history row, active row 0 (under the region's old top row,
-  as tmux's history line stays wrapped above it), the region's new top row
-  and the row below the region. The alternate screen, left/right margins
-  and a screen with Kitty image placements keep upstream's in-place path
-  (vtmux stores no images). The upstream test "eraseDisplay complete
-  ignores stale prompt on recycled row" now expects the region's prompt row
-  in history and checks the clear adds none. New test `Terminal: a region
-  below the top scrolls into history as tmux's does (vtmux)` (the D-032
-  evidence, SU over the region's height, the wrap flag, the background, and
-  a styled rotation across a page boundary at every offset); vtmux goldens
-  `cap_region_scroll_history`, `fmt_region_scroll_history_size`, regress
-  `input-raw-scroll.sh`, oracle `region_scroll_history`. With it,
-  `-Doptimize=ReleaseSafe` with the filters `PageList`, `Screen`, `vtmux`,
-  `reflow`, `scroll`, `index`, `stream`, `eraseDisplay`, `prompt`,
-  `insertLines`, `deleteLines`: 1132/1132 and 1160/1160; Debug
-  `-Dtest-filter="Terminal: "` 522/523 and 523/524, the known `tabClear
-  single` failure; Debug `-Dtest-filter=kitty`: the known kitty
-  temporary-file failure only (the tree under `/tmp`). Cost (release,
-  in process, 200k lines through an 80x24 `PaneTerm`, history 2000):
-  region from the top 0.025 s either way; a region from row 1 0.026 s
-  before (no history) and 0.036 s after; from row 20 0.026 s and 0.042 s.
-  Not an upstream candidate (tmux's model).
-
-- `patches/0027-tmux-clusters.patch` (`unicode/main.zig` `tmux_clusters`,
-  `tmux_vs16_wide`, `setTmuxClusters`, `tmuxJamo`, `tmuxShouldCombine`,
-  `tmuxMayJoin`, `tmuxTextPresentation`; `Terminal.zig` `tmuxCombine`, `print`, `printSliceFast`,
-  `printSliceFill`; `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
-  `include/ghostty/vt/unicode.h`): with a process-wide switch
-  (`ghostty_unicode_set_tmux_clusters(enabled, vs16_wide)`, off by default,
-  like patch 0007's overrides), mode 2027 joins characters into a cell as
-  tmux's `screen_write_combine` (screen-write.c) does instead of by UAX #29.
-  U+200D, U+FE0F and zero-width characters join the cell before, or are
-  dropped where there is none; U+FE0F makes a one-column cell two columns
-  while `vs16_wide` (tmux's `variation-selector-always-wide`), after any
-  character, not only an emoji variation base (upstream dropped it there),
-  and U+FE0E changes no width (upstream narrowed an emoji); any character
-  joins a cell that ends with a ZWJ (0xA0-0xFF too: the slice fast path
-  leaves a Latin-1 character after a cell with graphemes to `print`); two
-  lone regional indicators, and an emoji skin-tone modifier with one of
-  tmux's 72 bases in either order, join into two columns
-  (`utf8_should_combine`, utf8-combined.c); a character joining after a
-  ZWJ makes one of the nine text-presentation emoji tmux's table makes two
-  columns (U+261D, U+26F9, U+270C, U+270D, U+1F3CB, U+1F3CC, U+1F574,
-  U+1F575, U+1F590), one column alone in vtmux's grid (D-045), two
-  columns, as tmux's cell is and Ghostty draws the sequence; Hangul jamo join as
-  `hanguljamo_check_state` says (a medial or final jamo that cannot join is
-  dropped); U+3164 is dropped wherever it comes; a cell stops joining at 32
-  bytes of UTF-8 (`UTF8_SIZE`). Everything else, a spacing mark or a prepend
-  character included, takes a cell of its own. A cell on the last column
-  that U+FE0F would widen stays one column with the wrap pending: tmux puts
-  its padding past the edge, where Ghostty has no cell, and the next
-  character wraps in both. The slice fast path batches a character only
-  when `tmuxMayJoin` says tmux could not join it to the one before. vtmux
-  turns it on in the server (`vtmux_vt::set_tmux_clusters`), with tmux's
-  own width table (`utf8_default_width_cache`, less those nine) as
-  overrides under `codepoint-widths` (D-031); the oracle's observer stays on Ghostty's
-  rules. Wrapper: `unicode::set_tmux_clusters` (`libghostty-vt/src/unicode.rs`,
-  `bindings.rs` by hand). Tests: `Terminal: tmux clusters (vtmux)` (each case
-  through `print` and `printSlice`) and `tmux clustering rules (vtmux)`;
-  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug)
-  `-Dtest-filter=vtmux` 67/67 and 71/71, `print` 109/109 and 110/110,
-  `grapheme` 89/89 and 97/97 (the two test binaries); the switch is off
-  in Ghostty's own tests, so their behaviour is upstream's. Not an upstream
-  candidate (tmux's model).
-
-- `patches/0028-tmux-alternate-screen.patch` (`Terminal.zig` new fields
-  `tmux_alternate`, `tmux_alt_saved` and `TmuxAltSaved`,
-  `tmuxSwitchScreenMode`, `tmuxRestoreAltCursor`, `resize`,
-  `switchScreen`, `switchScreenMode`, `fullReset`; `c/vtmux_state.zig`
-  `set_tmux_alternate`, `alternate_saved`, `set_alternate_saved`,
-  `primary_size`, `importer_primary_size`, the importer's per-screen size;
-  `c/main.zig`, `lib_vt.zig`, `include/ghostty/vt/vtmux_state.h`): with
-  `tmux_alternate` set, modes 47, 1047 and 1049 switch screens as tmux's
-  `screen_alternate_on` and `screen_alternate_off` do (screen.c; input.c
-  `input_csi_dispatch_sm_private`, `_rm_private`), and the primary screen
-  is not resized while the alternate one is up (window.c
-  `window_pane_resize` resizes only the alternate grid). Every mode clears
-  the alternate screen as it comes up (upstream's 47 kept what it had) and
-  keeps the cursor; only 1049 saves the cursor and pen, in a terminal-wide
-  slot apart from DECSC's (`tmux_alt_saved`, tmux's `saved_cx`, `saved_cy`,
-  `saved_cell`), restored by `?1049l` even off the alternate screen and
-  from an earlier one, never with the charsets or origin mode; `?1049h` on
-  an alternate screen already up saves nothing. DECSC's slot is tmux's
-  input context's, so both screens share it (copied at each switch), and
-  `resize` leaves it as it is (input.c `input_save_state`; DECRC clamps
-  it, `input_restore_state`): upstream moved it with its row as a tracked
-  pin, to the top-left once the row left the screen, and the pin kept the
-  blank rows under it from being trimmed, so a shorter alternate screen
-  lost the rows its cursor was on.
-  Upstream used DECSC's per-screen slot for 1049 and resized and reflowed
-  the primary at every resize, with its own cursor. When the alternate
-  screen ends at another size, the terminal takes the primary's size with
-  the cursor tmux resizes it with (the saved one, or the alternate
-  screen's back at that size: `min(y, rows - 1)`, a pending wrap as
-  tmux's `cx` past the last column) and drops the alternate screen; the
-  caller resizes back (vtmux: `PaneTerm::alternate_ended`, through its
-  usual primary resize, so patch 0025 moves `hscrolled` and the rows under
-  the cursor go first). `switchScreen` and `fullReset` resize a primary
-  left at another size before showing it. The state export and import
-  carry the primary's size (`primary_size`, `importer_primary_size`: its
-  pages and cursor at that size, only with an alternate screen) and the
-  1049 slot (`alternate_saved`, `set_alternate_saved`) outside
-  `GhosttyVtmuxState`, so patch 0017's layout is unchanged. Wrapper:
-  `Terminal::vtmux_set_tmux_alternate`, `vtmux_alternate_saved`,
-  `vtmux_set_alternate_saved`, `vtmux_primary_size`,
-  `Importer::primary_size` (`vtmux.rs`; `VtmuxAltSaved` and the
-  functions in `bindings.rs` by hand). Tests: `Terminal: tmux alternate
-  screen leaves the primary at its size (vtmux)`, `Terminal: tmux
-  alternate screen cursor slots (vtmux)`, `Terminal: tmux saved cursor is
-  not moved by a resize (vtmux)`. With it, `-Doptimize=ReleaseSafe`
-  `-Dtest-filter=vtmux` 68/68 (72 in the C test binary), `resize`,
-  `PageList`, `reflow` and `Screen` pass; Debug `-Dtest-filter="Terminal: "`
-  1049/1051 with the known `tabClear single` failure in each test binary.
-  Oracle `alt_screen_exit`, `alt_screen_cleared_narrowed`,
-  `alt_screen_cursor_slots`, `alt_screen_history_clears`,
-  `alt_screen_saved_cursor_resize`. Not an upstream
-  candidate (tmux's model).
-
-- `patches/0029-tmux-grid-corners.patch` (`PageList.zig`
-  `ReflowCursor.reflowRow`, `tmuxEmptyRows`, new fields `tmux_empties`,
-  `tmux_joined`, `tmux_padding_made`, `scrollClear`; `Terminal.zig`
-  `eraseLine`, `tmuxLineUnwritten`, `index`, `scrollUp`, `scrollDown`,
-  `tmuxUnwrapAboveRegionWithoutHistory`, `tmuxFixRegionContinuations`,
-  `insertLinesTmux`, `insertLinesRowsTmux`, `tmuxOutsideRegion`,
-  `deleteLinesTmux`; `stream.zig` `csiDispatch`): corners of tmux's grid
-  bookkeeping (D-040 closed, D-006 narrowed).
-  - Reflow of a cell wider than the pane (a tab, D-040). tmux's
-    `grid_reflow_split` moves to the next line before every cell for
-    which `width + gc.data.width > sx`, also with nothing on the line
-    yet, so the first cell of a split (`at`) that is wider than the pane
-    gets an empty row before it, and a line of that one cell (`at` 0)
-    two: the line emptied and the one skipped. `grid_reflow_join` skips
-    empty wrapped lines (no cells used) looking for the next cell; when
-    that cell does not fit, even with the width at 0, and the join has
-    consumed no line yet, it removes nothing and each empty line stays a
-    row; once it has, the skipped lines go with it. A line tmux fills
-    exactly (`width == sx`, tab_extra counted) joins nothing, so the row
-    after it starts a line of its own (a wrap pending is set for it; a
-    wide character's padding cell that tmux has at the start of that row
-    is not counted), as does a row whose first cell is the padding a full
-    row's wide character left on a row of its own (`tmuxWidePadding`).
-    reflowRow follows which cells start a line tmux splits as its own (a
-    row starting a line, or the rest of a row a join stopped in) and adds
-    the empty rows (`tmuxEmptyRows`). Pins marking where an emptied line
-    starts (vtmux's oldest history row, OSC 133 marks) stay on it (tmux
-    keeps the original line, `first`); the cursor goes with the cell
-    (`grid_unwrap_position` skips lines with no cells used). A pin on an
-    empty wrapped row no longer makes it a blank cell (Ghostty raised the
-    row's length to write it; joined, the line gained a blank).
-  - EL 2 (and EL 0 from column 0, EL 1 from the last column) does nothing
-    to a line never written to (`cellsize` 0: no cell used, every cell
-    blank, no tab or background) in the default background
-    (`screen_write_clearline`), so it unwraps nothing; such a wrapped
-    line comes from the reflow above.
-  - `scrollClear` (`CSI 22 J`, which vtmux sends only for scroll-on-clear)
-    scrolls the rows up to the last with cells used (`tmuxCellsUsed`,
-    erased ones included), as `grid_view_clear_history` takes
-    `cellused`; Ghostty took the last row with a non-empty cell, so a
-    clear after an erased row scrolled one row less, and a row only
-    erased with a background one more.
-  - Without history (`no_scrollback`: the alternate screen, and a pane
-    made with history-limit 0, which vtmux gives no scrollback bytes) a
-    region scrolled up goes through `grid_move_lines`
-    (`grid_view_scroll_region_up` without `GRID_HISTORY`): a region of two
-    rows unwraps the line moved to its top (`py >= dy + ny`), so a line a
-    print wrapped onto the bottom row of a two-row pane loses its flag as
-    it scrolls; a region of one row (a one-row pane) moves nothing, so LF
-    and SU leave the row as it is. SD and RI at the top margin
-    (`grid_view_scroll_region_down`) move nothing in a one-row pane,
-    history or not. The continuation fix-up after a region scroll
-    (`tmuxFixRegionContinuations`, patch 0011) now skips the alternate
-    screen only, not every screen without scrollback: the primary screen
-    of a pane without history reflows.
-  - IL and DL with the cursor above or below the scroll region work on
-    the whole screen from the cursor's row (`screen_write_insertline`,
-    `screen_write_deleteline`: `grid_view_insert_lines`,
-    `grid_view_delete_lines`), where Ghostty (as xterm) did nothing. DL is
-    the region's DL with the region the whole screen; IL is
-    `grid_move_lines` alone (no `grid_clear`, so not its unwrap), and a
-    count reaching the bottom moves no line and changes nothing. The
-    cursor stays, as in the region (patch 0011).
-  - A zero count is 1 for IL, DL, DCH, SU, SD and CBT (`stream.zig`
-    `csiDispatch`: `@max(1, params[0])`, as ICH had): tmux reads every
-    count with `input_get(ictx, 0, 1, 1)` (input.c), where Ghostty passed
-    the 0 on and `insertLinesTmux`, `deleteLinesTmux`, `deleteChars`,
-    `scrollUp`, `scrollDown` and CBT's loop do nothing for it. A sweep of
-    every count final (`@ A B C D E F G H I L M P S T X Z a b d e` and
-    backquote, counts 0, 1, 2, 65535) against tmux 3.8 found only these
-    six; the others already took 0 as 1. Not changed: extra parameters
-    (`CSI 3;1 L`: tmux uses the first, Ghostty drops the sequence) and a
-    colon in a later parameter.
-
-  Tests: new `stream: a zero count is one for IL, DL, DCH, SU, SD and CBT
-  (vtmux)` (fails without the change), `Terminal: reflow leaves empty rows before a tab wider than
-  the pane (vtmux)` (fails without the PageList change: no empty rows)
-  and `Terminal: tmux grid bookkeeping corners (vtmux)`; oracle
-  `reflow_wide_tab`, `wrap_flag_corners`, `reflow_tmux_quirks` (scene
-  `tabwide` no longer annotated), `csi_zero_count` (every count final with
-  0, IL and DL in, above and below a region, ED 2 after a background). A random reflow probe against tmux 3.8
-  (780 seeds of letters, tabs, wide characters, erases and CRLF on
-  20x6, 2 to 7 resizes of 2 to 20 columns, some of the height) matches
-  but for the 14 seeds of D-041. `-Doptimize=ReleaseSafe` with test filters
-  reflow, PageList, Screen, resize, scroll, insertLines, deleteLines,
-  eraseLine, eraseDisplay, index and vtmux: 1761/1761 over the two test
-  binaries; Debug `-Dtest-filter="Terminal: "` 1047/1049 with the known
-  `tabClear single` failure in each. Not an upstream candidate (tmux's
-  model).
-
 - `patches/0030-import-saved-cursor-as-saved.patch` (`c/vtmux_state.zig`
   `installScreen`, patch 0017's importer): the saved cursor (DECSC, SCP)
   is imported as exported, off the screen too. A screen shrunk below or
@@ -1210,23 +1310,6 @@ Recorded per commit in git history; the list is kept current:
   change: the re-exported state differs, y 1 for 4); no Zig test.
   Changes the patch stack, so an upgrade across it moves history as
   rows. Not an upstream candidate (the importer is vtmux's).
-
-- `patches/0031-decaln-as-tmux.patch` (`Terminal.zig` `decaln`): DECALN
-  fills the screen with default cells holding E, puts the cursor top
-  left and resets the region, and leaves the pen and origin mode alone,
-  as tmux's `screen_write_alignmenttest` (screen-write.c:
-  `grid_default_cell`). Ghostty wrote the Es in the pen's colours, then
-  kept only those colours in the pen (bold, blink and the rest were lost
-  for what followed) and turned origin mode off. No D4 arbiter verdict:
-  xterm's DECALN fills with its current video attributes, so neither
-  Ghostty's nor tmux's, and esctest checks only the Es, the margins and
-  the cursor; so tmux's. Test: new `Terminal: decaln writes default cells and keeps the
-  pen and origin mode (vtmux)` (Ghostty's `decaln preserves color`
-  still passes: the row SD inserts takes the pen's background); Rust
-  `term::tests::decaln_writes_default_cells`; oracle `decaln_as_tmux`.
-  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
-  -Dtest-filter=decaln -Dtest-filter=DECALN` (Debug) passes. Found by
-  `scripts/emu_fuzz.py`. Not an upstream candidate (tmux's model).
 
 - `patches/0033-grid-ref-step.patch` (`c/grid_ref.zig`, `c/main.zig`,
   `lib_vt.zig`, `include/ghostty/vt/grid_ref.h`): `ghostty_grid_ref_down`
@@ -1248,172 +1331,6 @@ Recorded per commit in git history; the list is kept current:
   test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
   -Dtest-filter=grid_ref` (Debug) passes. Upstream candidate: a C API
   user reading many rows has no other way to avoid the walk.
-
-- `patches/0037-wide-wrap-keeps-last-cell.patch` (`Terminal.zig` `print`,
-  `printSliceFast`): a wide character that does not fit the rest of the
-  row wraps and leaves the row's last cell as it was, its text, style
-  and link included, as tmux's `screen_write_cell` (screen-write.c: the
-  wrap comes before any cell is written); only an empty cell becomes the
-  spacer head, which is tmux's unwritten cell. Ghostty wrote a blank
-  spacer head over the cell in the pen's style and link, so `printf
-  '0123456789\033[10G\344\270\200'` on 10 columns lost the 9. The
-  batched path keeps the cell too (its mask check already means the
-  cell has the pen's style and no link or tab). Inside a right margin
-  the cell is still blanked (vtmux never sets one: tmux has no DECSLRM).
-  Two cells still become the default spacer head: in insert mode tmux
-  makes room before it wraps (`grid_view_insert_cells` at the last
-  column clears the cell to the default one, whatever the pen), so the
-  cell is cleared, text, style and link; and a blank with only a
-  background, which is mostly the fill of a line a wrap scrolled in
-  (Ghostty fills it with the pen's background, tmux's wrap linefeed
-  with the default, bg 8), so `capture-pane -e` ends the background
-  before it as tmux does and the next line opens it again. A wide
-  character's tail in the last column stays in insert mode too (tmux
-  keeps the character and clears its padding cell, which only `-J`
-  shows, as a space).
-  esctest has no case for a wide character that does not fit, so no D4
-  arbiter verdict: tmux's. The upstream test `print wide char at right
-  edge with hyperlink` now expects the spacer head without the link.
-  New test `Terminal: a wide char that wraps leaves the last cell as it
-  was (vtmux)` (both paths, insert mode, a background blank); Rust
-  `capture::tests::wide_wrap_keeps_last_cell`; oracle
-  `wide_wrap_keeps_last_cell`, `wide_wrap_insert_mode`,
-  `wide_wrap_scrolled_fill`. `zig build test-lib-vt
-  -Demit-lib-vt=true -Dapp-runtime=none` (Debug): 7047/7125 pass, 76
-  skip, the known `tabClear single` failure. Found by
-  `scripts/emu_fuzz.py --gen round2` (`widemargin`). Not an upstream
-  candidate (tmux's model).
-
-- `patches/0034-tmux-line-flags.patch` (`page.zig` `Row.tmux_extended`,
-  `Row.tmux_hyperlink`, `tmuxMarkExtended`, `tmuxEmptied`,
-  `clonePartialRowFrom`, `moveCells`; `Terminal.zig` `printCell`,
-  `writeCell`, `tmuxPenExtended`, `tmuxWrittenBlank`, `printSliceFill`,
-  `markTab`, the grapheme attaches in `print`, `eraseChars`, `eraseLine`;
-  `Screen.zig` `clearRows`, `clearCells`; `PageList.zig`
-  `ReflowCursor.reflowRow`, `ReflowCursor.writeCell`, `tmuxCellExtended`;
-  `c/row.zig` and `screen.h` `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS`;
-  `c/vtmux_state.zig` and `vtmux_state.h` row flags `0x10`, `0x20`):
-  tmux's `GRID_LINE_EXTENDED` and `GRID_LINE_HYPERLINK` per row (grid.c
-  `grid_extended_cell`), in two of the Row's seven spare bits (five
-  left), and the other half of a wide character a print overwrites
-  (D-027 narrowed; regress `input-unicode.sh` and `input-raw-unicode.sh`
-  pass).
-  - tmux sets the line flags when a cell needs its extended form
-    (`grid_need_extended_cell`: a wide or non-ASCII character, more than
-    one codepoint, an RGB colour, an underline colour, an attribute past
-    the first eight, a tab, a link; HYPERLINK for a link) and keeps them,
-    and the cell's extended entry, when the cell is overwritten or
-    erased, until the line is emptied (`grid_empty_line`). The bits are
-    set by the writes that make such a cell: `printCell` for a character
-    past ASCII before its charset mapping (line drawing maps ASCII and is
-    not one), `writeCell` for a wide character or an extended pen
-    (`tmuxPenExtended`; not on a spacer head, the cell tmux leaves
-    unwritten), the `printSlice` fast path (wide runs, an extended pen,
-    a run with a character past ASCII: the vectorised scan takes ASCII
-    only, so an ASCII run costs no extra pass), grapheme attaches, a tab
-    (`markTab`), an erase to an RGB background (`clearCells`, and
-    `clearRows` after it resets the row: tmux clears to an RGB background
-    with extended cells; `Screen.resetBlankRow` for the scroll paths that
-    reset a row after clearing it, and `cursorScrollAbove`, whose new
-    line is filled with the pen's blank cell by hand). They are reset where `tmux_used` is (patch
-    0013's full-row clears, now `tmuxEmptied`) and with the row
-    (`Row.reset`, `clearRows`). A reflow keeps them on the first row of a
-    line it moves, splits or joins onto (`grid_reflow_move`,
-    `grid_reflow_split`'s first line, `grid_reflow_join`'s target), and
-    sets them on a row it writes an extended cell to (`grid_set_cell`;
-    `tmuxCellExtended`, which takes a cell with vtmux's line-drawing mark,
-    Ghostty's protected bit, as ASCII). Cells moved between rows
-    (`moveCells`, a partial `clonePartialRowFrom`: left and right
-    margins, which tmux has not got) bring their row's bits. So a row
-    with an extended cell should always have the bit; vtmux's snapshot
-    stores the bits a row's cells don't imply, and those a row lacks
-    though its cells imply them (a path that misses the bit: `CSI S` in
-    an RGB background with no history), beside the rows under their own
-    tags (`vtmux_snapshot::KeptRows`, `Row::lacks`), which a build before
-    them skips.
-    Readers OR them with what the cells say now (vtmux `capture.rs`
-    `LineKept`).
-  - A narrow character over half of a wide one: tmux writes the other
-    half as a default cell (`screen_write_overwrite`,
-    `screen_write_clear_cell`), a space that counts as written, where
-    Ghostty erased it to an empty cell (`capture-pane -R` showed it
-    `CLEARED`). `tmuxWrittenBlank` makes the erased half a space when the
-    erase left a default cell (one the cursor's background coloured stays
-    a background cell; tmux keeps the old cell's background, which
-    Ghostty does not).
-  - `GHOSTTY_ROW_DATA_TMUX_LINE_FLAGS` (bit 0 EXTENDED, bit 1 HYPERLINK)
-    reads them; the state export and import carry them as row flags
-    `0x10` and `0x20` (`GHOSTTY_VTMUX_ROW_TMUX_EXTENDED`,
-    `GHOSTTY_VTMUX_ROW_TMUX_HYPERLINK`); a page in Ghostty's own form
-    carries the Row as it is. Wrapper: `screen.rs` `Row::tmux_line_flags`,
-    `RowData::TMUX_LINE_FLAGS` added to `bindings.rs` by hand.
-
-  Tests: new `Terminal: tmux line flags (vtmux)` (both print paths, a wide
-  character overwritten from either half, a partial and a full erase, a
-  non-ASCII fast-path run, a strikethrough pen, a link, ED) and
-  `Terminal: tmux line flags follow a reflow (vtmux)`, and `vtmux state:
-  rows round trip into a fresh terminal` checks the bits; vtmux's
-  `capture.rs` `line_flags_outlive_the_cells_that_set_them`,
-  `state_roundtrip.rs` `kept_line_flags_round_trip`, `snapshot_term.rs`
-  `kept_line_flags_cross_a_snapshot` (and its fuzzer, which found the
-  reflow and spacer-head cases), oracle `capture_line_flags`. New
-  `Terminal: a row scrolled in under an RGB pen is extended (vtmux)`
-  (fails without `resetBlankRow` and without the `cursorScrollAbove`
-  mark: a new line under an RGB pen had no bit, which the snapshot, giving
-  a row back the bits its cells say, then restored; the fuzzer found it
-  once main's generator took `?47h` and `CSI s`), vtmux's
-  `snapshot_term.rs` `rows_scrolled_in_under_an_rgb_background_round_trip`
-  (fails without them) and `capture.rs`
-  `a_line_scrolled_in_under_an_rgb_background_is_extended` (the reference's
-  flags; it passes without them, as readers OR the cells).
-  `Terminal: tmux line flags follow a reflow` is the one new test not
-  run without the change (its join case is the reflow fix the fuzzer
-  asked for). The upstream tests `Terminal: print over wide char at 0,0`,
-  `Terminal: print over wide spacer tail` and `Terminal: overwrite
-  multicodepoint grapheme clears grapheme data` now expect the written
-  space (` `, `"X "`). `zig build test-lib-vt -Demit-lib-vt=true
-  -Dapp-runtime=none` (Debug, 0001-0034): 7039/7125, 76 skipped, 10
-  failed over the two test binaries: the known `tabClear single` and
-  kitty `temporary file outside directory prefix is rejected` (patch
-  0001's note) and those three upstream tests, before their expectations
-  were changed; after, `-Dtest-filter="Terminal: "` 1061/1063 with the
-  known `tabClear single` in each, and `-Dtest-filter=vtmux` 156/156.
-  Not an upstream candidate (tmux's model).
-
-- `patches/0035-clone-whole-page-memory.patch` (`PageList.zig` `clone`,
-  new `cloneWholePage`): a resident page `PageList.clone` copies whole
-  (every row of it) goes as a copy of its memory, as `Page.cloneBuf`
-  does: the new page has the source's capacity, so its layout, and a
-  page keeps everything as offsets into its memory. Upstream cloned it
-  row by row (`Page.cloneFrom`), and a row with managed memory cell by
-  cell, adding each styled cell's style to the new page's set
-  (`clonePartialRowFrom`, `StyleSet.addWithId`): copy-mode entry
-  (`ghostty_terminal_clone_screen`, patch 0005) over 1M styled lines took
-  701-727 ms against 290-325 ms for plain ones (tmux 276-282). Now both
-  270-303 ms. The new page comes zeroed but for its row headers
-  (`createPageExt`, `initBuf`), and zero memory is an empty set or
-  allocator (`initAssumeZeroed`): the row headers and cells are copied
-  whole, the style set, the grapheme allocator and map, and the string
-  allocator with the hyperlink set and map each only when it holds
-  anything (else the copy keeps the fresh page's, empty). Memory a page
-  never touched is not committed, and reading it to copy it faults in a
-  zero page: a plain `cloneBuf` made copy mode's RSS over 1M lines 61 MB
-  bigger (2022 against 1961 MB), and one that skipped zero memory pages
-  made the first entry 20-30 ms slower. Now 1961 MB plain, 1971 MB
-  styled (the style set's whole region is copied). A partial page (the
-  clone's first or last, cut by `top`/`bot`) and a compressed page
-  (patch 0005) go as before. Test: new `PageList clone copies whole pages
-  with their styles and graphemes (vtmux)` (several pages of styled rows
-  and graphemes: every cell, style and cluster reads back the same, each
-  page is byte for byte its source's, which the row-by-row clone fails,
-  and changing the source changes nothing in the copy); `zig build
-  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none -Dtest-filter="PageList
-  clone"` (Debug) passes, and the whole `test-lib-vt` gives what it gives
-  without the patch (7047/7127 pass, 76 skip; the same two fail,
-  `Terminal: tabClear single` and `kitty.graphics_image` "temporary file
-  outside directory prefix is rejected", and the same one leak, in both
-  test binaries). Rust: `capture::tests::a_copy_of_whole_pages_reads_as_the_pane_did`
-  (links included). Upstream candidate: any full-page clone gains.
 
 - `patches/0038-read-the-primary-under-the-alternate-screen.patch`
   (`c/terminal.zig` new `vtmux_screen_grid_ref`,
@@ -1449,26 +1366,8 @@ Recorded per commit in git history; the list is kept current:
   "temporary file outside directory prefix is rejected") and the one
   leak, in both test binaries. Not an upstream candidate (tmux's model).
 
-- `patches/0039-reflow-bulk-copy-line-flags.patch` (`PageList.zig`
-  `ReflowCursor.copyRun`, new `tmuxRunExtended`): a reflow's bulk copy
-  of a run of narrow cells sharing a style sets `Row.tmux_extended` on the
-  row it lands on when a cell of the run is one tmux holds extended, as
-  `ReflowCursor.writeCell` does (patch 0034, `tmuxCellExtended`): tmux
-  writes every cell its reflow moves with `grid_set_cell` (grid.c
-  `grid_reflow_split`, `grid_reflow_join`). The run shares one style and
-  has no wide, tab, link or grapheme cell, so the first cell's style and
-  each cell's character and RGB background decide. Patch 0034 missed this
-  path: a row a reflow filled with overlined text, or a character past
-  ASCII amid plain ones, lacked the flag, and lost it for good once its
-  cells were overwritten (tmux keeps it); a live upgrade, which gave the
-  row the flags its cells said, did not. The fuzzer of vtmux's
-  `snapshot_term.rs` found it (seed 141). Test: new `Terminal: tmux line
-  flags follow a bulk-copied reflow (vtmux)` (an extended style, a
-  character past ASCII, an RGB background cell, each on rows with no pin;
-  fails without the change); `zig build test-lib-vt -Demit-lib-vt=true
-  -Dapp-runtime=none` with `-Dtest-filter=vtmux` 233/233 and
-  `-Dtest-filter=PageList` 701/701 (Debug). Oracle
-  `reflow_line_flags_bulk`. Not an upstream candidate (tmux's model).
+### Kitty graphics
+
 - `patches/0042-kitty-graphics-vtmux.patch` (`c/vtmux_state.zig`
   `kitty_storage`, `set_kitty_limit`; `c/kitty_graphics.zig`
   `vtmux_placement_active_pos`; exported as `ghostty_vtmux_*`, declared in
@@ -1485,6 +1384,7 @@ Recorded per commit in git history; the list is kept current:
   `vtmux-server` `pane_graphics::tests` (the shared limit evicting across
   panes). Not an upstream candidate as is (vtmux's model), though a
   per-screen limit may be.
+
 - `patches/0043-kitty-graphics-bounds.patch` (`kitty/graphics_exec.zig`
   `vtmuxReserve`, `vtmuxInit`, a `vtmux_over` field on `LoadingImage`;
   `c/vtmux_state.zig` `kitty_loading`, `drop_kitty_loading`, exported as
@@ -1507,6 +1407,7 @@ Recorded per commit in git history; the list is kept current:
   `a_first_chunk_is_held_to_the_limit`
   and `pending_loads_count_and_the_oldest_goes_first`. Upstream candidate:
   the cap on a pending load (Ghostty's own limit is per screen too).
+
 - `patches/0044-kitty-graphics-decode-limit.patch` (`kitty/graphics_image.zig`
   a `vtmux_limit` field on `LoadingImage`, used by `decompressZlib` and
   `decodePng`; `kitty/graphics_exec.zig` `vtmuxInit` and `query` set
@@ -1519,73 +1420,164 @@ Recorded per commit in git history; the list is kept current:
   the load fails with `addImage`'s `ENOMEM`. Rust test: `vtmux-vt`
   `tests/graphics_memory.rs`. Upstream candidate (Ghostty's limit is per
   screen too).
-- `patches/0045-row-tmux-used.patch` (`c/row.zig` and `screen.h`
-  `GHOSTTY_ROW_DATA_TMUX_USED`; `Row::tmux_used` in `screen.rs` and
-  `RowData::TMUX_USED` in `bindings.rs`, by hand): a row's `tmux_used`
-  (patch 0013, tmux's `cellused`) through the row API, so `capture-pane -J`
-  and `-T` end a line where tmux does (grid.c `grid_string_cells`): at the
-  cells written, erased or not, where they read only the text before.
-  tmux-resurrect saves pane contents with `capture-pane -epJ`, and vim's
-  first screen has cells written then erased. Rust test `vtmux-vt`
-  `join_ends_lines_at_the_cells_written`, oracle
-  `capture_join_keeps_erased_cells`. Not an upstream candidate (tmux's
-  model). Written on 3bd54e025 and carried onto 1.0.1 after the rebase
-  (the same two additions; 1.0's non-exhaustive `RowData` keeps its `_`
-  arm last).
-- `patches/0046-reflow-keeps-cells-past-the-width.patch` (`page.zig`
-  `Row.tmux_kept`, `Page.tmuxKeptCells`, `tmuxKeep`, `tmuxKeepable`,
-  `clonePartialRowFrom`, `Row.tmuxEmptied`; `PageList.zig`
-  `ReflowCursor.reflowRow`, `computeAndMemoizeCap`, `cursorNewPage`,
-  `resizeCols`, new `tmuxKeptCols`, `resizeWithoutReflowGrowCols`;
-  `Terminal.zig` `deleteChars`, `decaln`; `c/vtmux_state.zig`
-  `exportRows`, `capacityFor`, `importRows`): a line
-  that fits a narrower width keeps the cells past it, as tmux's
-  `grid_reflow_move` keeps the line's `cellsize`. Those are erased cells
-  (past `cellused`: a background or nothing, no style, text or link), so
-  they sit in the row's own cells past the page's width, in a destination
-  page whose capacity is as wide as they need, and hold no managed memory.
-  A row moved whole (unwrapped, a line of its own, fitting by tmux's
-  measure) takes its cells and those it kept to the new width and keeps
-  the rest; a widening shows them again. Writes and partial erases keep
-  them (`grid_set_cell`, `grid_clear` within the width), a full-row clear
-  drops them (`grid_empty_line`: `Row.reset`, `tmuxEmptied`, and 1.0's
-  `Screen.clearRows`, which rewrites the row header; DCH over the whole
-  width from column 0 is such a clear, `grid_view_delete_cells`, and now
-  empties the row and unwraps the one above as ECH does), DECALN keeps
-  them (`screen_write_alignmenttest` writes the width only; `decaln`
-  clears row by row and keeps the mark), lines moved by IL, DL and
-  scroll regions take them along and the lines those add have none, a
-  row split
-  or joined by a reflow keeps none (`grid_reflow_split`,
-  `grid_reflow_join`), a row copied whole to a page of the same width
-  takes them, and a widening without reflow (the alternate screen) clears
-  the cells past the old width as before. The state export writes them as
-  the row's cells past the width under row flag `0x40`, and the import
-  reads them back (the page as wide as they need, erased cells only).
-  Cost: a reflow measures a row by tmux's measure (`tmuxReflowWidth`)
-  only when it has cells past the new width, and `tmuxKeptCols` looks
-  past a row's last cell only when that cell is not empty (an erase to
-  the end of the line) or the row keeps cells already, so a page of
-  ordinary lines costs one cell a row: 20 reflows of a 90,000-line
-  history take 130 ticks against main's 131 (a first version that
-  measured every row took 145). Residual: a wrapped line keeps none, and
-  a reflow's destination page holds them only as far as its capacity
-  (the widest its source page needed, so a background that stops short
-  of the line's end, ECH, can be cut there). Upstream tests unchanged; new tests `Terminal: reflow keeps
-  erased cells past the width (vtmux)`, `Terminal: kept cells past the
-  width survive a row copy and history (vtmux)`, `vtmux state: the cells a
-  row keeps past the width go with it`; Rust `vtmux-snapshot`
-  `cells_past_the_width_round_trip_and_require_nothing`, `vtmux-server`
-  `an_ordinary_attached_client_requires_no_feature`; oracle
-  `reflow_keeps_cells_past_width`, `reflow_kept_cells_edits` (DCH, ICH,
-  IL, DL, SU, SD, DECALN, RIS, REP at the narrow width),
-  `reflow_cells_used` scene `grow` (closes
-  D-036). The row bit takes one of the three spare bits 0013, 0034 and
-  1.0's `Row.blank` leave (`_padding: u3`); the paths that skip a blank
-  row's cells (`Screen.clearRows`, `trimTrailingBlankRows`) rewrite its
-  header, which drops them. Written on 3bd54e025 and ported onto 1.0.1 (the same code; 1.0.1
-  alone still loses the cells: the oracle scenario fails 8 steps on the
-  41-patch stack). Not an upstream candidate (tmux's model).
+
+### Misc: cells and styles
+
+- `patches/0002-tab-cell-mark.patch` (`page.zig` `Cell.tab`,
+  `Terminal.zig` `horizontalTab`/`markTab`/`writeCell`,
+  `c/cell.zig`, `include/ghostty/vt/screen.h`, the snapshot codec's
+  layout probe): a horizontal tab that moves over blank cells all alike
+  (tmux's HT rule, input.c `input_c0_dispatch`) marks the cells in 8
+  spare bits of `Cell` (width of the tab on the first cell, 255 on the
+  others), `GHOSTTY_CELL_DATA_TAB` reads it, and writing over any cell of
+  a tab clears the whole mark (`screen_write_overwrite`); the print
+  fast path skips a cell that carries a mark. Other erase and shift
+  operations drop the mark with the cell, as they do for tmux's TAB cell
+  when the cell is cleared. The bits are not in the snapshot wire
+  format, so a tab does not survive a snapshot round trip. `Cell.tab` and
+  `Cell::tab()` are reflected in `bindings.rs` and `screen.rs`.
+  Upstream's "Terminal: tabClear single" expects the row clean after a
+  tab; the mark makes it dirty, so the patch has the test check that and
+  then that the clear alone dirties nothing. Upstream candidate if
+  Ghostty ever wants tab cells (`vtmux-vt` `capture.rs` is the one
+  consumer). Ghostty's Zig tests pass with it (`check.sh`'s `ghostty-zig`
+  stage).
+
+  Checked by diffing the old and new bindings: no constant was renumbered
+  or removed, and struct layouts only grew at the end (`ClipboardWrite`,
+  `TerminalScrollViewportValue`).
+
+- `patches/0010-palette-256-form.patch` (`style.zig` `Style.Flags`,
+  `bgCell`, `Screen.zig` `setAttribute`, `page.zig` `Cell.content`,
+  `c/style.zig`, `c/cell.zig`, `include/ghostty/vt/{style,screen}.h`):
+  tmux keeps `COLOUR_FLAG_256` on a colour set by `38;5;N`/`48;5;N`
+  (input.c `input_csi_dispatch_sgr_256_do`), so `capture-pane -e` writes
+  `38;5;1` back apart from `31`, and an 8-colour terminal gets `38;5;9` as
+  plain red where `91` is bold (tty.c `tty_check_fg`). Ghostty kept one
+  palette index. Two spare `Style.Flags` bits (`fg_palette_256`,
+  `bg_palette_256`) record the form; any other foreground or background
+  change clears its bit. A cell erased with such a background carries the
+  bit in its `color_palette` content (`palette_256`). C: two `bool`s at
+  the end of the sized `GhosttyStyle` (offsets 68 and 69, the size stays
+  72) and `GHOSTTY_CELL_DATA_COLOR_PALETTE_256`; Rust: `Style::fg_palette_256`
+  / `bg_palette_256` and `Cell::bg_color_palette_256` (`style.rs`,
+  `screen.rs`, `bindings.rs` by hand). The VT formatter still writes every
+  palette colour as `38;5;N`, so its two round-trip tests ("Screen vt
+  with style", "Terminal vt restores gaps and cells that only have a
+  background") compare styles without the bits; the snapshot codec drops
+  them. Tests: new `Terminal: 256-colour SGR keeps its form (vtmux)`;
+  the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
+  gives 3251 pass, 37 skip and the known `tabClear single` failure (see
+  0009). Upstream candidate only for a consumer that needs the SGR form.
+
+- `patches/0022-deccolm-never-resizes.patch` (`stream_terminal.zig`): DECCOLM
+  (`?3h`/`?3l`) never resizes the grid. With DEC mode 40 set first, upstream
+  resized it to 132 or 80 columns behind the pane's back and cleared it
+  without history; tmux has no 132-column mode and ignores mode 40
+  (input.c `input_csi_dispatch_sm_private`, `_rm_private` home the cursor
+  and clear the screen, which vtmux's `PaneTerm::deccolm` does, into history
+  under `scroll-on-clear`). Test: `DECCOLM never resizes, with DEC mode 40
+  or without (vtmux)` (fails without the change). Not an upstream
+  candidate.
+
+### In libghostty-vt 1.0.1 itself
+
+Two changes vtmux needs are 1.0.1's own (*The patches on libghostty-vt
+1.0.1*): a pruned page zeroed in place (`DestroyMode.retain`) and the
+hyperlink map's own capacity (`Capacity.hyperlink_cells`). The reflow test
+for the second, "reflow keeps the links of a page full of them", passes on
+1.0.1's code (ReleaseSafe; in Debug its per-print integrity checks take
+over 2.5 min, so it is not kept). vtmux's own
+`a_reflow_keeps_the_links_of_pages_full_of_them` covers it.
+
+### Outside the patches
+
+- `libghostty-vt/src/alloc.rs` (`allocator_api`): `From<&A>` borrows the
+  original allocator for the adapter lifetime; `From<A>` kept a pointer
+  to its destroyed parameter. Tests check the callback context, allocate,
+  free, grow and shrink, and reject owned or too-short-lived allocators
+  at compile time. vtmux does not enable this optional feature.
+- `libghostty-vt/src/osc.rs`: window titles read the `const char **`
+  output specified by `osc.h`, then borrow and validate the parser-owned
+  C string. The generic getter previously fabricated a Rust `&str` with
+  a zero length. Tests cover ASCII, empty and UTF-8 titles.
+- `libghostty-vt/src/key.rs`, `mouse.rs`: growable encoders reserve the
+  required output length relative to the vector length, not its remaining
+  capacity. Tests cover empty and prefixed buffers one byte short.
+- `libghostty-vt/Cargo.toml`: `path` on the `libghostty-vt-sys` dependency.
+- Both `Cargo.toml`s: published as `vtmux-ghostty-vt-sys` and
+  `vtmux-ghostty-vt` at vtmux's version, licence MIT, vtmux's repository,
+  an `include` list (above); the redundant dev-dependency on the sys crate
+  is gone.
+- `libghostty-vt-sys/build.rs`: the Ghostty source and its Zig packages
+  are the libghostty-vt release's two tarballs, checked by SHA-256 and
+  built with `zig build --system` (above), where upstream cloned a commit
+  with git and let Zig fetch; the Zig version is checked first.
+- `libghostty-vt-sys/build.rs`: `GHOSTTY_VERSION` = `1.0.1` (tag
+  `vt-1.0.1`, 2026-11-11), which contains `e257bb45`. Before it,
+  `GHOSTTY_COMMIT` `3bd54e025cc3` (ghostty main, 2026-10-31).
+- `libghostty-vt-sys/src/bindings.rs`: generated from `3bd54e025`'s
+  headers with `gen-bindings`, then updated by hand for 1.0.1 (above,
+  *libghostty-vt 1.0.1*).
+- `libghostty-vt/src`: the 1.0 C API, kept behind the same Rust API:
+  `Style` from `GhosttyStyleFlags`; `Formatter` sets its options with
+  `ghostty_formatter_set` (`FormatterOptions` is a Rust struct now, its
+  defaults the old zeroed options'); `Terminal::format_selection_alloc`/
+  `_buf` and `selection::FormatOptions` are gone with their C calls (a
+  `Formatter` with `with_selection` does it); `set_scrollback_max_bytes`/
+  `_lines(None)` pass `usize::MAX`, since 1.0 reads NULL as the default
+  limit; `GridRef`, `Selection` and the callback records have no `size`;
+  key and mouse setters ignore their new `GhosttyResult`;
+  `PlacementIteration::set_layer` passes a layer mask; `ImageData::data`
+  reads `PIXELS` (a `GhosttyString`); the OSC window title is a
+  `GhosttyString`; `CellIteration::graphemes_buf` passes a
+  `GhosttyCodepointBuffer`.
+- `libghostty-vt/src`: API drift from `a887df42c`, ported in the shape
+  libghostty-rs master uses:
+  - `ghostty_terminal_new(alloc, &t, cols, rows)`: `GhosttyTerminalOptions`
+    is gone. `TerminalOptions` stays; `max_scrollback` (always bytes) is
+    applied through the new `Terminal::set_scrollback_max_bytes`.
+  - `ghostty_terminal_mode_get/set` are gone: `Terminal::mode`/`set_mode`
+    go through `TERMINAL_DATA_MODE`/`TERMINAL_OPT_MODE`.
+  - `ghostty_render_state_colors_get` is gone: `RENDER_STATE_DATA_COLORS`.
+  - The clipboard-write callback returns `void` and answers through the
+    request's `reply` function; the wrapper's trampoline calls it.
+  - New `Terminal::scrollback_max_bytes`/`set_scrollback_max_bytes`.
+- `libghostty-vt/src/terminal.rs`: `Terminal::scrollback_max_lines` and
+  `set_scrollback_max_lines` (`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES`,
+  `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`, already in the bindings);
+  vtmux keeps history by line count with it.
+- `libghostty-vt/src/terminal.rs`: `Terminal::memory_usage`
+  (`GHOSTTY_TERMINAL_DATA_MEMORY_USAGE`, a sized struct, already in the
+  bindings) re-exported as `terminal::MemoryUsage`; vtmux's compression
+  tests read compressed pages and resident bytes from it.
+- `libghostty-vt/src/terminal.rs`: `Terminal::on_desktop_notification`
+  (`GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION`, `GhosttyTerminalDesktopNotification`,
+  already in the bindings): the title and body of an OSC 9 (not ConEmu)
+  or OSC 777 notification, as bytes. vtmux sends them on to Ghostty
+  clients (spec D30).
+- `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
+  (name order, `git apply`) to the fetched ghostty; the source stamp
+  records the commit and the patch contents. Not applied to a
+  `GHOSTTY_SOURCE_DIR` tree.
+- `libghostty-vt-sys/build.rs`: `rerun-if-changed=build.rs`, not
+  upstream's `crates/libghostty-vt-sys/build.rs` (a path of its repo
+  layout): cargo counts a missing file as changed, so every cargo
+  command reran the script and rebuilt `libghostty-vt-sys` and every
+  crate above it, `target/debug/vtmux` included.
+- `libghostty-vt/src/screen.rs`: `Cell::bits`, the cell's `u64`. `vtmux-vt`
+  (`capture.rs` `CellBits`) decodes `page.zig`'s packed `Cell` from it
+  instead of seven `ghostty_cell_get` calls per cell (copy mode reading a
+  27-cell row: 2.2 to 1.65 µs, release, with the row kept).
+  `cell_bits_match_the_getters` checks the decoding against the getters, so
+  a bump that moves a field fails there.
+- `libghostty-vt/src/screen.rs`: `GridRef::row_cells` writes the row's
+  cells straight into the caller's `Vec` (its spare capacity, at least 256
+  cells), where it allocated and zeroed a 256-cell buffer per call and
+  copied from it; `Cell` is `#[repr(transparent)]` over `ffi::Cell` for
+  that. A capture of a 1M-line history reads a row per line: the
+  allocation, memset and copy were about 10% of `capture-pane -S -`
+  (`docs/test-health/2026-11-09-performance-detail.md`, *Reading all of a history*).
 - `libghostty-vt/src/kitty/graphics.rs`:
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a
@@ -1593,7 +1585,6 @@ Recorded per commit in git history; the list is kept current:
   Option<&str>)`, which passes the string or NULL. Upstream candidate.
 
 ## Bumping libghostty-vt
-
 Track releases by tag, never a commit (owner policy, 2026-11-11).
 
 1. Take the next `vt-<version>` release from
@@ -1632,7 +1623,8 @@ Track releases by tag, never a commit (owner policy, 2026-11-11).
    its file. Drop a patch the release already contains, and say why here.
    Run `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none
    --system <deps>` (Debug: some upstream tests need its safety checks)
-   before and after the patches, and compare the failures. Check 1.0-style
+   before and after the patches, and compare the failures; `check.sh
+   --only ghostty-zig` runs the part of it the patches touch. Check 1.0-style
    fast paths (`printSliceFill`, `printSliceMixed`) keep the tmux
    bookkeeping of patches 0013 and 0034 and the widths of 0007.
 5. Patch 0017 reads and writes Terminal, Screen and page fields by name:

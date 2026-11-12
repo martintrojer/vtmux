@@ -6,6 +6,8 @@
 #   replay            cargo xtask oracle replay
 #   replay-upgrade-3  the replay with a live upgrade after every third step
 #   replay-upgrade-1  the same after every step, for the scenarios that once failed only so
+#   ghostty-zig       Ghostty's own Zig tests on the patched tree, the modules the patches change
+#                     (scripts/ghostty-zig-tests.sh)
 # `check.sh` runs them all; `check.sh --only test,regress` the ones named
 # (CI runs each stage as a job of its own, .github/workflows/ci.yml, so CI
 # and the local gate run the same commands); `check.sh --list` prints them.
@@ -13,7 +15,7 @@
 # the stages, a run reaps leftovers first and ends with the socket guard.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-all_stages="lint test regress replay replay-upgrade-3 replay-upgrade-1"
+all_stages="lint test regress replay replay-upgrade-3 replay-upgrade-1 ghostty-zig"
 usage() {
   echo "usage: $0 [--only STAGE[,STAGE...]] [--list]; stages: $all_stages" >&2
   exit 2
@@ -136,6 +138,9 @@ fi
 if want regress replay replay-upgrade-3 replay-upgrade-1; then
   builds+=("build -p xtask" "build -p vtmux")
 fi
+if want ghostty-zig; then
+  builds+=("build -p vtmux-ghostty-vt-sys")
+fi
 for b in ${builds[@]+"${builds[@]}"}; do
   # shellcheck disable=SC2086 # the words of one cargo command
   cargo $b -q
@@ -190,6 +195,7 @@ if want test; then
   suite "Ghostty wrapper (allocator_api)" cargo test --manifest-path "$ghostty_manifest" --features allocator_api
 fi
 if want regress; then suite "regress" cargo xtask regress; fi
+if want ghostty-zig; then suite "Ghostty's Zig tests" bash scripts/ghostty-zig-tests.sh; fi
 if want replay; then suite "oracle replay" cargo xtask oracle replay; fi
 # The replay again with the server upgraded onto itself after every third
 # step (live-upgrade spec, *Tests*): every scenario must still match. Then

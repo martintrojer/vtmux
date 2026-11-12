@@ -36,16 +36,16 @@ jobs:
       # One red stage must not cancel the others: a run reports them all.
       fail-fast: false
       matrix:
-        stage: [lint, test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
+        stage: ["lint,ghostty-zig", test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
-          reference-tmux: ${{ matrix.stage != 'lint' }}
+          reference-tmux: ${{ !startsWith(matrix.stage, 'lint') }}
           cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
           # The macOS type-check, for the pushes no macOS job runs on, and
           # the static release build's libc.
-          targets: ${{ matrix.stage == 'lint' && 'aarch64-apple-darwin,x86_64-unknown-linux-musl' || '' }}
+          targets: ${{ startsWith(matrix.stage, 'lint') && 'aarch64-apple-darwin,x86_64-unknown-linux-musl' || '' }}
       - name: check.sh --only ${{ matrix.stage }}
         run: bash scripts/check.sh --only ${{ matrix.stage }}
       # A regress failure names target/regress/logs/<test>.log: keep it.
@@ -85,12 +85,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stage: [lint, test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
+        stage: ["lint,ghostty-zig", test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
-          reference-tmux: ${{ matrix.stage != 'lint' }}
+          reference-tmux: ${{ !startsWith(matrix.stage, 'lint') }}
           cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
       - name: check.sh --only ${{ matrix.stage }}
         run: bash scripts/check.sh --only ${{ matrix.stage }}

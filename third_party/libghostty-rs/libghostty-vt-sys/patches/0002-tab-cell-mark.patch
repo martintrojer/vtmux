@@ -19,7 +19,7 @@ index 6dffd7444..f31c1985d 100644
  } GhosttyCellData;
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 30424fc2e..c0741e985 100644
+index 30424fc2e..bb1fe1bca 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -985,6 +985,7 @@ const PrintSliceSimpleMask = pagepkg.Mask(Cell, &.{
@@ -138,6 +138,17 @@ index 30424fc2e..c0741e985 100644
  }
  
  // Same as horizontalTab but moves to the previous tabstop instead of the next.
+@@ -15888,6 +15964,10 @@ test "Terminal: tabClear single" {
+     defer t.deinit(alloc);
+ 
+     t.horizontalTab();
++    // vtmux: the tab marks the cells it crosses (markTab), which makes the
++    // row dirty; the clear itself dirties nothing.
++    try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
++    t.clearDirty();
+     t.tabClear(.current);
+     try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
+     t.setCursorPos(1, 1);
 diff --git a/src/terminal/c/cell.zig b/src/terminal/c/cell.zig
 index 3d2618099..eba7b5af0 100644
 --- a/src/terminal/c/cell.zig
