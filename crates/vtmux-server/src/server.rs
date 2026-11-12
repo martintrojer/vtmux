@@ -101,6 +101,15 @@ pub struct ServerConfig {
     pub binary: Option<PathBuf>,
 }
 
+/// How much of a client's socket is read in one loop turn. A client typing
+/// a flood (a paste, `cat /dev/zero` as its terminal) has the rest read on
+/// the next turns, after the other events, so commands and pane output are
+/// not starved: tmux reads a client's terminal once per libevent callback
+/// (tty.c `tty_read_callback`: `evbuffer_read`, at most `EVBUFFER_MAX_READ`,
+/// 4 KB in libevent 2.1) and runs the other handlers between reads. About
+/// one `Input` frame (the client reads its terminal 4 KB at a time).
+const CLIENT_READ_BUDGET: usize = 4 * 1024 + 64;
+
 /// Whether every event of a poll is a client socket that became readable,
 /// nothing else (not writable, not closed): the only events an
 /// acknowledgement-only turn has ([`Server::ack_turn_is_quiet`]).
@@ -859,6 +868,15 @@ pub struct Server {
     /// Held PTYs with output still to discard when their read budget ran
     /// out: the backlog for [`Self::held`].
     held_backlog: std::collections::BTreeSet<usize>,
+    /// Clients whose socket still had bytes when their read budget
+    /// ([`CLIENT_READ_BUDGET`]) ran out: read again next turn, as
+    /// [`Self::backlog`] is for panes.
+    client_backlog: std::collections::BTreeSet<ClientId>,
+    /// Panes with keys queued but not yet written ([`Self::write_pane`]):
+    /// written together, one `write` for a burst of keys rather than one
+    /// each, as tmux's `bufferevent_write` to the pane is written when the
+    /// loop gets to it (window.c `window_pane_key`, input-keys.c:418).
+    pane_writes: std::collections::BTreeSet<PaneId>,
     /// A live upgrade in its preflight ([`upgrade`]).
     pub(crate) upgrade: upgrade::Upgrade,
     /// The path the server was started as, carried across upgrades
@@ -1089,6 +1107,8 @@ impl Server {
             exe: None,
             held: Vec::new(),
             held_backlog: std::collections::BTreeSet::new(),
+            client_backlog: std::collections::BTreeSet::new(),
+            pane_writes: std::collections::BTreeSet::new(),
             upgrade: upgrade::Upgrade::default(),
             start_binary: None,
         };
@@ -1113,13 +1133,17 @@ impl Server {
         let mut events = Events::with_capacity(256);
         let mut full_turn = Instant::now();
         loop {
+            self.flush_pane_writes();
             let timeout = self.next_timeout();
             match self.poll.poll(&mut events, timeout) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             }
-            let idle = events.is_empty() && self.backlog.is_empty() && self.held_backlog.is_empty();
+            let idle = events.is_empty()
+                && self.backlog.is_empty()
+                && self.held_backlog.is_empty()
+                && self.client_backlog.is_empty();
             // Woken only for a compression step: nothing else is due, so
             // the rest of the turn (a full render among it) would do
             // nothing a turn without compression would have done. The
@@ -1130,7 +1154,13 @@ impl Server {
                 self.compress_turn(now, true);
                 continue;
             }
-            self.dispatch(&events);
+            // A client still flooding input is read after the events, once
+            // a turn like any other, not again for an event of its own.
+            let backlogged = std::mem::take(&mut self.client_backlog);
+            self.dispatch(&events, &backlogged);
+            for id in backlogged {
+                self.client_readable(id);
+            }
             if now < full_turn + NAME_INTERVAL
                 && events_are_client_reads(&events)
                 && self.ack_turn_is_quiet()
@@ -1223,6 +1253,7 @@ impl Server {
         self.turn_work == self.rendered_work
             && self.backlog.is_empty()
             && self.held_backlog.is_empty()
+            && self.client_backlog.is_empty()
             && self.model.redraw_panes.is_empty()
             && self.offset_due.is_empty()
             && self.burst_started.is_empty()
@@ -1234,8 +1265,9 @@ impl Server {
             && !self.timers_due()
     }
 
-    /// One poll's events, each to what owns its token.
-    fn dispatch(&mut self, events: &Events) {
+    /// One poll's events, each to what owns its token. A client in
+    /// `backlogged` is read after them, so its read event is skipped.
+    fn dispatch(&mut self, events: &Events, backlogged: &std::collections::BTreeSet<ClientId>) {
         for event in events {
             match event.token() {
                 LISTENER => self.accept(),
@@ -1261,7 +1293,8 @@ impl Server {
                 Token(t) if t >= HELD_BASE => self.held_readable(t - HELD_BASE),
                 Token(t) if t >= CLIENT_BASE => {
                     let id = ClientId(t - CLIENT_BASE);
-                    if event.is_readable() || event.is_read_closed() {
+                    if (event.is_readable() || event.is_read_closed()) && !backlogged.contains(&id)
+                    {
                         self.client_readable(id);
                     }
                     if event.is_writable() {
@@ -1362,6 +1395,7 @@ impl Server {
     fn own_timeout(&self) -> Option<Duration> {
         if !self.backlog.is_empty()
             || !self.held_backlog.is_empty()
+            || !self.client_backlog.is_empty()
             || !self.pending_exits.is_empty()
             || self.cmdq.runnable()
             || !self.format_jobs.borrow().actions.is_empty()
@@ -1650,17 +1684,45 @@ impl Server {
         }
     }
 
+    /// Client `id`'s socket is readable: what it sent, at most
+    /// [`CLIENT_READ_BUDGET`] once it has said Hello (its environment,
+    /// often tens of KB, is read whole), the rest on the next turns
+    /// ([`Self::client_backlog`]).
     fn client_readable(&mut self, id: ClientId) {
+        let budgeted = self.clients.get(&id).is_some_and(|c| c.hello.is_some());
+        self.client_read(id, budgeted);
+    }
+
+    /// All that client `id`'s socket holds, budget or not: its connection
+    /// is about to be replaced (a re-attach after an upgrade).
+    fn client_read_all(&mut self, id: ClientId) {
+        self.client_read(id, false);
+    }
+
+    fn client_read(&mut self, id: ClientId, budgeted: bool) {
         let mut closed = false;
         if let Some(c) = self.clients.get_mut(&id) {
-            let mut buf = [0u8; 16 * 1024];
+            let mut buf = [0u8; CLIENT_READ_BUDGET];
+            let mut read = 0;
             loop {
-                match c.stream.read(&mut buf) {
+                if budgeted && read >= CLIENT_READ_BUDGET {
+                    self.client_backlog.insert(id);
+                    break;
+                }
+                let room = if budgeted {
+                    CLIENT_READ_BUDGET - read
+                } else {
+                    buf.len()
+                };
+                match c.stream.read(&mut buf[..room]) {
                     Ok(0) => {
                         closed = true;
                         break;
                     }
-                    Ok(n) => c.inbuf.extend_from_slice(&buf[..n]),
+                    Ok(n) => {
+                        read += n;
+                        c.inbuf.extend_from_slice(&buf[..n]);
+                    }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                     Err(_) => {
@@ -3178,6 +3240,7 @@ impl Server {
             }
         }
         self.cmdq_process();
+        self.flush_pane_writes();
         Ok(())
     }
 
@@ -3353,21 +3416,35 @@ impl Server {
             if let Some(o) = self.model.panes.get_mut(&other)
                 && let Some(io) = o.io.as_mut()
             {
-                io.write(&bytes);
+                io.queue(&bytes);
+                self.pane_writes.insert(other);
             }
-            self.pane_output_queued(other);
         }
     }
 
-    /// Bytes to a pane's PTY, unless its input is off (window.c:2095).
+    /// Bytes to a pane's PTY, unless its input is off (window.c:2095),
+    /// written by [`Self::flush_pane_writes`] once the keys at hand are
+    /// handled. A write straight to the pane meanwhile (`paste-buffer`, a
+    /// query's reply) writes these first, so the order holds.
     pub(crate) fn write_pane(&mut self, p: PaneId, bytes: &[u8]) {
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
         };
         if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
-            io.write(bytes);
+            io.queue(bytes);
+            self.pane_writes.insert(p);
         }
-        self.pane_output_queued(p);
+    }
+
+    /// Write what [`Self::write_pane`] queued: after a client's input,
+    /// and before the loop waits.
+    fn flush_pane_writes(&mut self) {
+        for p in std::mem::take(&mut self.pane_writes) {
+            if let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.as_mut()) {
+                io.flush();
+            }
+            self.pane_output_queued(p);
+        }
     }
 
     /// This turn's frames, then the command clients whose commands are
@@ -6912,6 +6989,53 @@ mod tests {
 
     /// D33: what a Ghostty client is sent of panes' kitty graphics.
     mod graphics;
+
+    /// A client typing a flood is read [`super::CLIENT_READ_BUDGET`] at a
+    /// time: the rest waits on its socket and the client is read again on
+    /// the next turn (a zero poll timeout), since mio, edge-triggered,
+    /// would not report the socket again.
+    #[test]
+    fn a_flooding_client_is_read_a_budget_a_turn() {
+        use super::super::server::snapshot::tests as st;
+        use std::io::Write as _;
+        use vtmux_core::protocol::{self, ClientMsg};
+        let dir = st::temp_dir("client-budget");
+        let mut server = st::server(&dir);
+        st::ok(
+            &mut server,
+            &dir,
+            &["new-session", "-d", "-s", "a", "cat", "-"],
+        );
+        let (term, mut peer) = st::attach(&mut server, &dir, "a", &[]);
+        // Frames until the socket is full (8 KB on macOS), each 64 keys.
+        let frame = protocol::encode(&ClientMsg::Input(vec![b'q'; 64])).unwrap();
+        let mut sent = 0;
+        while sent < 64 * 1024 {
+            match peer.write(&frame) {
+                Ok(n) if n == frame.len() => sent += n,
+                Ok(n) => {
+                    sent += n;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        let budget = super::CLIENT_READ_BUDGET;
+        assert!(sent > 2 * budget, "{sent}");
+        let mut turns = 0;
+        loop {
+            server.client_readable(term);
+            turns += 1;
+            if !server.client_backlog.contains(&term) {
+                break;
+            }
+            assert_eq!(server.own_timeout(), Some(std::time::Duration::ZERO));
+            server.client_backlog.clear();
+        }
+        assert!(turns > sent / budget, "{sent} bytes in {turns} reads");
+        drop(server);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// An ESC held past `escape-time` and an `x` waiting on the client's
     /// socket, which no poll event reported (kqueue after the server was

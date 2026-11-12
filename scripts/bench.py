@@ -4,7 +4,7 @@
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
-           agent_panes key_echo upgrade (default: all), and trickle (by name only: about 22 min).
+           agent_panes key_echo key_flood upgrade (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -28,7 +28,7 @@ TRICKLE_LIMIT (100000), TRICKLE_PANES ("1": streaming panes per case, one window
 the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
 tmux ignores the option), AGENT_PANES ("5 10 20"),
-AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200), UPGRADE_PANES ("1 10"), UPGRADE_LINES ("10000 100000"),
+AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200), KEY_FLOOD_N (50), UPGRADE_PANES ("1 10"), UPGRADE_LINES ("10000 100000"),
 UPGRADE_IDLE_LIMIT (180 s: the longest `idle` waits for the compressor), UPGRADE_STATES ("fresh idle"; add
 "fresh-rows idle-rows" for an upgrade onto a binary that reports another Ghostty patch stack, so the history
 goes as rows; a state with "-alt", as "fresh-alt-rows", has an alternate screen up over the history),
@@ -723,8 +723,8 @@ def quiet(clients, secs=0.3, limit=10):
     raise RuntimeError("clients never went quiet")
 
 
-def attach_all(s, session, sizes, sync):
-    clients = [Client(s, session, c, r, sync) for c, r in sizes]
+def attach_all(s, session, sizes, sync, cls=Client):
+    clients = [cls(s, session, c, r, sync) for c, r in sizes]
     deadline = time.monotonic() + 15
     while len(s.run("list-clients", "-F", "x").split()) < len(clients):
         if time.monotonic() > deadline:
@@ -1093,8 +1093,78 @@ def scenario_key_echo(env):
             "rows": {f"flood {k}": v for k, v in out.items()}}
 
 
+KEY_FLOOD_N = int(os.environ.get("KEY_FLOOD_N", "50"))
+KEY_FLOOD_CHUNK = b"the quick brown fox jumps over the lazy dog " * 93  # ~4 KB of printable keys
+
+
+class FloodClient(Client):
+    """A Client whose second thread types KEY_FLOOD_CHUNK into its terminal as fast as the client reads it."""
+
+    def flood(self):
+        self.typed, self._stop = 0, threading.Event()
+
+        def type_keys():
+            while not self._stop.is_set():
+                try:
+                    self.typed += os.write(self.master, KEY_FLOOD_CHUNK)
+                except OSError:
+                    break
+
+        self._typer = threading.Thread(target=type_keys, daemon=True)
+        self._typer.start()
+
+    def stop(self):
+        self._stop.set()
+
+
+def scenario_key_flood(env):
+    """Command latency under a key flood: one 200x50 client (sync on) on a pane running `cat`, a thread
+    typing printable keys into the client's terminal as fast as it takes them; meanwhile KEY_FLOOD_N
+    `display -p x` command clients, one after another, each timed from spawn to exit. Also without the
+    flood. p50 / p90 / max ms of each run, and the keys per second the client's terminal took meanwhile."""
+    out = {}
+    for flood in ("none", "keys"):
+        def one(which, flood=flood):
+            s = env.server(which)
+            s.run("new", "-d", "-s", "f", "-x", str(CLIENT_COLS), "-y", str(CLIENT_ROWS - 1), "exec cat")
+            s.find_pid()
+            clients = []
+            try:
+                pin_terminal(s)
+                s.run("set", "-g", "automatic-rename", "off")
+                clients = attach_all(s, "f", [(CLIENT_COLS, CLIENT_ROWS)], True, cls=FloodClient)
+                c = clients[0]
+                if flood == "keys":
+                    c.flood()
+                    time.sleep(1)  # the flood is in full swing
+                lat = []
+                cmd = [s.bin, "-L", s.label, "-f", "/dev/null", "display", "-p", "x"]
+                typed0 = c.typed if flood == "keys" else 0
+                with Phase(s.pid, fine=True) as p:
+                    for _ in range(KEY_FLOOD_N):
+                        t0 = time.monotonic()
+                        r = subprocess.run(cmd, env=s.env, capture_output=True, text=True, timeout=120)
+                        lat.append((time.monotonic() - t0) * 1000)
+                        if r.stdout != "x\n":
+                            raise RuntimeError(f"key_flood: display -p x printed {r.stdout!r} {r.stderr!r}")
+                typed = c.typed - typed0 if flood == "keys" else 0
+                if flood == "keys":
+                    c.stop()
+                lat.sort()
+                return {"p50_ms": lat[len(lat) // 2], "p90_ms": lat[int(len(lat) * 0.9)], "max_ms": lat[-1],
+                        "keys_per_s": typed / p.wall, "server_cpu_pct": p.cpu / 10 / p.wall}
+            finally:
+                s.kill()
+                for c in clients:
+                    c.close()
+        out[flood] = env.per_binary(one)
+    return {"title": f"key_flood ({KEY_FLOOD_N} `display -p x` round trips, one after another, while one {CLIENT_COLS}x{CLIENT_ROWS} "
+                     f"client, sync on, takes printable keys as fast as it reads them into a pane running `cat`; keys/s typed)",
+            "rows": {f"flood {k}": v for k, v in out.items()}}
+
+
 ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scenario_render, "many_clients": scenario_many_clients,
-            "agent_panes": scenario_agent_panes, "key_echo": scenario_key_echo}
+            "agent_panes": scenario_agent_panes, "key_echo": scenario_key_echo, "key_flood": scenario_key_flood}
 ALL += list(ATTACHED)
 
 
@@ -1444,6 +1514,8 @@ def render_attached(name, res):
                         ("terminal KB/s (sum)", "term_kb_per_s", 1), ("sync frames/s (sum)", "frames_per_s", 0),
                         ("server wakeups/s", "wakeups_per_s", 0), ("RSS MB", "rss_mb", 1)],
         "key_echo": [("p50 ms", "p50_ms", 2), ("p90 ms", "p90_ms", 2), ("max ms", "max_ms", 2), ("lost", "lost", 0)],
+        "key_flood": [("p50 ms", "p50_ms", 1), ("p90 ms", "p90_ms", 1), ("max ms", "max_ms", 1), ("keys/s typed", "keys_per_s", 0),
+                      ("server CPU %", "server_cpu_pct", 0)],
         "upgrade": [("history lines", "history_lines", 0), ("idle s", "idle_s", 1), ("answered ms", "answered_ms", 0),
                     ("redrawn ms", "redrawn_ms", 0), ("snapshot MB", "snapshot_mb", 1), ("RSS MB before", "rss_before_mb", 1),
                     ("RSS MB after", "rss_after_mb", 1)],

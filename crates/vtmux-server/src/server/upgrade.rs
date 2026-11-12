@@ -1151,8 +1151,8 @@ impl Server {
         }
         let read_only = self.clients.get(&new).is_some_and(|c| c.flags.read_only);
         // What the old connection still holds (keys typed before the
-        // notice was read) is taken first.
-        self.client_readable(old);
+        // notice was read) is taken first, all of it: the connection goes.
+        self.client_read_all(old);
         let (Some(mut fresh), true) = (self.clients.remove(&new), self.clients.contains_key(&old))
         else {
             return;

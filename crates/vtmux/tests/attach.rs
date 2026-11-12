@@ -433,6 +433,57 @@ fn large_input_is_drained_without_another_key() {
     });
 }
 
+/// While an attached client floods keys, a command is answered after a few
+/// reads of the flood, not after all the client's socket held: the server
+/// reads about 4 KB of a client's input a loop turn, as tmux reads a
+/// terminal once per libevent callback (tty.c `tty_read_callback`). The
+/// keys that reach the pane during one control command's round trip stay
+/// well under the hundreds of KB a Linux socket holds, which one turn took
+/// before: a command waited 1.8 s in a release build, 4-6 s in a debug
+/// one. vtmux only: tmux handles keys several times faster, so its keys
+/// per round trip say nothing of its latency (`scripts/bench.py key_flood`
+/// compares the two).
+#[test]
+fn a_key_flood_leaves_commands_answered_between_its_reads() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let got = w.home.path().join("got");
+    let pane = format!(
+        "stty raw -echo; printf READY; exec cat >'{}'",
+        got.display()
+    );
+    let mut a = w.attach(&["new", "-s", "a", "sh", "-c", &pane]);
+    a.wait(|a| pane_text(a).contains("READY"));
+    let size = || std::fs::metadata(&got).map_or(0, |m| m.len());
+    let (typing, _) = typist(&mut a, 4096, Duration::ZERO);
+    common::wait("the flood to reach the pane", || size() > 1 << 16);
+    let mut control = w
+        .command(&["-C", "attach", "-f", "no-output", "-t", "a"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = control.stdin.take().unwrap();
+    let mut lines =
+        std::io::BufRead::lines(std::io::BufReader::new(control.stdout.take().unwrap()));
+    // The pane's byte count as each answer arrives.
+    let mut sizes = Vec::new();
+    for n in 0..11 {
+        writeln!(stdin, "display -p r{n}").unwrap();
+        let want = format!("r{n}");
+        while lines.next().expect("the control client ended").unwrap() != want {}
+        sizes.push(size());
+    }
+    typing.store(false, Ordering::Relaxed);
+    let _ = control.kill();
+    let _ = control.wait();
+    let mut per_command: Vec<u64> = sizes.windows(2).map(|s| s[1] - s[0]).collect();
+    per_command.sort_unstable();
+    assert!(
+        per_command[per_command.len() / 2] < 64 * 1024,
+        "keys reaching the pane per command: {per_command:?}"
+    );
+}
+
 #[test]
 fn signal_exit_restores_terminal_modes() {
     par::each(&bins(), |bin| {

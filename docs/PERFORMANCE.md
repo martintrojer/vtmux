@@ -22,6 +22,7 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | 32 clients on one window | | | 1.6x CPU **Worse** |
 | Idle server with the owner's config | 171 ms CPU a minute | 47 ms | 0.28x |
 | Key echo, p50 | 0.24 ms | 0.30 ms | 1.25x **Worse** |
+| A command while a client floods keys, p50 | 23.9 ms | 13.4 ms | 0.56x |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | Creating 400 panes | 200 ms CPU | 380 ms | 1.9x **Worse** |
 | Search a 1M-line history | 1.65 s | 0.55 s | 0.34x |
@@ -100,10 +101,11 @@ tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays pe
 |---|---|---|---|
 | key echo p50 / p90, other pane idle | 0.24 / 0.29 ms | 0.30 / 0.37 ms | 1.25x |
 | key echo p50 / p90, next to a `yes` flood | 0.56 / 0.83 ms | 0.39 / 0.74 ms | 0.70x |
+| `display -p` p50 / p90, a client flooding keys | 23.9 / 26.5 ms | 13.4 / 16.0 ms | 0.56x |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | start with the owner's config until it answers | 102 ms | 101 ms | 0.99x |
 
-vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not.
+vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not. A client typing a flood (a huge paste) is read 4 KB a loop turn, as tmux reads it, so commands still answer; before, they waited 1.8 s.
 
 ## Big histories
 
@@ -160,7 +162,7 @@ Ghostty is linked in statically (1.35 MB of text; tmux links libevent and ncurse
 - Host: a shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 CPUs). macOS numbers are not collected yet.
 - Only the server process: CPU from `/proc/<pid>/stat` or `schedstat`, RSS from `VmRSS`, never the pane children. Medians of 3 or 5 runs.
 - Clients are the binary's own `attach` on a PTY the bench drains, counting every byte and synchronized frame.
-- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes (5-20) and key echo: the 2026-11-10 run. 50-100 agent panes, 16-32 clients and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
+- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes (5-20) and key echo: the 2026-11-10 run. Commands under a key flood: the 2026-11-12 run. 50-100 agent panes, 16-32 clients and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
 - The host is shared and the load varied (3 to 22), so read CPU rows as rough; each run compares binaries side by side.
 
 ## Running the benchmarks

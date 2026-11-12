@@ -78,9 +78,9 @@ Steps 2 and 3 are why the cursor doesn't jump under heavy output (D14): tmux for
 
 ## Input: you press a key
 
-1. The client forwards the bytes. The server decodes them into keys as tmux's `tty-keys.c` does, and swallows the terminal's replies to vtmux's own queries.
+1. The client forwards the bytes. The server decodes them into keys as tmux's `tty-keys.c` does, and swallows the terminal's replies to vtmux's own queries. It reads a client's input 4 KB a loop turn, as tmux reads a terminal, so a paste or a flood of keys can't starve commands, panes or other clients.
 2. A mouse report is located (`mouse.rs`: pane, border, status range) and becomes a key such as `MouseDown1Pane`.
-3. A key with a binding runs its command; any other is encoded for the active pane's modes and written to its pty. A program granted the kitty keyboard protocol (D29) gets libghostty's encoding instead (`pane_kitty.rs` ends the grant when the program that asked exits).
+3. A key with a binding runs its command; any other is encoded for the active pane's modes and queued for its pty, written once the keys at hand are handled. A program granted the kitty keyboard protocol (D29) gets libghostty's encoding instead (`pane_kitty.rs` ends the grant when the program that asked exits).
 
 ## Commands and control mode
 
