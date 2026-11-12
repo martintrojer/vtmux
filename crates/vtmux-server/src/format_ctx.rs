@@ -91,6 +91,9 @@ pub struct ClientView {
     /// `CLIENT_SUSPENDED`: locked, or stopped by `suspend-client`.
     pub suspended: bool,
     pub pid: u32,
+    /// The connecting process's uid (`proc_get_peer_uid(c->peer)`);
+    /// `None` when the system can't say.
+    pub uid: Option<u32>,
     /// The key table the client is in, and its default table.
     pub key_table: String,
     pub default_key_table: String,
@@ -356,10 +359,10 @@ impl<'a> Ctx<'a> {
             "client_written" => c.written.to_string(),
             "client_activity" => c.activity_secs.to_string(),
             "client_created" => c.created_secs.to_string(),
-            // The server accepts only its own user (no server-access), so
-            // the peer's uid is the server's.
-            "client_uid" => rustix::process::getuid().as_raw().to_string(),
-            "client_user" => sys::user::current_user()?.name,
+            // format_cb_client_uid, format_cb_client_user: the peer's uid
+            // and its passwd name, nothing when either is unknown.
+            "client_uid" => c.uid?.to_string(),
+            "client_user" => sys::user::user_by_uid(c.uid?)?.name,
             _ => return None,
         })
     }

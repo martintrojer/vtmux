@@ -5063,6 +5063,7 @@ impl Server {
             utf8: hello.is_some_and(|h| h.flags.utf8),
             suspended: c.suspended,
             pid: hello.map_or(0, |h| h.pid),
+            uid: c.peer.map(|(uid, _)| uid),
             key_table: c.keys.table.clone(),
             default_key_table: self.default_key_table(id),
             last_session: c.last_session,
@@ -7228,6 +7229,55 @@ mod tests {
             run(&mut server, &dir, &["show", "-gv", "@gone"]),
             "$ show -gv @gone\nyes\n--stderr--\n--exit Some(0)--\n"
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `#{client_uid}` and `#{client_user}` are the connecting process's
+    /// uid and its passwd name (format.c `format_cb_client_uid`,
+    /// `format_cb_client_user`: `proc_get_peer_uid(c->peer)`), nothing when
+    /// unknown; so `list-clients` names a client of another user
+    /// (cmd-list-clients.c `LIST_CLIENTS_TEMPLATE`). A second user can't connect on CI, so the peer's ids
+    /// are set by hand.
+    #[test]
+    fn client_uid_and_user_are_the_peers() {
+        use crate::server::snapshot::tests::run;
+        let (mut server, _, s, _, dir) = setup();
+        let (id, _peer) = attach_test_client(&mut server, s, &dir);
+        let probe = |server: &super::Server| {
+            let found = crate::target::Found::from_session(&server.model, s);
+            let ctx = server.format_ctx(found, Some(id));
+            vtmux_core::format::expand_str("#{client_uid}:#{client_user}", &ctx)
+        };
+        let own = rustix::process::getuid().as_raw();
+        let name = crate::sys::user::current_user().unwrap().name;
+        assert_eq!(probe(&server), format!("{own}:{name}"));
+        let listed = |server: &mut super::Server| {
+            let out = run(server, &dir, &["list-clients"]);
+            // The first line echoes the command.
+            out.lines().nth(1).unwrap().to_owned()
+        };
+        let mine = listed(&mut server);
+        assert!(mine.starts_with("/dev/null: a [40x10 "), "{mine}");
+        assert!(!mine.contains("[user "), "{mine}");
+
+        let set_peer = |server: &mut super::Server, uid| {
+            server.clients.get_mut(&id).unwrap().peer = uid;
+        };
+        if own != 0 {
+            set_peer(&mut server, Some((0, 0)));
+            assert_eq!(probe(&server), "0:root");
+            assert!(listed(&mut server).contains(" [user root] "));
+        }
+        let nobody = 3_999_999_999;
+        assert!(crate::sys::user::user_by_uid(nobody).is_none());
+        set_peer(&mut server, Some((nobody, nobody)));
+        assert_eq!(probe(&server), format!("{nobody}:"));
+        // The template's `#{?client_user,#{client_user},#{client_uid},}`
+        // is two conditions and no else: an unnamed uid shows nothing
+        // (the reference prints `[user ]` too).
+        assert!(listed(&mut server).contains(" [user ] "));
+        set_peer(&mut server, None);
+        assert_eq!(probe(&server), ":");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

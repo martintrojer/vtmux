@@ -24,6 +24,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 - **A blinking cursor on Ghostty.** The cursor no longer starts blinking after a live upgrade, after a program resets the cursor style (`ESC[0 q`, which Ghostty draws blinking), or while a program's synchronized update sets a blinking cursor and steadies it again. Each frame shows the cursor as tmux shows it after a redraw (`cnorm`, then the style), the reset after an upgrade goes before `cnorm`, and a pane in synchronized output leaves the terminal's cursor as it is, as in tmux.
 - `capture-pane -J` (and `-T -N`) keeps a line's cells that were written then erased, as tmux does: tmux-resurrect's saved pane contents (`capture-pane -epJ`) now match tmux's, vim's screen included. tmux-resurrect's save and restore and tmux-continuum's auto-save and auto-restore are tested against tmux 3.8.
 - A client that goes away as it attaches (killed, or a SIGTERM as the attach completes) no longer crashes the server, and `client-detached` fires for it, as in tmux; before, on a loaded host, the hook was skipped, or the server died with every session.
+- `#{client_uid}` and `#{client_user}` name the client's own user, not the server's, as in tmux: `list-clients` shows `[user …]` for a client another user attached through `server-access`.
 - Live upgrade: a downgrade to 3.8-beta2 or 3.8-beta1 waits up to 5 s for the old binary's `-V`, not 1 s, so a loaded laptop or macOS checking the binary no longer gets it refused.
 ### Fixed
 
