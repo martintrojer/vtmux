@@ -624,9 +624,14 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
         // A last save long ago: the first status line saves. Plugins are
         // loaded with their output thrown away, as TPM does (continuum
         // traces itself with `set -x`).
+        // continuum restores in the background: sessions show up long
+        // before resurrect's restore has made each window's pane active
+        // again. Its `post-restore-all` hook (run after all of that) says
+        // when it is done.
         let continuum = format!(
             "set -g status-interval 1\n\
              set -g @continuum-save-last-timestamp 1\n\
+             set -g @resurrect-hook-post-restore-all 'tmux set -g @restored 1'\n\
              run-shell '{p}/tmux-continuum/continuum.tmux >/dev/null 2>&1'\n"
         );
         s.config(&continuum);
@@ -659,8 +664,9 @@ fn continuum_saves_from_the_status_line_and_restores_at_start() {
         s.config(&format!("set -g @continuum-restore on\n{continuum}"));
         s.t(&["new", "-d"]);
         s.wait("continuum's restore", || {
-            s.t(&["ls", "-F", "#{session_name}"]) == "misc\nwork\n"
+            s.t(&["show", "-gqv", "@restored"]).trim_end() == "1"
         });
+        assert_eq!(s.t(&["ls", "-F", "#{session_name}"]), "misc\nwork\n");
         s.wait_shell("work:1.0", |x| prompts(x) == 1);
         s.wait_shell("work:1.1", |x| prompts(x) == 2 && has(x, "pane-one"));
         s.wait_shell("work:2.0", |x| prompts(x) == 1);

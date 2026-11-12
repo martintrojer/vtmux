@@ -21,10 +21,13 @@ Window names: tmux 3.8 names a new window after its pane's process before the sh
 
 Shell names: on macOS `/bin/sh` runs as `bash`, so `#{pane_current_command}` is `bash` under both servers, and the first macOS run failed every time on both binaries waiting for `sh`. The test no longer names the shell: a shell pane is ready when its last row is a bare prompt (the count tells a restored pane's new prompt from its saved one), an automatically named window is waited on until its name is its pane's command, and the assertions take the shell's name from an idle pane. SIGWINCH goes to every process under the pane, not only its children, in case `/bin/sh` does not exec the shell. Simulated on Linux by making the panes' shell `bash --posix` (named `bash`): the previous version timed out on both binaries as on macOS, this one passes 3/3.
 
+Restore end: continuum restores in the background, and its sessions and pane prompts appear before resurrect's restore has made each window's pane active again (`select-pane -t <index>` per window, then zoom, grouped sessions, the client's session). On macOS the test compared `work:1` in the middle of that, 2 runs in about 6: one side had pane 1 active (as the split left it), the other pane 0 (after the `select-pane`). Sampled on Linux, the active pane of `work:1` was 1 or 0 on either binary while the restore ran and 0 on both once it ended (4/4 runs). Not a divergence: the test now waits for resurrect's `@resurrect-hook-post-restore-all`, which runs after all of it, before comparing.
+
 ## Runs
 
 | run | result |
 |---|---|
+| after waiting for the restore's end: the test binary 10x at idle, 6x under 48 busy loops | 10/10, 6/6 |
 | after the shell-name change: the test binary 10x at idle, 5x under 48 busy loops, once with a dash-like `/bin/sh` | 10/10, 5/5, 2/2 |
 | after the window-name wait: the test binary run directly, 14x at idle | 14/14, 3.9-4.3 s |
 | the same, 8x under 48 busy loops and 4x under 96 | 12/12, 4.1-4.2 s and 6.7-6.8 s |
