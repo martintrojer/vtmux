@@ -99,22 +99,11 @@ mise use -g github:martintrojer/vtmux
 ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
 ```
 
-On glibc hosts that's the gnu build. The static (musl) Linux build is for hosts it won't run on, a glibc older than 2.35 (EL9, Debian 11): `mise use -g "github:martintrojer/vtmux[matching=musl]"` (Alpine gets it by default). musl has no NSS, so with sssd or LDAP users and no nscd, user names (`#{user}`, `~user`, `server-access`) may not resolve.
+On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"`. Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
-Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
+With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-beta.3`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
-With cargo. The build compiles Ghostty, so it needs Zig 0.17 on `PATH`:
-
-```sh
-mise use -g zig@0.17
-cargo install --locked vtmux@3.8.0-beta.3   # a beta: cargo needs the version named
-```
-
-That build lacks the tarballs' whole-program LTO, worth 7-18% of the server's CPU on render-bound work; [docs/RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md#what-cargo-install-vtmux-gets) has the line that keeps it.
-
-From a checkout (mise brings the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
-
-Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets: `vtmux -V` prints `vtmux 3.8-beta3`.
+Run as `tmux`, it is tmux to every script and plugin: `tmux -V` prints `tmux 3.8`. Run as `vtmux`, it sits next to your tmux with its own sockets.
 
 ## Also
 
