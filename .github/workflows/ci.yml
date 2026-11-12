@@ -4,7 +4,7 @@ on:
     # m1 always points at a commit main already has: don't build it twice.
     branches-ignore: [m1]
   pull_request:
-  # Weekly perf-smoke only (the check job skips scheduled runs).
+  # Weekly perf-smoke and macOS (the Linux check skips scheduled runs).
   schedule:
     - cron: "17 4 * * 1"
 # A newer push to a worker branch supersedes its running check. main gets
@@ -13,51 +13,105 @@ on:
 concurrency:
   group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
+# The gate, scripts/check.sh, in jobs of a stage or two (`check.sh --list`;
+# xtask's ci test holds each matrix to every stage once): they run at once
+# on runners of their own, so a run takes as long as its longest job, not
+# their sum. The 30 s replay-upgrade-1 rides with regress rather than pay a
+# runner's setup and build: five jobs, as many macOS jobs as GitHub's free
+# plan runs at once. Each job runs `check.sh --only <stages>`, which reaps
+# and guards the socket dirs as the whole gate does. The harness jobs
+# (regress and the replays) build the same binaries, so they share one
+# rust-cache and Ghostty cache (`replay`); lint (clippy's metadata, the
+# other OS's target) and test (the test binaries, the wrapper's own
+# Ghostty) have their own.
 jobs:
-  # Linux: the full gate on every push. This is what the merge waits on.
-  check:
+  # Linux: every stage on every push.
+  linux:
+    name: linux (${{ matrix.stage }})
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # A hung test must fail the job, not hold the runner for six hours.
     timeout-minutes: 45
+    strategy:
+      # One red stage must not cancel the others: a run reports them all.
+      fail-fast: false
+      matrix:
+        stage: [lint, test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - name: Gate (full check.sh)
-        run: bash scripts/check.sh
+        with:
+          reference-tmux: ${{ matrix.stage != 'lint' }}
+          cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
+          # The macOS type-check, for the pushes no macOS job runs on.
+          targets: ${{ matrix.stage == 'lint' && 'aarch64-apple-darwin' || '' }}
+      - name: check.sh --only ${{ matrix.stage }}
+        run: bash scripts/check.sh --only ${{ matrix.stage }}
       # A regress failure names target/regress/logs/<test>.log: keep it.
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() && startsWith(matrix.stage, 'regress')
         with:
           name: regress-logs-linux
           path: target/regress/logs/
           if-no-files-found: ignore
           retention-days: 14
 
-  # macOS: the same gate, but GitHub's macOS runners take ~28 min against
-  # Linux's ~18, so it runs only where it pays: main (after the merge, not
-  # in its way), pull requests, and the weekly schedule. Worker branches
-  # skip it. A red macOS run on main is fixed on main like any other.
-  # A run no macOS runner picked up (GitHub capacity) is re-run by
+  # The Linux gate's one result: what the merge waits on.
+  check:
+    if: always() && github.event_name != 'schedule'
+    needs: linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Linux stage passed
+        env:
+          RESULT: ${{ needs.linux.result }}
+        run: test "$RESULT" = success
+
+  # macOS: the same stages, but GitHub's macOS runners are slower and
+  # scarcer, so they run only where it pays: main (after the merge, not in
+  # its way), pull requests, and the weekly schedule. Worker branches skip
+  # them. A red macOS run on main is fixed on main like any other.
+  # A job no macOS runner picked up (GitHub capacity) is re-run by
   # ci-retry.yml.
   # macos-15: Zig 0.17 (needed by the ghostty pin in third_party/libghostty-rs)
   # targets macOS 15+ and its own binary needs macOS 15 to run.
-  check-macos:
+  macos:
+    name: macos (${{ matrix.stage }})
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: macos-15
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [lint, test, "regress,replay-upgrade-1", replay, replay-upgrade-3]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - name: Gate (full check.sh)
-        run: bash scripts/check.sh
+        with:
+          reference-tmux: ${{ matrix.stage != 'lint' }}
+          cache-key: ${{ (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
+      - name: check.sh --only ${{ matrix.stage }}
+        run: bash scripts/check.sh --only ${{ matrix.stage }}
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() && startsWith(matrix.stage, 'regress')
         with:
           name: regress-logs-macos
           path: target/regress/logs/
           if-no-files-found: ignore
           retention-days: 14
+
+  # The macOS gate's one result.
+  check-macos:
+    if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'schedule')
+    needs: macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every macOS stage passed
+        env:
+          RESULT: ${{ needs.macos.result }}
+        run: test "$RESULT" = success
 
   # Performance regression guard (docs/PERFORMANCE.md, "Regression guard"): never blocks, not
   # part of check.sh. The table goes to the job summary; the result JSON is the artifact to
@@ -71,6 +125,8 @@ jobs:
         with:
           fetch-depth: 0 # the staleness check walks git history
       - uses: ./.github/actions/setup
+        with:
+          cache-key: perf
       - name: Smoke run
         run: python3 scripts/bench.py --smoke
         env:

@@ -1,24 +1,58 @@
 name: setup
-description: Zig, Rust, the reference tmux 3.8 build and its cache (shared by the ci.yml and release.yml jobs)
+description: Zig, Rust, the reference tmux 3.8 build and the caches (shared by the ci.yml and release.yml jobs)
 inputs:
   reference-tmux:
-    description: Build the reference tmux 3.8 (the gate needs it; a release build does not)
+    description: Build the reference tmux 3.8 (the gate needs it; a release build and the lint stage do not)
     default: "true"
   rust-cache:
-    description: Restore and save target/ (a release build starts clean)
+    description: Restore and save target/ and the Ghostty build (a release build starts clean)
     default: "true"
+  cache-key:
+    description: The last word of the rust-cache and Ghostty cache keys; jobs that build the same things share one
+    default: default
+  targets:
+    description: Other Rust targets to install (the lint stage's other-OS type-check)
+    default: ""
+  zig-version:
+    description: The Zig of mise.toml (also a word of the Ghostty cache key)
+    default: 0.17.0
 runs:
   using: composite
   steps:
     - uses: mlugg/setup-zig@v2
       with:
-        version: 0.17.0
+        version: ${{ inputs.zig-version }}
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: 1.99.1
         components: rustfmt, clippy
+        targets: ${{ inputs.targets }}
     - uses: Swatinem/rust-cache@v2
       if: inputs.rust-cache == 'true'
+      with:
+        key: ${{ inputs.cache-key }}
+    # rust-cache drops the build output of the packages under the workspace
+    # root, vtmux-ghostty-vt-sys's among them, so without this every job
+    # rebuilt Ghostty with Zig (1-3 min). Its OUT_DIR holds the patched
+    # source (stamped: build.rs fetches again only when the pin or a patch
+    # changes), the installed library and Zig's cache, so a restored one
+    # makes the build script's `zig build` a cache hit (under a second).
+    # The test stage builds Ghostty twice (the wrapper's tests are a
+    # workspace of their own, so a package of another hash), the lint stage
+    # once more for the other OS's target, so the key ends in the job's
+    # cache-key. The directory's name is cargo's hash of the package (its version, the
+    # toolchain, the profile), hence Cargo.lock, Cargo.toml and
+    # rust-toolchain.toml in the key: a key that restores a directory under
+    # a stale name would never be saved again. This step's post (the save)
+    # runs before rust-cache's, which cleans target/.
+    - name: Ghostty build cache
+      if: inputs.rust-cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/*/build/vtmux-ghostty-vt-sys-*/out
+          target/*/*/build/vtmux-ghostty-vt-sys-*/out
+        key: ghostty-${{ runner.os }}-${{ runner.arch }}-zig${{ inputs.zig-version }}-${{ hashFiles('third_party/libghostty-rs/libghostty-vt-sys/build.rs', 'third_party/libghostty-rs/libghostty-vt-sys/patches/**', 'Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml') }}-${{ inputs.cache-key }}
     - name: Reference tmux 3.8 build dependencies
       if: inputs.reference-tmux == 'true'
       shell: bash

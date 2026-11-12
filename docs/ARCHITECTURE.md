@@ -173,4 +173,4 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 - **Oracle:** 443 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step.
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 
-`scripts/check.sh` runs all of it on Linux and macOS in CI. Numbers against tmux: [PERFORMANCE.md](PERFORMANCE.md).
+`scripts/check.sh` runs all of it, on Linux and macOS in CI, where each of its stages is a job of its own. Numbers against tmux: [PERFORMANCE.md](PERFORMANCE.md).

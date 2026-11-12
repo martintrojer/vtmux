@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 //! Developer tasks: `ref-tmux`, `regress`, `oracle`, `reap`, `sockets`.
 
+#[cfg(test)]
+mod ci;
 mod oracle;
 #[cfg(test)]
 mod publish;
