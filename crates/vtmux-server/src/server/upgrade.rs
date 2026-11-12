@@ -443,6 +443,13 @@ impl Server {
     }
 
     fn upgrade_pending_turn(&mut self, now: Instant) {
+        if self.upgrade.pending.is_none() {
+            return;
+        }
+        // A client whose write failed this turn goes first, its hooks
+        // queued: the blockers below wait for them to run, so they run in
+        // this image, before a snapshot that would leave it out.
+        self.lose_failed_writes();
         let Some(p) = self.upgrade.pending.as_ref() else {
             return;
         };

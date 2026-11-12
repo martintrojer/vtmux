@@ -1103,6 +1103,51 @@ fn a_client_lost_during_the_notice_is_dropped_after_the_exec() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A client whose write failed in the turn an upgrade execs (its peer
+/// gone, not yet read) is lost before the snapshot: its client-detached
+/// hook runs once, in this image, before the exec, and the snapshot
+/// leaves it out. (Before: it stayed closing, the snapshot skipped it and
+/// no hook fired before the exec.)
+#[test]
+fn a_client_whose_write_failed_is_lost_before_the_exec() {
+    let (mut server, dir) = setup("failedwrite");
+    st::ok(
+        &mut server,
+        &dir,
+        // The value, `lost-here`, is in the snapshot only once the hook
+        // has run: the hook's own text has `#{l:-}` in its place.
+        &[
+            "set-hook",
+            "-g",
+            "client-detached",
+            "set -gaF @gone 'lost#{l:-}here'",
+        ],
+    );
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", false);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    drop(f_peer);
+    closed(&server, f);
+    server.send(f, &ServerMsg::Frame(b"x".to_vec()));
+    assert!(server.clients[&f].write_failed, "the write did not fail");
+    let (_id, _peer) = handshake(&mut server, &passing(&dir));
+    until_exec(&mut server);
+    let exec = execs().pop().expect("exec");
+    let s = snap::decode(&exec.bytes).unwrap();
+    assert!(s.clients.is_empty(), "{:?}", s.clients);
+    assert!(
+        exec.bytes.windows(9).any(|w| w == b"lost-here"),
+        "the hook ran after the exec"
+    );
+    server.exit_timers(Instant::now());
+    server.cmdq_process();
+    let shown = st::run(&mut server, &dir, &["show", "-gv", "@gone"]);
+    assert!(
+        shown.starts_with("$ show -gv @gone\nlost-here\n"),
+        "{shown}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A dry run that fails sends no notice, and the tokens it would have
 /// carried are void.
 #[test]

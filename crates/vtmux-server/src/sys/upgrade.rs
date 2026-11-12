@@ -77,8 +77,12 @@ pub const CHECKED: &str = "vtmux-snapshot-checked ";
 pub const LEGACY_VERSIONS: &[&str] = &["vtmux 3.8-beta1", "vtmux 3.8-beta2"];
 
 /// How long [`legacy_vtmux`] waits for `-V`: long enough for a loaded
-/// laptop, or macOS assessing a binary it has not seen run, and paid in
-/// full only by a program that is no vtmux and does not exit on `-V`.
+/// laptop, or macOS assessing a binary it has not seen run. The wait
+/// blocks the server's loop (it runs inside [`DryRun::poll`]): only a
+/// dry run that exited 0 without the acknowledgement pays it, a release
+/// before it answering in milliseconds, so the server freezes for the
+/// whole 5 s only for a program that is no vtmux, exits 0 on
+/// `--vtmux-check-snapshot` and then hangs on `-V`.
 const VERSION_LIMIT: Duration = Duration::from_secs(5);
 
 /// The line a dry run of the stream whose body hashes to `digest` answers

@@ -2019,6 +2019,22 @@ impl Server {
         }
     }
 
+    /// The clients whose write failed, lost now rather than at the next
+    /// turn's [`Self::exit_timers`]: before an upgrade's snapshot, which
+    /// leaves closing clients out, so their client-detached and
+    /// client-closed run in this image, before the exec.
+    pub(crate) fn lose_failed_writes(&mut self) {
+        let failed: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.write_failed && !c.dead)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in failed {
+            self.drop_client(id);
+        }
+    }
+
     /// `server_client_exit_timer` and `server_client_check_exit(c, 1)`
     /// (server-client.c:2361-2440): a client still not gone
     /// [`EXIT_TIMEOUT`] after it was told to go has everything queued for
