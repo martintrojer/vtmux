@@ -7021,7 +7021,9 @@ mod tests {
             }
         }
         let budget = super::CLIENT_READ_BUDGET;
-        assert!(sent > 2 * budget, "{sent}");
+        // More than one budget: at least two reads drain it (macOS's 8 KB
+        // socket holds just under two budgets, 8176 bytes).
+        assert!(sent > budget, "{sent}");
         let mut turns = 0;
         loop {
             server.client_readable(term);
