@@ -1223,7 +1223,9 @@ fn a_binary_that_fails_the_dry_run_leaves_the_server_as_it_was() {
 /// its panes and their programs carry on. Before the fix each of them
 /// replaced the server ("server exited unexpectedly", every pane gone).
 /// The old-style vtmux that says `vtmux 3.8-beta2` or `vtmux 3.8-beta1`
-/// takes over (a downgrade), and this build takes over from it again.
+/// takes over (a downgrade), also one whose `-V` takes 2 s (a loaded
+/// laptop; macOS assessing a binary), and this build takes over from it
+/// again. (Before: `-V` had 1 s, and the slow one was refused.)
 #[test]
 fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     let world = World::new();
@@ -1235,16 +1237,17 @@ fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     set_executable(&script);
     // The real dry run with its acknowledgement hidden, as a build from
     // before it writes, and `-V` saying `version`.
-    let old = |name: &str, version: &str| {
+    let old_after = |name: &str, version: &str, before: &str| {
         wrapper(
             &world,
             name,
             &format!(
                 "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>&1 | grep -v '^vtmux-snapshot-checked ' >&2; \
-                 exit 0;;\n-V) echo '{version}'; exit 0;;"
+                 exit 0;;\n-V) {before}echo '{version}'; exit 0;;"
             ),
         )
     };
+    let old = |name: &str, version: &str| old_after(name, version, "");
     let candidates = [
         PathBuf::from("/bin/echo"),
         PathBuf::from("/usr/bin/true"),
@@ -1268,8 +1271,13 @@ fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     }
     assert!(!world.server_args().contains("--vtmux-resume"));
     world.echo("a:w1", "still");
-    for version in ["vtmux 3.8-beta2", "vtmux 3.8-beta1"] {
-        let release = old(&version.replace(' ', "-"), version);
+    for (version, before) in [
+        ("vtmux 3.8-beta2", ""),
+        ("vtmux 3.8-beta1", ""),
+        ("vtmux 3.8-beta2", "sleep 2; "),
+    ] {
+        let name = format!("{}{}", version.replace(' ', "-"), before.len());
+        let release = old_after(&name, version, before);
         let out = world
             .run_within(
                 &["vtmux-upgrade", "-b", &release.display().to_string()],

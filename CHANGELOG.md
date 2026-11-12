@@ -22,6 +22,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 ### Fixed
 
 - `capture-pane -J` (and `-T -N`) keeps a line's cells that were written then erased, as tmux does: tmux-resurrect's saved pane contents (`capture-pane -epJ`) now match tmux's, vim's screen included. tmux-resurrect's save and restore and tmux-continuum's auto-save and auto-restore are tested against tmux 3.8.
+- Live upgrade: a downgrade to 3.8-beta2 or 3.8-beta1 waits up to 5 s for the old binary's `-V`, not 1 s, so a loaded laptop or macOS checking the binary no longer gets it refused.
 
 ## 3.8-beta3
 

@@ -71,12 +71,15 @@ pub const CHECKED: &str = "vtmux-snapshot-checked ";
 
 /// What `<binary> -V` (run as `vtmux`, so a binary named `tmux` answers
 /// as vtmux too) prints, exactly, for a vtmux from before [`CHECKED`]:
-/// 3.8-beta1, 3.8-beta2, and this cycle's builds that report 3.8-beta2.
+/// 3.8-beta1, 3.8-beta2, and the builds between 3.8-beta2 and the bump
+/// to 3.8-beta3, which report 3.8-beta2.
 /// `/bin/echo -V` prints `-V`, a script nothing.
 pub const LEGACY_VERSIONS: &[&str] = &["vtmux 3.8-beta1", "vtmux 3.8-beta2"];
 
-/// How long [`legacy_vtmux`] waits for `-V`.
-const VERSION_LIMIT: Duration = Duration::from_secs(1);
+/// How long [`legacy_vtmux`] waits for `-V`: long enough for a loaded
+/// laptop, or macOS assessing a binary it has not seen run, and paid in
+/// full only by a program that is no vtmux and does not exit on `-V`.
+const VERSION_LIMIT: Duration = Duration::from_secs(5);
 
 /// The line a dry run of the stream whose body hashes to `digest` answers
 /// with ([`CHECKED`]).
