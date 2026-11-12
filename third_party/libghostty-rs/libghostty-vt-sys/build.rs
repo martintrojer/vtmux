@@ -359,6 +359,12 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
         LinkMode::Static => emit_static_link_lib(target),
     }
+    // vtmux: the headers these bindings must match, for the wrapper's ABI
+    // test (`libghostty-vt/tests/abi.rs`, `INCLUDE_DIR`).
+    println!(
+        "cargo:rustc-env=LIBGHOSTTY_VT_INCLUDE_DIR={}",
+        include_dir.display()
+    );
     emit_include_metadata(&[include_dir]);
 }
 
@@ -533,6 +539,23 @@ fn zig_version_matches(version: &str) -> bool {
 fn fetch_ghostty(out_dir: &Path) -> (PathBuf, PathBuf) {
     let src_dir = out_dir.join("ghostty-src");
     let deps_dir = out_dir.join("ghostty-deps");
+    let source = format!("libghostty-vt-{GHOSTTY_VERSION}.tar.gz");
+    let deps = format!("libghostty-vt-{GHOSTTY_VERSION}-deps.tar.gz");
+    // Both local, or both downloaded: one set alone is a half-offline
+    // build that would go to the network for the other.
+    match (
+        env::var_os("GHOSTTY_SOURCE_TARBALL"),
+        env::var_os("GHOSTTY_DEPS_TARBALL"),
+    ) {
+        (Some(_), None) => fail(&format!(
+            "GHOSTTY_SOURCE_TARBALL is set but GHOSTTY_DEPS_TARBALL is not: set both (to {source} and {deps}) or neither"
+        )),
+        (None, Some(_)) => fail(&format!(
+            "GHOSTTY_DEPS_TARBALL is set but GHOSTTY_SOURCE_TARBALL is not: set both (to {source} and {deps}) or neither"
+        )),
+        _ => {}
+    }
+
     let stamp = src_dir.join(".ghostty-release");
 
     // vtmux: local patches (`patches/*.patch`, VENDOR.md) applied on top of
@@ -561,8 +584,6 @@ fn fetch_ghostty(out_dir: &Path) -> (PathBuf, PathBuf) {
         }
     }
 
-    let source = format!("libghostty-vt-{GHOSTTY_VERSION}.tar.gz");
-    let deps = format!("libghostty-vt-{GHOSTTY_VERSION}-deps.tar.gz");
     for (file, var, sha, dest) in [
         (
             &source,

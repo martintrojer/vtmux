@@ -331,18 +331,19 @@ impl<'alloc> Event<'alloc> {
     pub fn set_utf8<S: Into<String>>(&mut self, text: Option<S>) -> &mut Self {
         self.text = text.map(Into::into);
 
-        match &self.text {
-            Some(text) => unsafe {
-                ffi::ghostty_key_event_set_utf8(
-                    self.inner.as_raw(),
-                    text.as_ptr().cast(),
-                    text.len(),
-                );
+        // libghostty-vt 1.0 takes the text as one `GhosttyString` by value
+        // (key/event.h); an empty one with a NULL pointer clears it.
+        let utf8 = match &self.text {
+            Some(text) => ffi::String {
+                ptr: text.as_ptr(),
+                len: text.len(),
             },
-            None => unsafe {
-                ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), std::ptr::null(), 0);
+            None => ffi::String {
+                ptr: std::ptr::null(),
+                len: 0,
             },
-        }
+        };
+        unsafe { ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), utf8) };
         self
     }
 
