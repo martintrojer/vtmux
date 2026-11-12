@@ -78,6 +78,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-072](#d-072) | Kitty graphics drawn as unicode placeholders for Ghostty clients (`vtmux-graphics`) | Extension | extension |
 | [D-073](#d-073) | `-D` (run the server in the foreground) is refused | Deferred | deferred |
 | [D-074](#d-074) | `#{c/f:theme...}` and `#{c/b:theme...}` give the slot's terminal colour, whatever the client's theme | Deferred | deferred |
+| [D-075](#d-075) | ICH reaching the end of the line clears the rest of it, as xterm does; tmux's grid keeps it | Ghostty grid | open |
 
 Closed (vtmux matches tmux):
 
@@ -1247,6 +1248,18 @@ Closed (vtmux matches tmux):
   - RGB and 256 colours are never downgraded: colour.c:318-323 tests `(~flags & TERM_RGBCOLOURS) & (colour & COLOUR_FLAG_RGB)`, disjoint bits (0x10 and 0x02000000), so `#{c/f:#ff0000}` is `\e[38;2;255;0;0m` even for a TERM=screen client, in tmux as in vtmux.
 - **vtmux:** a theme slot always gives its terminal colour (`themered` is `\e[31m`, `themeblack` `\e[40m`), as tmux does with no client, and with the default theme options on a client with fewer than 256 colours.
 - **Evidence:** the oracle trace; a probe of reference tmux 3.8 and vtmux with a key binding running `set -gF @x '#{c/f:themered}'` on an RGB client gave `\e[38;2;205;92;92m` and `\e[31m`.
+
+<a id="d-075"></a>
+### D-075: ICH reaching the end of the line clears the rest of it
+
+- **Category:** Ghostty grid: libghostty-vt's ICH is xterm's (D4 arbiter: ECMA-48 ICH shifts the line right and loses what passes its end; tmux's own client terminal, sent the ICH, clears it too).
+- **Test:** oracle `ich_to_line_end` (annotated: the capture and the redrawn screen of a full-width pane, the capture of an ICH of exactly the columns left, and a pane that is not full width). Its ICH at the last column and its ICH of fewer columns than are left match tmux.
+- **tmux:**
+  - `screen_write_insertcharacter` (screen-write.c) clamps the count to the columns left, `sx - cx`. `grid_view_insert_cells` (grid-view.c) then moves `sx - px - nx` cells, none, and `grid_move_cells` (grid.c) returns at `nx == 0` before it clears the cells it would have moved from. The grid keeps the line.
+  - For a full-width pane, `tty_cmd_insertcharacter` (tty.c) sends the ICH to the client's terminal, which clears the rest of the line; any redraw (`refresh-client`, a window switch) draws the grid again. A pane that is not full width is drawn from the grid at once (`tty_draw_pane`).
+  - At the last column (`px >= sx - 1`) it clears that cell, as xterm does.
+- **vtmux:** the rest of the line is cleared in the grid, so the pane, its redraws and `capture-pane` agree with what tmux's client showed first.
+- **Evidence:** reference tmux 3.8, `printf 'abcdefgh\033[1;3H\033[30@'` on 20 columns: the attached client shows `ab`; after `refresh-client` it shows `abcdefgh`, as does `capture-pane -p`; in the left pane of two it shows `abcdefgh` at once. vtmux shows and captures `ab` in each. With `\033[18@` (exactly the columns left) the same.
 
 ## Adding an entry
 
