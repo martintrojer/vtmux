@@ -104,6 +104,18 @@ struct Answer {
 
 /// The loop's upgrade turn at `at`, again while a dry run runs (at most
 /// 20 s).
+/// Runs upgrade turns and the command queue until an exec has been
+/// recorded, or 20 s: a fixed number of rounds was too few on a loaded CI
+/// runner (the key binding, the dry run and the exec each take a round).
+fn until_exec(server: &mut Server) {
+    let end = Instant::now() + std::time::Duration::from_secs(20);
+    while EXECS.with(|e| e.borrow().is_empty()) && Instant::now() < end {
+        turns(server, Instant::now());
+        server.cmdq_process();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
 fn turns(server: &mut Server, at: Instant) {
     let end = Instant::now() + std::time::Duration::from_secs(20);
     loop {
@@ -496,10 +508,7 @@ fn keys_typed_after_a_bound_upgrade_do_not_refuse_it() {
     let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
     // F5 and `x` in one read: both are queued before the binding runs.
     server.on_client_input(term, b"\x1b[15~x").unwrap();
-    for _ in 0..5 {
-        turns(&mut server, Instant::now());
-        server.cmdq_process();
-    }
+    until_exec(&mut server);
     // The exec was reached (the recorder fails it) with the key in the
     // client's input, which the snapshot carries.
     let exec = execs().pop().expect("the upgrade was not refused");
@@ -537,10 +546,7 @@ fn a_paste_typed_after_a_bound_upgrade_goes_back_whole() {
     server
         .on_client_input(term, b"\x1b[15~\x1b[200~xa\x1b[201~y\x1b[200~p")
         .unwrap();
-    for _ in 0..5 {
-        turns(&mut server, Instant::now());
-        server.cmdq_process();
-    }
+    until_exec(&mut server);
     let exec = execs().pop().expect("the upgrade was not refused");
     let s = snap::decode(&exec.bytes).unwrap();
     let client = s
@@ -581,10 +587,7 @@ fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
     st::ok(&mut server, &dir, &["set", "-s", "escape-time", "10000"]);
     let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
     server.on_client_input(term, b"\x1b[15~ab\x1b").unwrap();
-    for _ in 0..5 {
-        turns(&mut server, Instant::now());
-        server.cmdq_process();
-    }
+    until_exec(&mut server);
     let exec = execs().pop().expect("the upgrade was not refused");
     let s = snap::decode(&exec.bytes).unwrap();
     let client = s
@@ -617,10 +620,7 @@ fn a_lone_held_escape_is_carried_across_the_exec() {
     st::ok(&mut server, &dir, &["set", "-s", "escape-time", "10000"]);
     let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
     server.on_client_input(term, b"\x1b[15~\x1b").unwrap();
-    for _ in 0..5 {
-        turns(&mut server, Instant::now());
-        server.cmdq_process();
-    }
+    until_exec(&mut server);
     let exec = execs().pop().expect("the upgrade was not refused");
     let s = snap::decode(&exec.bytes).unwrap();
     let client = s
