@@ -76,6 +76,15 @@ impl OuterCursor {
         self.mode = None;
     }
 
+    /// A frame hid the cursor (`civis`) to draw, as tmux's redraws do
+    /// (`tty_update_mode` without `MODE_CURSOR`, tty.c:803-807): the next
+    /// update shows it as tmux does, `cnorm` and the style again.
+    pub fn hidden(&mut self) {
+        if let Some(m) = &mut self.mode {
+            m.visible = false;
+        }
+    }
+
     /// The terminal's style and colour are not known, as in a server that
     /// took the client over from another image: the next frame writes both
     /// whatever they were, a reset when the screen has none, and a
@@ -126,21 +135,66 @@ impl OuterCursor {
             }
             Some(s) => (s.shape, blinking),
         };
+        self.show(term, shape, blinking, very_visible, &mut out);
+        out
+    }
+
+    /// `tty_update_cursor` for a frame whose cursor is `visible` while the
+    /// screen the client looks at, the active pane's, is in synchronized
+    /// output: the terminal keeps the cursor modes and style it has, and
+    /// its colour (server-client.c:2280-2287: `tty->mode`'s cursor bits,
+    /// no screen). A cursor the frame hid is shown with them again.
+    pub fn keep(&mut self, term: &Term, visible: bool) -> String {
+        let mut out = String::new();
+        let (blinking, very_visible) = self
+            .mode
+            .map_or((false, false), |m| (m.blinking, m.very_visible));
+        if !visible {
+            self.mode = Some(Mode {
+                visible,
+                blinking,
+                very_visible,
+            });
+            return out;
+        }
+        self.show(term, self.shape, blinking, very_visible, &mut out);
+        out
+    }
+
+    /// The writes of `tty_update_cursor` (tty.c:822-878) for a shown
+    /// cursor of `shape`, when it or the modes changed.
+    fn show(
+        &mut self,
+        term: &Term,
+        shape: CursorShape,
+        blinking: bool,
+        very_visible: bool,
+        out: &mut String,
+    ) {
         let mode = Mode {
-            visible,
+            visible: true,
             blinking,
             very_visible,
         };
         if self.mode == Some(mode) && shape == self.shape {
-            return out;
+            return;
         }
         let code = |name: &str, p: &[Param]| term.code(name, p).unwrap_or_default();
+        // A style not known is reset before `cnorm`, so the blink is
+        // `cnorm`'s (and `cvvis`'s): Ghostty's `Se` (DECSCUSR 0) turns its
+        // blink on, and a terminal the teardown already reset is then as a
+        // fresh attach leaves it (`tty_start_tty` sends no `Se`). tmux's
+        // own change to the default style is `cnorm` then `Se`.
+        let reset_first = shape == CursorShape::Default && self.style_unknown;
+        if reset_first {
+            out.push_str(&reset_style(term));
+        }
         out.push_str(&code("cnorm", &[]));
         let ss = |n: i64| code("Ss", &[Param::Int(n)]);
         let steady = |n: i64| if blinking { n } else { n + 1 };
         match shape {
             CursorShape::Default => {
-                if self.shape != CursorShape::Default || self.style_unknown {
+                if self.shape != CursorShape::Default && !reset_first {
                     out.push_str(&reset_style(term));
                 }
                 if blinking || very_visible {
@@ -163,7 +217,6 @@ impl OuterCursor {
         self.shape = shape;
         self.mode = Some(mode);
         self.style_unknown = false;
-        out
     }
 
     /// `tty_force_cursor_colour`: `Cs` with the colour as `rgb:rr/gg/bb`,
@@ -208,7 +261,39 @@ fn reset_style(term: &Term) -> String {
 
 use crate::server::ClientId;
 
+/// What a client's terminal cursor follows (`server_client_reset_state`).
+enum Follows {
+    /// A screen's cursor (`None`: no screen).
+    Screen(Option<CursorScreen>),
+    /// The active pane's, in synchronized output: the terminal keeps the
+    /// cursor it has (server-client.c:2280-2287).
+    Held,
+}
+
 impl crate::server::Server {
+    /// What client `id`'s terminal cursor follows: the screen it looks at,
+    /// unless that is the active pane in synchronized output.
+    fn cursor_follows(&self, id: ClientId) -> Follows {
+        let held =
+            self.clients.get(&id).is_some_and(|c| {
+                c.popup.is_none()
+                    && c.status.prompt().is_none()
+                    && c.attached
+                        .and_then(|s| self.model.current_of(s))
+                        .is_some_and(|(_, w, p)| {
+                            self.model.windows.get(&w).is_some_and(|x| x.menu.is_none())
+                                && self.model.panes.get(&p).is_some_and(|p| {
+                                    p.modes.is_empty() && p.term.sync_held().is_some()
+                                })
+                        })
+            });
+        if held {
+            Follows::Held
+        } else {
+            Follows::Screen(self.cursor_screen(id))
+        }
+    }
+
     /// The cursor of the screen client `id` looks at, as
     /// `server_client_reset_state` (server-client.c:2197-2207) picks it:
     /// a popup's, a menu's, the active pane's (its mode's while it has
@@ -280,7 +365,7 @@ impl crate::server::Server {
     /// `tty_update_cursor` for client `id` after a frame: the bytes for a
     /// change of its terminal's cursor style or colour.
     pub(crate) fn outer_cursor_bytes(&mut self, id: ClientId) -> Vec<u8> {
-        let screen = self.cursor_screen(id);
+        let follows = self.cursor_follows(id);
         let Some(c) = self.clients.get_mut(&id) else {
             return Vec::new();
         };
@@ -288,7 +373,11 @@ impl crate::server::Server {
             return Vec::new();
         };
         let visible = c.compositor.cursor_shown();
-        c.cursor.update(term, visible, screen.as_ref()).into_bytes()
+        match follows {
+            Follows::Screen(screen) => c.cursor.update(term, visible, screen.as_ref()),
+            Follows::Held => c.cursor.keep(term, visible),
+        }
+        .into_bytes()
     }
 }
 
@@ -343,8 +432,9 @@ mod tests {
     }
 
     /// A terminal whose style and colour are not known (a client taken
-    /// over in a live upgrade) is given both again, a reset included, and
-    /// has both reset at a teardown; one that is known is not.
+    /// over in a live upgrade) is given both again, a reset included (before
+    /// `cnorm`, which then sets the blink), and has both reset at a
+    /// teardown; one that is known is not.
     #[test]
     fn a_cursor_not_known_is_written_and_reset() {
         let t = term("xterm-256color");
@@ -355,7 +445,7 @@ mod tests {
         let plain = CursorScreen::default();
         assert_eq!(
             c.update(&t, true, Some(&plain)),
-            "\x1b]112\x07\x1b[?12l\x1b[?25h\x1b[2 q"
+            "\x1b]112\x07\x1b[2 q\x1b[?12l\x1b[?25h"
         );
         assert_eq!(c.update(&t, true, Some(&plain)), "");
         assert_eq!(c.teardown(&t), "");
@@ -367,6 +457,48 @@ mod tests {
         let want = "\x1b]12;rgb:ff/00/00\x07\x1b[?12l\x1b[?25h\x1b[6 q";
         assert_eq!(c.update(&t, true, Some(&s)), want);
         assert_eq!(c.update(&t, true, Some(&s)), "");
+    }
+
+    /// A frame that hid the cursor to draw has it shown as tmux shows a
+    /// hidden cursor (tty.c:827-878): `cnorm` and the style again, `cvvis`
+    /// for a blinking default; a frame that did not hide it gets nothing.
+    #[test]
+    fn a_cursor_a_frame_hid_is_shown_with_cnorm_and_the_style() {
+        let t = term("xterm-ghostty");
+        let mut c = OuterCursor::default();
+        let plain = CursorScreen::default();
+        assert_eq!(c.update(&t, true, Some(&plain)), "\x1b[?12l\x1b[?25h");
+        assert_eq!(c.update(&t, true, Some(&plain)), "");
+        c.hidden();
+        assert_eq!(c.update(&t, true, Some(&plain)), "\x1b[?12l\x1b[?25h");
+        let blinking = CursorScreen {
+            blinking: true,
+            blinking_set: true,
+            ..CursorScreen::default()
+        };
+        c.update(&t, true, Some(&blinking));
+        c.hidden();
+        assert_eq!(
+            c.update(&t, true, Some(&blinking)),
+            "\x1b[?12l\x1b[?25h\x1b[?12;25h"
+        );
+        c.hidden();
+        assert_eq!(
+            c.update(&t, true, Some(&bar(false))),
+            "\x1b[?12l\x1b[?25h\x1b[6 q"
+        );
+        c.hidden();
+        assert_eq!(
+            c.update(&t, true, Some(&bar(false))),
+            "\x1b[?12l\x1b[?25h\x1b[6 q"
+        );
+        // A frame that ends with the cursor hidden: nothing until it shows.
+        c.hidden();
+        assert_eq!(c.update(&t, false, Some(&bar(false))), "");
+        assert_eq!(
+            c.update(&t, true, Some(&bar(false))),
+            "\x1b[?12l\x1b[?25h\x1b[6 q"
+        );
     }
 
     /// A screen without a style of its own takes its default

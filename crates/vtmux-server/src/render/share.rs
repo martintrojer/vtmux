@@ -361,8 +361,8 @@ mod tests {
         assert_ne!(own.frame(screen, caps()), b"", "its own is whole");
     }
 
-    /// A frame hides and shows the cursor with its terminal's `civis` and
-    /// `cnorm`, which caps do not carry: a terminal with other codes (the
+    /// A frame hides the cursor with its terminal's `civis`, which caps do
+    /// not carry: a terminal with other codes (the
     /// Linux console's, or a `terminal-overrides` entry's) never takes
     /// another's frame, whatever its caps.
     #[test]

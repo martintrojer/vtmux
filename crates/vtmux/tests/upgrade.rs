@@ -2293,6 +2293,50 @@ fn a_re_attached_terminal_is_given_its_cursor_style_and_colour_again() {
     }
 }
 
+/// On Ghostty, whose `Se` (`ESC[0 q`) turns its blink on, the reset that
+/// a re-attached terminal is given for a pane with no style goes before
+/// `cnorm`: the cursor stays steady, as after a fresh attach (tmux's
+/// `tty_start_tty` writes `cnorm` and no `Se`, tty.c:357-395), not
+/// blinking until something else writes `cnorm`.
+#[test]
+fn a_re_attached_ghostty_cursor_does_not_blink() {
+    let world = World::new();
+    world.populate(&[]);
+    let attached = Attached::with_env(
+        &world,
+        &world.client(),
+        &["attach", "-t", "a"],
+        &[("TERM", "xterm-ghostty")],
+    );
+    let blinks = |upto: usize| common::ghostty_blinks(&attached.bytes.lock().unwrap()[..upto]);
+    wait("the first draw", || {
+        attached.len() > 0 && attached.since(0).contains("\u{1b}[?2026l")
+    });
+    assert!(!blinks(attached.len()), "{:?}", attached.since(0));
+    let at = attached.len();
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()));
+    reexecuted(&attached, at);
+    // The frame after the terminal started again (`ESC[?996n`) that
+    // writes the reset: where it ends.
+    let find = |hay: &[u8], needle: &[u8]| hay.windows(needle.len()).position(|w| w == needle);
+    let mut end = 0;
+    wait("the reset written", || {
+        let bytes = attached.bytes.lock().unwrap();
+        let since = &bytes[at..];
+        let Some(started) = since.windows(7).rposition(|w| w == b"\x1b[?996n") else {
+            return false;
+        };
+        let Some(reset) = find(&since[started..], b"\x1b[0 q").map(|r| started + r) else {
+            return false;
+        };
+        find(&since[reset..], b"\x1b[?2026l").is_some_and(|e| {
+            end = at + reset + e;
+            true
+        })
+    });
+    assert!(!blinks(end), "{:?}", attached.since(at));
+}
+
 /// Twenty upgrades in a row, alternating between this build and a copy of
 /// it at another path: after each the attached client has re-executed the
 /// binary it was told to, is the same client (`lsc` alike, the same

@@ -447,19 +447,19 @@ pub struct Compositor {
     /// them, as (row, first column, count): the lines of a pane whose
     /// synchronized output ended ([`Self::force`]).
     forced: Vec<(u16, u16, u16)>,
-    /// What a frame hides the cursor with and shows it with.
+    /// What a frame hides the cursor with.
     cursor_codes: CursorCodes,
 }
 
-/// The terminal's `civis` and what ends a frame's hidden cursor. tmux
-/// hides the cursor with `civis` (`tty_update_cursor`, tty.c:805) and
-/// shows it with `cnorm`; on the Linux console `civis` is `ESC[?25l
-/// ESC[?1c`, which `ESC[?25h` alone does not undo, so there a frame ends
-/// with `cnorm`. A terminal with no `civis` gets none (`tty_putcode`).
+/// The terminal's `civis`, which a frame hides the cursor with while it
+/// draws (`tty_update_cursor`, tty.c:803-807); a terminal with none gets
+/// none (`tty_putcode`). The frame leaves it hidden: `OuterCursor` shows
+/// it after the frame as tmux does, with `cnorm` and the style again
+/// (tty.c:827-878), so the blink is the screen's whatever the terminal
+/// did with it meanwhile (Ghostty's `Se` turns its blink on).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorCodes {
     hide: String,
-    show: String,
 }
 
 impl Default for CursorCodes {
@@ -467,7 +467,6 @@ impl Default for CursorCodes {
     fn default() -> Self {
         Self {
             hide: "\x1b[?25l".into(),
-            show: "\x1b[?25h".into(),
         }
     }
 }
@@ -475,16 +474,9 @@ impl Default for CursorCodes {
 impl CursorCodes {
     #[must_use]
     pub fn from_term(term: &Term) -> Self {
-        let hide = term.code("civis", &[]).unwrap_or_default();
-        // The style and blink bits come after the frame, from
-        // `OuterCursor`: `cnorm` itself only where `civis` is more than
-        // DECTCEM.
-        let show = if hide == Self::default().hide {
-            Self::default().show
-        } else {
-            term.code("cnorm", &[]).unwrap_or_default()
-        };
-        Self { hide, show }
+        Self {
+            hide: term.code("civis", &[]).unwrap_or_default(),
+        }
     }
 }
 
@@ -845,9 +837,6 @@ impl Compositor {
             }
         }
         place_cursor(&mut out, &mut style, &screen, caps);
-        if screen.cursor_visible {
-            out.push_str(&self.cursor_codes.show);
-        }
         if caps.sync {
             out.push_str("\x1b[?2026l");
         }
@@ -1523,10 +1512,9 @@ mod tests {
     }
 
     /// `tty_update_cursor` hides the cursor with `civis` (tty.c:805), which
-    /// is `ESC[?25l ESC[?1c` on the console: a frame hides it so, and ends
-    /// with `cnorm`, since `ESC[?25h` alone leaves the console's hardware
-    /// cursor off. xterm's are DECTCEM; a terminal with no `civis` gets
-    /// nothing.
+    /// is `ESC[?25l ESC[?1c` on the console: a frame hides it so and leaves
+    /// it hidden, for `OuterCursor`'s `cnorm` to show. xterm's is DECTCEM;
+    /// a terminal with no `civis` gets nothing.
     #[test]
     fn a_frame_hides_the_cursor_with_the_terminals_civis() {
         let frame_of = |name: &str| {
@@ -1543,10 +1531,10 @@ mod tests {
         };
         let xterm = frame_of("xterm-256color");
         assert!(xterm.starts_with("\x1b[?25l\x1b[0m"), "{xterm:?}");
-        assert!(xterm.ends_with("\x1b[?25h"), "{xterm:?}");
+        assert!(!xterm.contains("\x1b[?25h"), "{xterm:?}");
         let linux = frame_of("linux");
         assert!(linux.starts_with("\x1b[?25l\x1b[?1c\x1b[0m"), "{linux:?}");
-        assert!(linux.ends_with("\x1b[?25h\x1b[?0c"), "{linux:?}");
+        assert!(!linux.contains("\x1b[?25h"), "{linux:?}");
         let vt100 = frame_of("vt100");
         assert!(!vt100.contains("\x1b[?25"), "{vt100:?}");
     }
@@ -1636,10 +1624,7 @@ mod tests {
         assert!(!frame.contains('\u{1f1f5}'), "{frame:?}");
         assert!(frame.contains("\u{2764}\u{2069}e\u{301} "), "{frame:?}");
         // The pending wrap is put back by writing the last cell again.
-        assert!(
-            frame.ends_with("\x1b[1;4H \x1b[0m\x1b[?25h\x1b[?2026l"),
-            "{frame:?}"
-        );
+        assert!(frame.ends_with("\x1b[1;4H \x1b[0m\x1b[?2026l"), "{frame:?}");
     }
 
     /// A terminal without `am` never has its bottom-right cell written
@@ -1656,10 +1641,7 @@ mod tests {
         screen.cursor = Some((4, 0));
         let frame = String::from_utf8(Compositor::default().frame(screen, caps)).unwrap();
         assert!(!frame.contains('z'), "{frame:?}");
-        assert!(
-            frame.ends_with("\x1b[0m\x1b[1;4H\x1b[?25h\x1b[?2026l"),
-            "{frame:?}"
-        );
+        assert!(frame.ends_with("\x1b[0m\x1b[1;4H\x1b[?2026l"), "{frame:?}");
     }
 
     /// A lone regional indicator is one column in the grid (tmux's table)

@@ -4243,8 +4243,14 @@ impl Server {
     /// `server_client_reset_state`: the terminal's cursor style and colour
     /// follow the screen the client looks at, its mouse modes `mouse` and
     /// the panes (`tty_update_mode`), written after the drawing and inside
-    /// the frame's synchronized update when there is one.
+    /// the frame's synchronized update when there is one. A frame drawn
+    /// hid the cursor, so the update shows it.
     fn add_outer_modes(&mut self, id: ClientId, frame: &mut Vec<u8>) {
+        if !frame.is_empty()
+            && let Some(c) = self.clients.get_mut(&id)
+        {
+            c.cursor.hidden();
+        }
         let mut modes = self.outer_cursor_bytes(id);
         modes.extend(self.outer_mouse_bytes(id));
         if modes.is_empty() {

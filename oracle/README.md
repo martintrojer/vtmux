@@ -51,7 +51,7 @@ steps = [ ... ]
 | `{ control_close = { id } }` | EOF, read to exit; observes the whole stream |
 | `{ attach = { session = "a" } }` | `attach -t` under a PTY of the scenario size; returns after the client's first draw, so clients connect (and `lsc` lists them) in step order |
 | `{ attach = { session = "a", id = "b" } }` | a further attached client, named `b`; `keys`, `resize`, `screen` and `title` without an id use the first |
-| `{ attach = { session = "a", term = "linux" } }` | the client's `TERM` instead of `xterm-256color`; only terminals in every host's terminfo (ncurses' base set: `linux`, `vt100`, `screen`, `tmux`) or in `oracle/terminfo` (`wezterm`, `contour`, `foot`, `foot-direct`, `rio`: the client gets `TERMINFO_DIRS` pointing there) |
+| `{ attach = { session = "a", term = "linux" } }` | the client's `TERM` instead of `xterm-256color`; only terminals in every host's terminfo (ncurses' base set: `linux`, `vt100`, `screen`, `tmux`) or in `oracle/terminfo` (`wezterm`, `contour`, `foot`, `foot-direct`, `rio`, `xterm-ghostty`: the client gets `TERMINFO_DIRS` pointing there) |
 | `{ keys = "echo hi\r" }` | raw bytes to the attached client |
 | `{ keys_to = { id = "b", keys = "q" } }` | raw bytes to attached client `b` |
 | `{ feed = { pane = "%0", bytes } }` | `send-keys -l` |

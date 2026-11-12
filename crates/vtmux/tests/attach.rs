@@ -2619,7 +2619,8 @@ fn terminals_tmux_knows_attach() {
 }
 
 /// `oracle/terminfo`: ncurses 6.6's entries for the terminals an older host
-/// lacks, put in the client's `TERMINFO_DIRS` so the reference finds them.
+/// lacks, and Ghostty's `xterm-ghostty`, put in the client's
+/// `TERMINFO_DIRS` so the reference finds them.
 const TERMINFO_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../oracle/terminfo");
 
 /// D-007: terminals from ncurses 6.6's database that an older host lacks
@@ -6061,6 +6062,169 @@ fn cursor_style_and_colour_reach_the_terminal() {
         assert!(w.cli(&["detach-client"]).status.success());
         a.exited(0);
         expect(&a, (Block, false, None));
+    });
+}
+
+/// The last of the cursor codes xterm-ghostty's entry gives (`cnorm`,
+/// `cvvis`, `Ss` and `Se`) in `bytes`: what the terminal's blink and style
+/// were last set by.
+fn last_cursor_code(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut codes = vec![
+        ("cnorm".to_owned(), "\x1b[?12l\x1b[?25h".to_owned()),
+        ("cvvis".to_owned(), "\x1b[?12;25h".to_owned()),
+    ];
+    codes.extend((0..=6).map(|n| (format!("Ss {n}"), format!("\x1b[{n} q"))));
+    codes
+        .into_iter()
+        .filter_map(|(name, code)| text.rfind(&code).map(|at| (at, name)))
+        .max()
+        .map(|(_, name)| name)
+}
+
+/// `tty_update_cursor` (tty.c:789-879) on Ghostty with no cursor settings,
+/// whose fresh start and `Se` (`ESC[0 q`) blink: the cursor blinks only
+/// while the pane asks (`?12h`) and after the pane's DECSCUSR 0, which
+/// tmux writes as `cnorm` then `Se`. Each show after a hide is `cnorm` and
+/// the style again (tty.c:827-878), so that blink lasts until a redraw
+/// hides the cursor: under tmux a full redraw, under vtmux, which hides it
+/// for every frame (D14), the next frame (D-007). For each event: the last
+/// cursor code written, and whether Ghostty blinks.
+#[test]
+fn a_ghostty_cursor_blinks_only_when_the_pane_asks() {
+    par::each(&bins(), |bin| {
+        let vtmux = *bin == bins()[0];
+        let what = bin.display().to_string();
+        let w = World::new(bin.clone());
+        let script = r"stty -echo; printf A; read x; printf '\033[?12hB'; read x; printf '\033[?12lC'; read x; printf '\033[6 qD'; read x; printf 'E\033[0 q'; read x; printf F; exec cat";
+        let new = ["new", "-d", "-s", "a", "-x", "40", "-y", "10"];
+        assert!(
+            w.cli(&[&new[..], &["sh", "-c", script]].concat())
+                .status
+                .success()
+        );
+        assert!(w.cli(&["set", "-g", "status", "off"]).status.success());
+        let a = w.attach_env(
+            &["attach", "-t", "a"],
+            40,
+            10,
+            &[
+                ("TERM", "xterm-ghostty"),
+                ("TERMINFO_DIRS", TERMINFO_FIXTURES),
+            ],
+        );
+        let bytes = || a.bytes.lock().unwrap().clone();
+        let code = |s: &'static str| Some(s.to_owned());
+        let enter: &[&str] = &["send", "-t", "a", "Enter"];
+        // Each step's command, the pane's text after it, the last cursor
+        // code it wrote and whether Ghostty blinks then.
+        let steps = [
+            (&[][..], "A", code("cnorm"), false),
+            (enter, "AB", code("cvvis"), true),
+            (enter, "ABC", code("cnorm"), false),
+            (enter, "ABCD", code("Ss 6"), false),
+            (enter, "ABCDE", code("Ss 0"), true),
+            // tmux writes the cell as it is, with no hide; vtmux a frame.
+            (enter, "ABCDEF", vtmux.then(|| "cnorm".to_owned()), !vtmux),
+            (&["refresh-client"][..], "ABCDEF", code("cnorm"), false),
+        ];
+        let mut at = 0;
+        for (step, text, last, blinks) in steps {
+            if !step.is_empty() {
+                assert!(w.cli(step).status.success(), "{what}: {step:?}");
+            }
+            let end = Instant::now() + Duration::from_secs(5);
+            loop {
+                let all = bytes();
+                let seen = (
+                    pane_text(&a).starts_with(text),
+                    last_cursor_code(&all[at..]),
+                    common::ghostty_blinks(&all),
+                );
+                if seen == (true, last.clone(), blinks) {
+                    at = all.len();
+                    break;
+                }
+                assert!(
+                    Instant::now() < end,
+                    "{what}: after {text}: {seen:?}: {:?}",
+                    String::from_utf8_lossy(&all[at..])
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    });
+}
+
+/// `server_client_reset_state` (server-client.c:2280-2287) while the
+/// active pane is in synchronized output: the terminal keeps the cursor
+/// modes and style it has, so a program that sets a blinking bar inside a
+/// synchronized update and a steady block before it ends (as an editor
+/// redrawing does) never shows the bar, even with a redraw meanwhile,
+/// which leaves the cursor hidden as it hid it. For
+/// each event: the last cursor code written, whether Ghostty blinks and
+/// the cursor's shape.
+#[test]
+fn a_synchronized_update_keeps_the_terminal_cursor() {
+    use vtmux_vt::CursorShape::{Block, Default};
+    par::each(&bins(), |bin| {
+        let what = bin.display().to_string();
+        let w = World::new(bin.clone());
+        let synced = w.home.path().join("synced");
+        let script = format!(
+            r"stty -echo; printf A; read x; printf '\033[?2026h\033[5 qB'; : > '{}'; (while :; do sleep 0.2; printf '\033[?2026h'; done) & read x; kill $!; printf '\033[2 qC\033[?2026l'; exec cat",
+            synced.display()
+        );
+        let new = ["new", "-d", "-s", "a", "-x", "40", "-y", "10"];
+        assert!(
+            w.cli(&[&new[..], &["sh", "-c", &script]].concat())
+                .status
+                .success()
+        );
+        assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+        let mut a = w.attach_env(
+            &["attach", "-t", "a"],
+            40,
+            10,
+            &[
+                ("TERM", "xterm-ghostty"),
+                ("TERMINFO_DIRS", TERMINFO_FIXTURES),
+            ],
+        );
+        let code = |s: &'static str| Some(s.to_owned());
+        let mut at = 0;
+        let mut expect =
+            |a: &Attached, text: &str, status: &str, last: Option<String>, blinks, shape| {
+                let end = Instant::now() + Duration::from_secs(5);
+                loop {
+                    let all = a.bytes.lock().unwrap().clone();
+                    let seen = (
+                        pane_text(a).starts_with(text) && status_row(a).starts_with(status),
+                        last_cursor_code(&all[at..]),
+                        common::ghostty_blinks(&all),
+                        outer_cursor(a).0,
+                    );
+                    if seen == (true, last.clone(), blinks, shape) {
+                        at = all.len();
+                        return;
+                    }
+                    assert!(
+                        Instant::now() < end,
+                        "{what}: after {text}: {seen:?}: {:?}",
+                        String::from_utf8_lossy(&all[at..])
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+            };
+        expect(&a, "A", "[a]", code("cnorm"), false, Default);
+        assert!(w.cli(&["send", "-t", "a", "Enter"]).status.success());
+        common::wait("the synchronized update", || synced.exists());
+        // A redraw while it lasts (kept on past the 1 s timer): a message
+        // on the status line, until a key, which then goes to the pane.
+        assert!(w.cli(&["display", "-d", "0", "X"]).status.success());
+        expect(&a, "A", "X", None, false, Default);
+        a.keys(b"\r");
+        expect(&a, "ABC", "[a]", code("Ss 2"), false, Block);
     });
 }
 

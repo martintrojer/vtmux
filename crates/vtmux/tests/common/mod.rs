@@ -176,3 +176,24 @@ pub fn errno_tokens(s: &str) -> String {
     }
     out
 }
+
+/// Whether Ghostty with no cursor settings shows a blinking cursor after
+/// `bytes`, a client's output: libghostty's terminal as the Ghostty app
+/// sets it up with `cursor-style-blink` unset (termio/Termio.zig: DEC mode
+/// 12 on at the start), where DECSCUSR 0, xterm-ghostty's `Se`, blinks
+/// (Terminal.zig `setCursorStyle`: `default_blink orelse true`).
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn ghostty_blinks(bytes: &[u8]) -> bool {
+    use libghostty_vt::terminal::{Mode, Options, Terminal};
+    let mut t = Terminal::new(Options {
+        cols: 80,
+        rows: 24,
+        max_scrollback: 0,
+    })
+    .expect("libghostty terminal");
+    t.set_default_cursor_blink(Some(true))
+        .expect("default cursor blink");
+    t.vt_write(b"\x1b[?12h");
+    t.vt_write(bytes);
+    t.mode(Mode::CURSOR_BLINKING).expect("mode 12")
+}

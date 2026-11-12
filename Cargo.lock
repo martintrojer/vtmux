@@ -768,6 +768,7 @@ dependencies = [
  "tempfile",
  "vtmux-client",
  "vtmux-core",
+ "vtmux-ghostty-vt",
  "vtmux-server",
  "vtmux-snapshot",
  "vtmux-vt",

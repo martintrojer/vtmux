@@ -123,7 +123,8 @@ pub struct AttachSpec {
     pub id: Option<String>,
     /// The client's `TERM`, when not `xterm-256color`; the terminal must
     /// be in every host's terminfo (ncurses' base set: `linux`, `vt100`) or
-    /// in `oracle/terminfo` (`wezterm`, `contour`, `foot`, `foot-direct`, `rio`).
+    /// in `oracle/terminfo` (`wezterm`, `contour`, `foot`, `foot-direct`, `rio`,
+    /// `xterm-ghostty`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub term: Option<String>,
 }
