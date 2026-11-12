@@ -143,7 +143,9 @@ pub struct Item {
     pub client: Option<ClientId>,
     pub origin: Origin,
     pub cwd: PathBuf,
-    pub env: Vec<(String, String)>,
+    /// The client's environment (`Client::environ`, shared, never
+    /// copied), `None` without a client.
+    pub env: Option<std::rc::Rc<[(String, String)]>>,
     pub tty: Option<TtyInfo>,
     pub utf8: bool,
     pub output: Vec<Output>,
@@ -206,13 +208,19 @@ pub enum Stdout {
 }
 
 impl Item {
+    /// The environment of the client the item runs for: empty without one.
+    #[must_use]
+    pub fn env(&self) -> &[(String, String)] {
+        self.env.as_deref().unwrap_or_default()
+    }
+
     #[must_use]
     pub fn new(client: Option<ClientId>, cwd: PathBuf) -> Self {
         Self {
             client,
             origin: Origin::default(),
             cwd,
-            env: Vec::new(),
+            env: None,
             tty: None,
             utf8: true,
             output: Vec::new(),

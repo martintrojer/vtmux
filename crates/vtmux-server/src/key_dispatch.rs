@@ -322,7 +322,7 @@ impl Server {
         };
         let control = c.control.is_some();
         let mut item = commands::Item::new(Some(id), hello.cwd.clone());
-        item.env.clone_from(&hello.env);
+        item.env = Some(std::rc::Rc::clone(&c.environ));
         item.utf8 = hello.flags.utf8;
         item.repeat = repeat;
         item.key = Some(key);

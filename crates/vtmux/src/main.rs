@@ -716,7 +716,10 @@ fn pump_stdin(
     after: &std::sync::atomic::AtomicBool,
     rest: &std::sync::mpsc::Sender<Option<Vec<u8>>>,
 ) {
-    let mut buf = [0u8; 16 * 1024];
+    // A read at a time, as libevent reads tmux's stdin: the server runs a
+    // `Stdin` message's lines in one turn, so smaller ones let the other
+    // clients in between.
+    let mut buf = [0u8; 4 * 1024];
     let mut stdin = io::stdin().lock();
     let mut server = true;
     loop {

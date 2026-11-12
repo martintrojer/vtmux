@@ -599,6 +599,41 @@ pub fn encode<M: Message>(msg: &M) -> Result<Vec<u8>, ProtocolError> {
     Ok(out)
 }
 
+/// Append `data` to `frame`, one encoded [`ServerMsg::Stdout`], so the one
+/// frame carries both: the bytes the client writes are the same, with one
+/// read and one write for the two. `false`, and `frame` untouched, when it
+/// is no such frame or its bytes would pass `limit`.
+#[must_use]
+pub fn extend_stdout(frame: &mut Vec<u8>, data: &[u8], limit: usize) -> bool {
+    // [payload length][tag 0][bytes length][bytes]
+    const HEAD: usize = 4 + 1 + 4;
+    let Some(len) = frame.len().checked_sub(HEAD) else {
+        return false;
+    };
+    let field = |at: usize| {
+        frame
+            .get(at..at + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
+    };
+    if frame[4] != 0
+        || field(0) != Some(len + 5)
+        || field(5) != Some(len)
+        || len + data.len() > limit
+    {
+        return false;
+    }
+    let (Ok(outer), Ok(inner)) = (
+        u32::try_from(len + 5 + data.len()),
+        u32::try_from(len + data.len()),
+    ) else {
+        return false;
+    };
+    frame[0..4].copy_from_slice(&outer.to_le_bytes());
+    frame[5..9].copy_from_slice(&inner.to_le_bytes());
+    frame.extend_from_slice(data);
+    true
+}
+
 /// Decode one frame from the front of `buf`; returns the message and the
 /// number of bytes it used. An incomplete frame is
 /// [`ProtocolError::Truncated`], which a streaming caller reads as "need more
@@ -1128,6 +1163,27 @@ impl Message for ServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdout_frames_extend_into_one_that_decodes_as_both() {
+        let mut frame = encode(&ServerMsg::Stdout(b"one\n".to_vec())).unwrap();
+        assert!(extend_stdout(&mut frame, b"two\n", 64));
+        assert_eq!(
+            frame,
+            encode(&ServerMsg::Stdout(b"one\ntwo\n".to_vec())).unwrap()
+        );
+        // Past the limit, or another message: untouched.
+        assert!(!extend_stdout(&mut frame, &[b'x'; 57], 64));
+        assert_eq!(
+            frame,
+            encode(&ServerMsg::Stdout(b"one\ntwo\n".to_vec())).unwrap()
+        );
+        let mut err = encode(&ServerMsg::Stderr(b"e".to_vec())).unwrap();
+        let before = err.clone();
+        assert!(!extend_stdout(&mut err, b"x", 64));
+        assert_eq!(err, before);
+        assert!(!extend_stdout(&mut vec![0, 0], b"x", 64));
+    }
 
     fn hello(tty: Option<TtyInfo>) -> Hello {
         Hello {

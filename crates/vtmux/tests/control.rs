@@ -330,6 +330,28 @@ fn attached_display_in_guard() {
     });
 }
 
+/// Lines piped in at once, as a script drives a control client: every
+/// command runs and answers in order, a parse error and a failed command
+/// among them in their places, and the client exits at the EOF.
+#[test]
+fn lines_piped_at_once_all_answer_in_order() {
+    compare("lines_piped_at_once_all_answer_in_order", |w| {
+        let mut c = w.control(&["new", "-s", "c", "-n", "w", "cat"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let lines: String = (0..2000)
+            .map(|i| match i % 500 {
+                250 => "nosuch-command\n".to_owned(),
+                499 => "display -t nosuch -p x\n".to_owned(),
+                _ => format!("display -p 'line{i} #{{session_name}}'\n"),
+            })
+            .collect();
+        let stdin = c.stdin.as_mut().expect("stdin open");
+        stdin.write_all(lines.as_bytes()).unwrap();
+        let (out, err, code) = c.close();
+        (normalise_guards(&out), err, code)
+    });
+}
+
 /// Signal `pid` with each of `signals`, then say whether `child` is still
 /// running a moment later.
 fn alive_after(child: &mut Child, signals: &[rustix::process::Signal]) -> bool {

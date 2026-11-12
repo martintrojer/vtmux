@@ -664,6 +664,17 @@ impl Server {
     /// line asks to exit and stops reading. Lines already read still run
     /// after a command made the client exit, as in tmux.
     pub(crate) fn control_read(&mut self, id: ClientId) {
+        // The output of the lines this read runs is written when they are
+        // done ([`Server::batching`]).
+        let outer = self.batching.replace(id);
+        self.control_read_lines(id);
+        self.batching = outer;
+        if outer != Some(id) {
+            self.flush_client(id);
+        }
+    }
+
+    fn control_read_lines(&mut self, id: ClientId) {
         loop {
             // Stdin is not read before the argv command is done
             // (control_ready): an EOF or a line meanwhile waits for it.
@@ -701,21 +712,23 @@ impl Server {
     /// ...)`: no parse input, so a `%if` sees no client, control.c:719),
     /// until an empty line, which asks to exit and drops the rest.
     fn control_parse_lines(&mut self, id: ClientId) {
-        loop {
-            let Some(cs) = self.control_mut(id) else {
-                return;
-            };
-            let Some(nl) = cs.inbuf.iter().position(|&b| b == b'\n') else {
-                return;
-            };
-            let mut line: Vec<u8> = cs.inbuf.drain(..=nl).collect();
-            line.pop();
+        let Some(cs) = self.control_mut(id) else {
+            return;
+        };
+        // The lines are taken off the front once all are parsed: one at a
+        // time moved the rest of the buffer down for each.
+        let inbuf = std::mem::take(&mut cs.inbuf);
+        let mut from = 0;
+        while let Some(nl) = inbuf[from..].iter().position(|&b| b == b'\n') {
+            let line = &inbuf[from..from + nl];
+            from += nl + 1;
             if line.is_empty() {
-                cs.exit.get_or_insert(Exit::Return);
-                cs.inbuf.clear();
+                if let Some(cs) = self.control_mut(id) {
+                    cs.exit.get_or_insert(Exit::Return);
+                }
                 return;
             }
-            let line = vtmux_core::rawstr::from_vec(line);
+            let line = vtmux_core::rawstr::from_vec(line.to_vec());
             let parsed = cmd::parse_config_with(
                 &line,
                 &mut GlobalEnv::new(&mut self.global_env, &self.model, &self.info),
@@ -724,6 +737,10 @@ impl Server {
             if let Some(cs) = self.control_mut(id) {
                 cs.lines.push_back((line, parsed));
             }
+        }
+        if let Some(cs) = self.control_mut(id) {
+            cs.inbuf = inbuf;
+            cs.inbuf.drain(..from);
         }
     }
 
@@ -739,7 +756,7 @@ impl Server {
             return;
         };
         let mut item = Item::new(Some(id), hello.cwd.clone());
-        item.env.clone_from(&hello.env);
+        item.env = Some(std::rc::Rc::clone(&client.environ));
         item.utf8 = hello.flags.utf8;
         item.control = Some(1);
         item.origin = Origin {
@@ -1238,6 +1255,50 @@ mod tests {
 
     fn text(cs: &ControlState) -> String {
         String::from_utf8(cs.out.bytes.clone()).unwrap()
+    }
+
+    /// The commands of lines read together all run before their output is
+    /// written, and it goes as one `Stdout` frame, in order: a script
+    /// piping 20,000 lines is not a write (and a client read and write) per
+    /// command.
+    #[test]
+    fn the_output_of_lines_read_together_goes_in_one_frame() {
+        use crate::server::snapshot::tests as st;
+        use vtmux_core::protocol::{ControlMode, ServerMsg};
+        let dir = st::temp_dir("ctl-batch");
+        let mut server = st::server(&dir);
+        st::ok(
+            &mut server,
+            &dir,
+            &["new-session", "-d", "-s", "s", "cat", "-"],
+        );
+        let attach = st::hello(
+            &["attach-session", "-t", "s"],
+            &dir,
+            None,
+            ControlMode::Control,
+        );
+        let (id, mut peer) = st::connect(&mut server, attach);
+        st::messages(&mut server, id, &mut peer);
+        let lines = (0..200)
+            .map(|i| format!("display -p line{i}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        server.control_stdin(id, lines.as_bytes());
+        let frames = st::messages(&mut server, id, &mut peer);
+        let [ServerMsg::Stdout(out)] = frames.as_slice() else {
+            panic!("one Stdout frame, not {frames:?}");
+        };
+        let out = String::from_utf8_lossy(out);
+        let said: Vec<&str> = out.lines().filter(|l| l.starts_with("line")).collect();
+        let want: Vec<String> = (0..200).map(|i| format!("line{i}")).collect();
+        assert_eq!(said, want);
+        assert_eq!(
+            out.lines().filter(|l| l.starts_with("%end ")).count(),
+            200,
+            "{out}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

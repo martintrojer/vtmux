@@ -543,7 +543,7 @@ impl Server {
                 let mut item = crate::commands::Item::new(Some(c), self.client_cwd(Some(c), None));
                 if let Some(client) = self.clients.get(&c) {
                     if let Some(hello) = client.hello.as_ref() {
-                        item.env.clone_from(&hello.env);
+                        item.env = Some(std::rc::Rc::clone(&client.environ));
                         item.utf8 = hello.flags.utf8;
                     }
                     if client.control.is_some() {

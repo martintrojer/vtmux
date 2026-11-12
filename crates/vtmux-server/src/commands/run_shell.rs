@@ -95,9 +95,10 @@ impl Done {
             ..self.origin
         };
         if let Some(c) = self.client
-            && let Some(hello) = server.clients.get(&c).and_then(|c| c.hello.as_ref())
+            && let Some(client) = server.clients.get(&c)
+            && let Some(hello) = client.hello.as_ref()
         {
-            item.env.clone_from(&hello.env);
+            item.env = Some(std::rc::Rc::clone(&client.environ));
             item.utf8 = hello.flags.utf8;
             if server.is_control(c) {
                 item.control = Some(0);

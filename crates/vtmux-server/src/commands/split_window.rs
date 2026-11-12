@@ -269,7 +269,7 @@ pub fn exec(
         session_env: &session_env,
         control_chars: session_chars.as_deref(),
         extra_env: &extra_env,
-        client_path: item.client.and(client_path(&item.env)),
+        client_path: item.client.and(client_path(item.env())),
         argv: args
             .positionals
             .iter()

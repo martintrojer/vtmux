@@ -89,7 +89,7 @@ pub fn exec(
                 .collect(),
             cwd,
             extra_env: &extra_env,
-            client_path: item.client.and(client_path(&item.env)),
+            client_path: item.client.and(client_path(item.env())),
             client: server.target_client(item.client, item.origin),
             // cmd-new-window.c:154-155.
             empty: args.flag('E') || empty_command,

@@ -248,7 +248,7 @@ impl Server {
         let mut item = crate::commands::Item::new(c, self.client_cwd(c, None));
         if let Some(client) = c.and_then(|c| self.clients.get(&c)) {
             if let Some(hello) = client.hello.as_ref() {
-                item.env.clone_from(&hello.env);
+                item.env = Some(std::rc::Rc::clone(&client.environ));
                 item.utf8 = hello.flags.utf8;
             }
             item.origin.attached = client.attached;

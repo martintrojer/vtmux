@@ -328,7 +328,7 @@ pub(crate) struct Client {
     pub(crate) term_options: (Vec<String>, Vec<String>),
     /// The hello's environment (`c->environ`), shared with every
     /// [`ClientView`] of the client instead of copied into each.
-    environ: std::rc::Rc<[(String, String)]>,
+    pub(crate) environ: std::rc::Rc<[(String, String)]>,
     pub(crate) compositor: crate::render::Compositor,
     /// The scene and composed rows of the client's last frame, reused
     /// where nothing under them changed.
@@ -519,6 +519,23 @@ impl Outbox {
             written: 0,
             kind,
         });
+    }
+
+    /// `data` onto the last message when that is an unwritten
+    /// [`ServerMsg::Stdout`] of the same kind with room: whether it went.
+    fn extend_stdout(&mut self, data: &[u8], kind: OutKind) -> bool {
+        let Some(last) = self
+            .queue
+            .back_mut()
+            .filter(|q| q.written == 0 && q.kind == kind)
+        else {
+            return false;
+        };
+        if !protocol::extend_stdout(&mut last.bytes, data, protocol::MAX_FRAME / 2) {
+            return false;
+        }
+        self.bytes += data.len();
+        true
     }
 
     /// Drop every message not yet started that `drop` picks; a message
@@ -841,6 +858,11 @@ pub struct Server {
     /// `cmdq_get_client(item)` of the command running now: the client whose
     /// jobs its formats use.
     pub(crate) cmd_client: Option<ClientId>,
+    /// The control client whose lines read are running
+    /// ([`Self::control_read`]): its output is written once they are done,
+    /// in as few `Stdout` frames as fit, as tmux's evbuffer is written
+    /// when the loop gets to it. Its exit is written at once.
+    pub(crate) batching: Option<ClientId>,
     /// The running command's mouse event (`state->event.m`).
     pub(crate) cmd_mouse: Option<crate::mouse::MouseEvent>,
     /// Where idle compression got to ([`crate::compress`]).
@@ -1019,6 +1041,7 @@ fn global_environ(config: &ServerConfig) -> Environ {
 
 impl Server {
     /// Take over a bound listening socket.
+    #[expect(clippy::too_many_lines, reason = "every field's start, one a line")]
     pub fn new(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io::Result<Self> {
         let poll = Poll::new()?;
         let mut listener = UnixListener::from_std(listener);
@@ -1098,6 +1121,7 @@ impl Server {
             orphans: Vec::new(),
             format_jobs: std::rc::Rc::default(),
             cmd_client: None,
+            batching: None,
             cmd_mouse: None,
             compress: crate::compress::Rotation::default(),
             shim: None,
@@ -1995,6 +2019,13 @@ impl Server {
         {
             return;
         }
+        let batching = self.batching == Some(id) && kind != OutKind::Last;
+        if batching
+            && let ServerMsg::Stdout(b) = msg
+            && c.out.extend_stdout(b, kind)
+        {
+            return;
+        }
         // Large payloads are split so no frame exceeds MAX_FRAME.
         let frames: Vec<ServerMsg> = match msg {
             ServerMsg::Stdout(b) | ServerMsg::Stderr(b) | ServerMsg::Frame(b)
@@ -2019,7 +2050,9 @@ impl Server {
                 c.out.push(bytes, kind);
             }
         }
-        self.flush_client(id);
+        if !batching {
+            self.flush_client(id);
+        }
     }
 
     /// `control_discard` (control.c:1040-1048) when a control client is
@@ -2331,8 +2364,9 @@ impl Server {
             current: None,
             mouse: None,
         };
+        let environ: std::rc::Rc<[(String, String)]> = hello.env.clone().into();
         let mut item = Item::new(Some(id), hello.cwd.clone());
-        item.env.clone_from(&hello.env);
+        item.env = Some(std::rc::Rc::clone(&environ));
         item.tty.clone_from(&hello.tty);
         item.utf8 = hello.flags.utf8;
         item.origin = origin;
@@ -2342,7 +2376,7 @@ impl Server {
         let control = hello_flags.control != vtmux_core::protocol::ControlMode::None;
         let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
-            c.environ = hello.env.clone().into();
+            c.environ = environ;
             // server_client_dispatch_identify -> tty_resize (server-client.c:
             // 3035): the pixel size from the terminal; no query yet, the
             // terminal is not open (`tty->out == NULL`).
@@ -6966,6 +7000,71 @@ mod tests {
     use super::Server;
     use crate::mode::prompt::tests::setup;
 
+    /// A script's lines are read [`super::CLIENT_READ_BUDGET`] a turn
+    /// like any client's input: the lines past it wait for the next turns,
+    /// and every line runs, in order, its output batched per read.
+    #[test]
+    fn a_control_clients_lines_run_in_order_across_budgeted_reads() {
+        use super::snapshot::tests as st;
+        use std::io::Write as _;
+        use vtmux_core::protocol::{ClientMsg, ControlMode, ServerMsg, encode};
+        let dir = st::temp_dir("ctl-budget");
+        let mut server = st::server(&dir);
+        st::ok(
+            &mut server,
+            &dir,
+            &["new-session", "-d", "-s", "s", "cat", "-"],
+        );
+        let attach = st::hello(
+            &["attach-session", "-t", "s"],
+            &dir,
+            None,
+            ControlMode::Control,
+        );
+        let (id, mut peer) = st::connect(&mut server, attach);
+        st::messages(&mut server, id, &mut peer);
+        // 1 KB frames of lines, three budgets' worth; what the socket does
+        // not take yet (8 KB on macOS) goes once the server has read.
+        let lines = 3 * super::CLIENT_READ_BUDGET / 16;
+        let mut wire = Vec::new();
+        for start in (0..lines).step_by(64) {
+            let chunk = (start..lines.min(start + 64))
+                .map(|i| format!("display -p x{i:05}\n"))
+                .collect::<Vec<_>>()
+                .concat();
+            wire.extend(encode(&ClientMsg::Stdin(chunk.into_bytes())).unwrap());
+        }
+        let mut said = Vec::new();
+        let mut read_with_more_left = false;
+        for _ in 0..1000 {
+            if !wire.is_empty()
+                && let Ok(n) = peer.write(&wire)
+            {
+                wire.drain(..n);
+            }
+            server.client_readable(id);
+            read_with_more_left |= server.client_backlog.contains(&id);
+            server.client_backlog.clear();
+            for m in st::messages(&mut server, id, &mut peer) {
+                if let ServerMsg::Stdout(b) = m {
+                    let text = String::from_utf8_lossy(&b).into_owned();
+                    said.extend(
+                        text.lines()
+                            .filter(|l| l.starts_with('x'))
+                            .map(str::to_owned),
+                    );
+                }
+            }
+            if wire.is_empty() && said.len() == lines {
+                break;
+            }
+        }
+        assert!(read_with_more_left, "a read stopped at the budget");
+        let want: Vec<String> = (0..lines).map(|i| format!("x{i:05}")).collect();
+        assert_eq!(said, want);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// A popup's token is `POPUP_BASE + client id`: client IDs wrap before
     /// it would reach `CLIENT_BASE`, where the popup's PTY events would go
     /// to another client's socket; an ID a client still has is skipped.
@@ -7755,6 +7854,7 @@ mod tests {
         let id = super::ClientId(server.next_client);
         server.next_client += 1;
         let mut client = super::Client::new(ours, 0);
+        client.environ = env.into();
         client.hello = Some(Hello {
             version: vtmux_core::protocol::PROTOCOL_VERSION,
             invocation: vtmux_core::socket::Invocation::Vtmux,
