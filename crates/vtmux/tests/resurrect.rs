@@ -463,7 +463,10 @@ fn settled(s: &Side, restored: bool) {
     if have_vim() && restored {
         s.redraw("misc:2.1", "vim", "C-l");
     } else if have_vim() {
-        s.wait_pane("misc:2.1", "vim", |x| top(x) && has(x, "\"file.txt\""));
+        // Not vim's '"file.txt" 200L' message: a vim with a different
+        // shortmess or build (CI's Ubuntu) doesn't show it; the file's
+        // lines from the top are what both servers must show.
+        s.wait_pane("misc:2.1", "vim", top);
     }
     // Its saved screen ends in the file's last line too: a restarted tail
     // has printed it once more.
