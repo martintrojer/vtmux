@@ -715,6 +715,32 @@ fn input_a_pane_has_not_read_yet_survives_an_upgrade() {
     );
 }
 
+/// The one client's terminal, held open here so its settings can be read
+/// after the client has gone.
+fn client_terminal(world: &World) -> rustix::fd::OwnedFd {
+    let tty = world.run(&["lsc", "-F", "#{client_tty}"]);
+    rustix::fs::open(
+        tty.trim(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap()
+}
+
+/// The terminal has a shell's settings (the pty's own, cooked): line
+/// editing, echo, signals, CR read as NL, output processed.
+fn assert_cooked(tty: &rustix::fd::OwnedFd, what: &str) {
+    use rustix::termios::{InputModes, LocalModes, OutputModes};
+    let t = rustix::termios::tcgetattr(tty).unwrap();
+    assert!(
+        t.local_modes
+            .contains(LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG)
+            && t.input_modes.contains(InputModes::ICRNL)
+            && t.output_modes.contains(OutputModes::OPOST),
+        "{what}: {t:?}"
+    );
+}
+
 /// Types at an attached client from a thread until told to stop: a fixed
 /// stream made before it starts (printable ASCII from a counter, a
 /// carriage return every 61 bytes, so a terminal that cooks it, CR to NL,
@@ -856,7 +882,6 @@ fn a_flood_typed_through_upgrades_reaches_the_pane_whole() {
 /// After the client leaves, the terminal has its own settings back.
 #[test]
 fn keys_typed_while_the_client_re_executes_reach_the_pane_raw() {
-    use rustix::termios::{InputModes, LocalModes};
     let (world, mut attached, file) = typed_into_file();
     let typist = Typist::start(&mut attached, Some(Duration::from_millis(2)));
     let size = || std::fs::metadata(&file).map_or(0, |m| m.len());
@@ -870,22 +895,10 @@ fn keys_typed_while_the_client_re_executes_reach_the_pane_raw() {
     // The terminal's own settings (the pty's, cooked) are back once the
     // client has detached: the image the last one handed them to put them
     // back. Read through the terminal itself, held open past the client.
-    let tty = world.run(&["lsc", "-F", "#{client_tty}"]);
-    let tty = rustix::fs::open(
-        tty.trim(),
-        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
-        rustix::fs::Mode::empty(),
-    )
-    .unwrap();
+    let tty = client_terminal(&world);
     world.run(&["detach-client", "-s", "a"]);
     wait("the detach", || attached.exited().is_some());
-    let t = rustix::termios::tcgetattr(&tty).unwrap();
-    assert!(
-        t.local_modes
-            .contains(LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG)
-            && t.input_modes.contains(InputModes::ICRNL),
-        "{t:?}"
-    );
+    assert_cooked(&tty, "after the detach");
 }
 
 /// `-l` outlives a re-attach: after an upgrade, `detach-client -E` runs
@@ -2388,7 +2401,9 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
 /// and its handlers are gone, just before the exec (the client stayed
 /// attached, no hook fired); and in the new image before its `Hello`
 /// (`-reattach`: the watcher cut the connection, and the client was given
-/// up on).
+/// up on); and in the new image first thing, before it has any handler
+/// (`-start`: the default action killed it, the terminal it was handed
+/// raw left raw). The terminal has its own settings back after each.
 #[test]
 fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
     for (hook, says) in [
@@ -2396,6 +2411,8 @@ fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
         ("HUP", "[lost tty]"),
         ("TERM-reattach", "[terminated]"),
         ("HUP-reattach", "[lost tty]"),
+        ("TERM-start", "[terminated]"),
+        ("HUP-start", "[lost tty]"),
     ] {
         let world = World::new();
         world.populate(&[]);
@@ -2413,6 +2430,7 @@ fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
             &[("VTMUX_TEST_REEXEC_SIGNAL", hook)],
         );
         wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+        let tty = client_terminal(&world);
         assert_eq!(world.upgrade(&bin()), Some(upgraded()), "{hook}");
         wait("the client to end", || attached.exited().is_some());
         assert_eq!(attached.exited(), Some(1), "{hook}: {}", attached.since(0));
@@ -2420,6 +2438,42 @@ fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
         assert!(!attached.since(0).contains("unexpectedly"), "{hook}");
         assert_eq!(world.run(&["lsc"]), "", "{hook}");
         assert_eq!(world.run(&["show", "-gv", "@log"]), "|detached\n", "{hook}");
+        assert_cooked(&tty, hook);
+    }
+}
+
+/// SIGINT, SIGUSR1 or SIGUSR2 in the new image before it has any handler
+/// (it was handed the terminal raw) neither kills it nor ends the client:
+/// they were blocked across the exec and are let in once its handlers are,
+/// which ignore them, as an attached tmux client does (client.c
+/// `client_signal`). The client follows, its keys reach the pane, and the
+/// terminal has its own settings back after the detach.
+#[test]
+fn a_signal_tmux_ignores_as_the_new_image_starts_changes_nothing() {
+    for sig in ["INT", "USR1", "USR2"] {
+        let world = World::new();
+        world.populate(&[]);
+        let hook = format!("{sig}-start");
+        let mut attached = Attached::with_env(
+            &world,
+            &world.client(),
+            &["attach", "-t", "a"],
+            &[("VTMUX_TEST_REEXEC_SIGNAL", &hook)],
+        );
+        wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+        let tty = client_terminal(&world);
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "{hook}");
+        assert!(attached.args().contains(protocol::REATTACH_FLAG), "{hook}");
+        assert!(attached.exited().is_none(), "{hook}: {}", attached.since(0));
+        attached.keys("after\r");
+        wait("the keys to reach the pane", || {
+            world
+                .run(&["capture-pane", "-p", "-t", "a:w1"])
+                .contains("after")
+        });
+        world.run(&["detach-client", "-s", "a"]);
+        wait("the detach", || attached.exited().is_some());
+        assert_cooked(&tty, &hook);
     }
 }
 
@@ -2715,11 +2769,12 @@ fn upgrade_losing(
 /// reports or keypad left on), says why, and the requester is warned,
 /// naming it; the session is unharmed. `case` makes the binary fail the
 /// re-attach.
-fn a_lost_client_gets_its_terminal_back(case: &str, says: &str) {
+fn a_lost_client_gets_its_terminal_back(case: &str, says: &str) -> rustix::fd::OwnedFd {
     let world = World::new();
     world.populate(&[]);
     let mut attached = Attached::new(&world, "a");
     wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let tty = client_terminal(&world);
     world.echo("a:w1", "before");
     wait("the client's draw", || attached.screen().contains("before"));
     assert!(
@@ -2751,26 +2806,55 @@ fn a_lost_client_gets_its_terminal_back(case: &str, says: &str) {
     assert!(world.server_args().contains("--vtmux-resume"));
     assert_eq!(world.run(&["lsc"]), "");
     world.echo("a:w1", "after");
+    tty
 }
 
 /// A binary from before clients followed upgrades (a downgrade) doesn't
 /// know the re-attach command line.
 #[test]
 fn a_client_whose_new_binary_cannot_re_attach_gets_its_terminal_back() {
-    a_lost_client_gets_its_terminal_back(
+    let _ = a_lost_client_gets_its_terminal_back(
         "--vtmux-reattach) echo 'usage: vtmux [-2CDlNuVv]' >&2; exit 1;;",
         "usage: vtmux",
     );
 }
 
-/// The new image refuses the token the client presents.
+/// The new image refuses the token the client presents. It was handed the
+/// terminal raw: its output modes are back before it says why (a line
+/// ending in CR LF, not a bare LF), and the rest after.
 #[test]
 fn a_client_whose_token_is_refused_gets_its_terminal_back() {
-    a_lost_client_gets_its_terminal_back(
+    let tty = a_lost_client_gets_its_terminal_back(
         "--vtmux-reattach) VTMUX_REATTACH_TOKEN=0123456789abcdef; \
          export VTMUX_REATTACH_TOKEN;;",
-        "[server upgraded: re-attach]",
+        "[server upgraded: re-attach]\r\n",
     );
+    assert_cooked(&tty, "a refused token");
+}
+
+/// A terminal handed over with settings the new image can't read (a later
+/// build's form, here garbage) gets sane cooked ones back when the client
+/// leaves, never the raw ones it was handed.
+#[test]
+fn unreadable_handed_settings_leave_the_terminal_sane() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let tty = client_terminal(&world);
+    let binary = wrapper(
+        &world,
+        "vtmux-new",
+        "--vtmux-reattach) VTMUX_REATTACH_TTY=later,form; export VTMUX_REATTACH_TTY;;",
+    );
+    assert_eq!(world.upgrade(&binary), Some(upgraded()));
+    wait("the re-attach", || {
+        attached.args().contains(protocol::REATTACH_FLAG)
+            && world.run(&["lsc"]).lines().count() == 1
+    });
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.exited().is_some());
+    assert_cooked(&tty, "unreadable settings");
 }
 
 /// The client's exec of the new binary fails (here the binary stops being
@@ -3379,20 +3463,13 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
 #[test]
 #[ignore = "needs VTMUX_BETA3_BINARY, a 3.8-beta3 vtmux"]
 fn a_downgrade_to_beta3_leaves_the_terminal_cooked_after_the_detach() {
-    use rustix::termios::{InputModes, LocalModes};
     let beta3 =
         PathBuf::from(std::env::var_os("VTMUX_BETA3_BINARY").expect("VTMUX_BETA3_BINARY is set"));
     let world = World::new();
     world.populate(&[]);
     let mut attached = Attached::new(&world, "a");
     wait("the client", || world.run(&["lsc"]).lines().count() == 1);
-    let tty = world.run(&["lsc", "-F", "#{client_tty}"]);
-    let tty = rustix::fs::open(
-        tty.trim(),
-        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY,
-        rustix::fs::Mode::empty(),
-    )
-    .unwrap();
+    let tty = client_terminal(&world);
     assert_eq!(world.upgrade(&beta3), Some(upgraded()), "onto beta3");
     wait("the client as beta3", || {
         attached.args().contains(protocol::REATTACH_FLAG)
@@ -3400,13 +3477,7 @@ fn a_downgrade_to_beta3_leaves_the_terminal_cooked_after_the_detach() {
     });
     world.run(&["detach-client", "-s", "a"]);
     wait("the detach", || attached.exited().is_some());
-    let t = rustix::termios::tcgetattr(&tty).unwrap();
-    assert!(
-        t.local_modes
-            .contains(LocalModes::ICANON | LocalModes::ECHO | LocalModes::ISIG)
-            && t.input_modes.contains(InputModes::ICRNL),
-        "{t:?}"
-    );
+    assert_cooked(&tty, "after the detach");
 }
 
 /// Live upgrade both ways with 3.8-beta3, the last release with

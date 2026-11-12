@@ -479,10 +479,11 @@ fn reattach_main(
     socket: &Path,
 ) -> ExitCode {
     // Raw since the image before: the user's settings go back when this
-    // returns, whichever way (the attach puts them back itself too).
-    let handed = tty
-        .and_then(|t| t.to_str())
-        .and_then(vtmux_client::tty::Handed::parse);
+    // returns, whichever way (the attach puts them back itself too). That
+    // image blocked the signals this one catches across the exec, so none
+    // can end it before then; they are let in once its handlers are.
+    let handed = tty.map(|t| vtmux_client::tty::Handed::take_over(t.to_str().unwrap_or_default()));
+    signals::reattach_start_hook();
     signals::ignore_job_control();
     signals::reattaching(carried);
     let Some(token) = token
@@ -498,6 +499,10 @@ fn reattach_main(
         Err(e) => return edge_exit(&connect_error(socket, e)),
     };
     signals::watch(&stream);
+    // Every handler is in: what came since the exec is let in.
+    if handed.is_some() {
+        vtmux_server::sys::signal::unblock_handled();
+    }
     let tty = tty_info(&[]);
     let sent_size = tty.as_ref().map(|t| (t.cols, t.rows));
     let hello = Hello {
@@ -535,7 +540,10 @@ fn reattach_main(
         socket: socket.to_owned(),
         sent_size,
         login,
-        handed: handed.as_ref().map(|h| h.settings().clone()),
+        handed: handed
+            .as_ref()
+            .and_then(Option::as_ref)
+            .map(|h| h.settings().clone()),
     };
     match protocol::read_msg::<ServerMsg>(&mut stream) {
         // Told to attach again: said as a detached client says it, or as
