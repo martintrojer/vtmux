@@ -499,10 +499,13 @@ fn reattach_main(
         Err(e) => return edge_exit(&connect_error(socket, e)),
     };
     signals::watch(&stream);
-    // Every handler is in: what came since the exec is let in.
-    if handed.is_some() {
-        vtmux_server::sys::signal::unblock_handled();
-    }
+    // Every handler is in: what came since the exec is let in. Whether or
+    // not this image was handed the terminal (`VTMUX_REATTACH_TTY`): the
+    // image before blocked them whenever it handed it over, and a wrapper
+    // between the two may drop the variable, which left this one deaf to
+    // resizes and signals for good. Unblocking a mask that blocks none of
+    // them changes nothing.
+    vtmux_server::sys::signal::unblock_handled();
     let tty = tty_info(&[]);
     let sent_size = tty.as_ref().map(|t| (t.cols, t.rows));
     let hello = Hello {
