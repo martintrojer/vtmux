@@ -1301,6 +1301,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// A command's item shares its client's environment, never a copy
+    /// one command can change for another: `setenv`, `new -e` and the
+    /// commands of another client leave each client's own environment
+    /// as its hello sent it, so each new session takes `update-environment`
+    /// from its own client, and a later client sees none of theirs.
+    #[test]
+    fn commands_share_no_environment_across_clients() {
+        use crate::server::snapshot::tests as st;
+        use vtmux_core::protocol::{ControlMode, ServerMsg};
+        let dir = st::temp_dir("ctl-env");
+        let mut server = st::server(&dir);
+        st::ok(
+            &mut server,
+            &dir,
+            &["new-session", "-d", "-s", "s", "cat", "-"],
+        );
+        st::ok(
+            &mut server,
+            &dir,
+            &["set", "-g", "update-environment", "FOO"],
+        );
+        let client = |server: &mut Server, foo: Option<&str>| {
+            let mut h = st::hello(
+                &["attach-session", "-t", "s"],
+                &dir,
+                None,
+                ControlMode::Control,
+            );
+            if let Some(v) = foo {
+                h.env.push(("FOO".into(), v.into()));
+            }
+            let (id, mut peer) = st::connect(server, h);
+            st::messages(server, id, &mut peer);
+            (id, peer)
+        };
+        let run = |server: &mut Server,
+                   (id, peer): &mut (ClientId, mio::net::UnixStream),
+                   lines: &str| {
+            server.control_stdin(*id, lines.as_bytes());
+            st::messages(server, *id, peer)
+                .into_iter()
+                .filter_map(|m| match m {
+                    ServerMsg::Stdout(b) => Some(String::from_utf8_lossy(&b).into_owned()),
+                    _ => None,
+                })
+                .collect::<String>()
+                .lines()
+                .filter(|l| l.contains("FOO"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let mut a = client(&mut server, Some("fromA"));
+        let mut b = client(&mut server, Some("fromB"));
+        run(
+            &mut server,
+            &mut a,
+            "setenv -g FOO changed\nnew -d -s a -e FOO=e cat -\n",
+        );
+        run(&mut server, &mut b, "new -d -s b cat -\n");
+        run(&mut server, &mut a, "new -d -s a2 cat -\n");
+        let mut c = client(&mut server, None);
+        run(&mut server, &mut c, "new -d -s c cat -\n");
+        let said = run(
+            &mut server,
+            &mut b,
+            "showenv -t a FOO\nshowenv -t a2 FOO\nshowenv -t b FOO\nshowenv -g FOO\nshowenv -t c FOO\n",
+        );
+        assert_eq!(
+            said,
+            ["FOO=e", "FOO=fromA", "FOO=fromB", "FOO=changed", "-FOO"]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn output_escapes_controls_and_backslash_as_octal() {
         let line = output_line(PaneId(3), b"a\\b\r\n\x1b[m\x7f\xc3\xa9");
