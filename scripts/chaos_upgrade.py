@@ -128,6 +128,18 @@ class Server:
                     pass
 
     @staticmethod
+    def pids_matching_group(pgid):
+        try:
+            out = subprocess.run(
+                ["pgrep", "-g", str(pgid)],
+                capture_output=True,
+                timeout=10,
+            ).stdout.decode()
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return [int(p) for p in out.split() if p.isdigit()]
+
+    @staticmethod
     def pids_matching(pattern):
         try:
             out = subprocess.run(
@@ -138,6 +150,16 @@ class Server:
         except (OSError, subprocess.TimeoutExpired):
             return []
         return [int(p) for p in out.split() if p.isdigit() and int(p) != os.getpid()]
+
+
+def held(argv):
+    """`argv` run below a shell that waits for it, so the driver can stop
+    the program and not the pane's process: the server continues a pane
+    process that stops (server.c `server_child_stopped`), but it only
+    hears of its own child, and a shell without job control does not ask
+    of its child's stops (no WUNTRACED). Two commands, so the shell does
+    not exec the last."""
+    return ["sh", "-c", '"$@"; exit $?', "sh", *argv]
 
 
 def sh_quote(s):
@@ -279,12 +301,12 @@ class Chaos:
     def stream_cmd(self, tag):
         # Numbered lines with a short rest every 200; two words, so the
         # shell is not left in front (oracle/README.md).
-        return [
+        return held([
             "sh",
             "-c",
             f"i=0; while :; do echo S{tag}-$i.; i=$((i+1)); "
             f"case $i in *00) sleep 0.05;; esac; done",
-        ]
+        ])
 
     def new_stream(self, target, split=False):
         tag = self.next_tag
@@ -325,14 +347,14 @@ class Chaos:
                 self.new_stream(f"{name}:st{self.next_tag - 1}", split=True)
             pane = s.run(
                 "neww", "-d", "-t", name, "-n", "alt", "-P", "-F", "#{pane_id}",
-                "sh", "-c", "printf '\\033[?1049h\\033[2J\\033[HALT'; i=0; "
-                f"while :; do printf '\\033[5;5H%s' $i; echo $i > {self.root}/tick{k}; i=$((i+1)); sleep 0.2; done",
+                *held(["sh", "-c", "printf '\\033[?1049h\\033[2J\\033[HALT'; i=0; "
+                       f"while :; do printf '\\033[5;5H%s' $i; echo $i > {self.root}/tick{k}; i=$((i+1)); sleep 0.2; done"]),
             ).strip()
             s.run("select-pane", "-t", pane, "-T", "alt")
             self.tickers.append((pane, f"{self.root}/tick{k}"))
             pane = s.run(
                 "neww", "-d", "-t", name, "-n", "less", "-P", "-F", "#{pane_id}",
-                "less", "/etc/services",
+                *held(["less", "/etc/services"]),
             ).strip()
             s.run("select-pane", "-t", pane, "-T", "less")
             pane = s.run(
@@ -340,7 +362,7 @@ class Chaos:
                 "sh", "-c", "echo bye; exit 3",
             ).strip()
             s.run("select-pane", "-t", pane, "-T", "dead")
-        top = s.run("neww", "-d", "-t", "s1", "-n", "top", "-P", "-F", "#{pane_id}", "top", "-d", "0.3").strip()
+        top = s.run("neww", "-d", "-t", "s1", "-n", "top", "-P", "-F", "#{pane_id}", *held(["top", "-d", "0.3"])).strip()
         s.run("select-pane", "-t", top, "-T", "top")
         # The pipe-pane: the first stream's output to a file as well.
         first = next(iter(self.streams))
@@ -600,12 +622,27 @@ class Chaos:
         self.timers = []
 
     def signal_panes(self, sig):
+        """`sig` to every pane's process group. SIGSTOP goes to the
+        programs below each pane's process (`held`), not to it: the
+        server would continue it, and the group with it."""
         self.settle_timers()
         for pid in self.pane_pids().values():
-            try:
-                os.killpg(pid, sig)
-            except (ProcessLookupError, PermissionError):
-                pass
+            if sig != signal.SIGSTOP:
+                targets = [lambda: os.killpg(pid, sig)]
+            else:
+                # Twice: a loop may have forked between the listing and
+                # its stop (a `sleep`: no output of its own).
+                targets = [
+                    lambda m=member: os.kill(m, sig)
+                    for _ in range(2)
+                    for member in Server.pids_matching_group(pid)
+                    if member != pid
+                ]
+            for send in targets:
+                try:
+                    send()
+                except (ProcessLookupError, PermissionError):
+                    pass
 
     def close_overlays(self, popups=True):
         """Close what a fresh attach would not show: popups (unless not
