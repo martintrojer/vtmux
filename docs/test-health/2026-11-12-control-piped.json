@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "date": "2026-11-12 16:55 UTC",
+    "commit": "cc8b9889+dirty",
+    "host": "Linux-6.16.1-0_fbk5_0_g0e127f210adc-x86_64-with-glibc2.34",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "cpus": 96,
+    "kernel": "6.16.1-0_fbk5_0_g0e127f210adc",
+    "load_at_start": 5.23,
+    "runs": 5,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "base": "vtmux 3.8-beta3",
+      "vtmux": "vtmux 3.8-beta3"
+    }
+  },
+  "scenarios": {
+    "control_piped": {
+      "title": "control_piped (20000 command lines piped into `-C attach` at once, until the client exits)",
+      "rows": {
+        "display -p ok": {
+          "tmux": {
+            "wall_ms": 180.4920940194279,
+            "cpu_ms": 177.216048,
+            "client_cpu_ms": 0.0,
+            "command_ms": 18.68457207456231
+          },
+          "base": {
+            "wall_ms": 414.58802204579115,
+            "cpu_ms": 410.003387,
+            "client_cpu_ms": 129.99999999999997,
+            "command_ms": 15.314301941543818
+          },
+          "vtmux": {
+            "wall_ms": 118.22283396031708,
+            "cpu_ms": 115.468086,
+            "client_cpu_ms": 0.0,
+            "command_ms": 6.510816048830748
+          }
+        },
+        "display -p with 3 formats": {
+          "tmux": {
+            "wall_ms": 282.36817999277264,
+            "cpu_ms": 278.361602,
+            "client_cpu_ms": 0.0,
+            "command_ms": 9.19201347278431
+          },
+          "base": {
+            "wall_ms": 484.4254100462422,
+            "cpu_ms": 478.992504,
+            "client_cpu_ms": 159.99999999999991,
+            "command_ms": 4.468834493309259
+          },
+          "vtmux": {
+            "wall_ms": 160.78317305073142,
+            "cpu_ms": 157.841407,
+            "client_cpu_ms": 0.0,
+            "command_ms": 3.235179465264082
+          }
+        }
+      },
+      "env_vars": 179
+    }
+  }
+}

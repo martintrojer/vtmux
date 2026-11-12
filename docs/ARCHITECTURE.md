@@ -90,7 +90,7 @@ Commands run on per-client queues (`cmdq.rs`, after `cmd-queue.c`), plus a globa
 
 Inside panes, plugins call plain `tmux`. The server puts a private directory with `tmux` → its own binary first on every pane's `PATH` (`shim.rs`, D5), so they reach this server whatever `tmux` is installed.
 
-Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications instead of frames, with tmux's backpressure (`control_queue.rs`, after `control.c`): `pause-after` pauses a pane whose oldest unsent output is too old, a client 300 s behind is dropped, and a pane is not read while every attached client is a control client that is behind.
+Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications instead of frames, with tmux's backpressure (`control_queue.rs`, after `control.c`): `pause-after` pauses a pane whose oldest unsent output is too old, a client 300 s behind is dropped, and a pane is not read while every attached client is a control client that is behind. A control client's stdin is read 4 KB a turn like a terminal's input, so a script can't hold up other clients, and the output of the lines one read brings goes out in one write.
 
 ## Live upgrade
 

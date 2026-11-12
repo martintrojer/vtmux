@@ -3,7 +3,7 @@
 
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
-Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
+Scenarios: idle scale history startup throughput control_piped owner_idle owner_startup throughput_attached render many_clients
            agent_panes key_echo key_flood upgrade (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
@@ -20,7 +20,7 @@ Medians over RUNS runs. A Markdown table goes to stdout, a JSON file to $OUT.jso
 Env: RUNS (3), IDLE_SECS (60), VTMUX (target/release/vtmux), VTMUX_REFERENCE_TMUX (the
 `cargo xtask ref-tmux` cache), BASE (another vtmux binary, shown as `base`), OUT
 (default target/bench/bench-<utc>), NO_BUILD=1 (skip cargo build), STARTUP_N (100),
-THROUGHPUT_MB (100), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWNER_MUCREW (the
+THROUGHPUT_MB (100), CONTROL_N (20000), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWNER_MUCREW (the
 owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf, ~/.tmux/plugins,
 ~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s), TRICKLE_RATES ("10 1000 fill": lines/s
 per case; `fill` is 150k lines at once), TRICKLE_SECS (1200), TRICKLE_IDLE_SECS (120), TRICKLE_SAMPLE (10 s),
@@ -63,7 +63,7 @@ IDLE_SECS = float(os.environ.get("IDLE_SECS", "60"))
 STARTUP_N = int(os.environ.get("STARTUP_N", "100"))
 THROUGHPUT_MB = int(os.environ.get("THROUGHPUT_MB", "100"))
 CLK_TCK = os.sysconf("SC_CLK_TCK")
-ALL = ["idle", "scale", "history", "startup", "throughput"]
+ALL = ["idle", "scale", "history", "startup", "throughput", "control_piped"]
 
 
 class Skip(Exception):
@@ -190,7 +190,8 @@ class Server:
         self.bin, self.label = binary, label
         self.env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE", "EDITOR", "VISUAL")}
         self.env.update(TMUX_TMPDIR=work, SHELL="/bin/sh", TERM="xterm-256color",
-                        LANG="C.UTF-8" if LINUX else "en_US.UTF-8")
+                        LANG="C.UTF-8" if LINUX else "en_US.UTF-8",
+                        XDG_STATE_HOME=os.path.join(work, "state"))  # nothing of a run lands in ~
         self.pid = None
 
     def run(self, *args, check=True, full=False):
@@ -340,6 +341,81 @@ def scenario_startup(env):
             gone.append(ret_ms + gone_ms)
         return {"new_ms": med(new), "kill_ms": med(kill), "gone_ms": med(gone), "rss_mb": med(rss) / 1024}
     return {"title": f"startup (new -d + kill-server, {STARTUP_N}x, -f /dev/null)", "results": env.per_binary(one)}
+
+
+CONTROL_N = int(os.environ.get("CONTROL_N", "20000"))
+CONTROL_INPUTS = {"display -p ok": "display -p ok",
+                  "display -p with 3 formats": "display -p '#{session_name} #{window_index} #{pane_id}'"}
+
+
+def _command_during_flood(s, path, n=10):
+    """Median round trip of `display -p ok` from a command client while another control client
+    is piped the file over and over until the probes are done."""
+    with open(path, "rb") as f:
+        data = f.read()
+    p = subprocess.Popen([s.bin, "-L", s.label, "-C", "attach", "-t", "c"], stdin=subprocess.PIPE,
+                         stdout=subprocess.DEVNULL, env=s.env)
+    done = threading.Event()
+
+    def feed():
+        try:
+            while not done.is_set():
+                p.stdin.write(data)
+        except (BrokenPipeError, ValueError):
+            pass
+    th = threading.Thread(target=feed)
+    th.start()
+    try:
+        time.sleep(0.2)
+        lat = []
+        for _ in range(n):
+            t = time.monotonic()
+            s.run("display", "-p", "ok")
+            lat.append((time.monotonic() - t) * 1000)
+            time.sleep(0.01)
+        if p.poll() is not None:
+            raise RuntimeError(f"control_piped: the piped client left before the probes were done ({s.bin})")
+        return med(lat)
+    finally:
+        done.set()
+        p.kill()
+        p.wait()
+        th.join(timeout=10)
+
+
+def scenario_control_piped(env):
+    """CONTROL_N command lines piped into `-C attach` at once, as a script drives a control
+    client: wall time until the client exits (stdin's EOF ends it), server CPU over it, and
+    the client's own CPU. Each command's %begin, output line and %end are checked. Then the
+    median round trip of a command client's `display -p ok` while a control client is piped
+    the lines over and over."""
+    out = {}
+    for name, line in CONTROL_INPUTS.items():
+        path = os.path.join(env.work, f"control-{len(out)}.txt")
+        with open(path, "w") as f:
+            f.write((line + "\n") * CONTROL_N)
+
+        def one(which, path=path):
+            s = env.server(which)
+            s.run("new", "-d", "-s", "c", "exec cat")
+            s.find_pid()
+            try:
+                with open(path, "rb") as stdin, Phase(s.pid, fine=True) as ph:
+                    t0 = os.times()
+                    r = subprocess.run([s.bin, "-L", s.label, "-C", "attach", "-t", "c"], stdin=stdin,
+                                       env=s.env, capture_output=True, timeout=120)
+                    t1 = os.times()
+                lines = len(re.findall(rb"^%end \d+ \d+ 1$", r.stdout, re.M))  # stdin's commands have flags 1
+                if r.returncode or lines != CONTROL_N:
+                    raise RuntimeError(f"control_piped: {lines} of {CONTROL_N} commands ended ({s.bin})")
+                return {"wall_ms": ph.wall * 1000, "cpu_ms": ph.cpu,
+                        "client_cpu_ms": max(0.0, (t1.children_user + t1.children_system - t0.children_user - t0.children_system) * 1000),
+                        "command_ms": _command_during_flood(s, path)}
+            finally:
+                s.kill()
+        out[name] = env.per_binary(one)
+    return {"title": f"control_piped ({CONTROL_N} command lines piped into `-C attach` at once, until the client exits)",
+            "rows": out, "env_vars": len(os.environ)}
 
 
 def gen_log(path, mb, sgr):
@@ -1562,6 +1638,12 @@ def render(name, res):
     elif name == "startup":
         rows = [[b, fmt(m["new_ms"]), fmt(m["kill_ms"]), fmt(m["gone_ms"]), fmt(m["rss_mb"])] for b, m in res["results"].items()]
         out.append(table(["binary", "new -d ms", "kill-server returns ms", "pid gone ms", "RSS MB"], rows))
+    elif name == "control_piped":
+        rows = [[k, b, fmt(m["wall_ms"], 0), fmt(m["cpu_ms"], 0), fmt(m["client_cpu_ms"], 0), fmt(m["command_ms"], 1)]
+                for k, per in res["rows"].items() for b, m in per.items()]
+        out.append(table(["input", "binary", "wall ms", "server CPU ms", "client CPU ms",
+                          "`display -p ok` during the flood, ms"], rows))
+        out += ["", f"The client's environment had {res['env_vars']} variables."]
     elif name == "throughput":
         rows = [[k, b, fmt(m["wall_s"], 2), fmt(m["cpu_s"], 2), fmt(m["mb_per_s"]), fmt(m["peak_rss_mb"])]
                 for k, per in res["throughput"].items() for b, m in per.items()]
@@ -1617,7 +1699,7 @@ def main():
         print(f"warning: load average {m['load_at_start']:.1f} >= 4; numbers are noisy", file=sys.stderr)
     env = Env(bins)
     funcs = {"idle": scenario_idle, "scale": scenario_scale, "history": scenario_history,
-             "startup": scenario_startup, "throughput": scenario_throughput}
+             "startup": scenario_startup, "throughput": scenario_throughput, "control_piped": scenario_control_piped}
     funcs.update(OWNER_FUNCS)
     funcs.update(ATTACHED)
     funcs["trickle"] = scenario_trickle
