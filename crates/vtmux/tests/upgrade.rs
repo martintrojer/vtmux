@@ -1050,12 +1050,14 @@ fn key_log(world: &World) -> String {
     String::from_utf8_lossy(&log).trim_end().to_owned()
 }
 
-/// Escape, then `x` 50 ms later (more than `escape-time`), typed behind a
+/// Escape, then `x` 300 ms later (more than `escape-time`), typed behind a
 /// key bound to `vtmux-upgrade`: they run as Escape and `x`, as they do
 /// with no upgrade (F6 first, the control), whether the server still held
 /// the ESC at the exec or had decoded it already, its wait out, and given
 /// it back while the upgrade waited for a job (`sleep`). (Before: the keys
-/// given back were decoded again at one instant, as M-x.)
+/// given back were decoded again at one instant, as M-x.) The gap is
+/// wide: keys a loaded host's client or server reads within
+/// `escape-time` of each other are M-x, rightly (with no gap they are).
 #[test]
 fn escape_then_a_key_behind_a_bound_upgrade_keep_their_escape_time() {
     for (first, upgrades, job, want) in [
@@ -1070,7 +1072,7 @@ fn escape_then_a_key_behind_a_bound_upgrade_keep_their_escape_time() {
             world.run(&["run-shell", "-b", "sleep 1"]);
         }
         attached.keys(&format!("{first}\x1b"));
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(300));
         attached.keys("x");
         if upgrades {
             wait("the upgrade", || {
