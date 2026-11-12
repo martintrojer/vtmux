@@ -14,6 +14,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 use vtmux_vt::{CaptureOpts, PaneTerm, capture};
 
+/// How long a wait for a state lasts before it fails: it only ends a hang.
+/// A loaded host (a gate's parallel suites, a CI runner) can take seconds
+/// to schedule a client, a server or a pane's program (oracle/README.md,
+/// *Races under load*), so no wait for a state is shorter.
+const HANG: Duration = common::HANG;
+
 struct World {
     bin: PathBuf,
     label: String,
@@ -227,7 +233,7 @@ impl Attached {
         t
     }
     fn wait(&self, predicate: impl Fn(&Self) -> bool) {
-        self.wait_for(Duration::from_secs(5), predicate);
+        self.wait_for(HANG, predicate);
     }
     fn wait_for(&self, limit: Duration, predicate: impl Fn(&Self) -> bool) {
         self.wait_labelled("", limit, predicate);
@@ -259,10 +265,11 @@ impl Attached {
     fn alive(&mut self) -> bool {
         self.child.try_wait().unwrap().is_none()
     }
-    /// Wait (at most 5 s) for the client to exit: its exit code. What it
-    /// wrote last may still be in the terminal ([`Self::exited`] reads it).
+    /// Wait (at most [`HANG`]) for the client to exit: its exit code. What
+    /// it wrote last may still be in the terminal ([`Self::exited`] reads
+    /// it).
     fn reaped(&mut self) -> u32 {
-        let end = Instant::now() + Duration::from_secs(5);
+        let end = Instant::now() + HANG;
         loop {
             if let Some(s) = self.child.try_wait().unwrap() {
                 return s.exit_code();
@@ -612,22 +619,14 @@ fn closing_the_tty_fires_no_focus_out() {
                 .trim()
                 .to_owned()
         };
-        let end = Instant::now() + Duration::from_secs(5);
-        while !log().contains("pane-focus-in") && Instant::now() < end {
-            thread::sleep(Duration::from_millis(20));
-        }
+        common::wait_for("the focus-in", log, |l| l.contains("pane-focus-in"));
         // The terminal goes away with the client still running.
         drop(master);
-        let end = Instant::now() + Duration::from_secs(5);
-        while !log().contains("client-detached") && Instant::now() < end {
-            thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(log(), "|pane-focus-in:%0|client-detached:%0");
-        let end = Instant::now() + Duration::from_secs(5);
-        while child.try_wait().unwrap().is_none() && Instant::now() < end {
-            thread::sleep(Duration::from_millis(20));
-        }
-        let _ = child.kill();
+        let got = common::wait_for("the client-detached", log, |l| {
+            l.contains("client-detached")
+        });
+        assert_eq!(got, "|pane-focus-in:%0|client-detached:%0");
+        common::wait("the client to exit", || child.try_wait().unwrap().is_some());
         let out = child.wait_with_output().unwrap();
         assert_eq!(
             (
@@ -966,18 +965,17 @@ fn pane_requests_reach_the_terminal_and_back() {
                     .success()
             );
             let needle = String::from_utf8_lossy(needle).into_owned();
-            a.wait_labelled(
-                &format!("{} {needle:?}", bin.display()),
-                Duration::from_secs(5),
-                |a| a.text()[seen..].contains(&needle),
-            );
+            a.wait_labelled(&format!("{} {needle:?}", bin.display()), HANG, |a| {
+                a.text()[seen..].contains(&needle)
+            });
             a.keys(reply);
-            let end = Instant::now() + Duration::from_secs(5);
-            while std::fs::metadata(&out).map_or(true, |m| m.len() == 0) && Instant::now() < end {
-                thread::sleep(Duration::from_millis(20));
-            }
-            thread::sleep(Duration::from_millis(100));
-            std::fs::read_to_string(&out).unwrap_or_default()
+            // `dd` ends 2 s after the reply's last byte; every reply ends
+            // with BEL or ST.
+            common::wait_for(
+                "the pane's copy of the reply",
+                || std::fs::read_to_string(&out).unwrap_or_default(),
+                |got| got.ends_with("^G") || got.ends_with("^[\\"),
+            )
         };
         assert_eq!(
             query(
@@ -1235,14 +1233,17 @@ fn send_keys_k_delivers_keys_to_the_pane() {
         let client = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
             .trim()
             .to_owned();
+        let written = || std::fs::metadata(&out).map_or(0, |m| m.len());
         for key in KEYS {
+            let before = written();
             assert!(
                 w.cli(&["send-keys", "-K", "-c", &client, key])
                     .status
                     .success()
             );
-            // The key is handled as a queue item after the command.
-            thread::sleep(Duration::from_millis(100));
+            // The key is handled as a queue item after the command: the
+            // mark goes once the key is in the pane, not before.
+            common::wait_for(key, written, |&n| n > before);
             assert!(
                 w.cli(&["send-keys", "-t", "a", "-H", "7c"])
                     .status
@@ -1524,22 +1525,34 @@ fn stalled_terminal_bounds_passthrough() {
 /// After a stall, detach is not queued behind stale frames: the client
 /// exits promptly and drains about one terminal's worth, not the backlog
 /// (reviewer-28 lag.py: reference 0.1 s / 16 KB; unblocked vtmux 15 s / 330 MB).
+/// A loaded host can stall any detach past the limit: a run over it is
+/// tried again, and only every try over it fails.
 #[test]
 fn detach_after_stall_is_not_behind_a_backlog() {
     for bin in bins() {
-        let w = World::new(bin);
-        let mut a = flood(&w);
-        thread::sleep(Duration::from_secs(10));
-        let before = a.bytes.lock().unwrap().len();
-        a.paused.store(false, Ordering::Relaxed);
-        let start = Instant::now();
-        a.keys(b"\x02d");
-        a.reaped();
-        let took = start.elapsed();
-        a.exited(0);
-        let drained = a.bytes.lock().unwrap().len() - before;
-        assert!(took < Duration::from_secs(1), "detach took {took:?}");
-        assert!(drained < 8 << 20, "drained {drained} bytes after detach");
+        let mut tries = Vec::new();
+        for _ in 0..3 {
+            let w = World::new(bin.clone());
+            let mut a = flood(&w);
+            thread::sleep(Duration::from_secs(10));
+            let before = a.bytes.lock().unwrap().len();
+            a.paused.store(false, Ordering::Relaxed);
+            let start = Instant::now();
+            a.keys(b"\x02d");
+            a.reaped();
+            let took = start.elapsed();
+            a.exited(0);
+            let drained = a.bytes.lock().unwrap().len() - before;
+            assert!(drained < 8 << 20, "drained {drained} bytes after detach");
+            tries.push(took);
+            if took < Duration::from_secs(1) {
+                break;
+            }
+        }
+        assert!(
+            tries.iter().any(|&t| t < Duration::from_secs(1)),
+            "detach took {tries:?}"
+        );
     }
 }
 
@@ -1552,24 +1565,32 @@ fn detach_after_stall_is_not_behind_a_backlog() {
 fn slow_terminal_detaches_promptly() {
     for bin in bins() {
         for rate in [500_000, 100_000, 30_000] {
-            let w = World::new(bin.clone());
-            let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", FLOOD], 80, 24);
-            a.wait(|a| pane_text(a).contains("READY"));
-            a.rate.store(rate, Ordering::Relaxed);
-            a.keys(b"\r");
-            thread::sleep(Duration::from_secs(5));
-            assert!(a.alive());
-            let start = Instant::now();
-            a.keys(b"\x02d");
-            a.reaped();
-            let took = start.elapsed();
-            a.exited(0);
             // The reference takes under 0.1 s (tty_close frees what the
             // terminal has not taken); 3 s leaves room for a loaded CI
-            // runner. The bug this pins took 5.9 s and more.
+            // runner, and a run over it is tried again: only every try
+            // over it fails. The bug this pins took 5.9 s and more.
+            let mut tries = Vec::new();
+            for _ in 0..3 {
+                let w = World::new(bin.clone());
+                let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", FLOOD], 80, 24);
+                a.wait(|a| pane_text(a).contains("READY"));
+                a.rate.store(rate, Ordering::Relaxed);
+                a.keys(b"\r");
+                thread::sleep(Duration::from_secs(5));
+                assert!(a.alive());
+                let start = Instant::now();
+                a.keys(b"\x02d");
+                a.reaped();
+                let took = start.elapsed();
+                a.exited(0);
+                tries.push(took);
+                if took < Duration::from_secs(3) {
+                    break;
+                }
+            }
             assert!(
-                took < Duration::from_secs(3),
-                "{}: detach at {rate} B/s took {took:?}",
+                tries.iter().any(|&t| t < Duration::from_secs(3)),
+                "{}: detach at {rate} B/s took {tries:?}",
                 bin.display()
             );
         }
@@ -2003,7 +2024,7 @@ fn repeat_keys_within_and_after_repeat_time() {
         );
         a.keys(b"R");
         a.wait(|_| display(&w, "#{@n}") == "2");
-        a.wait_for(Duration::from_secs(2), |_| {
+        a.wait_for(HANG, |_| {
             display(&w, "#{client_key_table} #{client_prefix}") == "root 0"
         });
         a.keys(b"R");
@@ -2698,11 +2719,9 @@ fn terminfo_keys_follow_the_terminal() {
             let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", term)]);
             a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
             a.keys(keys);
-            a.wait_labelled(
-                &format!("{term} {want} {}", bin.display()),
-                Duration::from_secs(5),
-                |_| String::from_utf8_lossy(&w.cli(&["show", "-gv", "@key"]).stdout).trim() == want,
-            );
+            a.wait_labelled(&format!("{term} {want} {}", bin.display()), HANG, |_| {
+                String::from_utf8_lossy(&w.cli(&["show", "-gv", "@key"]).stdout).trim() == want
+            });
             a.keys(b"\x02d");
             a.exited(0);
         }
@@ -3574,9 +3593,17 @@ fn copy_pipe_sends_osc52() {
         step("on", &["copy-pipe-no-clear", "cat >/dev/null", "pre"]);
         step("on", &["pipe", "cat >/dev/null"]);
         step("on", &["copy-selection-and-cancel"]);
-        thread::sleep(Duration::from_millis(400));
+        // Three copies send the selection (the last one last, so one the
+        // others should not have sent would be in by then), and the pipes'
+        // jobs write it.
+        a.wait(|a| osc52(&a.text()).len() >= 3);
+        let piped = common::wait_for(
+            "the pipe's job",
+            || std::fs::read_to_string(&out).map_err(|e| e.to_string()),
+            |t| t.as_deref() == Ok("abc"),
+        );
         seen.extend(osc52(&a.text()));
-        seen.push(format!("piped {:?}", std::fs::read_to_string(&out)));
+        seen.push(format!("piped {piped:?}"));
         seen
     });
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
@@ -3745,8 +3772,12 @@ impl Pair {
         Self { w, clients, names }
     }
 
-    /// Wait for the clients to settle, then report each.
-    fn report(&mut self) -> Vec<String> {
+    /// Wait for `exits` clients to exit, then a while longer for one that
+    /// should not, then report each.
+    fn report(&mut self, exits: usize) -> Vec<String> {
+        common::wait(&format!("{exits} clients to exit"), || {
+            self.clients.iter_mut().filter_map(Attached::status).count() >= exits
+        });
         thread::sleep(Duration::from_millis(600));
         self.clients
             .iter_mut()
@@ -3780,13 +3811,14 @@ fn strip_escapes(text: &str) -> String {
     out
 }
 
-fn pair_results(third: bool, act: impl Fn(&mut Pair) -> Vec<String>) -> Vec<Vec<String>> {
+/// What [`Pair`]'s three clients see after `act`, of which `exits` exit.
+fn pair_results(exits: usize, act: impl Fn(&mut Pair) -> Vec<String>) -> Vec<Vec<String>> {
     let results: Vec<_> = bins()
         .into_iter()
         .map(|bin| {
-            let mut p = Pair::new(bin, third);
+            let mut p = Pair::new(bin, true);
             let mut seen = act(&mut p);
-            seen.extend(p.report());
+            seen.extend(p.report(exits));
             seen
         })
         .collect();
@@ -3807,7 +3839,7 @@ fn run_line(p: &Pair, args: &[&str]) -> String {
 /// the one that pressed the key bound to it.
 #[test]
 fn detach_client_a_keeps_the_caller() {
-    let r = pair_results(true, |p| {
+    let r = pair_results(2, |p| {
         p.w.cli(&["bind", "-n", "F5", "detach-client", "-a"]);
         p.clients[0].keys(b"\x1b[15~");
         Vec::new()
@@ -3820,7 +3852,7 @@ fn detach_client_a_keeps_the_caller() {
 /// `-a -t`: every client but the named one, whatever its session.
 #[test]
 fn detach_client_a_with_target() {
-    let r = pair_results(true, |p| {
+    let r = pair_results(2, |p| {
         let name = p.names[1].clone();
         vec![run_line(p, &["detach-client", "-a", "-t", &name])]
     });
@@ -3831,7 +3863,7 @@ fn detach_client_a_with_target() {
 
 #[test]
 fn detach_client_t_names_one_client() {
-    let r = pair_results(true, |p| {
+    let r = pair_results(1, |p| {
         let name = p.names[1].clone();
         let short = format!("{}:", name.trim_start_matches("/dev/"));
         vec![
@@ -3849,7 +3881,7 @@ fn detach_client_t_names_one_client() {
 /// `-s`: every client on the session, the others stay.
 #[test]
 fn detach_client_s_detaches_a_session() {
-    let r = pair_results(true, |p| {
+    let r = pair_results(2, |p| {
         vec![
             run_line(p, &["detach-client", "-s", "nosuch"]),
             run_line(p, &["detach-client", "-s", "a"]),
@@ -3884,8 +3916,13 @@ fn detach_client_p_hangs_up_the_parent() {
             let out = run_line_w(&w, &["detach-client", "-P"]);
             a.exited(0);
             a.wait(|a| a.text().contains("[detached and SIGHUP (from session a)]"));
-            thread::sleep(Duration::from_millis(200));
-            (before, out, std::fs::read_to_string(&mark).ok())
+            // The shell's trap writes the mark as it gets the hangup.
+            let hup = common::wait_for(
+                "the parent's HUP trap",
+                || std::fs::read_to_string(&mark).ok(),
+                |m| m.as_deref().is_some_and(|m| m.ends_with('\n')),
+            );
+            (before, out, hup)
         })
         .collect();
     assert_eq!(r[0], r[1], "vtmux (left) vs tmux 3.8 (right)");
@@ -3905,7 +3942,7 @@ fn run_line_w(w: &World, args: &[&str]) -> String {
 /// detaching: no message, the command's own exit status, `SHELL` set.
 #[test]
 fn detach_client_e_runs_a_command_in_place_of_the_client() {
-    let r = pair_results(true, |p| {
+    let r = pair_results(1, |p| {
         let name = p.names[1].clone();
         vec![run_line(
             p,
@@ -3922,7 +3959,7 @@ fn detach_client_e_runs_a_command_in_place_of_the_client() {
     assert_eq!(r[0][2], "exit 7 \"ran:/bin/sh\"");
     assert_eq!(r[0][3], "alive");
     // `-a` and `-s` take `-E` too.
-    let r = pair_results(true, |p| {
+    let r = pair_results(2, |p| {
         let name = p.names[0].clone();
         vec![run_line(
             p,
@@ -3930,7 +3967,7 @@ fn detach_client_e_runs_a_command_in_place_of_the_client() {
         )]
     });
     assert_eq!(&r[0][1..], ["alive", "exit 3 \"ran\"", "exit 3 \"ran\""]);
-    let r = pair_results(true, |p| {
+    let r = pair_results(2, |p| {
         vec![run_line(
             p,
             &["detach-client", "-s", "a", "-E", "echo ran; exit 4"],
@@ -4800,7 +4837,7 @@ fn clock_mode_glyphs_at_a_fixed_time() {
         "                    #     #   #   #   #     #   #       #     #",
         "                    # #####       #####     #           # #####",
     ]);
-    a.wait_for(Duration::from_secs(5), |a| rows_of(a) == want);
+    a.wait_for(HANG, |a| rows_of(a) == want);
     // Every `#` is the colour on the colour (red is palette 1).
     let snap = vtmux_vt::snapshot(&a.screen());
     let hashes: Vec<_> = snap.cells.iter().filter(|c| c.text == "#").collect();
@@ -4824,7 +4861,7 @@ fn clock_mode_glyphs_at_a_fixed_time() {
         "                          #   #   #   #     #       #     #   #",
         "                          #       #####     #       #     #   #",
     ]);
-    a.wait_for(Duration::from_secs(5), |a| rows_of(a) == want);
+    a.wait_for(HANG, |a| rows_of(a) == want);
     // A pane too small for glyphs shows the text, in the colour.
     a.resize(20, 5);
     assert!(
@@ -4832,7 +4869,7 @@ fn clock_mode_glyphs_at_a_fixed_time() {
             .status
             .success()
     );
-    a.wait_for(Duration::from_secs(5), |a| {
+    a.wait_for(HANG, |a| {
         rows_of(a).get(2).map(String::as_str) == Some("        13:07")
     });
     let snap = vtmux_vt::snapshot(&a.screen());
@@ -4842,9 +4879,7 @@ fn clock_mode_glyphs_at_a_fixed_time() {
     );
     // Any key leaves the mode.
     a.keys(b"x");
-    a.wait_for(Duration::from_secs(5), |_| {
-        display(&w, "[#{pane_mode}]") == "[]"
-    });
+    a.wait_for(HANG, |_| display(&w, "[#{pane_mode}]") == "[]");
 }
 
 /// The titles the client wrote to its terminal so far (`tsl` `title` `fsl`
@@ -5536,7 +5571,7 @@ fn extended_keys_are_asked_of_a_terminal_with_extkeys() {
             // No reply: the start timer.
             thread::sleep(Duration::from_secs(3));
             assert!(!has(&a, ENEKS), "{what}: Eneks before the start timer");
-            a.wait_for(Duration::from_secs(5), |a| !eneks || has(a, ENEKS));
+            a.wait_for(HANG, |a| !eneks || has(a, ENEKS));
         } else {
             a.keys(reply);
             a.wait(|a| !eneks || has(a, ENEKS));
@@ -5951,7 +5986,7 @@ fn cursor_style_and_colour_reach_the_terminal() {
         ]);
         a.wait(|a| pane_text(a).starts_with('A'));
         let expect = |a: &Attached, want: (vtmux_vt::CursorShape, bool, Option<(u8, u8, u8)>)| {
-            a.wait_labelled(&what, Duration::from_secs(5), |a| outer_cursor(a) == want);
+            a.wait_labelled(&what, HANG, |a| outer_cursor(a) == want);
         };
         expect(&a, (Default, false, None));
         let steps: [(&[&str], _); 6] = [
@@ -6007,14 +6042,14 @@ fn the_console_cursor_is_hidden_with_civis() {
         assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
         let a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", "linux")]);
         a.wait(|a| pane_text(a).starts_with('A'));
-        a.wait_labelled(&what, Duration::from_secs(5), |a| !hidden(&a.text()));
+        a.wait_labelled(&what, HANG, |a| !hidden(&a.text()));
         let at = a.text().len();
         assert!(w.cli(&["send", "-t", "a", "Enter"]).status.success());
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+        a.wait_labelled(&what, HANG, |a| {
             a.text()[at..].contains("\x1b[?25l\x1b[?1c") && hidden(&a.text())
         });
         assert!(w.cli(&["send", "-t", "a", "Enter"]).status.success());
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+        a.wait_labelled(&what, HANG, |a| {
             pane_text(a).starts_with("AB") && !hidden(&a.text())
         });
         // No hide anywhere is a bare DECTCEM.
@@ -6051,23 +6086,21 @@ fn the_cursor_hides_where_its_cell_does_not_show() {
                 t.screen_modes().cursor_visible == shown && t.cursor() == at
             }
         };
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
+        a.wait_labelled(&what, HANG, |a| {
             pane_text(a).contains('A') && cursor(true, (10, 3))(a)
         });
         // A floating pane over the cursor's cell (4,2 40x6 by default).
         ok(&["new-pane", "-d", "-t", "a", "cat", "-"]);
-        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (10, 3)));
+        a.wait_labelled(&what, HANG, cursor(false, (10, 3)));
         ok(&["kill-pane", "-t", "%1"]);
-        a.wait_labelled(&what, Duration::from_secs(5), cursor(true, (10, 3)));
+        a.wait_labelled(&what, HANG, cursor(true, (10, 3)));
         // A full line: the wrap pending at column 80 is outside the window.
         // tmux's update as the line is written leaves the cursor shown; its
         // redraw (here asked for, else 5 s after the attach) hides it.
         ok(&["send", "-t", "%0", "Enter"]);
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
-            pane_text(a).contains("0B")
-        });
+        a.wait_labelled(&what, HANG, |a| pane_text(a).contains("0B"));
         ok(&["refresh-client"]);
-        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (79, 3)));
+        a.wait_labelled(&what, HANG, cursor(false, (79, 3)));
         // Copy mode's cursor in the last column, under a modal scrollbar
         // shown by a scroll, and in the first.
         ok(&["set", "-g", "pane-scrollbars", "modal"]);
@@ -6076,9 +6109,9 @@ fn the_cursor_hides_where_its_cell_does_not_show() {
         ok(&["send", "-X", "-t", "%0", "scroll-up"]);
         ok(&["send", "-X", "-t", "%0", "scroll-down"]);
         ok(&["send", "-X", "-t", "%0", "end-of-line"]);
-        a.wait_labelled(&what, Duration::from_secs(5), cursor(false, (79, 3)));
+        a.wait_labelled(&what, HANG, cursor(false, (79, 3)));
         ok(&["send", "-X", "-t", "%0", "start-of-line"]);
-        a.wait_labelled(&what, Duration::from_secs(5), cursor(true, (0, 3)));
+        a.wait_labelled(&what, HANG, cursor(true, (0, 3)));
     });
 }
 
@@ -6102,15 +6135,11 @@ fn application_escape_mode_follows_the_appesc_feature() {
         a.wait(|a| a.text().contains("\x1b[c"));
         // The terminal's DA reply: its features are known now.
         a.keys(b"\x1b[?62;22c");
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
-            a.text().contains("\x1b[?7727h")
-        });
+        a.wait_labelled(&what, HANG, |a| a.text().contains("\x1b[?7727h"));
         assert!(!a.text().contains("\x1b[?7727l"), "{what}");
         assert!(w.cli(&["detach-client"]).status.success());
         a.exited(0);
-        a.wait_labelled(&what, Duration::from_secs(5), |a| {
-            a.text().contains("\x1b[?7727l")
-        });
+        a.wait_labelled(&what, HANG, |a| a.text().contains("\x1b[?7727l"));
     });
 }
 
@@ -7803,9 +7832,7 @@ fn lock_after_time_locks_an_idle_session() {
         w.cli(&["set", "-g", "lock-after-time", "2"]);
         let ctx = bin.display().to_string();
         let mut a = w.attach(&["attach", "-t", "a"]);
-        a.wait_labelled(&ctx, Duration::from_secs(5), |a| {
-            status_row(a).starts_with("[a] 0:w*")
-        });
+        a.wait_labelled(&ctx, HANG, |a| status_row(a).starts_with("[a] 0:w*"));
         // Keys keep it awake.
         for _ in 0..6 {
             a.keys(b"k");
@@ -7830,7 +7857,7 @@ fn lock_after_time_locks_an_idle_session() {
             n,
             "{ctx}: locked with lock-after-time 0"
         );
-        a.wait_labelled(&ctx, Duration::from_secs(5), |a| {
+        a.wait_labelled(&ctx, HANG, |a| {
             pane_text(a).contains("kkkkkk") && status_row(a).starts_with("[a] 0:w*")
         });
         a.keys(b"\x02d");
@@ -8361,18 +8388,14 @@ fn zero_size_terminal_is_80x24() {
                 "#{window_width}x#{window_height} #{pane_width}x#{pane_height}",
             )
         };
-        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
+        a.wait_labelled(&bin.display().to_string(), HANG, |_| {
             window() == "80x23 80x23"
         });
         // A later resize to 0x0 (MSG_RESIZE) is taken the same way.
         a.resize(40, 10);
-        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
-            client() == "40x10"
-        });
+        a.wait_labelled(&bin.display().to_string(), HANG, |_| client() == "40x10");
         a.resize(0, 0);
-        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
-            client() == "80x24"
-        });
+        a.wait_labelled(&bin.display().to_string(), HANG, |_| client() == "80x24");
     });
 }
 

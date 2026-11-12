@@ -105,11 +105,15 @@ pub fn teardown(
     }
 }
 
-/// Poll `done` every 20 ms until it holds; after 20 s, panic naming
+/// How long a wait for a state lasts: it only ends a hang.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub const HANG: Duration = Duration::from_secs(20);
+
+/// Poll `done` every 20 ms until it holds; after [`HANG`], panic naming
 /// `what`. The limit only ends a hang: no wait here is for a time.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn wait(what: &str, mut done: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(20);
+    let end = Instant::now() + HANG;
     while !done() {
         assert!(Instant::now() < end, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(20));
@@ -124,7 +128,7 @@ pub fn wait_for<T: std::fmt::Debug>(
     mut read: impl FnMut() -> T,
     done: impl Fn(&T) -> bool,
 ) -> T {
-    let end = Instant::now() + Duration::from_secs(20);
+    let end = Instant::now() + HANG;
     loop {
         let value = read();
         if done(&value) {

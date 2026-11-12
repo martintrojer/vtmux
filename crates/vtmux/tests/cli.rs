@@ -124,8 +124,9 @@ impl World {
             .expect("spawn binary")
     }
 
-    /// Poll `wait-for -l args` (max 5 s) until it lists `want`, with each
-    /// `client-PID` of `pids` written `client-N` (N its index).
+    /// Poll `wait-for -l args` (at most [`common::HANG`]) until it lists
+    /// `want`, with each `client-PID` of `pids` written `client-N` (N its
+    /// index).
     fn waiters(&self, args: &[&str], pids: &[u32], want: &str) -> Run {
         let mut full = vec!["wait-for", "-l"];
         full.extend_from_slice(args);
@@ -137,7 +138,7 @@ impl World {
                     .stdout
                     .replace(&format!("client-{pid}\n"), &format!("client-{i}\n"));
             }
-            if r.stdout == want || start.elapsed() > Duration::from_secs(5) {
+            if r.stdout == want || start.elapsed() > common::HANG {
                 return r;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -175,7 +176,7 @@ impl World {
         out
     }
 
-    /// Poll `capture-pane -p` (max 10 s, 50 ms steps) until `want` shows,
+    /// Poll `capture-pane -p` (at most [`common::HANG`], 50 ms steps) until `want` shows,
     /// in the normalised text (`TMP` for the temp dir, either spelling of
     /// it: macOS's `pwd` prints `/private/tmp`). The last poll is made after
     /// the deadline, so a stall that eats the whole budget in one step is
@@ -189,7 +190,7 @@ impl World {
             if last.contains(want) {
                 return;
             }
-            if start.elapsed() >= Duration::from_secs(10) {
+            if start.elapsed() >= common::HANG {
                 break;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -208,7 +209,7 @@ impl World {
         );
     }
 
-    /// Poll `list-panes -a` (max 10 s) until every pane's
+    /// Poll `list-panes -a` (at most `common::HANG`) until every pane's
     /// `#{pane_current_command}` is `want`. Run the panes as `cat -` (two
     /// words: execvp'd, no shell): `sh -c cat` is `sh` or `bash` until it
     /// execs, and for good under a dash that forks, and a rename
@@ -218,7 +219,7 @@ impl World {
     fn wait_all_running(&self, want: &str) {
         let start = Instant::now();
         let mut last = String::new();
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < common::HANG {
             let r = self.run(&["lsp", "-a", "-F", "#{pane_current_command}"]);
             if r.stdout.lines().all(|l| l == want) {
                 return;
@@ -234,7 +235,7 @@ impl World {
 
     /// The pane's `stty size` must come to agree with `#{pane_height}
     /// #{pane_width}`: send Enter to a `while read` loop running `stty
-    /// size` until its last line is that size (max 5 s). tmux sends
+    /// size` until its last line is that size (at most `common::HANG`). tmux sends
     /// TIOCSWINSZ from a 250 ms timer (server-client.c
     /// `server_client_check_pane_resize`), so the first answer may be old.
     /// Returns the size seen.
@@ -251,7 +252,7 @@ impl World {
             .trim()
             .to_owned();
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < common::HANG {
             self.run(&["send-keys", "-t", target, "Enter"]);
             std::thread::sleep(Duration::from_millis(100));
             let screen = self.run(&["capture-pane", "-p", "-t", target]).stdout;
@@ -265,10 +266,10 @@ impl World {
         );
     }
 
-    /// Poll until `target` is on the alternate screen (max 5 s).
+    /// Poll until `target` is on the alternate screen (at most `common::HANG`).
     fn wait_alternate(&self, target: &str) {
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < common::HANG {
             if self
                 .run(&["display", "-p", "-t", target, "#{alternate_on}"])
                 .stdout
@@ -289,7 +290,7 @@ impl World {
     /// (names.c `check_window_name` waits for `PANE_CHANGED`).
     fn wait_window_name(&self, target: &str, want: &str) {
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < common::HANG {
             if self
                 .run(&["display", "-p", "-t", target, "#{window_name}"])
                 .stdout
@@ -443,10 +444,7 @@ fn make_stale_socket(path: &Path) {
     drop(std::os::unix::net::UnixListener::bind(path).expect("bind"));
     let start = Instant::now();
     while std::os::unix::net::UnixStream::connect(path).is_ok() {
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "socket stays live"
-        );
+        assert!(start.elapsed() < common::HANG, "socket stays live");
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -739,7 +737,7 @@ fn copy_pipe_commands() {
         let read = |name: &str| -> Run {
             let path = w.dir().join(name);
             let start = Instant::now();
-            while !path.exists() && start.elapsed() < Duration::from_secs(5) {
+            while !path.exists() && start.elapsed() < common::HANG {
                 std::thread::sleep(Duration::from_millis(20));
             }
             let text = std::fs::read(&path).map_or_else(
@@ -901,10 +899,13 @@ fn copy_refresh() {
             std::fs::write(format!("{d}/go{r}"), "").unwrap();
             let done = format!("{d}/done{r}");
             let start = Instant::now();
-            while !Path::new(&done).exists() && start.elapsed() < Duration::from_secs(5) {
+            while !Path::new(&done).exists() && start.elapsed() < common::HANG {
                 std::thread::sleep(Duration::from_millis(20));
             }
-            // The refresh timer is 50 ms; give it several.
+            // The server has read the round (the pane's own screen, not
+            // the mode's, shows its last line); the refresh timer is 50 ms
+            // from there: give it several.
+            w.wait_for_text("a", &format!("r{r}-3"));
             std::thread::sleep(Duration::from_millis(400));
             runs.push(w.run(&["display", "-p", "-t", "a", F]));
         };
@@ -1758,13 +1759,13 @@ fn respawn_kill_never_gets_the_old_tty_back() {
     w.wait_all_running("cat");
 }
 
-/// Poll `display -p -t target fmt` (max 10 s) until its output is `done`.
+/// Poll `display -p -t target fmt` (at most `common::HANG`) until its output is `done`.
 #[cfg(target_os = "linux")]
 fn display_until(w: &World, target: &str, fmt: &str, done: impl Fn(&str) -> bool) -> Run {
     let start = Instant::now();
     loop {
         let r = w.run(&["display", "-p", "-t", target, fmt]);
-        if done(&r.stdout) || start.elapsed() > Duration::from_secs(10) {
+        if done(&r.stdout) || start.elapsed() > common::HANG {
             return r;
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -2020,7 +2021,7 @@ fn exit_unattached() {
             .expect("spawn binary");
         let start = Instant::now();
         while w.run(&["lsc", "-F", "#{client_session}"]).stdout != "a\n"
-            && start.elapsed() < Duration::from_secs(5)
+            && start.elapsed() < common::HANG
         {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -2408,7 +2409,7 @@ fn signals_follow_tmux() {
         assert_ne!(w.run(&["ls"]).code, 0, "socket is gone");
         kill("-USR1");
         let start = Instant::now();
-        while !sock.exists() && start.elapsed() < Duration::from_secs(5) {
+        while !sock.exists() && start.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(50));
         }
         let ls = w.run(&["ls"]);
@@ -2974,7 +2975,7 @@ fn kill_server_with_running_job() {
         ])];
         let client = w.spawn(&["run", &format!("touch {st}; sleep 2")]);
         let begin = Instant::now();
-        while !(started.exists() && pidfile.exists()) && begin.elapsed() < Duration::from_secs(5) {
+        while !(started.exists() && pidfile.exists()) && begin.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(20));
         }
         runs.push(w.run(&["kill-server"]));
@@ -3004,7 +3005,7 @@ fn kill_server_with_running_job() {
             })
         };
         let begin = Instant::now();
-        while !gone() && begin.elapsed() < Duration::from_secs(5) {
+        while !gone() && begin.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(20));
         }
         runs.push(Run::seen(format!("pane gone: {}", gone())));
@@ -3028,7 +3029,7 @@ fn run_shell_background() {
             w.run(&["run", "-b", "-C", "set -g @bgc done"]),
         ];
         let start = Instant::now();
-        while !mark.exists() && start.elapsed() < Duration::from_secs(5) {
+        while !mark.exists() && start.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(20));
         }
         runs.push(Run::seen(
@@ -3069,7 +3070,7 @@ fn background_commands_start_from_no_state() {
         for opt in ["@h1", "@h2", "@h3", "@h4"] {
             let start = Instant::now();
             let mut r = w.run(&["show", "-gv", opt]);
-            while r.code != 0 && start.elapsed() < Duration::from_secs(5) {
+            while r.code != 0 && start.elapsed() < common::HANG {
                 std::thread::sleep(Duration::from_millis(20));
                 r = w.run(&["show", "-gv", opt]);
             }
@@ -3205,7 +3206,7 @@ fn startup_config_shell() {
             w.run(&["source", "/dev/null"]),
         ];
         let start = Instant::now();
-        while !mark.exists() && start.elapsed() < Duration::from_secs(5) {
+        while !mark.exists() && start.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(20));
         }
         runs.push(Run::seen(mark.exists().to_string()));
@@ -3635,20 +3636,38 @@ fn initial_window_name_is_the_command() {
     }
     w.run(&["neww", "-d"]);
     w.run(&["neww", "-d", "sh", "-c", "exec sleep 101"]);
-    // Past two name intervals: every check that is going to run has run.
+    // Past two name intervals: every check that is going to run has run,
+    // on a host that ran the panes' programs by then; a loaded one gets
+    // until they settle.
     std::thread::sleep(Duration::from_millis(1500));
-    let names = w.run(&[
-        "lsw",
-        "-F",
-        "#{window_name} #{pane_current_command} #{automatic-rename}",
-    ]);
     // Each window ends up named after what is actually running in it. Which
     // process that is depends on the shell: bash execs the last command of
     // `sh -c cat` (so `cat`), dash keeps `sh` in front. Either way the name
     // and #{pane_current_command} must agree, and none may be the
     // half-started shell state the race used to leave behind.
-    let lines: Vec<&str> = names.stdout.lines().collect();
-    assert_eq!(lines.len(), 8, "{}", names.stdout);
+    let settled = |out: &str| {
+        let lines: Vec<&str> = out.lines().collect();
+        lines.len() == 8
+            && lines.iter().all(|line| {
+                let f: Vec<&str> = line.split(' ').collect();
+                f.len() == 3 && f[0] == f[1] && f[2] == "1"
+            })
+            && lines[7].starts_with("sleep ")
+    };
+    let names = common::wait_for(
+        "every window named after its command",
+        || {
+            w.run(&[
+                "lsw",
+                "-F",
+                "#{window_name} #{pane_current_command} #{automatic-rename}",
+            ])
+            .stdout
+        },
+        |out| settled(out),
+    );
+    let lines: Vec<&str> = names.lines().collect();
+    assert_eq!(lines.len(), 8, "{names}");
     for line in &lines {
         let f: Vec<&str> = line.split(' ').collect();
         assert_eq!(f.len(), 3, "{line}");
@@ -3658,12 +3677,7 @@ fn initial_window_name_is_the_command() {
         );
         assert_eq!(f[2], "1", "{line}");
     }
-    assert_eq!(
-        lines[7].split(' ').next(),
-        Some("sleep"),
-        "{}",
-        names.stdout
-    );
+    assert_eq!(lines[7].split(' ').next(), Some("sleep"), "{names}");
 }
 
 /// D-012 for a pane split into, or respawned in, a window whose name clock
@@ -3685,8 +3699,15 @@ fn split_and_respawned_pane_name_is_the_command() {
     w.run(&["splitw", "-t", "a:0", "sh", "-c", "exec sleep 101"]);
     w.run(&["respawnp", "-k", "-t", "a:1", "sh", "-c", "exec sleep 102"]);
     std::thread::sleep(Duration::from_millis(1500));
-    let names = w.run(&["lsw", "-F", "#{window_name} #{pane_current_command}"]);
-    assert_eq!(names.stdout, "sleep sleep\nsleep sleep\n");
+    // A loaded host may exec `sleep` later: its name follows.
+    common::wait_for(
+        "both windows named sleep",
+        || {
+            w.run(&["lsw", "-F", "#{window_name} #{pane_current_command}"])
+                .stdout
+        },
+        |names| names == "sleep sleep\nsleep sleep\n",
+    );
 }
 
 /// Whether the reference's libc answers like glibc for bytes that are not
@@ -4215,7 +4236,7 @@ fn panes_respawn() {
         ));
         let start = Instant::now();
         while w.run(&["display", "-p", "#{window_panes}"]).stdout != "1\n"
-            && start.elapsed() < Duration::from_secs(5)
+            && start.elapsed() < common::HANG
         {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -5162,14 +5183,16 @@ fn save_buffer_to_a_slow_fifo_does_not_stall_the_server() {
             std::thread::sleep(Duration::from_millis(300));
             let start = Instant::now();
             out.push(w.run(&["display", "-p", "alive"]));
+            // A server stalled on the FIFO answers only once it is read,
+            // which is after this: any wait under that is load.
             assert!(
-                start.elapsed() < Duration::from_secs(2),
+                start.elapsed() < common::HANG,
                 "display waited for the FIFO ({})",
                 w.bin.display()
             );
             let mut got = Vec::new();
             let mut buf = [0u8; 8192];
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + common::HANG;
             while got.len() < 100_000 && Instant::now() < deadline {
                 match reader.read(&mut buf) {
                     Ok(0) => std::thread::sleep(Duration::from_millis(10)),
@@ -5218,7 +5241,7 @@ fn load_buffer_of_a_fifo_waits_for_the_writer() {
         let loader = w.spawn(&["load-buffer", "-b", "late", fifo.to_str().unwrap()]);
         std::thread::sleep(Duration::from_millis(500));
         // A non-blocking open fails with ENXIO while nobody reads.
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + common::HANG;
         let writer = loop {
             match std::fs::OpenOptions::new()
                 .write(true)
@@ -5843,10 +5866,15 @@ fn plane16_characters_are_ordinary_text() {
 fn send_keys_passes_bytes_through() {
     compare("send_keys_passes_bytes_through", |w| {
         let got = w.dir().join("got");
-        let cmd = format!("stty raw -echo; cat > {}", got.display());
+        let raw = w.dir().join("raw");
+        let cmd = format!(
+            "stty raw -echo; : > {}; cat > {}",
+            raw.display(),
+            got.display()
+        );
         let mut steps = vec![w.run(&["new", "-d", "-s", "s", "-x", "60", "-y", "10", &cmd])];
         // The pane's shell must be in raw mode before anything is sent.
-        std::thread::sleep(Duration::from_millis(500));
+        common::wait("the pane in raw mode", || raw.exists());
         let args: [&[&[u8]]; 7] = [
             &[b"-l", b"c\xe9d"],
             &[b"-l", b"a\xffb\xc3\xa9"],
@@ -5865,7 +5893,7 @@ fn send_keys_passes_bytes_through() {
         steps.push(w.run_bytes(&[b"send-keys", b"-t", b"s", b"-l", b"END"]));
         let start = Instant::now();
         let mut data = Vec::new();
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < common::HANG {
             data = std::fs::read(&got).unwrap_or_default();
             if data.ends_with(b"END") {
                 break;
@@ -6217,16 +6245,14 @@ fn killed_control_client_leaves_the_server_up() {
             .expect("spawn binary");
         let start = Instant::now();
         while w.run(&["lsc", "-F", "#{client_control_mode}"]).stdout != "1\n"
-            && start.elapsed() < Duration::from_secs(5)
+            && start.elapsed() < common::HANG
         {
             std::thread::sleep(Duration::from_millis(20));
         }
         c.kill().expect("kill");
         let _ = c.wait();
         let start = Instant::now();
-        while w.run(&["show", "-gv", "@closed"]).stdout != "1\n"
-            && start.elapsed() < Duration::from_secs(5)
-        {
+        while w.run(&["show", "-gv", "@closed"]).stdout != "1\n" && start.elapsed() < common::HANG {
             std::thread::sleep(Duration::from_millis(20));
         }
         out.push(w.run(&["ls", "-F", "#{session_name}"]));
@@ -6855,7 +6881,7 @@ fn send_keys_in_key_modes(name: &str, keys: &[&str], backspace: Option<&str>) {
                         runs.push(Run::seen(format!("{mode} {format}: {}", keys.join(" "))));
                         break;
                     }
-                    assert!(start.elapsed() < Duration::from_secs(5), "{mode} {format}");
+                    assert!(start.elapsed() < common::HANG, "{mode} {format}");
                 }
             }
         }
@@ -7282,20 +7308,21 @@ fn program_output_reaches_the_grid_as_in_tmux() {
     });
 }
 
-/// Poll (max 5 s) until `path` exists and `done(contents)`; the contents.
+/// Poll (at most [`common::HANG`]) until `path` exists and
+/// `done(contents)`; the contents.
 fn wait_file(path: &Path, done: impl Fn(&str) -> bool) -> String {
     let start = Instant::now();
     loop {
         let text = std::fs::read_to_string(path).unwrap_or_default();
-        if path.exists() && done(&text) || start.elapsed() > Duration::from_secs(5) {
+        if path.exists() && done(&text) || start.elapsed() > common::HANG {
             return text;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
 
-/// Poll until no process `pid` is left (max 5 s): it has exited and its
-/// parent has reaped it.
+/// Poll until no process `pid` is left (at most [`common::HANG`]): it has
+/// exited and its parent has reaped it.
 fn wait_reaped(pid: &str) {
     let start = Instant::now();
     while Command::new("kill")
@@ -7303,7 +7330,7 @@ fn wait_reaped(pid: &str) {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
-        && start.elapsed() < Duration::from_secs(5)
+        && start.elapsed() < common::HANG
     {
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -7803,7 +7830,8 @@ fn capture_pane_mode_screen() {
         // Output after copy mode began, which the mode's copy does not show.
         let tty = w.run(&["display", "-p", "-t", "a", "#{pane_tty}"]).stdout;
         std::fs::write(tty.trim(), b"after\r\n").expect("write to the pane's tty");
-        std::thread::sleep(Duration::from_millis(300));
+        // The pane's own screen (not the mode's) shows it once read.
+        w.wait_for_text("a", "after");
         for args in [
             &["-pM"][..],
             &["-pM", "-S", "-", "-E", "-"],
