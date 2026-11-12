@@ -1,13 +1,16 @@
 name: ci-retry
-# GitHub's macOS arm64 runners run out at busy times: check-macos then waits
+# GitHub's macOS arm64 runners run out at busy times: a macOS job then waits
 # ~15 min and ends `cancelled` with no runner and the annotation "The job was
 # not acquired by Runner of type hosted even after multiple attempts" (main
 # 3682ca7, runs 41854335963 to 41871887523; a manual rerun the next morning
 # got a runner at once). Nothing on main cancels a main run otherwise (one
-# concurrency group per commit), so such a job is re-run, one at a time, up
-# to three times, each after the run completes again. Re-runs made with
-# GITHUB_TOKEN start no new workflow_run event, so this job waits for them
-# itself.
+# concurrency group per commit), so such jobs are re-run, up to three times,
+# each after the run completes again: all at once (`rerun-failed-jobs`) when
+# no other job failed but the gates' results (`check`, `check-macos`, which
+# fail because a stage did), else one at a time, so a real failure is never
+# re-run. Re-running a job re-runs the jobs that need it (the gate's result).
+# Re-runs made with GITHUB_TOKEN start no new workflow_run event, so this job
+# waits for them itself.
 # workflow_run fires only for this file as it is on the default branch. The
 # `branches` filter matches the head branch name only, so a fork's `main`
 # passes it too: the job runs only for runs of this repository's own
@@ -46,20 +49,32 @@ jobs:
               sleep 60
             done
             attempt=$(gh api "repos/$REPO/actions/runs/$RUN" --jq .run_attempt)
-            job=""
-            for id in $(gh api "repos/$REPO/actions/runs/$RUN/attempts/$attempt/jobs" \
+            jobs="repos/$REPO/actions/runs/$RUN/attempts/$attempt/jobs?per_page=100"
+            unacquired=""
+            for id in $(gh api "$jobs" \
                 --jq '.jobs[] | select(.conclusion == "cancelled" and (.runner_name // "") == "") | .id'); do
               if gh api "repos/$REPO/check-runs/$id/annotations" --jq '.[].message' |
                   grep -q 'not acquired by Runner'; then
-                job=$id
-                break
+                unacquired="$unacquired $id"
               fi
             done
-            if [ -z "$job" ]; then
+            if [ -z "$unacquired" ]; then
               echo "attempt $attempt: no job left waiting for a runner"
               exit 0
             fi
-            echo "attempt $attempt: job $job got no runner; re-run $try of 3"
-            gh api -X POST "repos/$REPO/actions/jobs/$job/rerun" >/dev/null
+            others=""
+            for id in $(gh api "$jobs" \
+                --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral" and .name != "check" and .name != "check-macos") | .id'); do
+              case "$unacquired " in *" $id "*) ;; *) others="$others $id" ;; esac
+            done
+            if [ -z "$others" ]; then
+              echo "attempt $attempt: jobs$unacquired got no runner; re-run $try of 3, all at once"
+              gh api -X POST "repos/$REPO/actions/runs/$RUN/rerun-failed-jobs" >/dev/null
+            else
+              job=${unacquired# }
+              job=${job%% *}
+              echo "attempt $attempt: jobs$unacquired got no runner and jobs$others failed; re-run $try of 3 of job $job alone"
+              gh api -X POST "repos/$REPO/actions/jobs/$job/rerun" >/dev/null
+            fi
             sleep 30
           done

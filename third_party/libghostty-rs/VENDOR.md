@@ -1405,7 +1405,7 @@ Recorded per commit in git history; the list is kept current:
    Copy the commit's `LICENSE` to `libghostty-vt-sys/LICENSE-ghostty` if
    it changed.
 2. Match Zig to the commit's `build.zig.zon` `minimum_zig_version` in
-   `mise.toml`, `.github/workflows/ci.yml`, `ZIG_VERSION` in
+   `mise.toml`, `.github/actions/setup/action.yml` (`zig-version`), `ZIG_VERSION` in
    `libghostty-vt-sys/build.rs` and the README's install line.
 3. Regenerate the bindings from the new headers, in
    `third_party/libghostty-rs/libghostty-vt-sys`:
