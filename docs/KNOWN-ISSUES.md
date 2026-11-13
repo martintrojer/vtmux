@@ -13,6 +13,7 @@ What is known to differ, be rough, or be worth doing next. Until 3.8 final only 
 | Copy mode, wide characters | A reflowed line of wide characters splits 20/20. | 18/20/2 |
 | `vtmux-upgrade` onto a hung binary | A `-V` script's own children outlive the kill (only the direct child is killed); while it hangs, another child's exit can be noticed up to 5 s late. | n/a |
 | Upgrade signals, rare | During the client's re-exec onto an older build (3.8-beta3), a late `SIGTERM` or `SIGHUP` ends the client by its default action instead of `[terminated]`; the terminal is left cooked. If that exec fails, `SIGTERM` and `SIGHUP` stay at their default action until the client exits with its error. | n/a |
+| Passed descriptors on macOS | A client that sends more than 16 descriptors in one message (vtmux's own protocol sends none; tmux's client sends one at a time) leaves the rest open in the server, so a peer allowed to connect could fill its descriptor table. | the same (imsg reads one) |
 | `#{client_user}` | Looked up on every expansion; slow with LDAP or sssd users. | cached per client |
 
 ## Ideas
