@@ -374,6 +374,15 @@ fn given_back_input_round_trips() {
 }
 
 #[test]
+fn a_client_that_keeps_its_terminal_raw_round_trips() {
+    let mut s = sample();
+    s.clients[0].keeps_raw = true;
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| !c.keeps_raw));
+}
+
+#[test]
 fn a_stopped_client_round_trips() {
     let mut s = sample();
     s.clients[0].stopped = true;

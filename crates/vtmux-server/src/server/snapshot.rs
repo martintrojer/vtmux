@@ -1396,6 +1396,7 @@ impl Server {
             cwd_bytes: path_bytes(&hello.cwd),
             inbuf: input.bytes,
             pasting: c.pasting,
+            keeps_raw: hello.ext.keeps_raw,
             given_back_keys: input.keys,
             given_back_held: input.held,
             held_ago_ms: input.held_ago_ms,
@@ -2062,9 +2063,13 @@ impl Server {
                 utf8: x.utf8,
                 no_start: false,
             },
-            // Only a client that follows upgrades was given a token.
+            // Only a client that follows upgrades was given a token. What
+            // else its hello said comes again when it re-attaches; whether
+            // it leaves its terminal raw across the re-exec is the
+            // record's until then.
             ext: vtmux_core::protocol::HelloExt {
                 follows_upgrade: x.token != 0,
+                keeps_raw: x.keeps_raw,
                 ..Default::default()
             },
         };

@@ -934,6 +934,11 @@ record! {
         52 => one given_back_keys: u32,
         53 => one given_back_held: u32,
         54 => one held_ago_ms: u64,
+        /// It leaves its terminal raw across a live upgrade's re-exec
+        /// when the new binary takes it so (its `Hello`'s `keeps_raw`).
+        /// Ignorable: a reader before takes it as a client that restores
+        /// its terminal, until the client re-attaches and says again.
+        55 => one keeps_raw: bool,
     }
 }
 
@@ -1668,6 +1673,8 @@ pub(crate) mod tests {
             given_back_keys: 0,
             given_back_held: 0,
             held_ago_ms: 0,
+            // Added within v1 too (a_client_that_keeps_its_terminal_raw_round_trips).
+            keeps_raw: false,
         }
     }
 

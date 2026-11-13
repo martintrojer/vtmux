@@ -1317,6 +1317,38 @@ fn a_frame_read_in_part_is_finished_after_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Whether a client leaves its terminal raw across a live upgrade's
+/// re-exec (its hello's `keeps_raw`) comes back with its record, as
+/// whether it follows upgrades does: until it re-attaches and says so
+/// again, the record agrees with the client. (Before: a rebuilt record
+/// said it restores its terminal.)
+#[test]
+fn a_client_that_keeps_its_terminal_raw_is_kept_so() {
+    let dir = temp_dir("keepsraw");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (raw, _raw_peer) = attach(&mut a, &dir, "s", &[]);
+    let (cooked, _cooked_peer) = attach(&mut a, &dir, "s", &[]);
+    let ext = |s: &Server, id| s.clients[&id].hello.as_ref().unwrap().ext.clone();
+    a.clients
+        .get_mut(&raw)
+        .unwrap()
+        .hello
+        .as_mut()
+        .unwrap()
+        .ext
+        .keeps_raw = true;
+    assert!(!ext(&a, cooked).keeps_raw);
+    let b = rebuild(&a, &dir, "b");
+    let c = rebuild(&b, &dir, "c");
+    for s in [&b, &c] {
+        assert!(ext(s, raw).keeps_raw);
+        assert!(!ext(s, cooked).keeps_raw);
+    }
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The title an attached client's terminal shows from its output comes
 /// back with the client.
 #[test]
@@ -1598,6 +1630,16 @@ fn an_ordinary_attached_client_requires_no_feature() {
     a.clients.get_mut(&client).unwrap().inbuf = vec![0x03, 0x00];
     // A client stopped by `suspend-client` (`stopped`).
     a.suspend_client(client);
+    // A client that leaves its terminal raw across a re-exec
+    // (`keeps_raw`), as every attached vtmux client does.
+    a.clients
+        .get_mut(&client)
+        .unwrap()
+        .hello
+        .as_mut()
+        .unwrap()
+        .ext
+        .keeps_raw = true;
     let s = a.to_snapshot(snap::Meta {
         purpose: snap::Purpose::Upgrade,
         ..snap::Meta::default()
@@ -1605,6 +1647,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     assert_eq!(s.panes[0].input_queued, b"typed ahead");
     assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
     assert!(s.clients[0].stopped);
+    assert!(s.clients[0].keeps_raw);
     let [c] = &s.clients[..] else {
         panic!("{:?}", s.clients)
     };
