@@ -24,7 +24,7 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 | **Big scrollback** | 1M lines settle at 103 MB vs 622 MB. 20 panes streaming nonstop at a 100k limit: 217 MB vs 1.25 GB. Searching or capturing all of a 1M-line history takes 0.2-0.55x tmux's time; vim or less opens over it in 3 ms, as in tmux. |
 | **CPU** | Pane output costs 0.43-0.54x tmux's server CPU, 0.48-0.58x with a client attached, 0.06-0.19x with 8 clients. An idle server with a real config (TPM, a status poller): 0.28x. Agent TUIs: 0.76-0.92x at 5-20 panes, 0.7x at 100. |
 | **Rendering** | One frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. A redraw-heavy benchmark sends 0.07 MB where tmux sends 10.1 MB, at 0.3x the CPU. |
-| **What it costs** | An idle server uses 9.0 MB vs 4.2 MB, each idle pane 18 KB vs 5.4 KB, the binary is 10.4 MB vs 1.3 MB. A key's echo takes 0.30 ms vs 0.24 ms. Many clients on one window cost more CPU than tmux (1.4x at 5). |
+| **What it costs** | An idle server uses 8.5 MB vs 4.2 MB, each idle pane 20 KB vs 5.3 KB, the binary is 10.4 MB vs 1.3 MB. A key's echo takes 0.30 ms vs 0.21 ms. Many clients on one window cost more CPU than tmux (1.4x at 5). |
 
 ## What tmux can't do
 

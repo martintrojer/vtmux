@@ -11,8 +11,8 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | 1M lines of scrollback, settled | 622 MB | 103 MB | 0.17x |
 | 10 panes x 100k lines, settled | 629 MB | 100 MB | 0.16x |
 | 20 panes streaming at a 100k limit | 1.25 GB | 217 MB | 0.17x |
-| Idle server | 4.2 MB | 9.0 MB | 2.1x **Worse** |
-| Each idle pane | 5.4 KB | 18 KB | 3.4x **Worse** |
+| Idle server | 4.2 MB | 8.5 MB | 2.0x **Worse** |
+| Each idle pane | 5.3 KB | 20 KB | 3.8x **Worse** |
 | Pane output, no client | | | 0.43-0.54x CPU |
 | Pane output, one client attached | | | 0.48-0.58x CPU |
 | 8 clients, a 20 MB flood | | | 0.06-0.19x CPU |
@@ -21,11 +21,11 @@ The trade is Ghostty's: speed over a few MB. vtmux holds more memory when idle a
 | 100 agent panes | | | 0.70x CPU |
 | 32 clients on one window | | | 1.6x CPU **Worse** |
 | Idle server with the owner's config | 171 ms CPU a minute | 47 ms | 0.28x |
-| Key echo, p50 | 0.24 ms | 0.30 ms | 1.25x **Worse** |
+| Key echo, p50 | 0.21 ms | 0.30 ms | 1.4x **Worse** |
 | A command while a client floods keys, p50 | 23.9 ms | 13.4 ms | 0.56x |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | 20,000 commands piped into `-C` | 180 ms | 118 ms | 0.66x |
-| Creating 400 panes | 200 ms CPU | 380 ms | 1.9x **Worse** |
+| Creating 400 panes | 140 ms CPU | 230 ms | 1.6x **Worse** |
 | Search a 1M-line history | 1.65 s | 0.55 s | 0.34x |
 | `capture-pane -S -` of 1M lines | 840 ms | 385 ms | 0.46x |
 | Alternate screen up over 1M lines of history | 3-4 ms | 3 ms | 1x |
@@ -38,8 +38,8 @@ Each pane is a libghostty terminal with its own render state, so a small server 
 
 | | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|
-| Idle server | 4.2 MB | 9.0 MB | 2.1x |
-| 400 idle panes | 6.4 MB | 16.0 MB | 2.5x |
+| Idle server | 4.2 MB | 8.5 MB | 2.0x |
+| 400 idle panes | 6.2 MB | 16.3 MB | 2.6x |
 | A hidden full pane (101 windows) | 48 KB | 74-80 KB | 1.6x |
 | 100k lines, right after the output | 66 MB | 107 MB | 1.6x |
 | 100k lines, settled (16 s later) | 66 MB | 19 MB | 0.29x |
@@ -100,14 +100,14 @@ tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays pe
 
 | | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|
-| key echo p50 / p90, other pane idle | 0.24 / 0.29 ms | 0.30 / 0.37 ms | 1.25x |
-| key echo p50 / p90, next to a `yes` flood | 0.56 / 0.83 ms | 0.39 / 0.74 ms | 0.70x |
+| key echo p50 / p90, other pane idle | 0.21 / 0.27 ms | 0.30 / 0.37 ms | 1.4x |
+| key echo p50 / p90, next to a `yes` flood | 0.57 / 0.83 ms | 0.31 / 0.46 ms | 0.54x |
 | `display -p` p50 / p90, a client flooding keys | 23.9 / 26.5 ms | 13.4 / 16.0 ms | 0.56x |
 | `new -d` | 12.2 ms | 8.9 ms | 0.73x |
 | start with the owner's config until it answers | 102 ms | 101 ms | 0.99x |
 | a command while a script pipes commands into `-C` | 18.7 ms | 6.5 ms | 0.35x |
 
-vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not. A client typing a flood (a huge paste) is read 4 KB a loop turn, as tmux reads it, so commands still answer.
+vtmux is 0.09 ms behind with no flood (median of three runs). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not. A client typing a flood (a huge paste) is read 4 KB a loop turn, as tmux reads it, so commands still answer.
 
 ## Control mode
 
@@ -176,7 +176,7 @@ Ghostty is linked in statically (1.35 MB of text; tmux links libevent and ncurse
 - Host: a shared Linux server (Linux 6.16, AMD EPYC Genoa, 96 CPUs). macOS numbers are not collected yet.
 - Only the server process: CPU from `/proc/<pid>/stat` or `schedstat`, RSS from `VmRSS`, never the pane children. Medians of 3 or 5 runs.
 - Clients are the binary's own `attach` on a PTY the bench drains, counting every byte and synchronized frame.
-- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes (5-20) and key echo: the 2026-11-10 run. Commands under a key flood and control mode: the 2026-11-12 runs. 50-100 agent panes, 16-32 clients and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
+- Most memory, startup and owner-config rows: commit `ada47ba`, 2026-11-05, cargo's default release profile. Agent panes (5-20): the 2026-11-10 run. Idle server, idle panes, creating panes, key echo and the binary: the 2026-11-13 rc1 run. Commands under a key flood and control mode: the 2026-11-12 runs. 50-100 agent panes, 16-32 clients and output CPU: the 2026-11-09 release-profile run. Others: their own dated runs.
 - The host is shared and the load varied (3 to 22), so read CPU rows as rough; each run compares binaries side by side.
 
 ## Running the benchmarks
