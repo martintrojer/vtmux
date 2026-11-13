@@ -4,7 +4,8 @@
 //! sessions, saves them with the plugin, kills its server, starts a new one
 //! and restores: what comes back (sessions, windows, layouts, names, working
 //! directories, pane titles, pane contents, restarted programs) and what was
-//! saved must be the same on both sides.
+//! saved must be the same on both sides. A save made on one restores on the
+//! other to the same result, both ways.
 //!
 //! Every side has its own `/tmp` root: `HOME`, `TMUX_TMPDIR`,
 //! `XDG_STATE_HOME`, the plugin's save directory and a `bin/` first on `PATH`
@@ -138,6 +139,15 @@ impl Side {
             root,
             plugins: plugins.to_owned(),
         }
+    }
+
+    /// The binary the next commands run, a server started from now on
+    /// included (the one before must be gone): `bin/tmux` points to it.
+    fn switch_to(&mut self, bin: &Path) {
+        let link = self.root.join("bin/tmux");
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(bin, &link).unwrap();
+        bin.clone_into(&mut self.bin);
     }
 
     fn env(&self) -> Vec<(&'static str, String)> {
@@ -566,24 +576,39 @@ fn assert_same(seen: &[Seen], bins: &[PathBuf]) {
 
 /// resurrect's save (`prefix C-s` runs it with `run-shell`), the server
 /// killed, a new one started and resurrect's restore (`prefix C-r`), with
-/// pane contents on: vtmux saves and restores what tmux 3.8 does.
+/// pane contents on: vtmux saves and restores what tmux 3.8 does. And a
+/// user can go either way: a save made under vtmux restores under tmux
+/// 3.8, and one made under tmux 3.8 under vtmux, to the same result.
 #[test]
-fn resurrect_saves_and_restores_as_with_tmux() {
+fn resurrect_saves_and_restores_as_with_tmux_and_across() {
     let Some(plugins) = plugins() else { return };
     let bins = bins();
-    let seen = par::map(&bins, 2, |bin| {
-        let s = Side::new(bin, &plugins);
+    let (vt, tmux) = (&bins[0], &bins[1]);
+    // (saved by, restored by): each server alone, then each restoring
+    // the other's save.
+    let runs = [(vt, vt), (tmux, tmux), (vt, tmux), (tmux, vt)];
+    let seen = par::map(&runs, runs.len(), |&(save, restore)| {
+        let mut s = Side::new(save, &plugins);
         s.config("");
         build(&s);
         settled(&s, false);
-        let p = s.plugins.display();
+        let p = s.plugins.display().to_string();
         s.t(&[
             "run-shell",
             &format!("{p}/tmux-resurrect/scripts/save.sh quiet"),
         ]);
         let saved = s.saved();
         s.kill_server();
+        s.switch_to(restore);
         s.t(&["new", "-d"]);
+        // The restoring server is the other binary: only vtmux knows its
+        // own options.
+        assert_eq!(
+            s.run(&["show", "-gv", "vtmux-kitty-keys"]).status.success(),
+            restore == vt,
+            "restoring under {}",
+            restore.display()
+        );
         s.t(&[
             "run-shell",
             &format!("{p}/tmux-resurrect/scripts/restore.sh"),
@@ -616,7 +641,23 @@ fn resurrect_saves_and_restores_as_with_tmux() {
     if have_vim() {
         assert!(vt.contains("misc:2.1 1 80x11 t%7 vim <R>/w/a\n"), "{vt}");
     }
-    assert_same(&seen, &bins);
+    let name = |(save, restore): (&PathBuf, &PathBuf)| {
+        format!(
+            "saved by {}, restored by {}",
+            save.display(),
+            restore.display()
+        )
+    };
+    assert_same(&seen[..2], &bins);
+    for (i, run) in runs.iter().enumerate().skip(2) {
+        assert_eq!(
+            seen[i].restored.lines().collect::<Vec<_>>(),
+            seen[0].restored.lines().collect::<Vec<_>>(),
+            "restored: {} (left) vs {} (right)",
+            name(*run),
+            name(runs[0])
+        );
+    }
 }
 
 /// continuum saves from the status line of an attached client (its `#()`

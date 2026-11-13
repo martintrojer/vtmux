@@ -12,7 +12,7 @@ vtmux is tmux 3.8 to everything that talks to it: the same commands, options, fo
 - **A behaviour oracle:** 449 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, all but six also with a live upgrade inserted between steps.
 - **Your terminal:** Ghostty, WezTerm, foot, kitty, Alacritty, rio, xterm and some 2,600 other terminals from ncurses' database work out of the box, with the same features and colours tmux gives them, even on a host that has no terminfo entry for yours.
 - **Your setup:** a real `.tmux.conf` with TPM plugins gives the same options, key bindings, hooks and screens as tmux 3.8 on macOS and Linux.
-- **Restores across reboots:** tmux-resurrect and tmux-continuum work as with tmux.
+- **Restores across reboots:** tmux-resurrect and tmux-continuum work as with tmux, and a save made under either restores under the other.
 - **Where it differs on purpose:** real tmux bugs (data loss, hangs) are fixed and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md); everything else vtmux adds is opt-in.
 
 ## Compared with tmux 3.8
@@ -42,7 +42,7 @@ tmux vtmux-upgrade -b "$(mise which vtmux)"
 
 Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary. Exit status: 0 upgraded, 1 not (the server runs on as it was), 2 upgraded without a part that did not read (stderr says which). The new binary must prove it read the server's state before it takes over, so `-b` naming anything else (a typo'd `/bin/echo`, a script) is refused with 1. Downgrading to an earlier beta works too.
 
-Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-continuum work on vtmux as on tmux.
+Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-continuum work on vtmux as on tmux. A save moves both ways, so going back to tmux keeps your sessions.
 
 ### Terminal features tmux drops
 
