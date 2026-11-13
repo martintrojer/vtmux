@@ -417,13 +417,20 @@ impl Server {
     /// binary.
     ///
     /// # Errors
-    /// The path no longer leads to a file.
+    /// The path no longer leads to a file (a version manager pruned it):
+    /// the message says to name the binary with `-b`.
     pub(crate) fn upgrade_default_binary(&self) -> Result<PathBuf, String> {
         let Some(start) = &self.start_binary else {
             return crate::shim::own_exe()
-                .ok_or_else(|| "can't find the server's binary".to_owned());
+                .ok_or_else(|| "can't find the server's binary: name it with -b".to_owned());
         };
-        std::fs::canonicalize(start).map_err(|e| format!("{}: {}", start.display(), strerror(&e)))
+        std::fs::canonicalize(start).map_err(|e| {
+            format!(
+                "{}: {} (the binary the server was started as): name the new one with -b",
+                start.display(),
+                strerror(&e)
+            )
+        })
     }
 
     /// A loop turn's look at a waiting upgrade: forget it if the requester

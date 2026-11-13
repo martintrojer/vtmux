@@ -1093,6 +1093,34 @@ fn tmux_vtmux_upgrade_follows_a_relink_of_the_start_path() {
     wait("a command over control mode", || control.has("after b"));
 }
 
+/// `vtmux-upgrade` with no `-b` once the binary the server was started as
+/// is gone (a version manager pruned it) fails naming that path and
+/// pointing at `-b`; the server serves on, and `-b` moves it.
+#[test]
+fn an_upgrade_without_b_after_the_start_binary_is_gone_points_at_b() {
+    let world = World::new();
+    let copy = world.home.path().join("vtmux-pruned");
+    std::fs::copy(BIN, &copy).unwrap();
+    set_executable(&copy);
+    *world.client.lock().unwrap() = copy.clone();
+    world.populate(&[]);
+    let pid = world.pid();
+    std::fs::remove_file(&copy).unwrap();
+    *world.client.lock().unwrap() = bin();
+    let out = world
+        .run_within(&["vtmux-upgrade"], Duration::from_secs(60))
+        .expect("vtmux-upgrade answered");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains(&format!("{}: ", copy.display())) && err.contains("-b"),
+        "{err}"
+    );
+    assert_eq!(world.pid(), pid);
+    assert!(!world.server_args().contains("--vtmux-resume"));
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()));
+}
+
 /// A key bound to `vtmux-upgrade`, with another typed right after it (the
 /// same read): the upgrade is not refused for it, and the second key runs
 /// its binding in the image that serves next, once the client re-attached.
