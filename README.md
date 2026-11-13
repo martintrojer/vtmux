@@ -113,7 +113,7 @@ Run as `vtmux`, it sits next to your tmux with its own sockets.
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI, no session save and restore of its own: only what tmux and its plugins can't do.
 
-**Status:** release candidate ([3.8-rc1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
+**Status:** release candidate ([3.8-rc1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md). [Known issues](https://github.com/martintrojer/vtmux/blob/main/docs/KNOWN-ISSUES.md).
 
 [How it was built](https://github.com/martintrojer/vtmux/blob/main/docs/HOW-IT-WAS-BUILT.md): agents, tmux 3.8 as the spec, and the checks.
 
