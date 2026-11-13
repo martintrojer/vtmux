@@ -9,6 +9,7 @@ vtmux's version is the tmux release it is tested against (D25), set by `version`
 - `[workspace.package] version` and the `=` requirements in `[workspace.dependencies]` (`Cargo.toml`);
 - `version` of the two forks and the `=` requirements on them (`third_party/libghostty-rs/libghostty-vt-sys/Cargo.toml`, `libghostty-vt/Cargo.toml`, `crates/vtmux-vt/Cargo.toml`);
 - `Cargo.lock` (any cargo build rewrites it).
+- the two tests that pin the printed version, `own_name` and `version_formats` in `crates/vtmux/tests/cli.rs` (`cargo test -p vtmux --test cli` fails until they say the new one).
 
 Add the version's section to `CHANGELOG.md`, and the release page's text to `docs/release-notes/<version>.md` (e.g. `3.8-rc1.md`): short, about 1,500 characters, what is new and how to install. The release uses it as its notes; without it, the CHANGELOG section.
 
