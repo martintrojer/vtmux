@@ -2407,21 +2407,38 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
 /// session left with one client-detached. A test hook raises it in each
 /// window that once lost it: in the old image, once the relay has ended
 /// and its handlers are gone, just before the exec (the client stayed
-/// attached, no hook fired); and in the new image before its `Hello`
-/// (`-reattach`: the watcher cut the connection, and the client was given
-/// up on); and in the new image first thing, before it has any handler
-/// (`-start`: the default action killed it, the terminal it was handed
-/// raw left raw). The terminal has its own settings back after each.
+/// attached, no hook fired); there again once the signals caught so far
+/// were read for the exec (`-late`: the same); and in the new image
+/// before its `Hello` (`-reattach`: the watcher cut the connection, and
+/// the client was given up on); and in the new image first thing, before
+/// it has any handler (`-start`: the default action killed it, the
+/// terminal it was handed raw left raw). The old image's windows again
+/// onto a binary whose dry run does not say it takes the terminal raw,
+/// so the client gives it back before the exec. The terminal has its own
+/// settings back after each.
 #[test]
 fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
-    for (hook, says) in [
+    let cooked = [
+        ("TERM", "[terminated]"),
+        ("TERM-late", "[terminated]"),
+        ("HUP-late", "[lost tty]"),
+        ("TERM-reattach", "[terminated]"),
+    ];
+    let raw = [
         ("TERM", "[terminated]"),
         ("HUP", "[lost tty]"),
+        ("TERM-late", "[terminated]"),
+        ("HUP-late", "[lost tty]"),
         ("TERM-reattach", "[terminated]"),
         ("HUP-reattach", "[lost tty]"),
         ("TERM-start", "[terminated]"),
         ("HUP-start", "[lost tty]"),
-    ] {
+    ];
+    let cases = raw
+        .iter()
+        .map(|&(hook, says)| (true, hook, says))
+        .chain(cooked.iter().map(|&(hook, says)| (false, hook, says)));
+    for (raw, hook, says) in cases {
         let world = World::new();
         world.populate(&[]);
         world.run(&["set", "-g", "@log", ""]);
@@ -2431,6 +2448,20 @@ fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
             "client-detached",
             "set -ga @log '|detached'",
         ]);
+        let binary = if raw {
+            bin()
+        } else {
+            let said = world.home.path().join("said");
+            wrapper(
+                &world,
+                "vtmux-cooked",
+                &format!(
+                    "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>'{0}'; s=$?; \
+                     grep -v '^vtmux-reattach takes' '{0}' >&2; exit $s;;",
+                    said.display()
+                ),
+            )
+        };
         let mut attached = Attached::with_env(
             &world,
             &world.client(),
@@ -2438,14 +2469,16 @@ fn a_signal_as_the_client_re_executes_ends_it_as_attached() {
             &[("VTMUX_TEST_REEXEC_SIGNAL", hook)],
         );
         wait("the client", || world.run(&["lsc"]).lines().count() == 1);
-        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "{hook}");
+        let answer = world.upgrade(&binary);
+        let what = format!("{hook} (raw: {raw})");
+        assert_eq!(answer, Some(upgraded()), "{what}: {:?}", attached.since(0));
         wait("the client to end", || attached.exited().is_some());
-        assert_eq!(attached.exited(), Some(1), "{hook}: {}", attached.since(0));
+        assert_eq!(attached.exited(), Some(1), "{what}: {}", attached.since(0));
         wait("its reason", || attached.since(0).contains(says));
-        assert!(!attached.since(0).contains("unexpectedly"), "{hook}");
-        assert_eq!(world.run(&["lsc"]), "", "{hook}");
-        assert_eq!(world.run(&["show", "-gv", "@log"]), "|detached\n", "{hook}");
-        assert_cooked(&attached, hook);
+        assert!(!attached.since(0).contains("unexpectedly"), "{what}");
+        assert_eq!(world.run(&["lsc"]), "", "{what}");
+        assert_eq!(world.run(&["show", "-gv", "@log"]), "|detached\n", "{what}");
+        assert_cooked(&attached, &what);
     }
 }
 

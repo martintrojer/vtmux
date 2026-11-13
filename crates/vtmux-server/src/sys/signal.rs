@@ -120,25 +120,58 @@ pub fn unblock_handled() {
     }
 }
 
-/// `command.exec()` with every signal of [`HANDLED`] blocked across the
-/// `execve`: an attached client handing its terminal over raw to the
-/// binary it re-executes as, which unblocks them once its handlers are in
-/// (`vtmux_core::protocol::REATTACH_TTY_ENV`). Without it a SIGINT,
-/// SIGTERM, SIGHUP, SIGUSR1 or SIGUSR2 in between took the default action
-/// and killed the new image before it could give the terminal its
-/// settings back. Blocked in a `pre_exec` hook: std's `exec` empties the
-/// mask first. Returns only if the exec fails, the mask let in again.
-pub fn exec_handled_blocked(command: &mut std::process::Command) -> std::io::Error {
+/// `command.exec()` unless `proceed`, asked with every signal of
+/// [`HANDLED`] blocked just before the `execve`, says no: a live
+/// upgrade's re-exec, which carries the SIGTERM or SIGHUP the client has
+/// caught so far in the new image's environment, so one caught after
+/// that was read would be lost with this image's handlers. Asked with
+/// them blocked, `proceed` sees every signal handled before the exec: a
+/// later one stays pending. With `keep_blocked` (the terminal is handed
+/// over raw) it stays pending across the `execve` until the new image's
+/// handlers are in (`vtmux_core::protocol::REATTACH_TTY_ENV`): without it
+/// a SIGINT, SIGTERM, SIGHUP, SIGUSR1 or SIGUSR2 in between took the
+/// default action and killed the new image before it could give the
+/// terminal its settings back. Without (a binary that may never unblock
+/// them), SIGTERM and SIGHUP go back to their default action before the
+/// mask is let in again, so one pending ends the client, as it ends a
+/// tmux client starting up, rather than being lost. Done in a `pre_exec`
+/// hook: std's `exec` empties the mask first. Returns only if the exec
+/// fails or `proceed` said no (`Interrupted`), the mask let in again and
+/// SIGPIPE's disposition as it was.
+pub fn exec_unless(
+    command: &mut std::process::Command,
+    keep_blocked: bool,
+    proceed: impl Fn() -> bool + Send + Sync + 'static,
+) -> std::io::Error {
     use std::os::unix::process::CommandExt as _;
     // SAFETY: `exec` does not fork: the hook runs in this process just
-    // before `execve`, and only sets the calling thread's signal mask.
+    // before `execve`, and only sets the calling thread's signal mask and
+    // two signals' dispositions to their defaults.
     unsafe {
-        command.pre_exec(|| {
-            let _ = block_handled();
+        command.pre_exec(move || {
+            let before = block_handled();
+            if !proceed() {
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            if !keep_blocked {
+                libc::signal(libc::SIGTERM, libc::SIG_DFL);
+                libc::signal(libc::SIGHUP, libc::SIG_DFL);
+                restore_mask(before);
+            }
             Ok(())
         });
     }
+    // std's `exec` puts SIGPIPE to its default action for the new image:
+    // one that fails leaves it so, and a write to a closed pipe (a
+    // dropped `Signals`' handler writing to its own) would kill the
+    // client. What it was goes back.
+    // SAFETY: reads SIGPIPE's disposition, setting it to what it was.
+    let pipe = unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    // SAFETY: as above.
+    unsafe { libc::signal(libc::SIGPIPE, pipe) };
     let err = command.exec();
+    // SAFETY: puts back the disposition read above.
+    unsafe { libc::signal(libc::SIGPIPE, pipe) };
     unblock_handled();
     err
 }

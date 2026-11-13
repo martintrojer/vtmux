@@ -146,8 +146,36 @@ pub const SYS: vtmux_client::attach::Sys = vtmux_client::attach::Sys {
     defaults: vtmux_server::sys::signal::default_job_control,
     attached,
     caught,
-    exec_blocked: vtmux_server::sys::signal::exec_handled_blocked,
+    reexec,
 };
+
+/// [`vtmux_client::attach::Sys::reexec`]: the exec, unless [`CAUGHT`]
+/// holds another signal than `carried` once the signals are blocked.
+fn reexec(
+    command: &mut std::process::Command,
+    raw: bool,
+    carried: Option<i32>,
+) -> vtmux_client::attach::Unexeced {
+    late_hook();
+    let err =
+        vtmux_server::sys::signal::exec_unless(command, raw, move || last_caught() == carried);
+    if last_caught() == carried {
+        vtmux_client::attach::Unexeced::Failed(err)
+    } else {
+        vtmux_client::attach::Unexeced::Caught
+    }
+}
+
+/// [`REEXEC_SIGNAL_HOOK`]'s `<sig>-late`: once [`caught`] has been read
+/// for the re-exec, before its exec.
+fn late_hook() {
+    if let Some(sig) = std::env::var(REEXEC_SIGNAL_HOOK)
+        .ok()
+        .and_then(|v| signal_named(v.strip_suffix("-late")?))
+    {
+        let _ = signal_hook::low_level::raise(sig);
+    }
+}
 
 /// Attached: the client's own handlers, installed just before, take
 /// over from these. A SIGTERM or SIGHUP delivered before now is the
@@ -235,7 +263,9 @@ pub fn ready() {
 /// A test hook read from the client's environment
 /// (`crates/vtmux/tests/upgrade.rs`): `TERM` or `HUP`, raised once a live
 /// upgrade's re-exec is decided, the attach's handlers gone (a signal
-/// that once left the client attached after the exec); `TERM-reattach`
+/// that once left the client attached after the exec); `TERM-late` or
+/// `HUP-late`, raised once that signal has been read for the exec, before
+/// the exec (one that left the client attached too); `TERM-reattach`
 /// or `HUP-reattach`, raised in the image it execs, before its `Hello`;
 /// `<sig>-start` (`TERM`, `HUP`, `INT`, `USR1`, `USR2`), raised in that
 /// image once it has taken the terminal over (`Handed::take_over`) and
@@ -249,7 +279,7 @@ fn reexec_hook(reattach: bool) {
     };
     let sig = match value.strip_suffix("-reattach") {
         Some(name) if reattach => signal_named(name),
-        None if !reattach && !value.ends_with("-start") => signal_named(&value),
+        None if !reattach => signal_named(&value),
         _ => None,
     };
     if let Some(sig) = sig {

@@ -67,12 +67,25 @@ pub struct Sys {
     /// if one came: read last thing before a live upgrade's re-exec, which
     /// would discard it, so the new image is told to end for it.
     pub caught: fn() -> Option<i32>,
-    /// `exec` of the command with the signals the new image catches
-    /// blocked across it, for a terminal handed over raw: the new image
-    /// lets them in once its handlers are in, and its settings back are
-    /// safe from their default actions. Returns only if the exec fails,
-    /// the signals let in again.
-    pub exec_blocked: fn(&mut std::process::Command) -> io::Error,
+    /// A live upgrade's re-exec: `exec` of the command unless the binary
+    /// has caught a SIGTERM or SIGHUP other than `carried` (what
+    /// [`Self::caught`] gave for the command) since, checked with the
+    /// signals blocked just before the `execve`. With `raw` (the terminal
+    /// handed over raw) they stay blocked across it: the new image lets
+    /// them in once its handlers are in, and its settings back are safe
+    /// from their default actions. Returns only if the exec did not
+    /// happen, the signals let in again.
+    pub reexec: fn(&mut std::process::Command, raw: bool, carried: Option<i32>) -> Unexeced,
+}
+
+/// Why [`Sys::reexec`] returned.
+#[derive(Debug)]
+pub enum Unexeced {
+    /// A SIGTERM or SIGHUP came after [`Sys::caught`] was read: read it
+    /// again, and exec with it.
+    Caught,
+    /// The exec failed.
+    Failed(io::Error),
 }
 
 /// A SIGTERM or SIGHUP the binary caught before the attach's handlers.
@@ -193,39 +206,46 @@ pub fn exec(shell: &Path, command: impl AsRef<std::ffi::OsStr>, login: bool) -> 
 /// attached tmux client leaves for it (client.c `client_signal`), so the
 /// new image is told in [`REATTACH_SIGNAL_ENV`] and detaches for it as
 /// soon as it is back. One the attach sent `Detach` for already is
-/// carried too: the server may have read the notice's exec first. Only
-/// the few instructions of the exec itself are left, and in the new
-/// image those before its first handlers, where the signal's default
-/// action ends the process, as it does a tmux client starting up; with
-/// the terminal handed over raw, not even those: the signals are blocked
-/// across the exec ([`Sys::exec_blocked`]) until the new image has its
-/// handlers, so none ends it with the terminal still raw.
+/// carried too: the server may have read the notice's exec first. One
+/// caught after `caught` was read stops the exec ([`Sys::reexec`] checks,
+/// the signals blocked) and is carried by the next try. One after that
+/// check is pending: with the terminal handed over raw, blocked across
+/// the exec until the new image has its handlers, so none ends it with
+/// the terminal still raw; otherwise it takes its default action, in this
+/// image or the new one before its first handlers, and ends the client,
+/// as it does a tmux client starting up.
 #[must_use]
 fn reexec(binary: &Path, token: &str, how: &Reattach, sys: Sys, raw: Option<RawTty>) -> i32 {
     use std::os::unix::process::CommandExt;
-    let mut command = std::process::Command::new(binary);
-    command
-        .arg0(&how.argv0)
-        .arg(REATTACH_FLAG)
-        .arg(&how.socket)
-        .env(REATTACH_TOKEN_ENV, token);
-    if how.login {
-        command.env(REATTACH_LOGIN_ENV, "1");
-    }
-    match (sys.caught)() {
-        Some(SIGTERM) => {
-            command.env(REATTACH_SIGNAL_ENV, "TERM");
+    let handed = raw.as_ref().map(RawTty::hand_over);
+    // A command a try: each `exec` adds its check to the command.
+    let err = loop {
+        let mut command = std::process::Command::new(binary);
+        command
+            .arg0(&how.argv0)
+            .arg(REATTACH_FLAG)
+            .arg(&how.socket)
+            .env(REATTACH_TOKEN_ENV, token);
+        if how.login {
+            command.env(REATTACH_LOGIN_ENV, "1");
         }
-        Some(SIGHUP) => {
-            command.env(REATTACH_SIGNAL_ENV, "HUP");
+        if let Some(handed) = &handed {
+            command.env(REATTACH_TTY_ENV, handed);
         }
-        _ => {}
-    }
-    let err = if let Some(raw) = &raw {
-        command.env(REATTACH_TTY_ENV, raw.hand_over());
-        (sys.exec_blocked)(&mut command)
-    } else {
-        command.exec()
+        let carried = (sys.caught)();
+        match carried {
+            Some(SIGTERM) => {
+                command.env(REATTACH_SIGNAL_ENV, "TERM");
+            }
+            Some(SIGHUP) => {
+                command.env(REATTACH_SIGNAL_ENV, "HUP");
+            }
+            _ => {}
+        }
+        match (sys.reexec)(&mut command, raw.is_some(), carried) {
+            Unexeced::Caught => {}
+            Unexeced::Failed(err) => break err,
+        }
     };
     drop(raw);
     crate::say_err(&format!(
