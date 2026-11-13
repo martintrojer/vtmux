@@ -17,6 +17,18 @@ Add the version's section to `CHANGELOG.md`, and the release page's text to `doc
 
 Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v<version>` (`v3.8-rc1`) locally, then push the tag `v<version>`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64; glibc and static musl) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it (the gnu tarball on a glibc host, the default there; the musl one on a musl host or with `[matching=musl]`, for hosts the gnu build won't run on: musl has no NSS, so sssd/LDAP users without nscd may not resolve). A musl tarball builds the same way (`rustup target add x86_64-unknown-linux-musl`; `zig cc` links it); ci.yml's `musl` jobs build both musl tarballs on every push, so a broken static link fails before the tag.
 
+## For packagers
+
+What a distribution package or a security review needs to know. vtmux has no distro packages yet.
+
+- **Sources.** The GitHub release's source archive for the tag, or the crates on crates.io (`cargo vendor` works on either). The release's tarballs are built by `.github/workflows/release.yml` with `scripts/release-tarball.sh` and listed with their SHA-256 in the release's `SHA256SUMS`.
+- **Build.** Rust as pinned in `rust-toolchain.toml` (with the platform's linker) and Zig 0.17 (`mise.toml`), plus curl, tar and git (the build script checks for them). The build script of `vtmux-ghostty-vt-sys` builds libghostty-vt from its release tarballs. Without network, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` to local copies of `libghostty-vt-1.0.1.tar.gz` and `libghostty-vt-1.0.1-deps.tar.gz`: their SHA-256s are pinned in `build.rs` and checked before anything is extracted, and Zig builds with `--system` on the deps tarball, so it fetches nothing (`third_party/libghostty-rs/VENDOR.md`).
+- **libghostty-vt is bundled.** vtmux links its own copy statically, with 43 local patches, so it cannot use a distribution's `libghostty-vt.so.1`: some patches add C API the soname 1 library lacks, others change what existing calls return. `VENDOR.md` lists every patch and why. A libghostty-vt security fix reaches vtmux as a release with a new pin.
+- **Licences.** vtmux is ISC (`LICENSE`). The vendored bindings are MIT (libghostty-rs's `LICENSE`), Ghostty is MIT (`third_party/libghostty-rs/libghostty-vt-sys/LICENSE-ghostty`). The Zig packages in the deps tarball carry their own licences; there is no full inventory yet.
+- **Outputs.** One binary, `vtmux`; it behaves as tmux when invoked as `tmux` (a symlink), which a package may ship or leave to the user. The static musl tarballs have no NSS: user names from sssd or LDAP need nscd.
+- **Security posture.** `SECURITY.md`: the socket and server-access model, what a live upgrade writes, the `unsafe` code (86 first-party blocks, all in `crates/vtmux-server/src/sys/` and `crates/vtmux-vt`), no external audit. Most of the code is written by AI agents under one maintainer (`docs/HOW-IT-WAS-BUILT.md`); the checks it passes are tmux's own regress suite and the oracle scenarios recorded from tmux 3.8.
+- **Tests.** The suites compare vtmux against a reference tmux 3.8 build (`cargo xtask ref-tmux`, which needs libevent and ncurses headers) and need no network once the Ghostty tarballs and that build are local.
+
 ## crates.io
 
 Eight crates, published in this order, each after the crates it depends on:
