@@ -246,3 +246,64 @@ fn a_tmux_client_meeting_a_vtmux_server_leaves_it_serving() {
         assert!(!messages.contains(theirs), "{theirs}: {messages}");
     }
 }
+
+/// The server's pid, stopped (SIGSTOP) until dropped (SIGCONT), so a
+/// failing test never leaves it stopped.
+struct Stopped(rustix::process::Pid);
+
+impl Stopped {
+    fn new(w: &World) -> Self {
+        let out = w.run(&w.server, &[], &["display", "-p", "#{pid}"]);
+        let pid: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+        Self(pid)
+    }
+}
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        let _ = rustix::process::kill_process(self.0, rustix::process::Signal::CONT);
+    }
+}
+
+/// `args` run by vtmux as `tmux` in the background: its output once it
+/// ends (within [`LIMIT`]).
+fn in_background(w: &World, args: &[&str]) -> std::thread::JoinHandle<Option<Output>> {
+    let mut cmd = w.command(&w.vtmux_as_tmux(), &[], args);
+    std::thread::spawn(move || common::output_within(&mut cmd, LIMIT))
+}
+
+/// A vtmux server that says nothing for longer than the client's 200 ms
+/// (a command that waits, a server stopped for a while, also past the
+/// probe's 2 s) is still a vtmux server to its client: the probe is
+/// dropped or gives up, and the client gets the server's real answer.
+#[test]
+fn a_vtmux_server_slow_to_answer_is_never_taken_for_tmux() {
+    let w = World::new(true);
+    // A command that waits for a second (`wait-for`), then is let go.
+    let waiting = in_background(&w, &["wait-for", "go"]);
+    std::thread::sleep(Duration::from_secs(1));
+    let out = w.run(&w.server, &[], &["wait-for", "-S", "go"]);
+    assert!(out.status.success(), "{out:?}");
+    let out = waiting
+        .join()
+        .unwrap()
+        .expect("wait-for ends once signalled");
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "", "wait-for");
+    assert_eq!(out.status.code(), Some(0), "wait-for");
+    // A server stopped while a client connects: for 1 s (it drops the
+    // probe once it runs again) and for 3 s (the probe gives up first).
+    for secs in [1, 3] {
+        let stopped = Stopped::new(&w);
+        let ls = in_background(&w, &["ls", "-F", "#{session_name}"]);
+        std::thread::sleep(Duration::from_secs(secs));
+        drop(stopped);
+        let out = ls.join().unwrap().expect("ls ends once the server runs");
+        let ctx = format!("ls, server stopped {secs} s");
+        assert_eq!(String::from_utf8_lossy(&out.stderr), "", "{ctx}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "keep\n", "{ctx}");
+        assert_eq!(out.status.code(), Some(0), "{ctx}");
+    }
+    w.assert_undisturbed();
+}

@@ -28,8 +28,16 @@ use vtmux_core::protocol;
 /// dropped unread.
 const QUIET: Duration = Duration::from_millis(200);
 
-/// How long a probe waits for tmux's answer: tmux sends it on its next
-/// loop turn.
+/// How long a probe waits to be answered or dropped, writing and then
+/// reading. A tmux server answers on its next loop turn and a vtmux one
+/// drops the probe on its next read, both well under a millisecond: 2 s
+/// leaves room for a loaded host and stays short next to a command the
+/// user waits on. A server that does neither in time (stopped, wedged, a
+/// long upgrade's exec) is taken for vtmux: the client goes on to its
+/// relay at most 2 s later than without the probe, the server's answer
+/// waiting in the socket meanwhile, so nothing is lost. A tmux server that
+/// slow gets the old outcome, `server exited unexpectedly` or a client
+/// that waits.
 const PROBE_LIMIT: Duration = Duration::from_secs(2);
 
 /// tmux's `MSG_VERSION` (tmux-protocol.h).
