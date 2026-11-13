@@ -19,7 +19,7 @@ include = ["/src/**/*.rs", "/LICENSE"]
 vtmux-core.workspace = true
 vtmux-server.workspace = true
 vtmux-client.workspace = true
-rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "event"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "event", "net"] }
 signal-hook = "0.3"
 
 [[bin]]

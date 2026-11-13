@@ -4,6 +4,7 @@
 
 mod cli;
 mod files;
+mod foreign;
 mod signals;
 
 use std::ffi::OsString;
@@ -185,17 +186,18 @@ fn connect_error(path: &Path, e: io::Error) -> EdgeError {
 /// a concurrent starter to finish), connect again, and only then bind the
 /// socket (reporting `error creating`) and fork the daemon, which has this
 /// client as its first client on a socketpair (`proc_fork_and_daemon`).
-/// The lock is held until then.
+/// The lock is held until then. `true` with the stream when this client
+/// started the server.
 fn connect_or_start(
     path: &Path,
     start: bool,
     default_socket: bool,
     config: impl FnOnce() -> ServerConfig,
-) -> Result<UnixStream, EdgeError> {
+) -> Result<(UnixStream, bool), EdgeError> {
     let mut lock: Option<daemon::Lock> = None;
     loop {
         let err = match connect(path) {
-            Ok(s) => return Ok(s),
+            Ok(s) => return Ok((s, false)),
             Err(e) => e,
         };
         let absent = matches!(
@@ -253,7 +255,7 @@ fn connect_or_start(
         Ok(Forked::Parent) => {
             drop(listener);
             drop(theirs);
-            Ok(ours)
+            Ok((ours, true))
         }
         Err(io) => Err(EdgeError::CreateFailed {
             path: path.to_owned(),
@@ -390,7 +392,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         dry_run: false,
         binary: start_binary(&argv0),
     };
-    let mut stream = match connect_or_start(&path, start, default_socket, config) {
+    let (mut stream, started) = match connect_or_start(&path, start, default_socket, config) {
         Ok(s) => s,
         Err(e) => return edge_exit(&e),
     };
@@ -429,6 +431,12 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
     {
         restore_tty(saved_tio.as_ref());
         write_err(b"server exited unexpectedly");
+        return ExitCode::from(1);
+    }
+    // Run as `tmux`, the socket may be a real tmux server's (D20).
+    if !started && foreign::is_tmux(&stream, &path) {
+        restore_tty(saved_tio.as_ref());
+        write_err(foreign::message(&path).as_bytes());
         return ExitCode::from(1);
     }
     let how = Reattach {

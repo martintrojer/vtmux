@@ -84,7 +84,7 @@ Steps 2 and 3 are why the cursor doesn't jump under heavy output (D14): tmux for
 
 ## Commands and control mode
 
-A command client connects (starting the server if needed and allowed), sends `Hello` with argv, cwd, environment and tty, and gets `Stdout`, `Stderr` and `Exit` back. Those match tmux 3.8 byte for byte, exit codes and errors included: the edge scripts depend on.
+A command client connects (starting the server if needed and allowed), sends `Hello` with argv, cwd, environment and tty, and gets `Stdout`, `Stderr` and `Exit` back. Those match tmux 3.8 byte for byte, exit codes and errors included: the edge scripts depend on. Run as `tmux`, the socket may be a real tmux server's (D20): a client whose `Hello` is answered with tmux's `MSG_VERSION` says so; one that gets no answer within 200 ms, or a close, first asks the socket with an imsg header that a vtmux server drops unread (`foreign.rs`).
 
 Commands run on per-client queues (`cmdq.rs`, after `cmd-queue.c`), plus a global one for the config and `run-shell -b`. `wait-for`, file I/O, `run-shell` and `if-shell` hold their queue without blocking the loop. Jobs and `#()` formats are `/bin/sh -c` children read through the same loop (`jobs.rs`, `format_jobs.rs`).
 
