@@ -167,7 +167,7 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 ```
 
 - **Regress:** tmux's test suite from the 3.8 tag, unchanged, scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
-- **Oracle:** 447 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step (all but six scenarios, each skip with its reason in `oracle/upgrade-every-skip.toml`).
+- **Oracle:** 449 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step (all but six scenarios, each skip with its reason in `oracle/upgrade-every-skip.toml`).
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 - **Plugins:** tmux-resurrect and tmux-continuum (vendored in `compat/tmux-plugins`) save, kill the server and restore on both binaries; what was saved and what came back must match.
 

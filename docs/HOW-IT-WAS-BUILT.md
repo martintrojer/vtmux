@@ -21,9 +21,9 @@ Mechanically. The gate (`scripts/check.sh`) runs all of this:
 | Check | What it does | Today |
 |---|---|---|
 | tmux's own test suite | the `regress/` tests from the 3.8 tag, unchanged, against vtmux | 173 of 174 pass; the one expected failure is recorded with its reason (it greps tmux's debug log) |
-| Behaviour oracle | scenarios recorded once from real tmux 3.8 (CLI output, control-mode streams, screens compared as grids), replayed against vtmux | 447 scenarios; any mismatch fails the gate |
-| Live upgrade | the same replay with vtmux upgrading itself in place after every third step, and after every step for a short list of scenarios (in `scripts/check.sh`) | 441 of 447 run with upgrades; 6 skipped, each with the reason written down |
-| Divergences | every intended difference from tmux, with evidence, in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) | 75 entries: 22 tmux bugs not copied, 28 not done yet, 4 opt-in extensions, 9 other deliberate differences, 12 closed (vtmux matches tmux) |
+| Behaviour oracle | scenarios recorded once from real tmux 3.8 (CLI output, control-mode streams, screens compared as grids), replayed against vtmux | 449 scenarios; any mismatch fails the gate |
+| Live upgrade | the same replay with vtmux upgrading itself in place after every third step, and after every step for a short list of scenarios (in `scripts/check.sh`) | 443 of 449 run with upgrades; 6 skipped, each with the reason written down |
+| Divergences | every intended difference from tmux, with evidence, in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) | 76 entries: 22 tmux bugs not copied, 28 not done yet, 4 opt-in extensions, 10 other deliberate differences, 12 closed (vtmux matches tmux) |
 | Lints and unit tests | `cargo fmt`, `clippy` pedantic with warnings as errors, the workspace's tests | about 1,550 `#[test]`s |
 | CI | the whole gate | Linux on every push; macOS on main, pull requests and weekly |
 
@@ -36,7 +36,7 @@ From a checkout, after `mise trust && mise install`:
 ```sh
 mise exec -- cargo xtask ref-tmux        # build the reference tmux 3.8
 mise exec -- cargo xtask regress         # tmux's own tests against vtmux
-mise exec -- cargo xtask oracle replay   # the 447 scenarios
+mise exec -- cargo xtask oracle replay   # the 449 scenarios
 mise exec -- cargo xtask oracle replay --upgrade-every 3
 mise exec -- bash scripts/check.sh       # the whole gate, as CI runs it
 ```
@@ -44,12 +44,12 @@ mise exec -- bash scripts/check.sh       # the whole gate, as CI runs it
 ## How it's reviewed
 
 - **Every change:** a second model reviews it in a fresh context before it merges.
-- **Every milestone:** a review panel drawn from two model families. For 3.8-beta3: 63 findings, every critical and high one fixed and re-reviewed. Panel records with their evidence are in [docs/test-health/](test-health/).
+- **Every milestone:** a review panel drawn from two model families. For 3.8-rc1: 9 reviewers, no critical or high findings, every medium fixed and the code fixes re-reviewed. Panel records with their evidence are in [docs/test-health/](test-health/).
 
 ## Unsafe code
 
 - `unsafe` is allowed in two places only (D10): `crates/vtmux-vt`, the wrapper over libghostty-vt, and `crates/vtmux-server/src/sys/`, the OS calls. Every other crate is `#![forbid(unsafe_code)]`, and vtmux-server denies it outside `sys/`.
-- 83 `unsafe` blocks in all: 3 in vtmux-vt and 80 in `sys/` (most of them for ptys, live upgrade and user lookup).
+- 86 `unsafe` blocks in all: 3 in vtmux-vt and 83 in `sys/` (most of them for ptys, live upgrade and user lookup).
 - Below that sit the vendored Ghostty bindings (`third_party/libghostty-rs`, 417 `unsafe` blocks, mostly FFI calls) and Ghostty itself (Zig, the libghostty-vt 1.0.1 release) with 43 local patches, each explained in its `VENDOR.md`.
 
 ## Not done yet

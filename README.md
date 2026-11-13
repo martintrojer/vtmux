@@ -9,7 +9,7 @@ tmux 3.8, reimplemented in Rust on [libghostty-vt](https://github.com/ghostty-or
 vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them. Run as `tmux`, `tmux -V` prints `tmux 3.8`, so plugins' version checks pass.
 
 - **tmux's own test suite:** 173 of its 174 regress tests pass (1 expected failure, recorded).
-- **A behaviour oracle:** 447 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, all but six also with a live upgrade inserted between steps.
+- **A behaviour oracle:** 449 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, all but six also with a live upgrade inserted between steps.
 - **Your terminal:** Ghostty, WezTerm, foot, kitty, Alacritty, rio, xterm and some 2,600 other terminals from ncurses' database work out of the box, with the same features and colours tmux gives them, even on a host that has no terminfo entry for yours.
 - **Your setup:** a real `.tmux.conf` with TPM plugins gives the same options, key bindings, hooks and screens as tmux 3.8 on macOS and Linux.
 - **Restores across reboots:** tmux-resurrect and tmux-continuum work as with tmux.
@@ -103,7 +103,7 @@ ln -sf "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux (again afte
 
 On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"` (musl has no NSS: with sssd or LDAP users and no nscd, user names may not resolve). Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
-With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-beta.3`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
+With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-rc.1`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
 Run as `vtmux`, it sits next to your tmux with its own sockets.
 
@@ -113,7 +113,7 @@ Run as `vtmux`, it sits next to your tmux with its own sockets.
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI, no session save and restore of its own: only what tmux and its plugins can't do.
 
-**Status:** beta ([3.8-beta3](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
+**Status:** release candidate ([3.8-rc1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md).
 
 [How it was built](https://github.com/martintrojer/vtmux/blob/main/docs/HOW-IT-WAS-BUILT.md): agents, tmux 3.8 as the spec, and the checks.
 

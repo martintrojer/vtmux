@@ -36,10 +36,10 @@ The same as tmux 3.8's: the server trusts its own user, and everyone who can tal
 
 | Where | `unsafe` blocks |
 |---|---|
-| `crates/vtmux-server/src/sys/` (ptys, signals, live upgrade, user lookup) | 80 |
+| `crates/vtmux-server/src/sys/` (ptys, signals, live upgrade, user lookup) | 83 |
 | `crates/vtmux-vt` (the wrapper over libghostty-vt) | 3 |
 | Every other crate | 0: `#![forbid(unsafe_code)]`; vtmux-server denies it outside `sys/` |
-| **In all** | **83** |
+| **In all** | **86** |
 
 Below that: the vendored Ghostty bindings (`third_party/libghostty-rs`, 417 blocks, mostly FFI calls) and Ghostty itself (Zig) with 43 local patches, each explained in its `VENDOR.md`.
 
