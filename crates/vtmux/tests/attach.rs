@@ -6401,12 +6401,6 @@ fn application_escape_mode_follows_the_appesc_feature() {
     });
 }
 
-/// `server_client_reset_state` with a window menu (server-client.c:
-/// 2201-2203, menu.c:633-634): the menu's screen gives the modes, all
-/// motion when it takes the mouse (opened by a mouse event or with -M),
-/// none when it does not, whatever `mouse` is; `mouse on` then adds
-/// button mode (server-client.c:2294-2308) but not, under a menu, the
-/// panes' all-motion.
 /// `server_client_reset_state` (server-client.c:2197-2209, 2294-2308) takes
 /// the modes from `wp->screen`, which is the mode's own screen while a pane
 /// is in copy mode, a tree or the clock (`window_pane_set_mode`), and a
@@ -6508,6 +6502,12 @@ fn a_terminal_reply_that_adds_capabilities_writes_the_modes() {
     });
 }
 
+/// `server_client_reset_state` with a window menu (server-client.c:
+/// 2201-2203, menu.c:633-634): the menu's screen gives the modes, all
+/// motion when it takes the mouse (opened by a mouse event or with -M),
+/// none when it does not, whatever `mouse` is; `mouse on` then adds
+/// button mode (server-client.c:2294-2308) but not, under a menu, the
+/// panes' all-motion.
 #[test]
 fn outer_mouse_modes_under_a_menu() {
     let seen = par::map(&bins(), 2, |bin| {
