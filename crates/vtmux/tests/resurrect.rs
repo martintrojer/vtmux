@@ -30,10 +30,10 @@ fn plugins() -> Option<PathBuf> {
     let found = dir.join("tmux-resurrect/scripts/save.sh").exists()
         && dir.join("tmux-continuum/continuum.tmux").exists();
     if !found {
-        eprintln!(
-            "SKIP: tmux-resurrect or tmux-continuum missing in {}",
+        common::skip(&format!(
+            "tmux-resurrect or tmux-continuum missing in {}",
             dir.display()
-        );
+        ));
         return None;
     }
     Some(dir.canonicalize().unwrap())

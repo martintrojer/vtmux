@@ -193,6 +193,28 @@ pub fn reap_dead_owners(prefix: &str) {
     });
 }
 
+/// Skip the calling test, loudly, when what it needs is missing (a skip is
+/// not a pass, AGENTS.md *Gates*): `SKIP: <test>: <why>` goes straight to
+/// stderr, past libtest's capture of `eprintln!`, so a plain `cargo test`
+/// shows it, and is appended to the file `VTMUX_TEST_SKIPS` names, the
+/// list `scripts/check.sh` prints and counts at its end. The caller
+/// returns.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn skip(why: &str) {
+    use std::io::Write as _;
+    let test = std::thread::current().name().unwrap_or("?").to_owned();
+    let line = format!("SKIP: {test}: {why}\n");
+    let _ = std::io::stderr().write_all(line.as_bytes());
+    if let Some(list) = std::env::var_os("VTMUX_TEST_SKIPS") {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&list)
+            .and_then(|mut f| f.write_all(line.as_bytes()))
+            .unwrap_or_else(|e| panic!("VTMUX_TEST_SKIPS {}: {e}", Path::new(&list).display()));
+    }
+}
+
 /// How long a wait for a state lasts: it only ends a hang.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub const HANG: Duration = Duration::from_secs(20);

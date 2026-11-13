@@ -14,7 +14,7 @@ Add the version's section to `CHANGELOG.md`, and the release page's text to `doc
 
 ## GitHub release
 
-Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v<version>` (`v3.8-rc1`) locally, then push the tag `v<version>`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64; glibc and static musl) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it (the gnu tarball on a glibc host, the default there; the musl one on a musl host or with `[matching=musl]`, for hosts the gnu build won't run on: musl has no NSS, so sssd/LDAP users without nscd may not resolve). A musl tarball builds the same way (`rustup target add x86_64-unknown-linux-musl`; `zig cc` links it).
+Run `scripts/release-tarball.sh x86_64-unknown-linux-gnu v<version>` (`v3.8-rc1`) locally, then push the tag `v<version>`: `.github/workflows/release.yml` builds the tarballs for Linux (x86_64, aarch64; glibc and static musl) and macOS (Apple silicon) and publishes the release with `docs/release-notes/<version>.md` (else the tag's CHANGELOG section) as its notes. `mise use -g github:martintrojer/vtmux` installs from it (the gnu tarball on a glibc host, the default there; the musl one on a musl host or with `[matching=musl]`, for hosts the gnu build won't run on: musl has no NSS, so sssd/LDAP users without nscd may not resolve). A musl tarball builds the same way (`rustup target add x86_64-unknown-linux-musl`; `zig cc` links it); ci.yml's `musl` jobs build both musl tarballs on every push, so a broken static link fails before the tag.
 
 ## crates.io
 

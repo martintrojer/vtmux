@@ -11,8 +11,11 @@
 # `check.sh` runs them all; `check.sh --only test,regress` the ones named
 # (CI runs each stage as a job of its own, .github/workflows/ci.yml, so CI
 # and the local gate run the same commands); `check.sh --list` prints them.
-# VTMUX_CHECK_HARNESS=0 without `--only` runs lint and test only. Whatever
-# the stages, a run reaps leftovers first and ends with the socket guard.
+# VTMUX_CHECK_HARNESS=0 without `--only` runs lint and test only (no
+# regress, replays or ghostty-zig). Whatever the stages, a run reaps
+# leftovers first and ends with the socket guard and the list of the tests
+# that skipped themselves for want of what they need (`common::skip`: a
+# skip is not a pass).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 all_stages="lint test regress replay replay-upgrade-3 replay-upgrade-1 ghostty-zig"
@@ -88,6 +91,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 bash scripts/socket-guard.sh record "$sockets_before"
+# Where a test that skips itself says so (crates/vtmux/tests/common, `skip`).
+export VTMUX_TEST_SKIPS="$logs/skips"
 # The published Ghostty fork is outside the workspace, including its tests.
 ghostty_manifest=third_party/libghostty-rs/libghostty-vt/Cargo.toml
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
@@ -102,7 +107,9 @@ if want lint; then
   # release build's libc (x86_64-unknown-linux-musl: the libc crate lacks
   # some glibc wrappers there). Skipped where the target isn't installed
   # (`rustup target add aarch64-apple-darwin x86_64-unknown-linux-musl` /
-  # x86_64-unknown-linux-gnu).
+  # x86_64-unknown-linux-gnu), except in GitHub's Linux lint job, which
+  # installs both: there a missing one (the toolchain rustup runs is not
+  # the one the setup action gave the targets) fails.
   case "$(uname -s)" in
   Linux) others="aarch64-apple-darwin x86_64-unknown-linux-musl" ;;
   *) others=x86_64-unknown-linux-gnu ;;
@@ -110,6 +117,9 @@ if want lint; then
   for other in $others; do
     if rustup target list --installed 2>/dev/null | grep -qx "$other"; then
       cargo check --workspace --all-targets --exclude xtask --target "$other"
+    elif [ "${GITHUB_ACTIONS:-}" = true ] && [ "$(uname -s)" = Linux ]; then
+      echo "check: no $other target installed for $(rustup show active-toolchain 2>&1)" >&2
+      exit 1
     else
       echo "check: no $other target installed: its type-check skipped"
     fi
@@ -224,4 +234,8 @@ if [ "$parallel" = 1 ]; then
   fi
 fi
 bash scripts/socket-guard.sh verify "$sockets_before"
+if [ -s "$VTMUX_TEST_SKIPS" ]; then
+  echo "check: $(wc -l <"$VTMUX_TEST_SKIPS" | tr -d ' ') test(s) skipped (not passed):"
+  sort "$VTMUX_TEST_SKIPS"
+fi
 echo "check: passed:${stages}"

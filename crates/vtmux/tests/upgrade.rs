@@ -3488,6 +3488,29 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
     assert_eq!(history(), "209978 27 90050");
 }
 
+/// `VTMUX_BETA3_BINARY`, a 3.8-beta3 vtmux: the release binary
+/// (`scripts/fetch-beta3.sh` downloads it; CI's test jobs set it so), or a
+/// build of its commit, 034e438a. Unset, the test is skipped (and says so,
+/// [`common::skip`]); set to a path that is not a vtmux 3.8-beta3, it fails.
+fn beta3() -> Option<PathBuf> {
+    let Some(path) = std::env::var_os("VTMUX_BETA3_BINARY") else {
+        common::skip("VTMUX_BETA3_BINARY unset (scripts/fetch-beta3.sh)");
+        return None;
+    };
+    let path = PathBuf::from(path);
+    let out = Command::new(&path).arg("-V").output();
+    let version = out
+        .as_ref()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    assert_eq!(
+        version.as_deref().ok(),
+        Some("vtmux 3.8-beta3\n"),
+        "VTMUX_BETA3_BINARY {}: {out:?}",
+        path.display()
+    );
+    Some(path)
+}
+
 /// A downgrade onto 3.8-beta3 (`VTMUX_BETA3_BINARY`), a build from before
 /// a client's terminal is handed over raw: this build's client gives the
 /// terminal its settings back before it re-executes as beta3 (beta3's dry
@@ -3495,10 +3518,8 @@ fn a_downgrade_under_an_editor_keeps_the_history_it_hides() {
 /// which takes the terminal as it finds it for the user's, leaves it
 /// cooked when it detaches. Handed over raw, it would leave it raw.
 #[test]
-#[ignore = "needs VTMUX_BETA3_BINARY, a 3.8-beta3 vtmux"]
 fn a_downgrade_to_beta3_leaves_the_terminal_cooked_after_the_detach() {
-    let beta3 =
-        PathBuf::from(std::env::var_os("VTMUX_BETA3_BINARY").expect("VTMUX_BETA3_BINARY is set"));
+    let Some(beta3) = beta3() else { return };
     let world = World::new();
     world.populate(&[]);
     let mut attached = Attached::new(&world, "a");
@@ -3526,11 +3547,9 @@ fn a_downgrade_to_beta3_leaves_the_terminal_cooked_after_the_detach() {
 /// kept), lets the guarded pane's program exit as any pane's and writes
 /// nothing to the checkpoint directory.
 #[test]
-#[ignore = "needs VTMUX_BETA3_BINARY, a 3.8-beta3 vtmux"]
 #[expect(clippy::too_many_lines, reason = "three upgrades in a row")]
 fn a_beta3_server_upgrades_onto_this_build_and_back() {
-    let beta3 =
-        PathBuf::from(std::env::var_os("VTMUX_BETA3_BINARY").expect("VTMUX_BETA3_BINARY is set"));
+    let Some(beta3) = beta3() else { return };
     let world = World::new();
     *world.client.lock().unwrap() = beta3.clone();
     let shown = |pane: &str, word: &str| {
@@ -3650,6 +3669,19 @@ fn a_beta3_server_upgrades_onto_this_build_and_back() {
     rustix::process::kill_process(raw, rustix::process::Signal::TERM).unwrap();
     wait("the guarded pane closed", || {
         world.run(&["lsp", "-t", "r", "-F", "#{pane_index}"]) == "0\n"
+    });
+    // The pane beta3 restored is an ordinary dead pane: `respawn-pane`
+    // runs a program in it (cmd-respawn-pane.c, cmd_respawn_pane_exec),
+    // which takes keys.
+    world.run(&["respawn-pane", "-t", "r:0.0", "cat", "-"]);
+    wait("the respawned pane", || dead("r:0.0") == "0\n");
+    world.run(&["send-keys", "-t", "r:0.0", "respawned", "Enter"]);
+    wait("the respawned program's echo", || {
+        world
+            .run(&["capture-pane", "-p", "-t", "r:0.0"])
+            .matches("respawned")
+            .count()
+            == 2
     });
     let before = state_now();
 

@@ -46,6 +46,13 @@ jobs:
           # The macOS type-check, for the pushes no macOS job runs on, and
           # the static release build's libc.
           targets: ${{ startsWith(matrix.stage, 'lint') && 'aarch64-apple-darwin,x86_64-unknown-linux-musl' || '' }}
+      # The live-upgrade tests from and back to 3.8-beta3 need its release
+      # binary; without VTMUX_BETA3_BINARY they skip (and say so).
+      - name: vtmux 3.8-beta3 for the upgrade tests
+        if: matrix.stage == 'test'
+        run: |
+          bin=$(bash scripts/fetch-beta3.sh)
+          echo "VTMUX_BETA3_BINARY=$bin" >>"$GITHUB_ENV"
       - name: check.sh --only ${{ matrix.stage }}
         run: bash scripts/check.sh --only ${{ matrix.stage }}
       # A regress failure names target/regress/logs/<test>.log: keep it.
@@ -57,17 +64,44 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The static release builds, as release.yml makes them (musl, linked by
+  # `zig cc`): a broken musl link fails here, not at a tag. The lint stage
+  # only type-checks x86_64 musl.
+  musl:
+    name: linux (${{ matrix.target }} release build)
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          reference-tmux: "false"
+          cache-key: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
+      - name: release-tarball.sh ${{ matrix.target }}
+        run: bash scripts/release-tarball.sh ${{ matrix.target }}
+
   # The Linux gate's one result: what the merge waits on.
   check:
     if: always() && github.event_name != 'schedule'
-    needs: linux
+    needs: [linux, musl]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every Linux stage passed
+      - name: Every Linux stage and release build passed
         env:
           RESULT: ${{ needs.linux.result }}
-        run: test "$RESULT" = success
+          MUSL: ${{ needs.musl.result }}
+        run: test "$RESULT" = success && test "$MUSL" = success
 
   # macOS: the same stages, but GitHub's macOS runners are slower and
   # scarcer, so they run only where it pays: main (after the merge, not in
@@ -92,6 +126,13 @@ jobs:
         with:
           reference-tmux: ${{ !startsWith(matrix.stage, 'lint') }}
           cache-key: ${{ startsWith(matrix.stage, 'lint') && 'lint' || (startsWith(matrix.stage, 'regress') || startsWith(matrix.stage, 'replay-')) && 'replay' || matrix.stage }}
+      # The live-upgrade tests from and back to 3.8-beta3 need its release
+      # binary; without VTMUX_BETA3_BINARY they skip (and say so).
+      - name: vtmux 3.8-beta3 for the upgrade tests
+        if: matrix.stage == 'test'
+        run: |
+          bin=$(bash scripts/fetch-beta3.sh)
+          echo "VTMUX_BETA3_BINARY=$bin" >>"$GITHUB_ENV"
       - name: check.sh --only ${{ matrix.stage }}
         run: bash scripts/check.sh --only ${{ matrix.stage }}
       - uses: actions/upload-artifact@v4

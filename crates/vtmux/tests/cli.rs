@@ -1641,10 +1641,10 @@ fn limit_server_forks(w: &World, n: Option<u64>) {
 
 /// `RLIMIT_NPROC` binds no root process: the fork would succeed.
 #[cfg(target_os = "linux")]
-fn forks_can_be_limited(name: &str) -> bool {
+fn forks_can_be_limited() -> bool {
     let root = rustix::process::geteuid().is_root();
     if root {
-        eprintln!("{name}: SKIP: root ignores RLIMIT_NPROC");
+        common::skip("root ignores RLIMIT_NPROC");
     }
     !root
 }
@@ -1655,7 +1655,7 @@ fn forks_can_be_limited(name: &str) -> bool {
 #[cfg(target_os = "linux")]
 #[test]
 fn spawn_failures_say_fork_failed() {
-    if !forks_can_be_limited("spawn_failures_say_fork_failed") {
+    if !forks_can_be_limited() {
         return;
     }
     compare("spawn_failures_say_fork_failed", |w| {
@@ -1679,7 +1679,7 @@ fn spawn_failures_say_fork_failed() {
 #[cfg(target_os = "linux")]
 #[test]
 fn failed_respawn_keeps_the_pane() {
-    if !forks_can_be_limited("failed_respawn_keeps_the_pane") {
+    if !forks_can_be_limited() {
         return;
     }
     let panes = [

@@ -26,9 +26,19 @@ runs:
       with:
         version: ${{ inputs.zig-version }}
         use-cache: false
+    # The Rust of rust-toolchain.toml, the one rustup runs in the repo: a
+    # second pin here could drift from it, and the targets below would go
+    # to a toolchain cargo never uses.
+    - name: Rust version (rust-toolchain.toml)
+      id: rust
+      shell: bash
+      run: |
+        channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+        test -n "$channel"
+        echo "channel=$channel" >>"$GITHUB_OUTPUT"
     - uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: 1.99.1
+        toolchain: ${{ steps.rust.outputs.channel }}
         components: rustfmt, clippy
         targets: ${{ inputs.targets }}
     - uses: Swatinem/rust-cache@v2
