@@ -2,8 +2,9 @@
 # Ghostty's own Zig tests on the tree vtmux builds: the libghostty-vt source
 # the sys crate's build script unpacked and patched (OUT_DIR/ghostty-src,
 # libghostty-vt-sys/patches), or the GHOSTTY_SOURCE_DIR tree. The filters are
-# the modules the patches change (the terminal core, its C API, kitty
-# graphics, Unicode) and every test a patch adds ("vtmux" in its name): an
+# the modules the patches change (the terminal core, its styles, snapshot
+# and compression, its C API, kitty graphics, Unicode) and every test a
+# patch adds ("vtmux" in its name): an
 # upstream test a patch breaks fails here, not only once someone runs the
 # suite by hand. Debug, as upstream runs it (some tests need its safety
 # checks). check.sh's `ghostty-zig` stage.
@@ -36,7 +37,8 @@ system=()
 if [ -n "$deps" ] && [ -d "$deps" ]; then system=(--system "$deps"); fi
 filters=()
 for f in terminal.Terminal. terminal.PageList. terminal.Screen. terminal.page. \
-  terminal.stream terminal.formatter. terminal.c. terminal.kitty. unicode. vtmux; do
+  terminal.stream terminal.formatter. terminal.style. terminal.snapshot. \
+  terminal.compress. terminal.c. terminal.kitty. unicode. vtmux; do
   filters+=("-Dtest-filter=$f")
 done
 cache="$target/ghostty-zig-tests"

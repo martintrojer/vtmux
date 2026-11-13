@@ -3015,6 +3015,46 @@ mod tests {
         }
     }
 
+    /// ECH short of the whole line keeps a soft-wrapped line wrapped
+    /// (screen.c `screen_write_clearcharacter`, grid.c `grid_clear`: only
+    /// `grid_clear_lines`, a clear of the whole line, touches the flag), so
+    /// a wider pane joins it again (Ghostty patch 0047); ECH over the whole
+    /// line from its start empties it. Expected: tmux 3.8 (oracle
+    /// `ech_keeps_a_wrapped_line_wrapped`).
+    #[test]
+    fn ech_keeps_a_wrapped_line_wrapped() {
+        let capture_with = |t: &PaneTerm, join, flags| {
+            let opts = CaptureOpts {
+                join,
+                flags,
+                ..Default::default()
+            };
+            String::from_utf8_lossy(&capture(t, opts)).into_owned()
+        };
+        let mut t = PaneTerm::new(30, 4, 100);
+        t.feed(b"abcdefghijklmnopqrstuvwxyz0123456789\r\nend\x1b[1;1H\x1b[2C\x1b[X");
+        assert!(
+            capture_with(&t, false, true).starts_with("W ab defghijklmnopqrstuvwxyz0123\n"),
+            "{}",
+            capture_with(&t, false, true)
+        );
+        assert!(
+            capture_with(&t, true, false)
+                .starts_with("ab defghijklmnopqrstuvwxyz0123456789\nend\n")
+        );
+        t.resize(40, 4);
+        assert!(
+            capture_with(&t, false, false)
+                .starts_with("ab defghijklmnopqrstuvwxyz0123456789\nend\n"),
+            "{}",
+            capture_with(&t, false, false)
+        );
+        // From column 0 over the whole line: grid_clear_lines.
+        let mut t = PaneTerm::new(30, 4, 100);
+        t.feed(b"abcdefghijklmnopqrstuvwxyz0123456789\r\nend\x1b[1;1H\x1b[30X");
+        assert!(capture_with(&t, false, true).starts_with("- \n- 456789\n"));
+    }
+
     /// The screen saved under the alternate one keeps each line's
     /// `cellused` (`screen_alternate_on` copies the lines whole), so
     /// `capture-pane -a -J` (and `-T`) ends a line where a capture of the

@@ -1,0 +1,28 @@
+name = "ech_keeps_a_wrapped_line_wrapped"
+size = [40, 8]
+# ECH (screen_write_clearcharacter, grid.c grid_clear) touches a line's
+# GRID_LINE_WRAPPED only when it clears the whole line from column 0
+# (grid_clear_lines): a soft-wrapped line erased in part, to its end or
+# not, stays wrapped, so -J joins it, -F flags it W and a wider pane joins
+# it again. `a`: ECH 1 inside the line; `b`: ECH from column 5 past the
+# end; `c`: ECH over the whole line from column 0, which empties it.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[2C\\033[X'; tmux wait-for -S a; exec cat"] },
+  { wait_for = "a" },
+  { run = ["new", "-d", "-s", "b", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;5H\\033[40X'; tmux wait-for -S b; exec cat"] },
+  { wait_for = "b" },
+  { run = ["new", "-d", "-s", "c", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[30X'; tmux wait-for -S c; exec cat"] },
+  { wait_for = "c" },
+  { run = ["capture-pane", "-p", "-F", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-J", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-F", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-J", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-F", "-t", "c:"] },
+  { run = ["resize-window", "-x", "40", "-t", "a:"] },
+  { run = ["resize-window", "-x", "40", "-t", "b:"] },
+  { run = ["resize-window", "-x", "40", "-t", "c:"] },
+  { run = ["capture-pane", "-p", "-F", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-J", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-F", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-F", "-t", "c:"] },
+]

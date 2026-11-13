@@ -122,11 +122,12 @@ with the patch that changes the behaviour: "eraseLine on a blank row keeps
 it blank" and "scrollClear skips blank rows and stops at a spacer" (0029),
 "manifest describes the frozen style layout" (0010), "Terminal: tabClear
 single" (0002: the tab's mark makes the row dirty, the clear itself does
-not); "C header types are all in the type registry" skips `GhosttyVtmux*`
+not), three "eraseChars" tests (0047: a partial ECH keeps the wrap); "C header types are all in the type registry" skips `GhosttyVtmux*`
 and `GhosttyUnicodeWidthRange` (0007). `check.sh`'s `ghostty-zig` stage
 (`scripts/ghostty-zig-tests.sh`) runs the suite's tests of the modules the
-patches change on the patched tree, in Debug: 4341 of 4367 pass and 26
-skip. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
+patches change on the patched tree (the terminal core, its styles,
+snapshot and compression, the C API, kitty graphics, Unicode), in Debug:
+4777 of 4805 pass and 28 skip, 102 s with Zig's global cache warm. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
 -Dapp-runtime=none --system <deps>`) passes too, but for "image load:
 temporary file outside directory prefix is rejected" when the tree is
 under `/tmp`, which Ghostty trusts as a temporary directory (it fails so on
@@ -155,7 +156,7 @@ the changes outside them. Each patch has its note under its theme.
 
 | theme | patches | what and why | upstreamable |
 |---|---|---|---|
-| [Grid semantics](#grid-semantics) | 0011, 0013, 0014, 0016, 0025, 0026, 0028, 0029, 0031, 0034, 0037, 0045, 0046 | tmux's line model in Ghostty's grid: `GRID_LINE_WRAPPED` as grid.c `grid_clear_lines` and screen-write.c `screen_write_linefeed` keep it, `cellused` per line (grid.c `struct grid_line`), the cursor past the last column (screen-write.c `screen_write_cell`), DECAWM, `hscrolled`, a region scroll into history (grid-view.c `grid_view_scroll_region_up`), the alternate screen (screen.c `screen_alternate_on`), DECALN (`screen_write_alignmenttest`), the line flags (grid.c `grid_extended_cell`) and the cells a line keeps past a narrower width (`grid_reflow_move`). `capture-pane`, formats and copy mode read tmux's grid; scripts parse them. | no |
+| [Grid semantics](#grid-semantics) | 0011, 0013, 0014, 0016, 0025, 0026, 0028, 0029, 0031, 0034, 0037, 0045, 0046, 0047 | tmux's line model in Ghostty's grid: `GRID_LINE_WRAPPED` as grid.c `grid_clear_lines` and screen-write.c `screen_write_linefeed` keep it, `cellused` per line (grid.c `struct grid_line`), the cursor past the last column (screen-write.c `screen_write_cell`), DECAWM, `hscrolled`, a region scroll into history (grid-view.c `grid_view_scroll_region_up`), the alternate screen (screen.c `screen_alternate_on`), DECALN (`screen_write_alignmenttest`), the line flags (grid.c `grid_extended_cell`) and the cells a line keeps past a narrower width (`grid_reflow_move`). `capture-pane`, formats and copy mode read tmux's grid; scripts parse them. | no |
 | [Reflow](#reflow) | 0012, 0015, 0019, 0020, 0023, 0024, 0039 | A resize reflows lines as grid.c `grid_reflow` does: blank continuations stay lines (`grid_reflow_join`), a tab costs its width and its padding cells and a wide character splits from its padding (`grid_reflow_split`), a wrapped row joins by its used cells, the cursor at a line's end goes to the end of its cells (`grid_wrap_position`), line flags survive the bulk copy, and a cell that fails for lack of room is written again whole. | partly (0019, a bug fix) |
 | [Widths and clusters](#widths-and-clusters) | 0007, 0008, 0009, 0021, 0027, 0041 | tmux's character widths and clusters: width overrides (utf8.c `utf8_update_width_cache`, the `codepoint-widths` option), a zero-width character joined to the cell before as screen-write.c `screen_write_combine` does, C1 controls as zero-width (wcwidth -1), REP of the last character whatever its width (input.c `ictx->last`), tmux's clustering rules, and the process-wide options safe to set while another thread prints. | partly (0041; 0008 and 0009 as options) |
 | [Memory and pages](#memory-and-pages) | 0003, 0004, 0035, 0040 | Memory a pane does not use is not touched: a resize does not fault in blank rows, compression goes in bounded steps from vtmux's idle loop, a whole-page clone copies the page's memory, and a grid reference is checked against its page before a native read. vtmux keeps hundreds of idle panes and their history. | yes |
@@ -740,6 +741,21 @@ the changes outside them. Each patch has its note under its theme.
   header, which drops them. 1.0.1 alone loses the cells (the oracle
   scenario fails 8 steps without the patch). Not an upstream candidate
   (tmux's model).
+- `patches/0047-ech-keeps-wrap.patch` (`Terminal.zig` `eraseChars`): ECH
+  keeps the row's soft wrap unless it clears the whole row from column 0.
+  tmux's ECH (`screen_write_clearcharacter`) is `grid_clear`, which leaves
+  `GRID_LINE_WRAPPED` alone; only a clear of the whole line
+  (`grid_clear_lines`, which 0013 already empties the row for) drops it.
+  Upstream unwrapped the row on any ECH, so a line erased in part split in
+  two on a wider pane and `capture-pane -J` broke it. Upstream tests
+  changed: "eraseChars resets wrap" (the row stays wrapped; a whole-row
+  ECH unwraps it), "eraseChars wide char wrap boundary conditions" (the
+  erased row still joins the next) and "eraseChars on a blank row keeps it
+  blank" (the wrap flag stays). Rust `vtmux-vt`
+  `ech_keeps_a_wrapped_line_wrapped` and oracle
+  `ech_keeps_a_wrapped_line_wrapped` (ECH inside the line, past its end,
+  over the whole line; `-F`, `-J`, then 40 columns) fail without it. Not an
+  upstream candidate (tmux's model).
 
 ### Reflow
 

@@ -1,0 +1,340 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "ech_keeps_a_wrapped_line_wrapped",
+  "inputs": {
+    "name": "ech_keeps_a_wrapped_line_wrapped",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "30",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[2C\\033[X'; tmux wait-for -S a; exec cat"
+        ]
+      },
+      {
+        "wait_for": "a"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-x",
+          "30",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;5H\\033[40X'; tmux wait-for -S b; exec cat"
+        ]
+      },
+      {
+        "wait_for": "b"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "-x",
+          "30",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[30X'; tmux wait-for -S c; exec cat"
+        ]
+      },
+      {
+        "wait_for": "c"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "c:"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-x",
+          "40",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-x",
+          "40",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-x",
+          "40",
+          "-t",
+          "c:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-F",
+          "-t",
+          "c:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "W ab defghijklmnopqrstuvwxyz0123\n- 456789\n- end\n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab defghijklmnopqrstuvwxyz0123456789\nend\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "W abcd\n- 456789\n- end\n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcd                          456789\nend\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "- \n- 456789\n- end\n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "- ab defghijklmnopqrstuvwxyz0123456789\n- end\n- \n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab defghijklmnopqrstuvwxyz0123456789\nend\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "- abcd                          456789\n- end\n- \n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "- \n- 456789\n- end\n- \n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

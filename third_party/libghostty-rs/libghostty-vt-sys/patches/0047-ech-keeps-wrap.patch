@@ -1,0 +1,71 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 4dc85db..c6e11b9 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -5170,8 +5170,12 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+     self.screens.active.splitCellBoundary(self.screens.active.cursor.x);
+     self.screens.active.splitCellBoundary(self.screens.active.cursor.x + count);
+ 
+-    // Reset our row's soft-wrap.
+-    self.screens.active.cursorResetWrap();
++    // vtmux: tmux's ECH (screen_write_clearcharacter, grid_clear) keeps
++    // the line's GRID_LINE_WRAPPED; only one over the whole line from its
++    // start (grid_clear_lines, below) unwraps it.
++    if (self.screens.active.cursor.x == 0 and count >= self.cols) {
++        self.screens.active.cursorResetWrap();
++    }
+ 
+     // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
+     // is emptied (cellused 0) and the line above unwrapped.
+@@ -12476,9 +12480,11 @@ test "Terminal: eraseChars resets wrap" {
+     t.eraseChars(1);
+ 
+     {
++        // vtmux: a partial ECH keeps the row wrapped, as tmux's grid_clear
++        // does (reference tmux 3.8: `capture-pane -pF` shows the line W).
+         const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
+         const row = list_cell.row;
+-        try testing.expect(!row.wrap);
++        try testing.expect(row.wrap);
+     }
+ 
+     try t.print('X');
+@@ -12488,6 +12494,15 @@ test "Terminal: eraseChars resets wrap" {
+         defer testing.allocator.free(str);
+         try testing.expectEqualStrings("XBCDE\n123", str);
+     }
++
++    // vtmux: ECH over the whole row from its start is tmux's
++    // grid_clear_lines, which empties the line, its wrap flag too.
++    t.setCursorPos(1, 1);
++    t.eraseChars(5);
++    {
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
++        try testing.expect(!list_cell.row.wrap);
++    }
+ }
+ 
+ test "Terminal: eraseChars preserves background sgr" {
+@@ -12690,9 +12705,11 @@ test "Terminal: eraseChars wide char wrap boundary conditions" {
+         defer testing.allocator.free(str);
+         try testing.expectEqualStrings(".......\n    cde\n😀......", str);
+ 
++        // vtmux: the erased row keeps its wrap flag (tmux's grid_clear),
++        // so it still joins the next one.
+         const unwrapped = try t.plainStringUnwrapped(alloc);
+         defer testing.allocator.free(unwrapped);
+-        try testing.expectEqualStrings(".......     cde\n😀......", unwrapped);
++        try testing.expectEqualStrings(".......     cde😀......", unwrapped);
+     }
+ }
+ 
+@@ -20088,7 +20105,8 @@ test "Terminal: eraseChars on a blank row keeps it blank" {
+     t.eraseChars(2);
+     try testing.expect(testActiveRow(&t, 1).blank);
+     try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 1 } }));
+-    try testing.expect(!testActiveRow(&t, 1).wrap);
++    // vtmux: a partial ECH keeps the row's wrap flag (tmux's grid_clear).
++    try testing.expect(testActiveRow(&t, 1).wrap);
+     try t.screens.active.cursor.page_pin.node.page().verifyIntegrity(alloc);
+ }
+ 
