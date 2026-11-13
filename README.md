@@ -35,7 +35,8 @@ Each one is off until you turn it on, and invisible to scripts while off. Put th
 Swap the binary under a running server. Shells, editors and builds keep running, clients stay attached, scrollback comes along. 10 panes with 100k lines each move in under a second.
 
 ```sh
-mise upgrade vtmux
+mise upgrade github:martintrojer/vtmux
+ln -sf "$(mise which vtmux)" ~/.local/bin/tmux   # if you linked it as tmux
 tmux vtmux-upgrade -b "$(mise which vtmux)"
 ```
 
@@ -93,14 +94,14 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'
 
 ## Install
 
-With [mise](https://mise.jdx.dev) (macOS on Apple silicon, Linux x86_64 and aarch64):
+With [mise](https://mise.jdx.dev) (macOS 15 or later on Apple silicon, Linux x86_64 and aarch64):
 
 ```sh
 mise use -g github:martintrojer/vtmux
-ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
+ln -sf "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux (again after each upgrade)
 ```
 
-On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"`. Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
+On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"` (musl has no NSS: with sssd or LDAP users and no nscd, user names may not resolve). Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
 With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-beta.3`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 

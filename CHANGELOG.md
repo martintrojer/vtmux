@@ -15,7 +15,16 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 
 ### Fixed
 
+- **A blinking cursor on Ghostty.** The cursor no longer starts blinking after a live upgrade, after a program resets the cursor style (`ESC[0 q`, which Ghostty draws blinking), or while a program's synchronized update sets a blinking cursor and steadies it again. Each frame shows the cursor as tmux shows it after a redraw (`cnorm`, then the style), the reset after an upgrade goes before `cnorm`, and a pane in synchronized output leaves the terminal's cursor as it is, as in tmux.
+- **Mouse in copy mode with `mouse off`.** A pane in copy mode, a tree or the clock no longer keeps the terminal reporting the mouse its program asked for, so a drag selects in the terminal, as in tmux; with `mouse on`, such a pane no longer holds the terminal in all-motion mode.
 - Live upgrade: typing (or pasting) into an attached client while the server upgrades no longer loses input. A client flooded with input read its terminal until it ran dry and so never saw the upgrade notice; the new server gave up on it after 10 s and dropped the rest of what was typed. The client now reads the server between reads of the terminal, and keeps the terminal raw across its re-exec, so keys typed in those milliseconds are no longer cooked by the terminal (Enter as a newline, Ctrl-C, Ctrl-U). Upgrading onto a build from before this fix still gives the terminal its modes back before the exec.
+- A terminal whose reply adds capabilities its `TERM` lacks (Ghostty or foot under `TERM=vt100`) gets the mouse mode, cursor style and cursor colour at once, as in tmux, not only once a pane changes them.
+- `capture-pane -J` (and `-T -N`) keeps a line's cells that were written then erased, as tmux does: tmux-resurrect's saved pane contents (`capture-pane -epJ`) now match tmux's, vim's screen included. tmux-resurrect's save and restore and tmux-continuum's auto-save and auto-restore are tested against tmux 3.8.
+- A client that goes away as it attaches (killed, or a SIGTERM as the attach completes) no longer crashes the server, and `client-detached` fires for it, as in tmux; before, on a loaded host, the hook was skipped, or the server died with every session.
+- `#{client_uid}` and `#{client_user}` name the client's own user, not the server's, as in tmux: `list-clients` shows `[user …]` for a client another user attached through `server-access`.
+- Live upgrade: a downgrade to 3.8-beta2 or 3.8-beta1 waits up to 5 s for the old binary's `-V`, not 1 s, so a loaded laptop or macOS checking the binary no longer gets it refused.
+- Commands answer while an attached client floods keys (a huge paste, a terminal that sends input without end): 13 ms in a release build, where tmux takes 24 ms. Before, each waited 1.8 s (4-6 s in a debug build), and a plugin's `tmux` calls stalled with it. The server reads a client's input 4 KB a loop turn, as tmux does, and writes keys to a pane in batches.
+- A line erased with a background colour and then narrowed keeps its coloured cells past the narrow width, as tmux does: widened again, the pane and `capture-pane -e` show them (`printf '\033[41m\033[K'`, 40 -> 30 -> 40 columns: red to column 40, not 30). They go into history with the line and through a live upgrade. DCH over a whole line (`\033[1;1H\033[<width>P`) empties it and unwraps the line above, as tmux does.
 
 ### Removed
 
@@ -26,19 +35,7 @@ vtmux's version is the tmux release it is tested against: `3.8-beta3` is the thi
 
 ### Changed
 
-- The engine is the libghostty-vt 1.0.1 release (tag `vt-1.0.1`), not a Ghostty commit: the build downloads its source and Zig packages from release.files.ghostty.org, checks their SHA-256 and builds with `zig build --system`, so Zig fetches nothing. Offline, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` to local copies. 41 vtmux patches on top; two of the old ones are in 1.0.1 already. Behaviour and live upgrade both ways with 3.8-beta3 are unchanged; agent panes and idle panes cost the same, and SGR-heavy output ran faster (86 against 64 MB/s, one run on a shared host).
-
-### Fixed
-
-- **A blinking cursor on Ghostty.** The cursor no longer starts blinking after a live upgrade, after a program resets the cursor style (`ESC[0 q`, which Ghostty draws blinking), or while a program's synchronized update sets a blinking cursor and steadies it again. Each frame shows the cursor as tmux shows it after a redraw (`cnorm`, then the style), the reset after an upgrade goes before `cnorm`, and a pane in synchronized output leaves the terminal's cursor as it is, as in tmux.
-- **Mouse in copy mode with `mouse off`.** A pane in copy mode, a tree or the clock no longer keeps the terminal reporting the mouse its program asked for, so a drag selects in the terminal, as in tmux; with `mouse on`, such a pane no longer holds the terminal in all-motion mode.
-- A terminal whose reply adds capabilities its `TERM` lacks (Ghostty or foot under `TERM=vt100`) gets the mouse mode, cursor style and cursor colour at once, as in tmux, not only once a pane changes them.
-- `capture-pane -J` (and `-T -N`) keeps a line's cells that were written then erased, as tmux does: tmux-resurrect's saved pane contents (`capture-pane -epJ`) now match tmux's, vim's screen included. tmux-resurrect's save and restore and tmux-continuum's auto-save and auto-restore are tested against tmux 3.8.
-- A client that goes away as it attaches (killed, or a SIGTERM as the attach completes) no longer crashes the server, and `client-detached` fires for it, as in tmux; before, on a loaded host, the hook was skipped, or the server died with every session.
-- `#{client_uid}` and `#{client_user}` name the client's own user, not the server's, as in tmux: `list-clients` shows `[user …]` for a client another user attached through `server-access`.
-- Live upgrade: a downgrade to 3.8-beta2 or 3.8-beta1 waits up to 5 s for the old binary's `-V`, not 1 s, so a loaded laptop or macOS checking the binary no longer gets it refused.
-- Commands answer while an attached client floods keys (a huge paste, a terminal that sends input without end): 13 ms in a release build, where tmux takes 24 ms. Before, each waited 1.8 s (4-6 s in a debug build), and a plugin's `tmux` calls stalled with it. The server reads a client's input 4 KB a loop turn, as tmux does, and writes keys to a pane in batches.
-- A line erased with a background colour and then narrowed keeps its coloured cells past the narrow width, as tmux does: widened again, the pane and `capture-pane -e` show them (`printf '\033[41m\033[K'`, 40 -> 30 -> 40 columns: red to column 40, not 30). They go into history with the line and through a live upgrade. DCH over a whole line (`\033[1;1H\033[<width>P`) empties it and unwraps the line above, as tmux does.
+- The engine is the libghostty-vt 1.0.1 release (tag `vt-1.0.1`), not a Ghostty commit: the build downloads its source and Zig packages from release.files.ghostty.org, checks their SHA-256 and builds with `zig build --system`, so Zig fetches nothing. Offline, set `GHOSTTY_SOURCE_TARBALL` and `GHOSTTY_DEPS_TARBALL` to local copies. 42 vtmux patches on top; two of the old ones are in 1.0.1 already. Behaviour and live upgrade both ways with 3.8-beta3 are unchanged; agent panes and idle panes cost the same, and SGR-heavy output ran faster (86 against 64 MB/s, one run on a shared host).
 
 ## 3.8-beta3
 

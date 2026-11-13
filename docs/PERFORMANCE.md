@@ -107,7 +107,7 @@ tmux's cost is parsing, so it grows with panes; vtmux parses cheaper and pays pe
 | start with the owner's config until it answers | 102 ms | 101 ms | 0.99x |
 | a command while a script pipes commands into `-C` | 18.7 ms | 6.5 ms | 0.35x |
 
-vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not. A client typing a flood (a huge paste) is read 4 KB a loop turn, as tmux reads it, so commands still answer; before, they waited 1.8 s.
+vtmux is 0.06 ms behind with no flood (median of five runs; 0.25-0.33 ms with the host's load). The server's part is one composed row and a diff of the cells that changed; the rest is the attached client, which relays each key and frame where tmux's server owns the terminal itself. Next to a flood vtmux is ahead, because flood output is paced and a key's echo is not. A client typing a flood (a huge paste) is read 4 KB a loop turn, as tmux reads it, so commands still answer.
 
 ## Control mode
 

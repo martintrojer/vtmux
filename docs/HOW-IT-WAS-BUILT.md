@@ -6,7 +6,7 @@ AI agents write most of vtmux. One human runs them and owns the result. tmux 3.8
 
 - **Agents write the code.** pi agents work as a crew: tasks, workers in their own worktrees, reviews, merges. One human, Martin Trojer, runs the crew, makes the design decisions and decides what lands.
 - **Design first.** Every design decision is written down and numbered (D1–D31, D33). A change that contradicts one updates the decision first.
-- **The size of it.** 1,235 commits from 29 October to 12 November 2026; about 211k lines of Rust, tests included.
+- **The size of it.** Over 1,200 commits from 29 October to 12 November 2026; over 200k lines of Rust, tests included ([counts](test-health/2026-11-12-counts.md)).
 
 ## tmux 3.8 is the spec
 
@@ -24,7 +24,7 @@ Mechanically. The gate (`scripts/check.sh`) runs all of this:
 | Behaviour oracle | scenarios recorded once from real tmux 3.8 (CLI output, control-mode streams, screens compared as grids), replayed against vtmux | 447 scenarios; any mismatch fails the gate |
 | Live upgrade | the same replay with vtmux upgrading itself in place after every third step, and after every step for a short list of scenarios (in `scripts/check.sh`) | 441 of 447 run with upgrades; 6 skipped, each with the reason written down |
 | Divergences | every intended difference from tmux, with evidence, in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) | 75 entries: 22 tmux bugs not copied, 28 not done yet, 4 opt-in extensions, 9 other deliberate differences, 12 closed (vtmux matches tmux) |
-| Lints and unit tests | `cargo fmt`, `clippy` pedantic with warnings as errors, the workspace's tests | 1,556 `#[test]`s |
+| Lints and unit tests | `cargo fmt`, `clippy` pedantic with warnings as errors, the workspace's tests | about 1,550 `#[test]`s |
 | CI | the whole gate | Linux on every push; macOS on main, pull requests and weekly |
 
 A behaviour fix lands with an oracle scenario or a regress test that proves it. A test that stops passing fails the gate, and so does one that starts passing while still marked as failing.
