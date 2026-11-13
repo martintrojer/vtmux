@@ -3134,6 +3134,56 @@ fn typing_echoes_while_the_dry_run_runs() {
     world.echo("a:w1", "after");
 }
 
+/// A dry run that exits 0 without its acknowledgement (a vtmux from
+/// before it) has its binary's `-V` asked, and the server serves on while
+/// that answers: typing echoes, a command is answered, and once `-V` says
+/// `vtmux 3.8-beta2` the upgrade goes through. (Before: the server's loop
+/// waited for `-V`, every client frozen for up to its 5 s, and a `-V`
+/// held that long was given up on.)
+#[test]
+fn typing_echoes_while_an_old_vtmux_answers_its_version() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.echo("a:w1", "before");
+    wait("the client's draw", || attached.screen().contains("before"));
+    let started = world.home.path().join("started");
+    let release = world.home.path().join("release");
+    // Held at most 20 s, so a failing run leaves no `-V` behind.
+    let binary = wrapper(
+        &world,
+        "vtmux-beta2",
+        &format!(
+            "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>&1 | grep -v '^vtmux-snapshot-checked ' >&2; \
+             exit 0;;\n-V) : >'{}'; i=0; while [ ! -e '{}' ] && [ $i -lt 400 ]; \
+             do sleep 0.05; i=$((i+1)); done; echo 'vtmux 3.8-beta2'; exit 0;;",
+            started.display(),
+            release.display()
+        ),
+    );
+    let path = world.run(&["display", "-p", "#{socket_path}"]);
+    *world.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
+    let pid = world.pid();
+    thread::scope(|scope| {
+        let asked = scope.spawn(|| world.upgrade_at(&binary));
+        wait("-V to be asked", || started.exists());
+        let at = attached.len();
+        attached.keys("during\r");
+        wait("the echo on the client", || {
+            attached.since(at).contains("during")
+        });
+        assert_eq!(world.run(&["display", "-p", "served"]), "served\n");
+        assert!(!asked.is_finished(), "-V is still answering");
+        std::fs::write(&release, "").unwrap();
+        assert_eq!(asked.join().unwrap(), Some(upgraded()));
+    });
+    assert_eq!(world.pid(), pid);
+    assert!(world.server_args().contains("--vtmux-resume"));
+    let shown = world.run(&["capture-pane", "-p", "-t", "a:w1"]);
+    assert_eq!(shown.matches("during").count(), 2, "{shown}");
+}
+
 /// `%output` payloads of pane `pane` in a control client's lines, octal
 /// escapes undone (control.c `control_append_data`), in order.
 fn output_of(lines: &[String], pane: &str) -> Vec<u8> {

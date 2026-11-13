@@ -84,13 +84,12 @@ pub const CHECKED: &str = "vtmux-snapshot-checked ";
 /// `/bin/echo -V` prints `-V`, a script nothing.
 pub const LEGACY_VERSIONS: &[&str] = &["vtmux 3.8-beta1", "vtmux 3.8-beta2"];
 
-/// How long [`legacy_vtmux`] waits for `-V`: long enough for a loaded
-/// laptop, or macOS assessing a binary it has not seen run. The wait
-/// blocks the server's loop (it runs inside [`DryRun::poll`]): only a
-/// dry run that exited 0 without the acknowledgement pays it, a release
-/// before it answering in milliseconds, so the server freezes for the
-/// whole 5 s only for a program that is no vtmux, exits 0 on
-/// `--vtmux-check-snapshot` and then hangs on `-V`.
+/// How long a dry run that exited 0 without the acknowledgement waits
+/// for its binary's `-V` ([`DryRun`]): long enough for a loaded laptop,
+/// or macOS assessing a binary it has not seen run. The server serves on
+/// meanwhile ([`DryRun::poll`] looks, never waits); only its requester
+/// waits, and only on a binary that is no vtmux (a release before the
+/// acknowledgement answers in milliseconds).
 const VERSION_LIMIT: Duration = Duration::from_secs(5);
 
 /// The line a dry run of the stream whose body hashes to `digest` answers
@@ -355,8 +354,71 @@ pub struct DryRun {
     /// The [`acknowledgement`] of the snapshot it was given, `None` when
     /// that is no stream (nothing passes then).
     expect: Option<String>,
+    /// The binary's `-V`, asked once the dry run exited 0 without the
+    /// acknowledgement, with what the dry run said it takes (boxed: the
+    /// rare case, kept out of the size of every upgrade's state).
+    version: Option<Box<(Version, Checked)>>,
     /// How it went, once it has ended and been reaped.
     outcome: Option<Result<Checked, String>>,
+}
+
+/// `<binary> -V`, run as `vtmux` (so a binary named `tmux` answers as
+/// vtmux too), within [`VERSION_LIMIT`]: whether it names a release from
+/// before the acknowledgement ([`LEGACY_VERSIONS`]). Its answer is read
+/// once it has exited: a descendant that keeps its stdout open can't hold
+/// the wait.
+#[derive(Debug)]
+struct Version {
+    child: std::process::Child,
+    pid: libc::pid_t,
+    out: std::process::ChildStdout,
+    end: Instant,
+}
+
+impl Version {
+    /// `None` when it can't be started: no legacy vtmux.
+    fn start(binary: &Path) -> Option<Self> {
+        use std::os::unix::process::CommandExt as _;
+        let mut child = Command::new(binary)
+            .arg0("vtmux")
+            .arg("-V")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let out = child.stdout.take()?;
+        let pid = libc::pid_t::try_from(child.id()).ok()?;
+        Some(Self {
+            child,
+            pid,
+            out,
+            end: Instant::now() + VERSION_LIMIT,
+        })
+    }
+
+    /// Without waiting: `None` while it runs within its limit; once it
+    /// has exited, or at the limit (killed), whether it is a legacy vtmux:
+    /// exactly one of [`LEGACY_VERSIONS`] and a newline, status 0. Left
+    /// unreaped until then, as the dry run is ([`next_exited`]).
+    fn poll(&mut self) -> Option<bool> {
+        let ended = exited(self.pid).unwrap_or(true);
+        if !ended && Instant::now() < self.end {
+            return None;
+        }
+        if !ended {
+            let _ = self.child.kill();
+        }
+        let status = self.child.wait().ok();
+        if !ended || !status.is_some_and(|s| s.success()) {
+            return Some(false);
+        }
+        let said = read_answer(&mut self.out);
+        Some(said.is_some_and(|said| {
+            said.strip_suffix('\n')
+                .is_some_and(|v| LEGACY_VERSIONS.contains(&v))
+        }))
+    }
 }
 
 impl DryRun {
@@ -422,20 +484,25 @@ impl DryRun {
             end: Instant::now() + limit,
             limit,
             expect,
+            version: None,
             outcome: None,
         })
     }
 
-    /// The child's pid while it is not reaped, `None` after.
+    /// The child's pid while it is not reaped, then its binary's `-V`'s
+    /// while that runs; `None` after.
     #[must_use]
     pub fn pid(&self) -> Option<i32> {
-        self.outcome.is_none().then_some(self.pid)
+        if self.outcome.is_some() {
+            return None;
+        }
+        Some(self.version.as_ref().map_or(self.pid, |asked| asked.0.pid))
     }
 
     /// When it is given up on.
     #[must_use]
     pub fn deadline(&self) -> Instant {
-        self.end
+        self.version.as_ref().map_or(self.end, |asked| asked.0.end)
     }
 
     /// Without waiting: `None` while the child runs within its limit;
@@ -448,6 +515,19 @@ impl DryRun {
         if let Some(outcome) = &self.outcome {
             return Ok(Some(outcome.clone()));
         }
+        if let Some(asked) = &mut self.version {
+            let (version, checked) = &mut **asked;
+            let Some(legacy) = version.poll() else {
+                return Ok(None);
+            };
+            let outcome = if legacy {
+                Ok(*checked)
+            } else {
+                Err(self.not_vtmux())
+            };
+            self.outcome = Some(outcome.clone());
+            return Ok(Some(outcome));
+        }
         if let Some(e) = &mut self.err
             && !drain(e, &mut self.said)
         {
@@ -457,16 +537,27 @@ impl DryRun {
         if !ended && Instant::now() < self.end {
             return Ok(None);
         }
-        let outcome = self.finish(ended)?;
+        let Some(outcome) = self.finish(ended)? else {
+            return Ok(None);
+        };
         self.outcome = Some(outcome.clone());
         Ok(Some(outcome))
+    }
+
+    fn not_vtmux(&self) -> String {
+        format!(
+            "{} is not a vtmux that can take over: its {CHECK_FLAG} exited 0 \
+             without saying it read the snapshot, and its -V names no vtmux \
+             release from before that",
+            self.binary.display()
+        )
     }
 
     /// Wait at most `nap` for its stderr to have something or close (or
     /// just `nap` once that is closed).
     pub fn nap(&self, nap: Duration) {
-        let nap = nap.min(self.end.saturating_duration_since(Instant::now()));
-        match &self.err {
+        let nap = nap.min(self.deadline().saturating_duration_since(Instant::now()));
+        match self.err.as_ref().filter(|_| self.version.is_none()) {
             Some(e) => {
                 let mut fds = [rustix::event::PollFd::new(e, rustix::event::PollFlags::IN)];
                 let _ = rustix::event::poll(&mut fds, Some(&timespec(nap)));
@@ -476,16 +567,17 @@ impl DryRun {
     }
 
     /// Kill the group, reap the child; how it went (`ended`: by itself,
-    /// not at the limit).
-    fn finish(&mut self, ended: bool) -> io::Result<Result<Checked, String>> {
+    /// not at the limit), or `None` when its binary's `-V` decides, asked
+    /// now ([`Self::version`]).
+    fn finish(&mut self, ended: bool) -> io::Result<Option<Result<Checked, String>>> {
         self.kill();
         let status = self.child.wait()?;
         if !ended {
-            return Ok(Err(format!(
+            return Ok(Some(Err(format!(
                 "{} {CHECK_FLAG} took over {} s",
                 self.binary.display(),
                 self.limit.as_secs()
-            )));
+            ))));
         }
         if let Some(e) = &mut self.err {
             drain(e, &mut self.said);
@@ -497,29 +589,30 @@ impl DryRun {
                     .split_inclusive(|&b| b == b'\n')
                     .any(|l| l == want)
             };
-            // Only for a binary that does not acknowledge (rare: another
-            // program, or a downgrade), so the loop waits on its `-V`
-            // ([`VERSION_LIMIT`]) only then.
-            if !self.expect.as_deref().is_some_and(line) && !legacy_vtmux(&self.binary) {
-                return Ok(Err(format!(
-                    "{} is not a vtmux that can take over: its {CHECK_FLAG} exited 0 \
-                     without saying it read the snapshot, and its -V names no vtmux \
-                     release from before that",
-                    self.binary.display()
-                )));
-            }
-            return Ok(Ok(Checked {
+            let checked = Checked {
                 takes_socket: line(TAKES_SOCKET),
                 takes_raw_tty: line(TAKES_RAW_TTY),
-            }));
+            };
+            if self.expect.as_deref().is_some_and(line) {
+                return Ok(Some(Ok(checked)));
+            }
+            // A binary that does not acknowledge (rare: another program,
+            // or a downgrade): its `-V` decides, polled as the dry run was.
+            return Ok(match Version::start(&self.binary) {
+                Some(version) => {
+                    self.version = Some(Box::new((version, checked)));
+                    None
+                }
+                None => Some(Err(self.not_vtmux())),
+            });
         }
         let message = String::from_utf8_lossy(&self.said);
         let message = message.trim_end();
-        Ok(Err(if message.is_empty() {
+        Ok(Some(Err(if message.is_empty() {
             format!("{} {CHECK_FLAG} failed: {status}", self.binary.display())
         } else {
             message.to_owned()
-        }))
+        })))
     }
 
     /// SIGKILL to the child's process group.
@@ -533,7 +626,13 @@ impl DryRun {
 
 impl Drop for DryRun {
     fn drop(&mut self) {
-        if self.outcome.is_none() {
+        if self.outcome.is_some() {
+            return;
+        }
+        if let Some(asked) = &mut self.version {
+            let _ = asked.0.child.kill();
+            let _ = asked.0.child.wait();
+        } else {
             self.kill();
             let _ = self.child.wait();
         }
@@ -636,17 +735,6 @@ pub fn patch_stack(binary: &Path, limit: Duration) -> Option<String> {
         .then(|| hash.to_owned())
 }
 
-/// Whether `binary` is a vtmux from before the dry run's acknowledgement
-/// ([`CHECKED`]): its `-V`, run as `vtmux` within [`VERSION_LIMIT`], is
-/// exactly one of [`LEGACY_VERSIONS`] and a newline.
-fn legacy_vtmux(binary: &Path) -> bool {
-    use std::os::unix::process::CommandExt as _;
-    answer(Command::new(binary).arg0("vtmux").arg("-V"), VERSION_LIMIT).is_some_and(|said| {
-        said.strip_suffix('\n')
-            .is_some_and(|v| LEGACY_VERSIONS.contains(&v))
-    })
-}
-
 /// What `command` writes on stdout (its first 128 bytes) if it exits 0
 /// within `limit`; `None` when it can't be started, exits non-zero, writes
 /// what is not UTF-8 or takes longer (it is killed then). Read once it has
@@ -672,7 +760,12 @@ fn answer(command: &mut Command, limit: Duration) -> Option<String> {
         let _ = child.wait();
         return None;
     }
-    rustix::io::ioctl_fionbio(&out, true).ok()?;
+    read_answer(&mut out)
+}
+
+/// The first 128 bytes of what an exited child wrote on `out`, if UTF-8.
+fn read_answer(out: &mut std::process::ChildStdout) -> Option<String> {
+    rustix::io::ioctl_fionbio(&*out, true).ok()?;
     let mut said = [0; 128];
     let mut n = 0;
     while n < said.len() {
