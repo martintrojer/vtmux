@@ -1228,7 +1228,14 @@ impl Server {
         }
         self.send(old, &ServerMsg::Ready);
         if let Some(term) = term {
-            let rows = self.tty_size(old).map_or(24, |(_, r)| u32::from(r));
+            // The terminal's height now: a resize while the client
+            // re-executed is applied below, after the start, which scrolls
+            // the whole terminal (`tty_start_tty` uses `tty->sy`, the size
+            // the client reports).
+            let rows = match size {
+                Some((_, rows, ..)) => rows,
+                None => self.tty_size(old).map_or(24, |(_, r)| u32::from(r)),
+            };
             let clear = self.clear_on_attach();
             self.send(
                 old,

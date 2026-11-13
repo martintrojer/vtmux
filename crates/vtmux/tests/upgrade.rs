@@ -2900,6 +2900,96 @@ fn a_re_attach_without_the_handed_settings_still_takes_signals() {
     wait("the detach", || attached.exited().is_some());
 }
 
+/// A terminal resized while its client re-executes is started again at
+/// its new size: with `clear-on-attach` off, `tty_start_tty` sets the
+/// scroll region to the terminal's height, scrolls that many lines and
+/// one more into its history and leaves the cursor in row 1, column
+/// `rows` (`cup 0 sy-1`, terminfo's row first; tty.c:357-369, `tty->sy`
+/// the size the client reports), and the redraw fills the new size.
+/// (Before: the start used the height the image before knew, so on a
+/// terminal grown from 24 rows to 40 it scrolled only the top 24, left
+/// the scroll region at 24 rows and the cursor in column 24.) The new
+/// image is held in a wrapper while the terminal changes size.
+#[test]
+fn a_terminal_resized_while_its_client_re_executes_starts_at_its_new_size() {
+    let world = World::new();
+    world.populate(&[]);
+    world.run(&["set", "-g", "clear-on-attach", "off"]);
+    world.run(&["set", "-g", "status-right", "R"]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    let here = world.home.path().join("here");
+    let go = world.home.path().join("go");
+    // Held at most 20 s, so a failing run leaves no client behind.
+    let binary = wrapper(
+        &world,
+        "vtmux-held",
+        &format!(
+            "--vtmux-reattach) : >'{}'; i=0; while [ ! -e '{}' ] && [ $i -lt 400 ]; \
+             do sleep 0.05; i=$((i+1)); done;;",
+            here.display(),
+            go.display()
+        ),
+    );
+    let path = world.run(&["display", "-p", "#{socket_path}"]);
+    *world.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
+    let split = thread::scope(|scope| {
+        let asked = scope.spawn(|| world.upgrade_at(&binary));
+        wait("the client to re-execute", || here.exists());
+        // The image before wrote its teardown, the theme reports off last.
+        wait("the teardown", || {
+            attached.since(0).contains("\u{1b}[?2031l")
+        });
+        let split = attached.len();
+        attached.resize(100, 40);
+        std::fs::write(&go, "").unwrap();
+        assert_eq!(asked.join().unwrap(), Some(upgraded()));
+        split
+    });
+    wait("the terminal started again", || {
+        attached.since(split).contains("\u{1b}[?996n")
+    });
+    let bytes = attached.bytes.lock().unwrap().clone();
+    let start = find_from(&bytes, split, b"\x1b[?996n").unwrap() + b"\x1b[?996n".len();
+    let mut t = vtmux_vt::PaneTerm::new(80, 24, 1000);
+    t.feed(&bytes[..split]);
+    t.resize(100, 40);
+    t.feed(&bytes[split..start]);
+    assert_eq!(
+        t.cursor(),
+        (39, 0),
+        "started again at 40 rows: {:?}",
+        attached.since(split)
+    );
+    assert!(
+        attached
+            .since(split)
+            .contains("\u{1b}[1;40r\u{1b}[1;40H\u{1b}[41S"),
+        "the 40 rows scrolled"
+    );
+    wait_for(
+        "the client's size",
+        || world.run(&["lsc", "-F", "#{client_width}x#{client_height}"]),
+        |size| size == "100x40\n",
+    );
+    wait("the redraw at the new size", || {
+        let mut t = vtmux_vt::PaneTerm::new(80, 24, 1000);
+        let bytes = attached.bytes.lock().unwrap();
+        t.feed(&bytes[..split]);
+        t.resize(100, 40);
+        t.feed(&bytes[split..]);
+        let shown =
+            String::from_utf8_lossy(&vtmux_vt::capture(&t, vtmux_vt::CaptureOpts::default()))
+                .into_owned();
+        shown
+            .lines()
+            .nth(39)
+            .is_some_and(|l| l.starts_with("[a] ") && l.trim_end().ends_with('R'))
+    });
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.exited().is_some());
+}
+
 /// A terminal handed over with settings the new image can't read (a later
 /// build's form, here garbage) gets sane cooked ones back when the client
 /// leaves, never the raw ones it was handed.
