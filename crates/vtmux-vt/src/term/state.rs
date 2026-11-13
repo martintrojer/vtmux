@@ -423,6 +423,8 @@ pub struct FrozenRowState {
     /// (Ghostty patch 0034, [`RowState::TMUX_EXTENDED`]).
     pub kept_extended: bool,
     pub kept_hyperlink: bool,
+    /// tmux's `cellused` the row had (Ghostty patch 0045), 0 for none.
+    pub used: usize,
 }
 
 /// A cell of a [`FrozenRowState`], as `capture.rs` reads cells.

@@ -1009,6 +1009,7 @@ fn cell_text(row: &snap::Row, col: usize, c: &snap::Cell) -> String {
 fn frozen_out(r: &FrozenRowState) -> snap::Row {
     let mut row = snap::Row {
         wrapped: r.wrapped,
+        cells_used: u16::try_from(r.used).unwrap_or(u16::MAX),
         ..snap::Row::default()
     };
     for (col, c) in r.cells.iter().enumerate() {
@@ -1095,6 +1096,7 @@ fn frozen_in(row: &snap::Row) -> FrozenRowState {
         wrapped: row.wrapped,
         kept_extended,
         kept_hyperlink,
+        used: usize::from(row.cells_used),
     }
 }
 

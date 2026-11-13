@@ -1,0 +1,23 @@
+name = "capture_saved_and_mode_keep_erased_cells"
+size = [30, 6]
+# capture_join_keeps_erased_cells for -a and -M: the screen saved under the
+# alternate one and copy mode's copy keep each line's cellused
+# (grid_duplicate_lines copies the line whole, screen_alternate_on and
+# window_copy_clone_screen), so -J and -T end a line there as on the pane
+# (grid.c grid_string_cells), erased cells included. The first line of `a`
+# wraps; its second part is erased back to three cells.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\033[3D\\033[K\\r\\nabc       \\033[4G\\033[K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\nend\\033[?1049halt'; tmux wait-for -S a; exec cat"] },
+  { wait_for = "a" },
+  { run = ["capture-pane", "-p", "-a", "-J", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-a", "-e", "-J", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-a", "-T", "-N", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-a", "-T", "-t", "a:"] },
+  { run = ["new", "-d", "-s", "b", "-x", "30", "-y", "4", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\033[3D\\033[K\\r\\nabc       \\033[4G\\033[K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\n1\\r\\n2\\r\\nend'; tmux wait-for -S b; exec cat"] },
+  { wait_for = "b" },
+  { run = ["copy-mode", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-M", "-J", "-S", "-", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-M", "-e", "-J", "-S", "-", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-M", "-T", "-N", "-S", "-", "-t", "b:"] },
+  { run = ["capture-pane", "-p", "-M", "-T", "-S", "-", "-t", "b:"] },
+]

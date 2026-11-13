@@ -45,6 +45,10 @@ impl vtmux_vt::Lines for Grid {
         let (src, source) = (line.src?, self.source.as_deref()?);
         (line.row.get().is_none() && source.cols() == self.sx).then_some((source, src))
     }
+
+    fn used(&self, y: usize) -> usize {
+        self.lines.get(y).map_or(0, |line| self.cellused(line))
+    }
 }
 
 /// One line of the copy.
@@ -65,6 +69,9 @@ struct Line {
     /// The hyperlinks of a line restored from a snapshot (D27), by column:
     /// it has no entry copy to ask.
     links: Box<[(usize, String)]>,
+    /// tmux's `cellused` of a line restored from a snapshot, which has no
+    /// entry copy to ask ([`Grid::cellused`]).
+    used: Option<usize>,
 }
 
 impl Line {
@@ -171,7 +178,8 @@ impl Grid {
         let mut tail = Vec::new();
         if trim {
             loop {
-                let row = used_cells(copy.row(n - 1));
+                // tmux trims the lines whose cellused is 0.
+                let row = copy.used_row(n - 1);
                 if n <= hsize + 1 || !row.cells.is_empty() {
                     tail.push(row);
                     break;
@@ -244,6 +252,7 @@ impl Grid {
                 prompt: false,
                 output: false,
                 links: Box::default(),
+                used: None,
             }));
         for (y, mark) in src.line_marks() {
             if let Some(line) = lines_at(&mut self.lines, y, from) {
@@ -353,6 +362,7 @@ impl Grid {
                 let row = self.peek(y);
                 let mut out =
                     crate::server::snapshot::rows::row_out(&row, |x| self.hyperlink(x, y));
+                out.cells_used = u16::try_from(self.cellused(line)).unwrap_or(u16::MAX);
                 out.time = line.time;
                 let flags = if line.prompt { 0x8 } else { 0 } | if line.output { 0x40 } else { 0 };
                 if flags != 0 {
@@ -398,6 +408,7 @@ impl Grid {
                     prompt: flags & 0x8 != 0,
                     output: flags & 0x40 != 0,
                     links: links.into_boxed_slice(),
+                    used: Some(usize::from(r.cells_used)),
                 }
             })
             .collect();
@@ -423,6 +434,19 @@ impl Grid {
         self.line_row(line).cells.len()
     }
 
+    /// The line's tmux `cellused`, which `capture-pane -M -J` (and `-T`)
+    /// ends it at: the entry copy's row's own while the line is still that
+    /// row (read or not, the line need not be read), the one a snapshot
+    /// carried, else its cells (a reflowed line, view mode's), as
+    /// [`Grid::used`] counts them.
+    fn cellused(&self, line: &Line) -> usize {
+        match (line.used, line.src, self.source.as_deref()) {
+            (Some(used), _, _) => used,
+            (None, Some(src), Some(source)) => source.line_used(src),
+            _ => self.used(line),
+        }
+    }
+
     fn wrapped_line(&self, line: &Line) -> bool {
         self.line_row(line).wrapped
     }
@@ -433,8 +457,10 @@ impl Grid {
         for line in &mut lines {
             self.line_row(line);
             line.src = None;
-            // A reflowed line has no hyperlinks, restored or not.
+            // A reflowed line has no hyperlinks, restored or not, and
+            // counts its cells as its cellused.
             line.links = Box::default();
+            line.used = None;
         }
         self.lines = lines;
     }
@@ -887,5 +913,47 @@ pub(super) mod tests {
         assert_eq!(g.kept_lines(), g.last() + 1);
         assert_eq!(vtmux_vt::capture_lines(&g, 40, opts), captured);
         assert_eq!(captured, vtmux_vt::capture(&t, opts));
+    }
+
+    /// A copy keeps each line's `cellused` (`grid_duplicate_lines`), cells
+    /// written then erased included: `capture-pane -M -J` (and `-T`) ends
+    /// a line there, as on the pane, whether the line is still the entry
+    /// copy's or read, and copy mode -s trims only lines nothing wrote.
+    /// Expected: tmux 3.8 (oracle `capture_saved_and_mode_keep_erased_cells`).
+    #[test]
+    fn the_copy_keeps_cells_written_then_erased() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"abc       \x1b[4G\x1b[K\r\nabcdef\x1b[3D\x1b[2X\r\n1\r\n2\r\n3\r\nend\r\nxyz\x1b[1K\r\n");
+        let (g, _, _) = Grid::clone_of(&t, 20, 5, false);
+        for join in [true, false] {
+            let opts = vtmux_vt::CaptureOpts {
+                join,
+                used_only: !join,
+                keep_spaces: !join,
+                start: vtmux_vt::LineRef::Start,
+                ..vtmux_vt::CaptureOpts::default()
+            };
+            let want = "abc       \nabc  f\n1\n2\n3\nend\n   \n\n";
+            assert_eq!(String::from_utf8_lossy(&vtmux_vt::capture(&t, opts)), want);
+            assert_eq!(
+                String::from_utf8_lossy(&vtmux_vt::capture_lines(&g, 20, opts)),
+                want
+            );
+        }
+        assert_eq!(g.row(0).cells.len(), 10);
+        let opts = vtmux_vt::CaptureOpts {
+            join: true,
+            start: vtmux_vt::LineRef::Start,
+            ..vtmux_vt::CaptureOpts::default()
+        };
+        assert_eq!(
+            vtmux_vt::capture_lines(&g, 20, opts),
+            vtmux_vt::capture(&t, opts),
+            "read lines"
+        );
+        // The line erased from its start keeps its cellused: -s trims the
+        // empty line after it only.
+        let (trimmed, _, _) = Grid::clone_of(&t, 20, 5, true);
+        assert_eq!(trimmed.last(), g.last() - 1);
     }
 }

@@ -100,6 +100,21 @@ pub trait Lines {
     fn entry_row(&self, _y: usize) -> Option<(&ScreenCopy, usize)> {
         None
     }
+    /// Line `y`'s tmux `cellused`, 0 where none is kept: a capture without
+    /// `GRID_STRING_EMPTY_CELLS` (`-J`, `-T`) ends the line there or at its
+    /// text, whichever is further.
+    fn used(&self, _y: usize) -> usize {
+        0
+    }
+}
+
+/// A Ghostty row's tmux `cellused` (patches 0013 and 0045), 0 when it reads
+/// none.
+fn tmux_used(r: &GridRef<'_>) -> usize {
+    r.row()
+        .ok()
+        .and_then(|row| row.tmux_used().ok())
+        .map_or(0, usize::from)
 }
 
 /// Where a capture reads (cmd-capture-pane.c:265-291).
@@ -418,23 +433,21 @@ impl Source<'_> {
     }
 
     /// Line `y`'s tmux `cellused` as the row keeps it (Ghostty patches 0013
-    /// and 0045), 0 where none is kept (`-a`, a mode's screen): readers
-    /// take the larger of it and the line's text extent. `last` is the row
-    /// just read for it, as for [`Source::line_kept`].
+    /// and 0045): the saved screen and copy mode's copy keep it as the
+    /// pane's row had it (`grid_duplicate_lines` copies the line whole).
+    /// Readers take the larger of it and the line's text extent. `last` is
+    /// the row just read for it, as for [`Source::line_kept`].
     fn line_used(&self, y: usize, last: &LastRow<'_>) -> usize {
-        let Self::Pane(t, p) = self else { return 0 };
-        let used = |r: &GridRef<'_>| {
-            r.row()
-                .ok()
-                .and_then(|row| row.tmux_used().ok())
-                .map_or(0, usize::from)
-        };
-        match p.screen_row(y) {
-            None => 0,
-            Some((at, _)) => match last {
-                Some((from, row_ref)) if *from == at => used(row_ref),
-                _ => row_ref_at(&t.term, at).map_or(0, |r| used(&r)),
+        match self {
+            Self::Pane(t, p) => match p.screen_row(y) {
+                None => 0,
+                Some((at, _)) => match last {
+                    Some((from, row_ref)) if *from == at => tmux_used(row_ref),
+                    _ => row_ref_at(&t.term, at).map_or(0, |r| tmux_used(&r)),
+                },
             },
+            Self::Saved(rows, _) => rows.get(y).map_or(0, |r| r.used),
+            Self::Mode(l, _) => l.used(y),
         }
     }
 
@@ -1100,24 +1113,47 @@ impl ScreenCopy {
     /// Row `y` as [`PaneTerm::row`] gave it when the copy was taken.
     #[must_use]
     pub fn row(&self, y: usize) -> Row {
-        let (cells, wrapped) = self.row_cells(y, false);
+        let (cells, wrapped) = self.row_cells(y);
         Row {
             cells: to_cells(&cells, &self.links, self.alternate_at(y)),
             wrapped,
         }
     }
 
-    /// [`ScreenCopy::row`] without its trailing unused cells (blanks
-    /// nothing wrote with a colour, a link or the line-drawing set: tmux's
-    /// `cellused`), and no room kept for them.
+    /// [`ScreenCopy::row`] as long as tmux's `cellused`: without its
+    /// trailing unused cells (blanks nothing wrote with a colour, a link or
+    /// the line-drawing set), but with the blanks of cells written and then
+    /// erased within the line, which `cellused` still counts (grid.c
+    /// `grid_clear`), and no room kept past them.
     #[must_use]
     pub fn used_row(&self, y: usize) -> Row {
-        let (cells, wrapped) = self.row_cells(y, true);
-        let used = cells.iter().rposition(|c| !c.unused()).map_or(0, |x| x + 1);
+        let Some(row_ref) = self.screen_row(y).and_then(|at| self.row_ref(at)) else {
+            return Row::default();
+        };
+        let (mut cells, wrapped) = read_cells(&row_ref, self.cols, true);
+        let used = cells
+            .iter()
+            .rposition(|c| !c.unused())
+            .map_or(0, |x| x + 1)
+            .max(tmux_used(&row_ref).min(self.cols));
+        let blank = RowCell {
+            empty: true,
+            ..RowCell::default()
+        };
+        cells.resize(used, blank);
         Row {
-            cells: to_cells(&cells[..used], &self.links, self.alternate_at(y)),
+            cells: to_cells(&cells, &self.links, self.alternate_at(y)),
             wrapped,
         }
+    }
+
+    /// Row `y`'s tmux `cellused` ([`tmux_used`]), without reading its
+    /// cells.
+    #[must_use]
+    pub fn line_used(&self, y: usize) -> usize {
+        self.screen_row(y)
+            .and_then(|at| self.row_ref(at))
+            .map_or(0, |r| tmux_used(&r).min(self.cols))
     }
 
     /// Row `y` is a row of the alternate screen (history is the primary's).
@@ -1139,11 +1175,10 @@ impl ScreenCopy {
         Some(y + self.retained - self.hsize)
     }
 
-    /// The row's cells; with `used_only` they may stop after the last
-    /// cell Ghostty has anything in.
-    fn row_cells(&self, y: usize, used_only: bool) -> (Vec<RowCell>, bool) {
+    /// The row's cells.
+    fn row_cells(&self, y: usize) -> (Vec<RowCell>, bool) {
         match self.screen_row(y).and_then(|at| self.row_ref(at)) {
-            Some(row_ref) => read_cells(&row_ref, self.cols, used_only),
+            Some(row_ref) => read_cells(&row_ref, self.cols, false),
             None => (Vec::new(), false),
         }
     }
@@ -1365,6 +1400,8 @@ pub(crate) struct FrozenRow {
     len: usize,
     wrapped: bool,
     pub(crate) kept: LineKept,
+    /// tmux's `cellused` ([`tmux_used`]).
+    used: usize,
 }
 
 impl FrozenRow {
@@ -1377,9 +1414,9 @@ impl FrozenRow {
         last: &mut LastRow<'t>,
     ) -> Self {
         let (mut cells, wrapped) = read_screen_row_near(term, y, cols, last);
-        let kept = match last {
-            Some((at, row_ref)) if *at == y => ref_kept(row_ref),
-            _ => LineKept::default(),
+        let (kept, used) = match last {
+            Some((at, row_ref)) if *at == y => (ref_kept(row_ref), tmux_used(row_ref)),
+            _ => (LineKept::default(), 0),
         };
         let len = cells.len();
         while cells.last().is_some_and(RowCell::is_default_blank) {
@@ -1390,6 +1427,7 @@ impl FrozenRow {
             len,
             wrapped,
             kept,
+            used,
         }
     }
 
@@ -1422,6 +1460,7 @@ impl FrozenRow {
             wrapped: self.wrapped,
             kept_extended: self.kept.extended,
             kept_hyperlink: self.kept.hyperlink,
+            used: self.used,
         }
     }
 
@@ -1458,6 +1497,7 @@ impl FrozenRow {
                 extended: state.kept_extended,
                 hyperlink: state.kept_hyperlink,
             },
+            used: state.used,
         }
     }
 
@@ -2975,6 +3015,40 @@ mod tests {
         }
     }
 
+    /// The screen saved under the alternate one keeps each line's
+    /// `cellused` (`screen_alternate_on` copies the lines whole), so
+    /// `capture-pane -a -J` (and `-T`) ends a line where a capture of the
+    /// pane did before the alternate screen came up, also across a
+    /// snapshot. Expected: tmux 3.8 (oracle
+    /// `capture_saved_and_mode_keep_erased_cells`).
+    #[test]
+    fn the_saved_screen_keeps_cells_written_then_erased() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"abcdefghijklmnopqrstuvwxyz\x1b[3D\x1b[K\r\nabc       \x1b[4G\x1b[K\r\nxyz\x1b[1K\r\nend");
+        for join in [true, false] {
+            let opts = CaptureOpts {
+                join,
+                used_only: !join,
+                keep_spaces: !join,
+                ..Default::default()
+            };
+            let want = capture(&t, opts);
+            assert!(
+                String::from_utf8_lossy(&want).contains("\nabc       \n   \n"),
+                "{want:?}"
+            );
+            let mut alt = PaneTerm::new(20, 5, 100);
+            alt.feed(b"abcdefghijklmnopqrstuvwxyz\x1b[3D\x1b[K\r\nabc       \x1b[4G\x1b[K\r\nxyz\x1b[1K\r\nend\x1b[?1049halt");
+            assert_eq!(capture_alternate(&alt, opts).unwrap(), want, "join {join}");
+            let back = PaneTerm::import_state(&alt.export_state()).unwrap();
+            assert_eq!(
+                capture_alternate(&back, opts).unwrap(),
+                want,
+                "join {join}, restored"
+            );
+        }
+    }
+
     /// In insert mode tmux makes room before a wide character wraps, which
     /// clears the last cell (`screen_write_cell`, `grid_view_insert_cells`);
     /// a blank with only the pen's background, as a wrap scrolls in, is
@@ -3405,6 +3479,10 @@ mod tests {
 
         fn entry_row(&self, y: usize) -> Option<(&ScreenCopy, usize)> {
             self.entry.then_some((&self.copy, y))
+        }
+
+        fn used(&self, y: usize) -> usize {
+            self.copy.line_used(y)
         }
     }
 

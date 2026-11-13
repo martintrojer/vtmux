@@ -1,0 +1,268 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "capture_saved_and_mode_keep_erased_cells",
+  "inputs": {
+    "name": "capture_saved_and_mode_keep_erased_cells",
+    "size": [
+      30,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "30",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\033[3D\\033[K\\r\\nabc       \\033[4G\\033[K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\nend\\033[?1049halt'; tmux wait-for -S a; exec cat"
+        ]
+      },
+      {
+        "wait_for": "a"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-J",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-e",
+          "-J",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-T",
+          "-N",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-a",
+          "-T",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-x",
+          "30",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\033[3D\\033[K\\r\\nabc       \\033[4G\\033[K\\r\\nabcdef\\033[3D\\033[2X\\r\\n\\033[1mbold      \\033[m\\033[5G\\033[K\\r\\n1\\r\\n2\\r\\nend'; tmux wait-for -S b; exec cat"
+        ]
+      },
+      {
+        "wait_for": "b"
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-M",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-M",
+          "-e",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-M",
+          "-T",
+          "-N",
+          "-S",
+          "-",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-M",
+          "-T",
+          "-S",
+          "-",
+          "-t",
+          "b:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123456   \nabc       \nabc  f\nbold      \nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123456   \nabc       \nabc  f\n\u001b[1mbold\u001b[0m      \nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123\n456   \nabc       \nabc  f\nbold      \nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123\n456\nabc\nabc  f\nbold\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123456   \nabc       \nabc  f\nbold      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123456   \nabc       \nabc  f\n\u001b[1mbold\u001b[0m      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123\n456   \nabc       \nabc  f\nbold      \n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghijklmnopqrstuvwxyz0123\n456\nabc\nabc  f\nbold\n1\n2\nend\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
