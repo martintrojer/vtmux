@@ -32,25 +32,51 @@ pub fn reap(pid: Option<Pid>) {
 
 /// What `cmd` prints, or `None` when it has not finished within `limit` (it
 /// is killed): for a server that may not answer. Teardown must not wait on
-/// a server that is stopped or wedged.
+/// a server that is stopped or wedged. Finished means its output closed
+/// too: a process that keeps the command's stdout or stderr open after it
+/// exits (a daemon it started, a server it passed them to) makes `None`
+/// at `limit`, not a read that waits for ever.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn output_within(cmd: &mut Command, limit: Duration) -> Option<Output> {
+    use std::io::Read;
+    use std::thread::JoinHandle;
+
+    fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let _ = pipe.read_to_end(&mut all);
+            all
+        })
+    }
+
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    let stdout = drain(child.stdout.take()?);
+    let stderr = drain(child.stderr.take()?);
     let end = Instant::now() + limit;
-    while child.try_wait().ok()?.is_none() {
+    let mut status = None;
+    // A reader left blocked on a held pipe is abandoned: it ends with the
+    // holder, or with the test binary.
+    while status.is_none() || !stdout.is_finished() || !stderr.is_finished() {
         if Instant::now() >= end {
             let _ = child.kill();
             let _ = child.wait();
             return None;
         }
+        if status.is_none() {
+            status = child.try_wait().ok()?;
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
-    child.wait_with_output().ok()
+    Some(Output {
+        status: status?,
+        stdout: stdout.join().ok()?,
+        stderr: stderr.join().ok()?,
+    })
 }
 
 /// How long teardown waits for each command to the server.

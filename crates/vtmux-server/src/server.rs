@@ -8,7 +8,7 @@
 //! ([`Server::attach_client`], [`Server::on_client_input`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::unix::net::UnixListener as StdListener;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -1738,7 +1738,9 @@ impl Server {
                 } else {
                     buf.len()
                 };
-                match c.stream.read(&mut buf[..room]) {
+                // Not `read`: on macOS that keeps the descriptors a tmux
+                // client passes (`sys::socket`).
+                match crate::sys::socket::read_closing_fds(&c.stream, &mut buf[..room]) {
                     Ok(0) => {
                         closed = true;
                         break;

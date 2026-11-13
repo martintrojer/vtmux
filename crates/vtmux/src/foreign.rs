@@ -58,9 +58,10 @@ pub fn message(path: &Path) -> String {
 }
 
 /// Whether the server at `path`, whose connection `stream` has just sent
-/// its `Hello`, is a tmux server: it answered with tmux's `MSG_VERSION`,
-/// or it said nothing for [`QUIET`] or closed the connection without a
-/// word and a probe finds tmux there.
+/// its `Hello` (or failed to, the server gone mid-write), is a tmux
+/// server: it answered with tmux's `MSG_VERSION`, or it said nothing for
+/// [`QUIET`] or closed the connection without a word and a probe finds
+/// tmux there.
 pub fn is_tmux(stream: &UnixStream, path: &Path) -> bool {
     let mut head = [0u8; IMSG_HEADER];
     match peek_within(stream, &mut head, QUIET) {

@@ -105,7 +105,7 @@ On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `
 
 With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-rc.1`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
-Run as `vtmux`, it sits next to your tmux with its own sockets. Linked as `tmux`, it uses tmux's: if a real tmux server still holds one, vtmux says `not a vtmux server` and leaves it running. Stop that server with the real tmux, or run vtmux as `vtmux` or with `-L <name>`.
+Run as `vtmux`, it sits next to your tmux with its own sockets. Linked as `tmux`, it uses tmux's: if a real tmux server still holds one, vtmux says `not a vtmux server` and leaves it running. Stop that server with the real tmux, or run vtmux as `vtmux` or with `-L <name>`. A real tmux client that reaches a vtmux server exits with `server exited unexpectedly` and leaves the server running.
 
 ## Also
 

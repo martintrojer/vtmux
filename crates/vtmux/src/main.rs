@@ -427,14 +427,18 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
     };
     // A SIGTERM or SIGHUP may have shut the connection down already: the
     // relay below reads its EOF and ends as for the signal.
-    if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() && !signals::terminated()
-    {
+    let sent = protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_ok();
+    // Run as `tmux`, the socket may be a real tmux server's (D20). One
+    // drops a `Hello` past its first read while it is still being written
+    // (compat/imsg.h `IBUF_READ_SIZE`; any over the socket's buffer, 8 KiB
+    // on macOS, may be), so a failed write asks too.
+    let tmux = !started && (sent || !signals::terminated()) && foreign::is_tmux(&stream, &path);
+    if !sent && !tmux && !signals::terminated() {
         restore_tty(saved_tio.as_ref());
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
-    // Run as `tmux`, the socket may be a real tmux server's (D20).
-    if !started && foreign::is_tmux(&stream, &path) {
+    if tmux {
         restore_tty(saved_tio.as_ref());
         write_err(foreign::message(&path).as_bytes());
         return ExitCode::from(1);

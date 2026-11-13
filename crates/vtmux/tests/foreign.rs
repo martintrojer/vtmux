@@ -97,10 +97,15 @@ impl World {
         cmd
     }
 
-    /// [`World::command`]'s output; it must end within [`LIMIT`].
+    /// [`World::command`]'s output; it must end within [`LIMIT`], and
+    /// nothing else may hold its stdout or stderr open.
     fn run(&self, bin: &Path, extra: Env, args: &[&str]) -> Output {
-        common::output_within(&mut self.command(bin, extra, args), LIMIT)
-            .unwrap_or_else(|| panic!("{}: {args:?} hung", bin.display()))
+        common::output_within(&mut self.command(bin, extra, args), LIMIT).unwrap_or_else(|| {
+            panic!(
+                "{}: {args:?} hung, or something kept its output open",
+                bin.display()
+            )
+        })
     }
 
     /// vtmux run as `tmux`, as a user's symlink runs it.
@@ -191,8 +196,9 @@ fn attach(w: &World) -> (String, Option<u32>) {
 /// vtmux, linked as `tmux`, meets a tmux 3.8 server on tmux's socket: every
 /// kind of client says it is not a vtmux server, names the socket and the
 /// ways out, and exits 1 at once, whatever the server made of its `Hello`
-/// (a small one it waits on for ever, a large one it drops unanswered).
-/// The tmux server keeps its session.
+/// (a small one it waits on for ever, a large one it drops unanswered, one
+/// past tmux's 64 KiB read, compat/imsg.h `IBUF_READ_SIZE`, it drops while
+/// the client still writes it). The tmux server keeps its session.
 #[test]
 fn a_vtmux_client_meeting_a_tmux_server_says_so_and_exits() {
     let w = World::new(false);
@@ -202,16 +208,21 @@ fn a_vtmux_client_meeting_a_tmux_server_says_so_and_exits() {
         w.socket().display()
     );
     let big = "x".repeat(8192);
-    let cases: [(Env, &[&str]); 5] = [
+    let huge = "x".repeat(256 * 1024);
+    let cases: [(Env, &[&str]); 6] = [
         (&[], &["ls"]),
         (&[("BIG", &big)], &["ls"]),
+        (&[("HUGE", &huge)], &["ls"]),
         (&[], &["new", "-d", "cat", "-"]),
         (&[], &["kill-server"]),
         (&[], &["-C", "attach"]),
     ];
     for (extra, args) in cases {
         let out = w.run(&w.vtmux_as_tmux(), extra, args);
-        let ctx = format!("{args:?} with {} more variables", extra.len());
+        let ctx = format!(
+            "{args:?} with {:?}",
+            extra.iter().map(|e| e.0).collect::<Vec<_>>()
+        );
         assert_eq!(String::from_utf8_lossy(&out.stderr), want, "{ctx}");
         assert_eq!(out.stdout, b"", "{ctx}");
         assert_eq!(out.status.code(), Some(1), "{ctx}");
@@ -226,6 +237,9 @@ fn a_vtmux_client_meeting_a_tmux_server_says_so_and_exits() {
 /// tmux 3.8's client meets a vtmux server: tmux's code fails it as it
 /// does (it never gets an answer it reads), within moments, and the vtmux
 /// server keeps serving, its session alone, no command of tmux's run.
+/// The server keeps none of the descriptors tmux's client passes (its
+/// stdin and stdout; macOS hands them over even to a plain `read`), so the
+/// client's output closes as it exits.
 #[test]
 fn a_tmux_client_meeting_a_vtmux_server_leaves_it_serving() {
     let w = World::new(true);
