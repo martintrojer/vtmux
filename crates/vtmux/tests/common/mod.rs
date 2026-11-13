@@ -35,7 +35,8 @@ pub fn reap(pid: Option<Pid>) {
 /// a server that is stopped or wedged. Finished means its output closed
 /// too: a process that keeps the command's stdout or stderr open after it
 /// exits (a daemon it started, a server it passed them to) makes `None`
-/// at `limit`, not a read that waits for ever.
+/// at `limit`, not a read that waits for ever. A command that cannot be
+/// started (E2BIG, a missing binary) panics with why: it did not hang.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn output_within(cmd: &mut Command, limit: Duration) -> Option<Output> {
     use std::io::Read;
@@ -49,12 +50,19 @@ pub fn output_within(cmd: &mut Command, limit: Duration) -> Option<Output> {
         })
     }
 
+    #[expect(clippy::zombie_processes, reason = "`try_wait` reaps it")]
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .ok()?;
+        .unwrap_or_else(|e| {
+            panic!(
+                "cannot start {} {:?}: {e}",
+                cmd.get_program().display(),
+                cmd.get_args().collect::<Vec<_>>()
+            )
+        });
     let stdout = drain(child.stdout.take()?);
     let stderr = drain(child.stderr.take()?);
     let end = Instant::now() + limit;

@@ -208,11 +208,21 @@ fn a_vtmux_client_meeting_a_tmux_server_says_so_and_exits() {
         w.socket().display()
     );
     let big = "x".repeat(8192);
-    let huge = "x".repeat(256 * 1024);
+    // 256 KiB in all, past tmux's read and Linux's unix socket buffer
+    // (`net.core.wmem_default`, 208 KiB by default), in variables of
+    // 64 KiB: Linux's execve refuses a single one over 128 KiB
+    // (`MAX_ARG_STRLEN`, E2BIG).
+    let part = "x".repeat(64 * 1024);
+    let huge: [(&str, &str); 4] = [
+        ("HUGE0", &part),
+        ("HUGE1", &part),
+        ("HUGE2", &part),
+        ("HUGE3", &part),
+    ];
     let cases: [(Env, &[&str]); 6] = [
         (&[], &["ls"]),
         (&[("BIG", &big)], &["ls"]),
-        (&[("HUGE", &huge)], &["ls"]),
+        (&huge, &["ls"]),
         (&[], &["new", "-d", "cat", "-"]),
         (&[], &["kill-server"]),
         (&[], &["-C", "attach"]),
