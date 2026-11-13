@@ -127,7 +127,7 @@ and `GhosttyUnicodeWidthRange` (0007). `check.sh`'s `ghostty-zig` stage
 (`scripts/ghostty-zig-tests.sh`) runs the suite's tests of the modules the
 patches change on the patched tree (the terminal core, its styles,
 snapshot and compression, the C API, kitty graphics, Unicode), in Debug:
-4777 of 4805 pass and 28 skip, 102 s with Zig's global cache warm. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
+4779 of 4807 pass and 28 skip, 102 s with Zig's global cache warm. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
 -Dapp-runtime=none --system <deps>`) passes too, but for "image load:
 temporary file outside directory prefix is rejected" when the tree is
 under `/tmp`, which Ghostty trusts as a temporary directory (it fails so on
@@ -747,14 +747,18 @@ the changes outside them. Each patch has its note under its theme.
   `GRID_LINE_WRAPPED` alone; only a clear of the whole line
   (`grid_clear_lines`, which 0013 already empties the row for) drops it.
   Upstream unwrapped the row on any ECH, so a line erased in part split in
-  two on a wider pane and `capture-pane -J` broke it. Upstream tests
+  two on a wider pane and `capture-pane -J` broke it. "The whole row" is
+  tmux's count (`nx == sx` at column 0), not the count widened over a wide
+  character the erase ends on (D-076), for 0013's emptying too. Upstream tests
   changed: "eraseChars resets wrap" (the row stays wrapped; a whole-row
   ECH unwraps it), "eraseChars wide char wrap boundary conditions" (the
   erased row still joins the next) and "eraseChars on a blank row keeps it
-  blank" (the wrap flag stays). Rust `vtmux-vt`
+  blank" (the wrap flag stays); new test "eraseChars widened over a wide
+  character keeps the wrap (vtmux)". Rust `vtmux-vt`
   `ech_keeps_a_wrapped_line_wrapped` and oracle
   `ech_keeps_a_wrapped_line_wrapped` (ECH inside the line, past its end,
-  over the whole line; `-F`, `-J`, then 40 columns) fail without it. Not an
+  over the whole line, widened over a wide character; `-F`, `-J`, then 40
+  columns) fail without it. Not an
   upstream candidate (tmux's model).
 
 ### Reflow

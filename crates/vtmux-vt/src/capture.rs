@@ -3053,6 +3053,35 @@ mod tests {
         let mut t = PaneTerm::new(30, 4, 100);
         t.feed(b"abcdefghijklmnopqrstuvwxyz0123456789\r\nend\x1b[1;1H\x1b[30X");
         assert!(capture_with(&t, false, true).starts_with("- \n- 456789\n"));
+        // ECH 29 from column 0 widens to 30 over a wide character in
+        // columns 28-29, but tmux's count is 29, not the width: the line
+        // and the one above stay wrapped and keep their cellused.
+        let mut t = PaneTerm::new(30, 4, 100);
+        t.feed(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123abcdefghijklmnopqrstuvwxyzab\u{4e00}bcdefg\x1b[2;1H\x1b[29X"
+                .as_bytes(),
+        );
+        assert!(
+            capture_with(&t, false, true)
+                .starts_with("W ABCDEFGHIJKLMNOPQRSTUVWXYZ0123\nWX \n- bcdefg\n"),
+            "{}",
+            capture_with(&t, false, true)
+        );
+        let opts = CaptureOpts {
+            join: true,
+            used_only: true,
+            ..Default::default()
+        };
+        // One line, as tmux's; a space more than tmux's 29, where the
+        // character's second column stays a padding cell (D-076).
+        let joined = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert!(
+            joined.starts_with(&format!(
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123{}bcdefg\n",
+                " ".repeat(30)
+            )),
+            "{joined:?}"
+        );
     }
 
     /// The screen saved under the alternate one keeps each line's

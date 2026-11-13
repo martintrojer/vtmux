@@ -79,6 +79,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-073](#d-073) | `-D` (run the server in the foreground) is refused | Deferred | deferred |
 | [D-074](#d-074) | `#{c/f:theme...}` and `#{c/b:theme...}` give the slot's terminal colour, whatever the client's theme | Deferred | deferred |
 | [D-075](#d-075) | ICH reaching the end of the line clears the rest of it, as xterm does; tmux's grid keeps it | Ghostty grid | open |
+| [D-076](#d-076) | ECH that ends on the first column of a wide character clears all of it; tmux leaves its second column a padding cell | Ghostty grid | open |
 
 Closed (vtmux matches tmux):
 
@@ -1260,6 +1261,17 @@ Closed (vtmux matches tmux):
   - At the last column (`px >= sx - 1`) it clears that cell, as xterm does.
 - **vtmux:** the rest of the line is cleared in the grid, so the pane, its redraws and `capture-pane` agree with what tmux's client showed first.
 - **Evidence:** reference tmux 3.8, `printf 'abcdefgh\033[1;3H\033[30@'` on 20 columns: the attached client shows `ab`; after `refresh-client` it shows `abcdefgh`, as does `capture-pane -p`; in the left pane of two it shows `abcdefgh` at once. vtmux shows and captures `ab` in each. With `\033[18@` (exactly the columns left) the same.
+
+<a id="d-076"></a>
+### D-076: ECH that ends on the first column of a wide character clears all of it
+
+- **Category:** Ghostty grid: Ghostty never splits a wide character from its spacer tail (`Terminal.eraseChars` widens the erase over it), so a cell tmux leaves as an orphaned padding cell is a blank in vtmux.
+- **Test:** oracle `ech_keeps_a_wrapped_line_wrapped` scene `d` (annotated: the `-J -T` capture, and the `-F` capture after widening to 40). Its `-F` capture before the widening (the line stays wrapped, `WX`) matches tmux.
+- **tmux:**
+  - `screen_write_clearcharacter` (screen-write.c) clears `nx` cells with `grid_clear` (grid.c) and does not look at a wide character the last one starts: its second column stays a padding cell.
+  - `grid_string_cells` (grid.c) skips padding cells, so `capture-pane -J` and `-T` print one space fewer than the line's `cellused`; a reflow moves the cell with the line and keeps `GRID_LINE_EXTENDED` (`X`) on the line it lands on.
+- **vtmux:** the whole character is cleared (two blanks), so those captures print a space more, and after a widening the row's flags show `-` where tmux shows `X`. Whether the line wraps or is emptied follows tmux's count, not the widened one (Ghostty patch 0047).
+- **Evidence:** reference tmux 3.8, 30 columns, `printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123abcdefghijklmnopqrstuvwxyzab\344\270\200bcdefg\033[2;1H\033[29X'`: `capture-pane -pJT` gives the first line, 29 spaces and `bcdefg`; vtmux 30 spaces. `-pF` gives `W`, `WX`, `-` on both.
 
 ## Adding an entry
 

@@ -5,7 +5,12 @@ size = [40, 8]
 # (grid_clear_lines): a soft-wrapped line erased in part, to its end or
 # not, stays wrapped, so -J joins it, -F flags it W and a wider pane joins
 # it again. `a`: ECH 1 inside the line; `b`: ECH from column 5 past the
-# end; `c`: ECH over the whole line from column 0, which empties it.
+# end; `c`: ECH over the whole line from column 0, which empties it; `d`:
+# ECH 29 from column 0 on a wrapped continuation whose columns 28-29 hold
+# a wide character: the erase covers the character, but tmux's count is 29,
+# not the width (grid_clear), so neither line is unwrapped or emptied. tmux
+# leaves the character's second column an orphaned padding cell, which
+# vtmux clears with the character (D-076, annotated).
 steps = [
   { run = ["new", "-d", "-s", "a", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[2C\\033[X'; tmux wait-for -S a; exec cat"] },
   { wait_for = "a" },
@@ -13,6 +18,11 @@ steps = [
   { wait_for = "b" },
   { run = ["new", "-d", "-s", "c", "-x", "30", "-y", "6", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz0123456789\\r\\nend\\033[1;1H\\033[30X'; tmux wait-for -S c; exec cat"] },
   { wait_for = "c" },
+  { run = ["new", "-d", "-s", "d", "-x", "30", "-y", "6", "sh", "-c", "printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123abcdefghijklmnopqrstuvwxyzab\\344\\270\\200bcdefg\\033[2;1H\\033[29X'; tmux wait-for -S d; exec cat"] },
+  { wait_for = "d" },
+  { run = ["capture-pane", "-p", "-F", "-t", "d:"] },
+  { divergence = { id = "D-076", expect = { kind = "cli", stdout = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123                              bcdefg\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-J", "-T", "-t", "d:"] },
   { run = ["capture-pane", "-p", "-F", "-t", "a:"] },
   { run = ["capture-pane", "-p", "-J", "-t", "a:"] },
   { run = ["capture-pane", "-p", "-F", "-t", "b:"] },
@@ -25,4 +35,7 @@ steps = [
   { run = ["capture-pane", "-p", "-J", "-t", "a:"] },
   { run = ["capture-pane", "-p", "-F", "-t", "b:"] },
   { run = ["capture-pane", "-p", "-F", "-t", "c:"] },
+  { run = ["resize-window", "-x", "40", "-t", "d:"] },
+  { divergence = { id = "D-076", expect = { kind = "cli", stdout = "W ABCDEFGHIJKLMNOPQRSTUVWXYZ0123\n-                     bcdefg\n- \n- \n- \n- \n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-F", "-t", "d:"] },
 ]
