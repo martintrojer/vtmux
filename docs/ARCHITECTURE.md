@@ -2,50 +2,19 @@
 
 vtmux has tmux's process model. A server owns every session, window, pane and shell. Each `vtmux` (or `tmux`) invocation is a short-lived client that talks to it over a Unix socket; an attached client also owns your real terminal.
 
-Each pane's screen lives in its own libghostty-vt terminal inside the server, where tmux has `grid.c` and `input.c`. Everything a script can read is still shaped like tmux. The decisions behind this (D1-D31, D33) are indexed in [docs/README.md](README.md).
+Each pane's screen lives in its own libghostty-vt terminal inside the server, where tmux has `grid.c` and `input.c`. Everything a script can read is still shaped like tmux. The decisions behind this are numbered (D1, D2, …) and indexed in [docs/README.md](README.md).
 
 ## The big picture
 
-```
- ┌──────────────────────────────────────┐
- │ Terminal emulator (Ghostty, foot, …) │  draws pixels
- └───────────────┬──────────────────────┘
-                 │ the terminal's pty
-                 │   ↑ keys, mouse, terminal replies
-                 │   ↓ escape sequences for the finished screen
- ┌───────────────┴──────────────────────┐
- │ client (crates/vtmux-client)         │  raw tty; a pipe:
- │  stdin → Input / Resize              │   forwards input bytes,
- │  Frame → stdout, then FrameAck       │   writes frames as they come
- └───────────────┬──────────────────────┘
-                 │ Unix socket $TMUX_TMPDIR/vtmux-UID/<label>
-                 │   (tmux-UID when run as tmux, D20)
-                 │ vtmux's own framed protocol (vtmux-core::protocol)
- ┌───────────────┴────────────────────────────────────────────────────┐
- │ server (crates/vtmux-server)  one thread, mio event loop           │
- │                                                                    │
- │  input.rs: decode keys ─► key tables (prefix/root) ─► command      │
- │                        └► encode for the active pane ─► its pty    │
- │  model: sessions ─► windows (Layout) ─► panes                      │
- │  options · formats · targets · hooks (vtmux-core, pure)            │
- │                                                                    │
- │  render/ compositor, once per tick, per client:                    │
- │    panes + borders + status + popups + menus → one screen          │
- │    → diff against the client's last frame → encode for its         │
- │      terminal, inside ?2026 → Frame (held while the client lags)   │
- │                        ▲ reads the grids                           │
- │  ┌─ pane %0 ───────────┴──────┐   ┌─ pane %1 ──────────────────┐   │
- │  │ PaneTerm (vtmux-vt)        │   │ PaneTerm                   │ … │
- │  │  libghostty-vt Terminal    │   │                            │   │
- │  │  grid + scrollback         │   │                            │   │
- │  │  answers queries as tmux   │   │                            │   │
- │  └──────┬─────────────────────┘   └──────┬─────────────────────┘   │
- └─────────┼────────────────────────────────┼─────────────────────────┘
-           │ pty                            │ pty
-      ┌────┴─────────┐                 ┌────┴─────────┐
-      │ shell / nvim │                 │ shell        │   TERM=tmux-256color
-      └──────────────┘                 └──────────────┘   TMUX=<socket>,<pid>,<session>
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/architecture-overview-dark.svg">
+  <img alt="Your terminal talks to the vtmux client over its pty; the client talks to the vtmux server over a Unix socket; inside the server, input, the model and the compositor sit above one libghostty-vt terminal per pane, each joined to its program by a pty." src="images/architecture-overview.svg">
+</picture>
+
+- **The socket** is `$TMUX_TMPDIR/vtmux-UID/<label>`, or `tmux-UID/<label>` when the binary runs as `tmux` (D20). Over it runs vtmux's own framed protocol (`vtmux-core::protocol`).
+- **The client** puts your terminal in raw mode, forwards what you type, writes each frame as it arrives and acknowledges it.
+- **The server** is one thread on a mio event loop. `input.rs` turns bytes into keys and runs their bindings or sends them to the active pane. Options, formats, targets and hooks are pure code in `vtmux-core`. The compositor in `render/` draws each client's screen (see *Output* below).
+- **Each pane** is a `PaneTerm` (`vtmux-vt`) around a libghostty-vt terminal, holding the grid and its scrollback. It answers a program's queries as tmux would.
 
 ## The crates
 
@@ -84,7 +53,7 @@ Steps 2 and 3 are why the cursor doesn't jump under heavy output (D14): tmux for
 
 ## Commands and control mode
 
-A command client connects (starting the server if needed and allowed), sends `Hello` with argv, cwd, environment and tty, and gets `Stdout`, `Stderr` and `Exit` back. Those match tmux 3.8 byte for byte, exit codes and errors included: the edge scripts depend on. Run as `tmux`, the socket may be a real tmux server's (D20): a client whose `Hello` is answered with tmux's `MSG_VERSION` says so; one that gets no answer within 200 ms, or a close, first asks the socket with an imsg header that a vtmux server drops unread (`foreign.rs`).
+A command client connects (starting the server if needed and allowed), sends `Hello` with argv, cwd, environment and tty, and gets `Stdout`, `Stderr` and `Exit` back. Those match tmux 3.8 byte for byte, exit codes and errors included, because scripts depend on that edge. Run as `tmux`, the socket may be a real tmux server's (D20): a client whose `Hello` is answered with tmux's `MSG_VERSION` says so; one that gets no answer within 200 ms, or a close, first asks the socket with an imsg header that a vtmux server drops unread (`foreign.rs`).
 
 Commands run on per-client queues (`cmdq.rs`, after `cmd-queue.c`), plus a global one for the config and `run-shell -b`. `wait-for`, file I/O, `run-shell` and `if-shell` hold their queue without blocking the loop. Jobs and `#()` formats are `/bin/sh -c` children read through the same loop (`jobs.rs`, `format_jobs.rs`).
 
@@ -96,29 +65,18 @@ Control clients (`-C`) get tmux's `%begin`/`%end`, `%output` and notifications i
 
 `vtmux-upgrade [-b binary]` (D27, [live-upgrade spec](specs/2026-11-06-live-upgrade.md)) replaces the server's image with `execve`, so the pid stays: pane processes remain its children and every descriptor it keeps stays open.
 
-```
- old image (pid P)                                          new image (pid P)
- wait for jobs and commands in flight (≤ 3 s)
- ask B --vtmux-patch-stack; same Ghostty stack?
-   yes: compress all history first (threads)
- snapshot ─► memfd ─► B --vtmux-check-snapshot  (dry run: decode + rebuild,
- serve on meanwhile                             at most 3 s + 1 s per 100k rows;
-                                                passes only if B answers the
-                                                snapshot's digest on stderr,
-                                                or B -V is 3.8-beta1/beta2)
- passed: quiesce, flush clients, snapshot again
- UpgradeNotice + token ─► attached clients
- execve(B --vtmux-resume <fd>) ──────────────────────────► decode, adopt the fds,
-   listener, client sockets, ptys, pipe-pane fds stay open    rebuild, reap, run
- attached client: resets its terminal, keeps it raw, execs
-   B --vtmux-reattach <socket> ───────────────────────────► rebound to its record
- control clients: stay connected (frozen frames)            answer the requester
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/live-upgrade-dark.svg">
+  <img alt="The old image finishes work in flight, dry-runs a snapshot with the new binary, snapshots for real and execs the new binary in the same process; the new image resumes and clients reattach. A failed dry run changes nothing; a failed resume goes back to the old image." src="images/live-upgrade.svg">
+</picture>
 
+- **Dry run.** Before the dry run, the server asks the new binary for its patch stack (`--vtmux-patch-stack`); if it matches, all history is compressed first, on threads. The snapshot goes to the new binary in a memfd (`--vtmux-check-snapshot`), which decodes and rebuilds it while the server keeps serving, within 3 s plus 1 s per 100k rows. It passes only if the binary answers the snapshot's digest on stderr, or `-V` says 3.8-beta1 or beta2.
+- **The switch.** The server quiesces, flushes clients, snapshots again and sends each attached client an `UpgradeNotice` with a token. It then runs `execve(B --vtmux-resume <fd>)`, keeping the listener, client sockets, ptys and `pipe-pane` descriptors open. The new image decodes, adopts those descriptors, rebuilds, reaps and answers the client that asked. An attached client resets its terminal, keeps it raw and execs `B --vtmux-reattach <socket>`, which binds it to its old record.
 - **Frozen frames.** A few protocol frames never change (`Hello`, `Stdin`, `StdinEof`, `Stdout`, `Stderr`, `Exit`, `Exec`, `Flags`, and `UpgradeRequest`/`UpgradeResult`/`UpgradeNotice`), so control clients of any version from protocol 9 on stay served and a newer client can ask an older server to upgrade. Every other frame may change with a protocol bump.
 - **No typing lost.** An attached client reads the server between reads of the terminal, so a flood of typing never hides the notice, and its terminal stays raw across the exec, its own settings handed to the new image in `VTMUX_REATTACH_TTY` (only for a binary whose dry run says it takes them).
 - **Failure never loses panes.** A failed dry run leaves the server as it was. A resume that fails switches back to the old image on the same descriptors (Linux: `fexecve` of the executable it kept open). Failing that, it serves without the parts that don't read, then without terminal state, then with no sessions while it holds every pty open. Exit status: 0 upgraded, 1 not, 2 upgraded short of a part.
-- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded; across stacks they go as vtmux rows. Across stacks an alternate screen's hidden history also goes as the copy a build without Ghostty patch 0038 reads, mostly the primary's own pages, which the dry run reads once. What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
+- **History fast path.** With the same Ghostty patch stack, compressed history pages travel as Ghostty's own bytes and nothing is decoded. Across stacks they go as vtmux rows (details in `VENDOR.md` and the live-upgrade spec).
+- **What closes.** What an upgrade closes by design (tree modes, prompts, menus) is listed in `server/snapshot.rs`.
 
 ## Terminal protocols tmux drops (D28)
 
@@ -135,7 +93,7 @@ vtmux passes through a protocol tmux 3.8 drops only when libghostty-vt implement
 
 libghostty-vt runs inside the server, once per pane: the "grid follows Ghostty" half of D4. Where the two emulators differ, the difference is recorded with evidence in [compat/DIVERGENCES.md](../compat/DIVERGENCES.md).
 
-It is vendored in `third_party/libghostty-rs`, pinned to the libghostty-vt 1.0.1 release (tag `vt-1.0.1`; releases are tracked by tag, never by commit), with 43 local patches applied at build time (`libghostty-vt-sys/patches`, each explained in `VENDOR.md`):
+It is vendored in `third_party/libghostty-rs`, pinned to a libghostty-vt release (tracked by tag, never by commit), with local patches applied at build time (`libghostty-vt-sys/patches`). `VENDOR.md` records the pin and explains each patch. The patches cover:
 
 - **tmux's grid shape:** wrap and pending-wrap bookkeeping, cells used, reflow as tmux does it (a line keeps its cells past a narrower width), the alternate screen, clusters and widths, hyperlink ids, line flags, DECAWM, DECALN.
 - **Memory:** bounded, resumable page compression and resize without faulting blank pages; grid-reference bounds checked before native reads.
@@ -156,18 +114,14 @@ Inside, vtmux is ordinary Rust: IDs are newtypes, values are enums, windows hold
 
 ## How it's tested
 
-```
-        tmux 3.8 regress/              behaviour oracle               esctest / specs
-     (what tmux means to do)      (what tmux 3.8 actually does)     (what a terminal should do)
-               │                              │                              │
-   cargo xtask regress              cargo xtask oracle record → traces    D4 arbiter for
-   tmux's own 174 tests             cargo xtask oracle replay → vtmux     grid differences
-   against the vtmux binary         (CLI output, -C streams, screens via
-                                     a libghostty observer terminal)
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/testing-dark.svg">
+  <img alt="Three sources of truth, each checked against vtmux: tmux's regress suite through cargo xtask regress, the behaviour oracle through cargo xtask oracle, and esctest and terminal specs through the D4 arbiter." src="images/testing.svg">
+</picture>
 
-- **Regress:** tmux's test suite from the 3.8 tag, unchanged, scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
-- **Oracle:** 449 scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step (all but six scenarios, each skip with its reason in `oracle/upgrade-every-skip.toml`).
+- **Regress:** tmux's own tests from the 3.8 tag, unchanged, run against the vtmux binary and scored by `compat/expected.toml`. The gate fails when a test regresses and when one passes unmarked.
+- **Oracle:** Scenarios recorded once against real tmux 3.8 and replayed against vtmux. Screens are compared as grids in an observer terminal, never as raw bytes. The replay runs again with a live upgrade after every third step (the scenarios an upgrade changes by design are skipped, each with its reason, in `oracle/upgrade-every-skip.toml`).
+- **Terminal specs:** where vtmux's grid differs from tmux's, esctest and the specs decide which emulator is right (D4).
 - **Side by side:** the CLI, attach and control tests run each case against both binaries.
 - **Plugins:** tmux-resurrect and tmux-continuum (vendored in `compat/tmux-plugins`) save, kill the server and restore on both binaries; what was saved and what came back must match, also when the other binary restores the save.
 

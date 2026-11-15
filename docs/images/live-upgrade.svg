@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500" role="img" aria-labelledby="t d">
+  <title id="t">Live upgrade</title>
+  <desc id="d">The old image finishes work in flight, dry-runs a snapshot with the new binary, snapshots for real and execs the new binary in the same process. The new image resumes from the snapshot and clients reattach. A failed dry run changes nothing; a failed resume goes back to the old image.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+      .head { font-size: 16px; font-weight: 600; }
+      .title { font-size: 15px; font-weight: 600; }
+      .sub { font-size: 13px; fill: #57606a; }
+      .label { font-size: 12.5px; fill: #57606a; }
+      .box { stroke-width: 1.5; }
+      .line { stroke: #57606a; stroke-width: 1.5; fill: none; }
+      .dash { stroke: #cf222e; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="800" height="500" rx="12" fill="#ffffff"/>
+
+  <text class="head" x="205" y="40" text-anchor="middle">Old image</text>
+  <text class="head" x="595" y="40" text-anchor="middle">New image</text>
+  <text class="label" x="400" y="62" text-anchor="middle">same pid: panes stay its children, descriptors stay open</text>
+
+  <!-- left column -->
+  <rect class="box" x="40" y="80" width="330" height="58" rx="8" fill="#fff7ed" stroke="#f59e0b"/>
+  <text class="title" x="205" y="104" text-anchor="middle">1. Finish work in flight</text>
+  <text class="sub" x="205" y="125" text-anchor="middle">jobs and commands, up to 3 s</text>
+
+  <rect class="box" x="40" y="160" width="330" height="58" rx="8" fill="#fff7ed" stroke="#f59e0b"/>
+  <text class="title" x="205" y="184" text-anchor="middle">2. Dry run</text>
+  <text class="sub" x="205" y="205" text-anchor="middle">the new binary checks a snapshot</text>
+
+  <rect class="box" x="40" y="240" width="330" height="58" rx="8" fill="#fff7ed" stroke="#f59e0b"/>
+  <text class="title" x="205" y="264" text-anchor="middle">3. Snapshot for real</text>
+  <text class="sub" x="205" y="285" text-anchor="middle">quiesce, tell the clients</text>
+
+  <rect class="box" x="40" y="320" width="330" height="58" rx="8" fill="#fff7ed" stroke="#f59e0b"/>
+  <text class="title" x="205" y="344" text-anchor="middle">4. execve the new binary</text>
+  <text class="sub" x="205" y="365" text-anchor="middle">the snapshot goes along as a descriptor</text>
+
+  <line class="line" x1="205" y1="140" x2="205" y2="158" marker-end="url(#arrow)"/>
+  <line class="line" x1="205" y1="220" x2="205" y2="238" marker-end="url(#arrow)"/>
+  <line class="line" x1="205" y1="300" x2="205" y2="318" marker-end="url(#arrow)"/>
+
+  <!-- exec across -->
+  <line class="line" x1="372" y1="349" x2="428" y2="349" marker-end="url(#arrow)"/>
+
+  <!-- right column -->
+  <rect class="box" x="430" y="320" width="330" height="58" rx="8" fill="#ecfdf5" stroke="#10b981"/>
+  <text class="title" x="595" y="344" text-anchor="middle">5. Resume</text>
+  <text class="sub" x="595" y="365" text-anchor="middle">decode, adopt descriptors, rebuild</text>
+
+  <rect class="box" x="430" y="400" width="330" height="58" rx="8" fill="#ecfdf5" stroke="#10b981"/>
+  <text class="title" x="595" y="424" text-anchor="middle">6. Clients reattach</text>
+  <text class="sub" x="595" y="445" text-anchor="middle">control clients never disconnect</text>
+
+  <line class="line" x1="595" y1="380" x2="595" y2="398" marker-end="url(#arrow)"/>
+
+  <!-- failure paths -->
+  <rect class="box" x="430" y="160" width="330" height="58" rx="8" fill="#fff5f5" stroke="#cf222e" stroke-dasharray="5 4"/>
+  <text class="title" x="595" y="184" text-anchor="middle">Dry run fails</text>
+  <text class="sub" x="595" y="205" text-anchor="middle">the server carries on unchanged</text>
+  <line class="dash" x1="372" y1="189" x2="428" y2="189" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="430" y="240" width="330" height="58" rx="8" fill="#fff5f5" stroke="#cf222e" stroke-dasharray="5 4"/>
+  <text class="title" x="595" y="264" text-anchor="middle">Resume fails</text>
+  <text class="sub" x="595" y="285" text-anchor="middle">back to the old image, no pane lost</text>
+  <line class="dash" x1="595" y1="318" x2="595" y2="300" marker-end="url(#arrow)"/>
+</svg>

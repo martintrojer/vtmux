@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="800" height="360" role="img" aria-labelledby="t d">
+  <title id="t">How vtmux is tested</title>
+  <desc id="d">Three sources of truth: tmux's regress suite (what tmux means to do), the behaviour oracle (what tmux 3.8 actually does) and esctest and terminal specs (what a terminal should do). Each feeds a check against vtmux.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9198a1"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #e6edf3; }
+      .title { font-size: 15px; font-weight: 600; }
+      .sub { font-size: 13px; fill: #9198a1; }
+      .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; font-weight: 600; fill: #e6edf3; }
+      .box { stroke-width: 1.5; }
+      .line { stroke: #9198a1; stroke-width: 1.5; fill: none; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="800" height="360" rx="12" fill="#0d1117"/>
+
+  <!-- sources -->
+  <rect class="box" x="30" y="30" width="236" height="64" rx="8" fill="#1c1d3d" stroke="#818cf8"/>
+  <text class="title" x="148" y="56" text-anchor="middle">tmux's regress suite</text>
+  <text class="sub" x="148" y="78" text-anchor="middle">what tmux means to do</text>
+
+  <rect class="box" x="282" y="30" width="236" height="64" rx="8" fill="#1c1d3d" stroke="#818cf8"/>
+  <text class="title" x="400" y="56" text-anchor="middle">Behaviour oracle</text>
+  <text class="sub" x="400" y="78" text-anchor="middle">what tmux 3.8 actually does</text>
+
+  <rect class="box" x="534" y="30" width="236" height="64" rx="8" fill="#1c1d3d" stroke="#818cf8"/>
+  <text class="title" x="652" y="56" text-anchor="middle">esctest, terminal specs</text>
+  <text class="sub" x="652" y="78" text-anchor="middle">what a terminal should do</text>
+
+  <line class="line" x1="148" y1="96" x2="148" y2="138" marker-end="url(#arrow)"/>
+  <line class="line" x1="400" y1="96" x2="400" y2="138" marker-end="url(#arrow)"/>
+  <line class="line" x1="652" y1="96" x2="652" y2="138" marker-end="url(#arrow)"/>
+
+  <!-- checks -->
+  <rect class="box" x="30" y="140" width="236" height="64" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text class="mono" x="148" y="166" text-anchor="middle">cargo xtask regress</text>
+  <text class="sub" x="148" y="188" text-anchor="middle">tmux's tests, unchanged</text>
+
+  <rect class="box" x="282" y="140" width="236" height="64" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text class="mono" x="400" y="166" text-anchor="middle">cargo xtask oracle</text>
+  <text class="sub" x="400" y="188" text-anchor="middle">replays tmux's recordings</text>
+
+  <rect class="box" x="534" y="140" width="236" height="64" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text class="title" x="652" y="166" text-anchor="middle">D4 arbiter</text>
+  <text class="sub" x="652" y="188" text-anchor="middle">settles grid differences</text>
+
+  <!-- converge -->
+  <path class="line" d="M148,206 L148,236 L360,236 L360,262" marker-end="url(#arrow)"/>
+  <line class="line" x1="400" y1="206" x2="400" y2="262" marker-end="url(#arrow)"/>
+  <path class="line" d="M652,206 L652,236 L440,236 L440,262" marker-end="url(#arrow)"/>
+
+  <rect class="box" x="282" y="264" width="236" height="64" rx="8" fill="#2b1d0b" stroke="#d29922"/>
+  <text class="title" x="400" y="290" text-anchor="middle">vtmux</text>
+  <text class="sub" x="400" y="312" text-anchor="middle">same output, same screens</text>
+</svg>
