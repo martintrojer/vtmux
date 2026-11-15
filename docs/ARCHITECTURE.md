@@ -11,7 +11,7 @@ Each pane's screen lives in its own libghostty-vt terminal inside the server, wh
   <img alt="Your terminal talks to the vtmux client over its pty; the client talks to the vtmux server over a Unix socket; inside the server, input, the model and the compositor sit above one libghostty-vt terminal per pane, each joined to its program by a pty." src="images/architecture-overview.svg">
 </picture>
 
-- **The socket** is `$TMUX_TMPDIR/vtmux-UID/<label>`, or `tmux-UID/<label>` when the binary runs as `tmux` (D20). Over it runs vtmux's own framed protocol (`vtmux-core::protocol`).
+- **The socket** is `$TMUX_TMPDIR/vtmux-UID/<label>`, or `tmux-UID/<label>` when the binary runs as `tmux` (D20): the file name in `argv[0]`, so a link named `tmux` counts and a shell alias does not. Over it runs vtmux's own framed protocol (`vtmux-core::protocol`).
 - **The client** puts your terminal in raw mode, forwards what you type, writes each frame as it arrives and acknowledges it.
 - **The server** is one thread on a mio event loop. `input.rs` turns bytes into keys and runs their bindings or sends them to the active pane. Options, formats, targets and hooks are pure code in `vtmux-core`. The compositor in `render/` draws each client's screen (see *Output* below).
 - **Each pane** is a `PaneTerm` (`vtmux-vt`) around a libghostty-vt terminal, holding the grid and its scrollback. It answers a program's queries as tmux would.

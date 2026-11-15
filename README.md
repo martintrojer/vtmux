@@ -6,7 +6,7 @@ tmux 3.8, reimplemented in Rust on [libghostty-vt](https://github.com/ghostty-or
 
 ## Compliance
 
-vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them. Run as `tmux`, `tmux -V` prints `tmux 3.8`, so plugins' version checks pass.
+vtmux is tmux 3.8 to everything that talks to it: the same commands, options, formats, hooks, key tables, control mode and error messages, byte for byte where scripts can see them.
 
 - **tmux's own test suite:** 173 of its 174 regress tests pass (1 expected failure, recorded).
 - **A behaviour oracle:** 449 scenarios recorded from real tmux 3.8 (screens, output, formats, control-mode streams) replay identically, all but six also with a live upgrade inserted between steps.
@@ -27,8 +27,6 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 | **What it costs** | An idle server uses 8.5 MB vs 4.2 MB, each idle pane 20 KB vs 5.3 KB, the binary is 10.4 MB vs 1.3 MB. A key's echo takes 0.30 ms vs 0.21 ms. Many clients on one window cost more CPU than tmux (1.4x at 5). |
 
 ## What tmux can't do
-
-Each one is off until you turn it on, and invisible to scripts while off. Put the lines inside `%if "#{vtmux_version}"` so the same `.tmux.conf` still loads in real tmux.
 
 ### Live upgrades
 
@@ -101,11 +99,11 @@ mise use -g github:martintrojer/vtmux
 ln -sf "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux (again after each upgrade)
 ```
 
-On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"` (musl has no NSS: with sssd or LDAP users and no nscd, user names may not resolve). Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
+On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"`. Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
 With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-rc.1`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
-Run as `vtmux`, it sits next to your tmux with its own sockets. Linked as `tmux`, it uses tmux's: if a real tmux server still holds one, vtmux says `not a vtmux server` and leaves it running. Stop that server with the real tmux, or run vtmux as `vtmux` or with `-L <name>`. A real tmux client that reaches a vtmux server exits with `server exited unexpectedly` and leaves the server running.
+vtmux goes by the name it is started under. As `vtmux`, it sits next to your tmux with its own sockets. As `tmux` (the link above), it is tmux: `tmux -V` prints `tmux 3.8` and it uses tmux's sockets. A simple alias (`alias tmux=vtmux`) runs it as `vtmux`, which is probably not what you want: use a symlink (as above) or a shell function that sets the name, `tmux() { (exec -a tmux vtmux "$@"); }` (bash, zsh). Inside a vtmux pane, `tmux` reaches its server either way.
 
 ## Also
 

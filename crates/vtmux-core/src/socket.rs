@@ -42,7 +42,9 @@ pub enum Invocation {
 
 impl Invocation {
     /// From argv[0]: a file name of exactly `tmux` is [`Invocation::Tmux`],
-    /// anything else is [`Invocation::Vtmux`].
+    /// anything else is [`Invocation::Vtmux`]. A link named `tmux` is the
+    /// former (`argv[0]` is the name it was run by, never resolved); a shell
+    /// alias or function that runs `vtmux` is the latter.
     #[must_use]
     pub fn from_argv0(argv0: &OsStr) -> Self {
         // A login shell's name is `-tmux` (tmux.c:415-416).

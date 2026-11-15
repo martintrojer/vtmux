@@ -6,6 +6,7 @@ What is known to differ, be rough, or be worth doing next. Until 3.8 final only 
 
 | Area | What happens | tmux 3.8 |
 |---|---|---|
+| Run as `tmux` beside a real tmux | Both use the same sockets. vtmux reaching a real tmux server says `not a vtmux server` and leaves it running (stop it with the real tmux, or use `-L <name>`); a real tmux client reaching a vtmux server exits with `server exited unexpectedly`, and the server runs on. | one server per socket |
 | Two clients | With two clients on a window of four agent panes, one client can show blank pane rows until `refresh-client`. Seen on macOS; not reproduced on demand. | draws every row |
 | Delete characters | `CSI P` on a soft-wrapped line unwraps it, so `capture-pane -J`, resizes and copy mode see two lines. | keeps the wrap flag |
 | Erase over half a wide character | `ab中c` then `ESC[4D ESC[2X` shows `a   c`. | `a  c` |
