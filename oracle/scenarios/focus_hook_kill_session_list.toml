@@ -1,0 +1,31 @@
+name = "focus_hook_kill_session_list"
+# select-window queues the pane-focus hooks with a's winlinks as their
+# state, and kill-session later in the list frees them: the hooks run from
+# the borrowed client (cmd-queue.c:597-598), the best client of all when
+# the best session (c) has none (cmd-find.c:1285-1300), so from b's
+# current pane, not from c.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"] },
+  { wait_for = "p0" },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"] },
+  { wait_for = "p1" },
+  { run = ["new", "-d", "-s", "b", "-n", "w2", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p2; exec cat -"] },
+  { wait_for = "p2" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { attach = { session = "a" } },
+  { run = ["new", "-d", "-s", "c", "-n", "w3", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p3; exec cat -"] },
+  { wait_for = "p3" },
+  { run = ["set-hook", "-g", "pane-focus-in", "set -p @m yes; set -agF @log '|#{hook}:#{hook_pane}->#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-g", "pane-focus-out", "set -p @m yes; set -agF @log '|#{hook}:#{hook_pane}->#{session_name}:#{window_index}.#{pane_id}'"] },
+  { settle = {} },
+  { attach = { session = "b", id = "cb" } },
+  { run = ["new", "-d", "-s", "d", "-n", "w4", "cat", "-"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["selectw", "-t", "a:1", ";", "kill-session", "-t", "a"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_id}=#{@m}"] },
+  { run = ["kill-server"] },
+]

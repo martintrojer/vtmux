@@ -5203,6 +5203,11 @@ impl Server {
         if let Some(c) = client.filter(|&c| self.client_session(c).is_some()) {
             return Some(c);
         }
+        // cmd_find_current_client never reads the queue's current state.
+        let origin = Origin {
+            current: None,
+            ..origin
+        };
         let s = crate::target::current(&self.model, origin)?.session?;
         self.best_client(Some(s))
     }

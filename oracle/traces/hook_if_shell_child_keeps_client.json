@@ -1,0 +1,313 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hook_if_shell_child_keeps_client",
+  "inputs": {
+    "name": "hook_if_shell_child_keeps_client",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p0"
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:0",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p1"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w2",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p2; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p2"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "-n",
+          "w3",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p3; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p3"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "focus-events",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "attach": {
+          "session": "b",
+          "id": "cb"
+        }
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux set-hook -g pane-focus-out \"if -F '##{==:##{@done},}' { set -g @done 1 ; switchc -n -c $(tmux lsc -t b -F '##{client_name}') ; set -agF @log '|child:##{hook_pane}:##{client_session}' }\""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-focus-in",
+          "set -agF @log '|next:#{hook_pane}:#{client_session}'"
+        ]
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "a:0.1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|child:%0:a|next:%1:c\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "c\na\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

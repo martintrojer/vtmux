@@ -1,0 +1,19 @@
+name = "control_hook_child_guards"
+# A hook's command has no client when its guard is due (cmd-queue.c:590-
+# 598), so its output reaches the borrowed control client without
+# %begin/%end; a command if-shell -F inserts after it gets that client
+# (cmd-queue.c:332-349) and so its guards, flags 0 (no CMDQ_STATE_CONTROL
+# in the hook's state).
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set-hook", "-g", "session-renamed", "display -p RV_TOP ; if -F 1 { display -p RV_CHILD }"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { run = ["rename-session", "-t", "a", "a2"] },
+  { run = ["display", "-p", "-t", "a2", "#{session_name}"] },
+  { control_send = { id = "c1", line = "display -p DONE" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["kill-server"] },
+]

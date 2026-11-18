@@ -1,0 +1,169 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "control_hook_child_guards",
+  "inputs": {
+    "name": "control_hook_child_guards",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-renamed",
+          "display -p RV_TOP ; if -F 1 { display -p RV_CHILD }"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "rename-session",
+          "-t",
+          "a",
+          "a2"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a2",
+          "#{session_name}"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p DONE"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%session-renamed $0 a2",
+          "RV_TOP",
+          "%begin <TIME> #2 0",
+          "RV_CHILD",
+          "%end <TIME> #2 0",
+          "%begin <TIME> #3 1",
+          "DONE",
+          "%end <TIME> #3 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

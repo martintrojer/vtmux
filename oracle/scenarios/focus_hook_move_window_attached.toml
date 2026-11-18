@@ -1,0 +1,30 @@
+name = "focus_hook_move_window_attached"
+# A queued pane-focus hook holds bare pointers (cmd-queue.c:228-229,
+# cmd-find.c:709-716) and runs from them only while they are still valid
+# (cmd-find.c:684-706, 995-997). move-window links the window into b,
+# whose pane-focus-in finds its target in the best session then (a, its
+# session hook), and frees a's winlink (window.c:311-321): when the hook
+# runs its state is stale, so its commands start from the borrowed client
+# (cmd-queue.c:597-598, cmd-find.c:1285-1300): a has no client, so the
+# best client of all, on b, whose current pane is the moved %0.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"] },
+  { wait_for = "p0" },
+  { run = ["new", "-d", "-s", "b", "-n", "w2", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"] },
+  { wait_for = "p1" },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p2; exec cat -"] },
+  { wait_for = "p2" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { attach = { session = "b" } },
+  { attach = { session = "a", id = "ca" } },
+  { run = ["detach-client", "-s", "a"] },
+  { settle = {} },
+  { run = ["set-hook", "-t", "a", "pane-focus-in", "set -p @m yes; set -agF @log '|#{hook}:#{session_name}:#{window_index}.#{pane_id}/#{hook_pane}'"] },
+  { run = ["move-window", "-s", "a:0", "-t", "b:1"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_id}=#{@m}"] },
+  { run = ["kill-server"] },
+]

@@ -181,6 +181,11 @@ pub struct Item {
     /// client once its guard is written (cmd-queue.c:597-598), so its
     /// output reaches that client without guards.
     pub borrow_client: bool,
+    /// In such a batch, the client the running step was inserted for
+    /// (`item->client` that `cmdq_insert_after` copied from the command
+    /// that inserted it, cmd-queue.c:332-349): it runs for that client,
+    /// with guards, instead of borrowing.
+    pub pinned: Option<ClientId>,
     /// The key whose binding this batch runs (`state->event.key`); the
     /// message log names it.
     pub key: Option<vtmux_core::keys::Key>,
@@ -237,6 +242,7 @@ impl Item {
             found: None,
             hook_target: None,
             borrow_client: false,
+            pinned: None,
             key: None,
             mouse: None,
             new_current: None,
@@ -331,11 +337,25 @@ impl Item {
 /// of its group. A waiting command (`CMD_RETURN_WAIT`) still closes its
 /// guard with `%end`.
 pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
+    if item.borrow_client
+        && let Some(c) = item.pinned
+    {
+        // cmd-queue.c:584-585: a client gone since is an error before the
+        // guard.
+        if !server.clients.contains_key(&c) {
+            return false;
+        }
+        item.client = Some(c);
+        item.control = server.is_control(c).then_some(0);
+    }
     let guard = server.control_begin(item);
     item.hook_target = None;
-    if item.borrow_client {
-        item.client = server.target_client(None, item.origin);
+    if item.borrow_client && item.pinned.is_none() {
+        // cmd_find_current_client with no client (cmd-find.c:1285-1300):
+        // the best session's best client, whatever the hook's state.
+        item.client = server.target_client(None, Origin::default());
         item.control = item.client.filter(|&c| server.is_control(c)).map(|_| 0);
+        server.cmdq.lend(item.client);
     }
     server.cmd_client = item.client;
     server.cmd_mouse.clone_from(&item.mouse);
@@ -395,12 +415,14 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
 /// `cmd_find_from_client` reads the client's session as it is when the
 /// command runs (cmd-find.c:888-898), so a `switch-client -n` earlier in
 /// the list moves the default target of the commands after it.
+///
+/// A hook's command finds its target from the client it borrowed, or
+/// from nothing without one, once the hook's state is stale
+/// (cmd-find.c:995-1000).
 fn follow_client_session(server: &Server, item: &mut Item) {
-    if item.borrow_client {
-        return;
-    }
-    if let Some(s) = item.client.and_then(|c| server.client_session(c)) {
-        item.origin.attached = Some(s);
+    let s = item.client.and_then(|c| server.client_session(c));
+    if item.borrow_client || s.is_some() {
+        item.origin.attached = s;
     }
 }
 
@@ -422,34 +444,38 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
     }
     let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
-    // command runs; commands without a target slot get the client's
-    // current state, failures ignored.
+    // command runs; commands without a target slot get the target client's
+    // current state (never the queue's), failures ignored.
     item.found = None;
-    let found = match &call.entry.target {
-        Some(spec) => {
-            let value = call.args.target(spec.flag);
-            // cmd-find.c:1012-1020: `@`, `{active}` and `{current}` from a
-            // client with no session are `no current client` even under
-            // CMD_FIND_CANFAIL, which quiets only the other errors: the
-            // command still runs and the client exits 1.
-            if spec.flags.can_fail
-                && item.origin.attached.is_none()
-                && value.as_ref().is_some_and(|v| {
-                    v.resolve(spec.kind) == vtmux_core::cmd::target::Resolved::ClientWindow
-                })
-                && target::current(&server.model, item.origin).is_some()
-            {
-                item.error(server, EdgeError::NoCurrentClient.to_bytes());
-            }
-            target::resolve(
-                &server.model,
-                item.origin,
-                value.as_ref(),
-                spec.kind,
-                spec.flags,
-            )?
+    let found = if let Some(spec) = &call.entry.target {
+        let value = call.args.target(spec.flag);
+        // cmd-find.c:1012-1020: `@`, `{active}` and `{current}` from a
+        // client with no session are `no current client` even under
+        // CMD_FIND_CANFAIL, which quiets only the other errors: the
+        // command still runs and the client exits 1.
+        if spec.flags.can_fail
+            && item.origin.attached.is_none()
+            && value.as_ref().is_some_and(|v| {
+                v.resolve(spec.kind) == vtmux_core::cmd::target::Resolved::ClientWindow
+            })
+            && target::current(&server.model, item.origin).is_some()
+        {
+            item.error(server, EdgeError::NoCurrentClient.to_bytes());
         }
-        None => target::current(&server.model, item.origin).unwrap_or_default(),
+        target::resolve(
+            &server.model,
+            item.origin,
+            value.as_ref(),
+            spec.kind,
+            spec.flags,
+        )?
+    } else {
+        let tc = server.target_client(item.client, item.origin);
+        match tc.and_then(|c| server.client_session(c)) {
+            Some(s) => Found::from_session(&server.model, s),
+            // cmd_find_from_client(NULL): cmd_find_from_nothing.
+            None => target::current(&server.model, Origin::default()).unwrap_or_default(),
+        }
     };
     item.found = Some(found);
     let result = dispatch(server, item, call, source, found);

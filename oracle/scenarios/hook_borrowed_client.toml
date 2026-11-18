@@ -1,0 +1,26 @@
+name = "hook_borrowed_client"
+# A hook runs on the global queue with no client and borrows the current
+# client when each command fires (cmd-queue.c:597-598):
+# cmd_find_current_client ignores the hook's state and takes the best
+# session's best client (cmd-find.c:1285-1300), so #{client_session} is
+# b, the most recently attached, though the hook's target is in a.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"] },
+  { wait_for = "p0" },
+  { run = ["splitw", "-d", "-t", "a:0", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"] },
+  { wait_for = "p1" },
+  { run = ["new", "-d", "-s", "b", "-n", "w2", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p2; exec cat -"] },
+  { wait_for = "p2" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { attach = { session = "a" } },
+  { attach = { session = "b", id = "cb" } },
+  { run = ["set-hook", "-g", "pane-focus-in", "set -agF @log '|#{hook}:#{hook_pane}->#{session_name}:#{window_index}.#{pane_id} c=#{client_session}'"] },
+  { run = ["set-hook", "-g", "pane-focus-out", "set -agF @log '|#{hook}:#{hook_pane}->#{session_name}:#{window_index}.#{pane_id} c=#{client_session}'"] },
+  { settle = {} },
+  { run = ["selectp", "-t", "a:0.1"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

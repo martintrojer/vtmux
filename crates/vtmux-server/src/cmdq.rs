@@ -109,6 +109,11 @@ struct Step {
     state: Option<Rc<StepState>>,
     /// Global group number; 0 for steps no error removes.
     group: u64,
+    /// The client a hook's command had borrowed when it inserted this
+    /// step (`item->client` copied by `cmdq_insert_after`,
+    /// cmd-queue.c:332-349): the step runs for it instead of borrowing
+    /// one of its own.
+    client: Option<ClientId>,
     work: Option<Work>,
     fired: bool,
     waiting: bool,
@@ -133,6 +138,10 @@ pub struct Cmdq {
     dirty: bool,
     /// The queue and state of the step firing now.
     current_state: Option<(QueueId, Rc<StepState>)>,
+    /// The client the hook command firing now borrowed
+    /// (`item->client` while `cmdq_fire_command` runs, cmd-queue.c:597-598,
+    /// put back to `NULL` at its end): what the steps it inserts get.
+    lent: Option<ClientId>,
     /// The server message log, oldest first (`message_log`).
     messages: VecDeque<Message>,
     /// `message_next`: the number the next message takes.
@@ -174,6 +183,7 @@ impl Cmdq {
         batch: BatchId,
         groups: Groups,
         state: Option<&Rc<StepState>>,
+        client: Option<ClientId>,
     ) -> Vec<Step> {
         let mut steps = Vec::new();
         for (source, calls) in groups {
@@ -188,6 +198,7 @@ impl Cmdq {
                     batch,
                     state: state.cloned(),
                     group,
+                    client,
                     work: Some(Work::Command {
                         call,
                         source: source.clone(),
@@ -208,6 +219,7 @@ impl Cmdq {
             batch,
             state: None,
             group: 0,
+            client: None,
             work: Some(work),
             fired: false,
             waiting: false,
@@ -252,6 +264,27 @@ impl Cmdq {
     fn batch_of(&mut self, id: StepId) -> Option<BatchId> {
         let (q, i) = self.find(id)?;
         Some(self.queues.get(&q)?.get(i)?.batch)
+    }
+
+    /// The client steps inserted after `id` get (`cmdq_insert_after`
+    /// copies `after->client`): the one `id` itself runs for, or while
+    /// `id` fires the client it borrowed.
+    fn client_after(&mut self, id: StepId) -> Option<ClientId> {
+        self.client_of(id).or_else(|| {
+            self.lent
+                .filter(|_| self.current.is_some_and(|(_, s)| s == id))
+        })
+    }
+
+    /// The client step `id` was given when it was inserted.
+    fn client_of(&mut self, id: StepId) -> Option<ClientId> {
+        let (q, i) = self.find(id)?;
+        self.queues.get(&q)?.get(i)?.client
+    }
+
+    /// Hook command firing now borrowed client `c` (`None`: none).
+    pub(crate) fn lend(&mut self, c: Option<ClientId>) {
+        self.lent = c;
     }
 
     /// The state of a step.
@@ -494,7 +527,7 @@ impl Server {
         let id = BatchId(q.next_batch);
         q.batches.insert(id, b.item);
         let mut steps: Vec<Step> = b.before.into_iter().map(|w| q.work_step(id, w)).collect();
-        steps.extend(q.command_steps(id, b.groups, b.state.as_ref()));
+        steps.extend(q.command_steps(id, b.groups, b.state.as_ref(), None));
         steps.push(q.work_step(id, Work::End(b.end)));
         steps
     }
@@ -530,7 +563,8 @@ impl Server {
         state: Option<&Rc<StepState>>,
     ) -> Option<StepId> {
         let batch = self.cmdq.batch_of(after)?;
-        let steps = self.cmdq.command_steps(batch, groups, state);
+        let client = self.cmdq.client_after(after);
+        let steps = self.cmdq.command_steps(batch, groups, state, client);
         self.cmdq.insert_after(after, steps)
     }
 
@@ -718,6 +752,7 @@ impl Server {
                     return false;
                 };
                 item.step = Some(id);
+                item.pinned = self.cmdq.client_of(id);
                 // load_cfg: the file's commands (and what they queue)
                 // carry `current_file` in their state.
                 let outer = std::mem::replace(
@@ -761,6 +796,7 @@ impl Server {
                     self.cmdq_add_message(&item, &call);
                 }
                 let ok = commands::fire(self, &mut item, &call);
+                self.cmdq.lend(None);
                 // The command moved the current state on (split-window's
                 // cmd_find_from_winlink_pane(current, ...)): the commands
                 // after it in the same state see it.
@@ -777,6 +813,7 @@ impl Server {
                     self.end_quiet(&mut item);
                     item.client = None;
                     item.control = None;
+                    item.pinned = None;
                 }
                 (item.origin.current, item.control, item.no_hooks) = saved;
                 self.flush_item(&mut item);
