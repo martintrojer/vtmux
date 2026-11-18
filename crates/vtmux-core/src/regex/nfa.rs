@@ -279,7 +279,9 @@ impl Builder {
             };
             for _ in 2..=min {
                 let e = self.build(expr, false, true)?;
-                tree = self.concat(Some(tree), e)?.unwrap();
+                tree = self
+                    .concat(Some(tree), e)?
+                    .expect("concat(Some, _) returns Some");
             }
             if max == Some(min) {
                 return Ok(Some(tree));
@@ -324,7 +326,9 @@ impl Nfa {
         };
         let body = b.build(expr, false, false)?;
         let end = b.add(TKind::Leaf(Kind::End), None, None)?;
-        let root = b.concat(body, Some(end))?.unwrap();
+        let root = b
+            .concat(body, Some(end))?
+            .expect("concat(_, Some(end)) returns Some");
         let mut tree = b.tree;
 
         // calc_first, postorder: non-CONCAT nodes get consecutive indices.
@@ -604,7 +608,9 @@ impl Nfa {
 
     /// Forward state log anchored at `positions[0]`; failing anchors are left out.
     fn state_log(&self, text: &str, positions: &[usize], not_bol: bool) -> Vec<Vec<usize>> {
-        let end = *positions.last().unwrap();
+        let end = *positions
+            .last()
+            .expect("positions always ends with the end offset");
         let mut log = Vec::with_capacity(positions.len());
         let mut mark = vec![usize::MAX; self.nodes.len()];
         let mut seeds = vec![self.init];
@@ -652,7 +658,8 @@ impl Nfa {
                     .filter(|&x| matches!(self.nodes[x].kind, Kind::End))
                     .collect()
             } else {
-                let (c, _) = unit_at(text, positions[k]).unwrap();
+                let (c, _) =
+                    unit_at(text, positions[k]).expect("k < last, so positions[k] starts a unit");
                 log[k]
                     .iter()
                     .copied()
@@ -685,7 +692,7 @@ impl Nfa {
     fn set_regs(&self, text: &str, positions: &[usize], sifted: &[Vec<usize>]) -> Option<Captures> {
         let n = self.nodes.len();
         let last = positions.len() - 1;
-        let to_i = |p: usize| isize::try_from(p).unwrap();
+        let to_i = |p: usize| isize::try_from(p).expect("text offsets fit in isize");
         let mut regs: Vec<(isize, isize)> = vec![(-1, -1); self.groups + 1];
         regs[0] = (to_i(positions[0]), to_i(positions[last]));
         let mut prev = regs.clone();
@@ -744,8 +751,10 @@ impl Nfa {
         Some(
             regs.iter()
                 .map(|&(so, eo)| {
-                    (so >= 0 && eo >= 0)
-                        .then(|| usize::try_from(so).unwrap()..usize::try_from(eo).unwrap())
+                    (so >= 0 && eo >= 0).then(|| {
+                        usize::try_from(so).expect("so checked >= 0")
+                            ..usize::try_from(eo).expect("eo checked >= 0")
+                    })
                 })
                 .collect(),
         )
