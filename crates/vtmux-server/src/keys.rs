@@ -554,7 +554,9 @@ fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
             }),
             None,
         ),
-        Backspace | BackTab | Keypad(_) => unreachable!(),
+        Backspace | BackTab | Keypad(_) => {
+            unreachable!("Keypad and BackTab returned above; the caller encodes Backspace")
+        }
     };
     let cursor = matches!(n, Up | Down | Left | Right);
     let function = matches!(n, F(1..=4));

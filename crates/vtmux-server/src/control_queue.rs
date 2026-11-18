@@ -416,7 +416,11 @@ impl Queue {
             let Some(lane) = self.lanes.get_mut(&pane) else {
                 break;
             };
-            let block = lane.front_mut().expect("a lane has a block");
+            // An emptied lane is removed as its last block goes (below).
+            let Some(block) = lane.front_mut() else {
+                self.lanes.remove(&pane);
+                break;
+            };
             age.get_or_insert_with(|| now.saturating_duration_since(block.read));
             let left = usize::try_from(block.end - block.start).unwrap_or(usize::MAX);
             let n = left.min(limit - used);

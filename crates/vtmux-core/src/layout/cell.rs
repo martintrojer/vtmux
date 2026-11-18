@@ -138,16 +138,27 @@ impl<L> Cell<L> {
         self.is_tiled() || self.has_tiled_child()
     }
 
-    /// The cell at `path`. Panics on a path that is not in the tree.
+    /// The cell at `path`.
+    ///
+    /// # Panics
+    /// On a path that is not in the tree: a path is taken from this tree
+    /// and used before the tree changes shape.
     #[must_use]
     pub fn get(&self, path: &[usize]) -> &Cell<L> {
-        path.iter().fold(self, |c, &i| &c.children()[i])
+        path.iter().fold(self, |c, &i| match c {
+            Self::Node(n) => &n.children[i],
+            _ => panic!("a layout path runs through a leaf: taken from another tree shape"),
+        })
     }
 
+    /// [`Self::get`], mutable.
+    ///
+    /// # Panics
+    /// As [`Self::get`].
     pub fn get_mut(&mut self, path: &[usize]) -> &mut Cell<L> {
         path.iter().fold(self, |c, &i| match c {
             Self::Node(n) => &mut n.children[i],
-            _ => panic!("path through a leaf"),
+            _ => panic!("a layout path runs through a leaf: taken from another tree shape"),
         })
     }
 

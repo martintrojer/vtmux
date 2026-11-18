@@ -194,14 +194,18 @@ impl Model {
             self.next_window(s, false);
         }
 
-        let session = self.sessions.get_mut(&s).expect("checked above");
+        let Some(session) = self.sessions.get_mut(&s) else {
+            return;
+        };
         let old_windows = std::mem::take(&mut session.windows);
         let old_tree = std::mem::take(&mut session.link_tree);
         session.link_alerts.clear();
         session.link_seq.clear();
         for (i, w) in &from {
             let stamp = self.next_link_stamp();
-            let session = self.sessions.get_mut(&s).expect("checked above");
+            let Some(session) = self.sessions.get_mut(&s) else {
+                return;
+            };
             session.windows.insert(*i, *w);
             session.link_tree.insert(*i);
             session.link_seq.insert(*i, stamp);
@@ -211,7 +215,9 @@ impl Model {
             self.fire_winlink("window-linked", s, *i, *w);
         }
 
-        let session = self.sessions.get_mut(&s).expect("checked above");
+        let Some(session) = self.sessions.get_mut(&s) else {
+            return;
+        };
         let first = session.windows.keys().next().copied();
         let keep = if had_current {
             session.current

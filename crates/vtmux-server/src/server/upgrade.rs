@@ -668,7 +668,7 @@ impl Server {
                 vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
                     chunk.to_vec(),
                 ))
-                .expect("a chunk of keys fits a frame")
+                .expect("a key, or 16 KiB of held input, is under MAX_FRAME (16 MiB)")
             };
             let held_frames: Vec<Vec<u8>> = held.chunks(16 * 1024).map(input).collect();
             let frames: Vec<u8> = keys

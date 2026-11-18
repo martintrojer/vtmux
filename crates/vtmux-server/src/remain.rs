@@ -146,7 +146,9 @@ impl Server {
         }
         // server-fn.c:417: MODE_CURSOR off.
         bytes.extend_from_slice(b"\x1b[?25l");
-        let pane = self.model.panes.get_mut(&p).expect("checked above");
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return false;
+        };
         // screen_write draws cells, not bytes through the pane's parser: a
         // sequence the program left unfinished must not swallow them.
         pane.term.reset_input();

@@ -1490,7 +1490,7 @@ fn for_older_readers(
         && let Some(alt) = t.alt_entry.as_mut()
     {
         let hsize = usize::try_from(t.history.hsize).unwrap_or(usize::MAX);
-        alt.history = history_tail(&t.primary.history, hsize);
+        alt.history = history_tail(&t.primary.history, hsize)?;
         alt.has_history = true;
     }
     if let Some(sized) = t.sized_primary.as_mut() {
@@ -1541,8 +1541,12 @@ fn for_older_readers(
 
 /// The newest `n` rows of `pages`, as pages: whole pages are the same
 /// pages, the one the cut falls in
-/// is encoded again from its cut.
-fn history_tail(pages: &[snap::HistoryPage], n: usize) -> Vec<snap::HistoryPage> {
+/// is encoded again from its cut. Fails when that page does not decode
+/// (it was encoded by this export, so only out of memory).
+fn history_tail(
+    pages: &[snap::HistoryPage],
+    n: usize,
+) -> Result<Vec<snap::HistoryPage>, StateError> {
     let mut left = n;
     let mut from = pages.len();
     while let Some(rows) = from.checked_sub(1).map(|i| pages[i].rows as usize)
@@ -1564,11 +1568,11 @@ fn history_tail(pages: &[snap::HistoryPage], n: usize) -> Vec<snap::HistoryPage>
             }
             i += 1;
         })
-        .expect("a page this export encoded");
+        .map_err(|_| StateError::Invalid("a history page this export encoded does not decode"))?;
         out.push(b.finish(false));
     }
     out.extend_from_slice(&pages[from..]);
-    out
+    Ok(out)
 }
 
 /// Export `term` as a snapshot record, one page at a time (see the module

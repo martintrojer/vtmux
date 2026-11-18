@@ -3686,7 +3686,9 @@ impl Server {
         // draw (CLIENT_REDRAWBORDERS is not frozen).
         let redrawing = self.redraw_pending(id, s);
         let (jobs, window_jobs) = self.redraw_jobs(id, redrawing);
-        let client = self.clients.get_mut(&id).expect("client");
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
         let frozen = client.status.hold_window();
         let held = frozen
             .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
@@ -3841,7 +3843,9 @@ impl Server {
         // A plain frame's window rows are the composed rows and its status
         // rows the status line's, each tagged: the buffer keeps them.
         let keep = if plain { 0..rows } else { 0..0 };
-        let client = self.clients.get_mut(&id).expect("client");
+        let Some(client) = self.clients.get_mut(&id) else {
+            return Vec::new();
+        };
         let (mut screen, mut tags) = client.compositor.buffer(cols, rows, keep);
         let window = (&mut screen, &mut tags[..], plain);
         self.draw_window(id, s, caps, window, (scene_y, area), held, drawing);

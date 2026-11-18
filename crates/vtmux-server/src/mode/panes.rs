@@ -199,14 +199,8 @@ pub fn enter(
         kill: args.flag('k'),
         key_mode: crate::mode::screen_key_mode(&server.model),
     };
-    // A mode that is not stacked goes first (window.c:1755-1756).
-    if server.model.panes[&p]
-        .modes
-        .first()
-        .is_some_and(Mode::no_stack)
-    {
-        server.reset_mode(p);
-    }
+    // window.c:1755-1756 resets a mode that is not stacked first; the only
+    // such mode is this one, and a pane already in it returned above.
     let pane = server.model.panes.get_mut(&p).expect("pane");
     let previous = pane.modes.first().map(Mode::name);
     pane.modes.insert(0, Mode::Panes(Box::new(mode)));

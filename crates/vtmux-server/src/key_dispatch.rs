@@ -167,7 +167,9 @@ impl Server {
             .map(|(&id, _)| id)
             .collect();
         for id in due {
-            let c = self.clients.get_mut(&id).expect("listed");
+            let Some(c) = self.clients.get_mut(&id) else {
+                continue;
+            };
             c.keys.repeat_deadline = None;
             if c.keys.repeating {
                 c.keys.repeating = false;
@@ -244,19 +246,23 @@ impl Server {
                 if let Some((bkey, repeat, commands)) = binding {
                     // Repeating, but this binding does not: stop and try
                     // again from the default table.
-                    if self.clients[&id].keys.repeating && !repeat {
-                        self.clients.get_mut(&id).expect("client").keys.repeating = false;
+                    let c = self.clients.get_mut(&id);
+                    if let Some(c) = c.filter(|c| c.keys.repeating && !repeat) {
+                        c.keys.repeating = false;
                         self.set_key_table(id, None);
                         table.clone_from(&self.clients[&id].keys.table);
                         first.clone_from(&table);
                         continue 'table_changed;
                     }
                     let time = self.repeat_time(id, s, bkey, repeat);
+                    let Some(c) = self.clients.get_mut(&id) else {
+                        return true;
+                    };
                     if time == 0 {
-                        self.clients.get_mut(&id).expect("client").keys.repeating = false;
+                        c.keys.repeating = false;
                         self.set_key_table(id, None);
                     } else {
-                        let keys = &mut self.clients.get_mut(&id).expect("client").keys;
+                        let keys = &mut c.keys;
                         keys.repeating = true;
                         keys.last_key = Some(bkey);
                         keys.repeat_deadline = Some(Instant::now() + Duration::from_millis(time));
@@ -286,7 +292,10 @@ impl Server {
                 if repeating {
                     first.clone_from(&table);
                 }
-                self.clients.get_mut(&id).expect("client").keys.repeating = false;
+                let Some(c) = self.clients.get_mut(&id) else {
+                    return true;
+                };
+                c.keys.repeating = false;
                 continue 'table_changed;
             }
             // Not in the default table either. A key that started in

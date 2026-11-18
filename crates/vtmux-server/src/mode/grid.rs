@@ -77,7 +77,9 @@ struct Line {
 impl Line {
     /// The row of a line already read (all of them once a reflow starts).
     fn row(&self) -> &Row {
-        self.row.get().expect("line read")
+        self.row
+            .get()
+            .expect("only a reflow reads rows this way, after Grid::read_all")
     }
 
     fn row_mut(&mut self) -> &mut Row {
@@ -588,7 +590,11 @@ impl Grid {
             if line == source.len() {
                 break;
             }
-            let next = source[line].as_ref().expect("lines below are live");
+            // A join empties only the lines below the one it joins onto,
+            // and the reflow goes past those: the lines below are live.
+            let Some(next) = source[line].as_ref() else {
+                break;
+            };
             if !next.row().wrapped {
                 wrapped = false;
             }
@@ -621,7 +627,9 @@ impl Grid {
         if lines == 0 {
             return;
         }
-        let rest = source[from].as_mut().expect("live line");
+        let rest = source[from]
+            .as_mut()
+            .expect("line `from` was live when the loop above took its cells");
         if want == rest.row().cells.len() {
             if !wrapped {
                 target[to].row_mut().wrapped = false;

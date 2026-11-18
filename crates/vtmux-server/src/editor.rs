@@ -113,7 +113,9 @@ impl Server {
         let was_zoomed = self.model.push_zoom(w, false, true);
         // layout_floating_pane(w, NULL): after the whole layout.
         let new = self.model.pane_ids.allocate();
-        let window = self.model.windows.get_mut(&w).expect("current window");
+        let Some(window) = self.model.windows.get_mut(&w) else {
+            return false;
+        };
         window.layout.add_floating(None, new, cell);
         window.panes.add(
             new,
@@ -143,9 +145,10 @@ impl Server {
             empty: false,
         });
         let Ok(mut pane) = spawned else {
-            let window = self.model.windows.get_mut(&w).expect("current window");
-            window.layout.close_pane(new);
-            window.panes.remove(new);
+            if let Some(window) = self.model.windows.get_mut(&w) {
+                window.layout.close_pane(new);
+                window.panes.remove(new);
+            }
             self.model.fix_panes(w);
             self.model.pop_zoom(w, was_zoomed);
             let _ = std::fs::remove_file(&path);
@@ -168,9 +171,10 @@ impl Server {
             .fix_panes_resized_from(w, None, assigned.then_some((new, created)));
         self.fire_pane_created(s, index, new, false, false);
         // spawn.c:596-603.
-        let window = self.model.windows.get_mut(&w).expect("current window");
-        window.panes.modal_last = window.panes.active;
-        window.panes.modal = Some(new);
+        if let Some(window) = self.model.windows.get_mut(&w) {
+            window.panes.modal_last = window.panes.active;
+            window.panes.modal = Some(new);
+        }
         self.model.switch_active(w, new);
         self.model.layout_changed(w);
         self.model.pop_zoom(w, was_zoomed);

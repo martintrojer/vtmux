@@ -724,7 +724,11 @@ impl Compositor {
                 if x >= end && after_regional.is_none_or(|a| a < x) {
                     break;
                 }
-                let cell = screen.cell(x, y).expect("screen cell");
+                // A Snapshot holds `cols * rows` cells; a short one
+                // writes no more of the row.
+                let Some(cell) = screen.cell(x, y) else {
+                    break;
+                };
                 let changed_at = |x: u16| {
                     !same_size
                         || is_forced(x, y)
@@ -747,7 +751,7 @@ impl Compositor {
                 }
                 if regional {
                     let (next, force) =
-                        write_regional(&mut out, &mut style, &screen, (x, y), at, caps);
+                        write_regional(&mut out, &mut style, &screen, (x, y, cell), at, caps);
                     after_regional = force.then_some(next);
                     x = next;
                     at = None;
@@ -956,11 +960,10 @@ fn write_regional(
     out: &mut String,
     style: &mut Pen,
     screen: &Snapshot,
-    (x, y): (u16, u16),
+    (x, y, cell): (u16, u16, &vtmux_vt::Cell),
     at: Option<(u16, u16)>,
     caps: Caps,
 ) -> (u16, bool) {
-    let cell = screen.cell(x, y).expect("screen cell");
     // A blank looks the same in the indicator's style when only its
     // background shows.
     let plain =

@@ -110,7 +110,11 @@ fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
             .iter()
             .map(|c| c.as_ref().map(|r| at(r.start)..at(r.end)))
             .collect();
-        let whole = captures[0].clone().unwrap();
+        // Capture 0 is the whole match, set whenever there is a match.
+        let Some(whole) = captures.first().cloned().flatten() else {
+            out.extend_from_slice(&bytes[start..]);
+            break;
+        };
         let (so, eo) = (whole.start, whole.end);
         out.extend_from_slice(&bytes[last..so]);
         if pattern.starts_with('^') {
