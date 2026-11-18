@@ -1,0 +1,28 @@
+name = "extended_key_signed"
+size = [100, 8]
+# tty-keys.c tty_keys_extended_key scans the parameters for digits and `;`
+# only (1117-1126): a `+` that sscanf's %u would read stops the scan, so an
+# 80-byte `CSI +0...97;5u` is M-[ and text, in one write or split after
+# `ESC [`. sscanf reads its two (or `27;` and two) fields and no more:
+# `97;5;u` is C-a, `027;5;97~` misses the literal `27`, and a %u past 32
+# bits wraps (4294967393 is 97). The pane shows its input through cat -v.
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w0", "-x", "100", "-y", "7", "sh", "-c", "stty raw -echo opost onlcr; tmux wait-for -S rdy; LC_ALL=C exec cat -v"] },
+  { wait_for = "rdy" },
+  { run = ["select-pane", "-t", "a", "-T", "t0"] },
+  { run = ["bind", "-n", "M-[", "set", "-ga", "@k", "M[,"] },
+  { run = ["bind", "-n", "C-a", "set", "-ga", "@k", "Ca,"] },
+  { run = ["set", "-g", "@k", ""] },
+  { attach = { session = "a" } },
+  { settle = { react = true } },
+  { keys = "\u001b[+0000000000000000000000000000000000000000000000000000000000000000000000097;5u\r" },
+  { settle = {} },
+  { keys = "\u001b[" },
+  { keys = "+0000000000000000000000000000000000000000000000000000000000000000000000097;5u\r" },
+  { settle = {} },
+  { keys = "\u001b[97;5;u\u001b[27;5;97~\u001b[4294967393;5u" },
+  { keys = "\u001b[027;5;97~\r" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["show", "-gv", "@k"] },
+]

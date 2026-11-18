@@ -605,8 +605,7 @@ fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
 
 /// An extended key too long for tmux's parser (tty-keys.c:1117-1126,
 /// `tmp[64]`) typed behind a bound upgrade goes back as the keys it
-/// decodes as, M-[ and text, each a frame of its own: no key is longer
-/// than `CSI_KEY_MAX`, so every frame fits (`upgrade_behind`'s encode).
+/// decodes as, M-[ and text, each a frame of its own.
 #[test]
 fn an_oversized_key_typed_after_a_bound_upgrade_goes_back_as_text() {
     let (mut server, dir) = setup("long");
@@ -2093,4 +2092,46 @@ fn a_re_attach_drops_the_notifications_queued_for_its_old_connection() {
         drop(server);
         std::fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// A key given back goes in one frame of its own, of at most
+/// `GIVE_BACK_CHUNK` bytes: one whose bytes are longer (no decoder makes
+/// one), here even than `MAX_FRAME`, is dropped, and the upgrade encodes
+/// the rest without a panic.
+#[test]
+fn a_key_longer_than_a_give_back_frame_is_dropped() {
+    let (mut server, dir) = setup("huge");
+    let binary = passing(&dir);
+    let bind = format!("vtmux-upgrade -b {}", binary.to_str().unwrap());
+    st::ok(&mut server, &dir, &["bind", "-n", "F5", &bind]);
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    server.on_client_input(term, b"\x1b[15~").unwrap();
+    let key = |c| crate::keys::Key {
+        base: crate::keys::Base::Char(c),
+        ctrl: false,
+        meta: false,
+        shift: false,
+        esc_prefix: false,
+    };
+    for (c, raw) in [
+        ('a', vec![b'a'; vtmux_core::protocol::MAX_FRAME + 1]),
+        ('b', b"b".to_vec()),
+    ] {
+        server.handle_key0(term, crate::key_dispatch::KeyKind::Key(key(c), raw), None);
+    }
+    until_exec(&mut server);
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let input =
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b"b".to_vec()))
+            .unwrap();
+    assert_eq!(client.inbuf, input);
+    assert_eq!(client.given_back_keys, 1);
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
 }

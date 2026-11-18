@@ -1061,14 +1061,24 @@ fn build_table(code_keys: &[(&str, &str)]) -> KeyTable {
 
 /// `tty_keys_extended_key` (tty-keys.c:1089-1202): `CSI number;mods u` or
 /// `CSI 27;mods;number ~`.
+/// The parameters are digits and `;` only (the terminator scan,
+/// tty-keys.c:1117-1126, stops at anything else, so `CSI +97;5u` is no
+/// key), read by `sscanf` (`%u;%u`, `27;%u;%u`): the fields after those it
+/// reads are not looked at.
 fn extended_key(body: &str, final_byte: u8) -> Option<Key> {
-    let parts: Vec<u32> = body
-        .split(';')
-        .map(str::parse)
-        .collect::<Result<_, _>>()
-        .ok()?;
-    let (number, modifiers) = match (final_byte, parts.as_slice()) {
-        (b'u', [n, m, ..]) | (b'~', [27, m, n, ..]) => (*n, *m),
+    if !body.bytes().all(|b| b.is_ascii_digit() || b == b';') {
+        return None;
+    }
+    let mut fields = body.split(';');
+    let mut field = || fields.next().and_then(scanf_u32);
+    let (number, modifiers) = match final_byte {
+        b'u' => (field()?, field()?),
+        // The format's `27` is literal: `027` is no match.
+        b'~' if body.starts_with("27;") => {
+            field()?;
+            let m = field()?;
+            (field()?, m)
+        }
         _ => return None,
     };
     let base = if number == 0x7f {
@@ -1093,6 +1103,25 @@ fn extended_key(body: &str, final_byte: u8) -> Option<Key> {
         k.shift = false;
     }
     Some(k)
+}
+
+/// `%u` of `sscanf` on a run of digits: `strtoul`'s value, saturated at
+/// `ULONG_MAX` (64 bits on every host tmux runs on), stored to an
+/// `unsigned int`, so it wraps; no digits is no field.
+fn scanf_u32(digits: &str) -> Option<u32> {
+    if digits.is_empty() {
+        return None;
+    }
+    let value = digits.bytes().fold(0u64, |n, d| {
+        n.checked_mul(10)
+            .and_then(|n| n.checked_add(u64::from(d - b'0')))
+            .unwrap_or(u64::MAX)
+    });
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "sscanf stores to an unsigned int"
+    )]
+    Some(value as u32)
 }
 
 fn character(bytes: &[u8], expired: bool) -> Option<(Key, usize)> {
@@ -1190,6 +1219,56 @@ mod tests {
         let events = d.drain_with_bytes(now);
         assert_eq!(events.len(), 1, "{events:?}");
         assert_eq!(events[0].1.len(), CSI_KEY_MAX - 1);
+    }
+
+    /// `tty_keys_extended_key` scans digits and `;` only (tty-keys.c:
+    /// 1117-1126): a sign is no key, whatever `sscanf` would read, so an
+    /// 80-byte `CSI +0…97;5u` is M-[ and text, in one frame and split after
+    /// `ESC [`. `sscanf` reads its fields only: `97;5;u` is C-a, `027;…~`
+    /// misses the literal `27`, and a `%u` past 32 bits wraps.
+    #[test]
+    fn an_extended_key_is_digits_and_semicolons_as_tmux_scans_it() {
+        let now = Instant::now();
+        let mut meta = key(Base::Char('['));
+        meta.meta = true;
+        meta.esc_prefix = true;
+        let mut ctrl_a = key(Base::Char('a'));
+        ctrl_a.ctrl = true;
+        let zeros = [b'0'; 80 - 9];
+        let body = [&b"+"[..], &zeros, b"97;5u"].concat();
+        for split in [false, true] {
+            let mut d = Decoder::default();
+            if split {
+                d.feed(b"\x1b[");
+                assert_eq!(d.drain(now), Vec::new());
+                d.feed(&body);
+            } else {
+                d.feed(&[&b"\x1b["[..], &body].concat());
+            }
+            let events = d.drain_with_bytes(now);
+            assert_eq!(events[0], (Event::Key(meta), b"\x1b[".to_vec()));
+            assert_eq!(events.len(), 1 + body.len(), "split {split}");
+            assert!(
+                events
+                    .iter()
+                    .all(|(_, raw)| raw.len() == 1 || raw == b"\x1b[")
+            );
+        }
+        for (seq, want) in [
+            (&b"\x1b[97;5;u"[..], Some(ctrl_a)),
+            (b"\x1b[27;5;97~", Some(ctrl_a)),
+            (b"\x1b[4294967393;5u", Some(ctrl_a)),
+            (b"\x1b[027;5;97~", None),
+            (b"\x1b[97;+5u", None),
+        ] {
+            let mut d = Decoder::default();
+            d.feed(seq);
+            let events = d.drain(now);
+            match want {
+                Some(k) => assert_eq!(events, vec![Event::Key(k)], "{seq:?}"),
+                None => assert_eq!(events[0], Event::Key(meta), "{seq:?}"),
+            }
+        }
     }
 
     /// tty-keys.c:990-1012: a partial key waits `escape-time` (1 ms for

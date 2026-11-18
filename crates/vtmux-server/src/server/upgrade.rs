@@ -53,6 +53,11 @@ pub type ExecFn = fn(&Path, OwnedFd, &[RawFd], Option<&Path>) -> io::Error;
 /// (decisions 10 and 26: "a few seconds", 3 s).
 pub const PREFLIGHT_WAIT: Duration = Duration::from_secs(3);
 
+/// The largest `Input` frame input given back to a client is cut to (a
+/// size every reader takes); a key longer is not given back.
+const GIVE_BACK_CHUNK: usize = 16 * 1024;
+const _: () = assert!(GIVE_BACK_CHUNK <= vtmux_core::protocol::MAX_FRAME / 2);
+
 /// A test hook read from the server's environment (`1`), which
 /// `cargo xtask oracle replay --upgrade-every` sets: it inserts upgrades
 /// between a scenario's steps and needs each one to leave everything a
@@ -668,21 +673,26 @@ impl Server {
                 vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(
                     chunk.to_vec(),
                 ))
-                .expect(
-                    "a decoded key (under input::CSI_KEY_MAX bytes), or 16 KiB of held \
-                     input, is under MAX_FRAME (16 MiB)",
-                )
+                .expect("GIVE_BACK_CHUNK is under MAX_FRAME")
             };
-            let held_frames: Vec<Vec<u8>> = held.chunks(16 * 1024).map(input).collect();
-            let frames: Vec<u8> = keys
+            let held_frames: Vec<Vec<u8>> = held.chunks(GIVE_BACK_CHUNK).map(input).collect();
+            // A key is given back whole, in one frame: one longer than a
+            // chunk (no decoder key is: a CSI key is under
+            // input::CSI_KEY_MAX bytes) is dropped, not cut.
+            let key_frames: Vec<Vec<u8>> = keys
                 .iter()
+                .filter(|key| key.len() <= GIVE_BACK_CHUNK)
                 .map(|key| input(key))
+                .collect();
+            let whole = key_frames.len();
+            let frames: Vec<u8> = key_frames
+                .into_iter()
                 .chain(held_frames.iter().cloned())
                 .flatten()
                 .collect();
             c.inbuf.splice(0..0, frames);
             c.given_back = crate::server::GivenBack {
-                whole: keys.len(),
+                whole,
                 held: held_frames.len(),
                 since,
             };
