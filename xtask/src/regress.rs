@@ -681,6 +681,22 @@ fn ptmx_holders(lsof: &str) -> Vec<(usize, String, String)> {
     out
 }
 
+/// Joins every worker, then tells the sampler to stop (even when a worker
+/// panicked, or the scope would wait on the sampler forever); returns the
+/// number of workers that panicked.
+fn join_then_stop(
+    workers: Vec<thread::ScopedJoinHandle<'_, ()>>,
+    finished: &std::sync::atomic::AtomicBool,
+) -> usize {
+    let panicked = workers
+        .into_iter()
+        .map(thread::ScopedJoinHandle::join)
+        .filter(std::result::Result::is_err)
+        .count();
+    finished.store(true, Ordering::Relaxed);
+    panicked
+}
+
 fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran> {
     let census = pty_census();
     let jobs = job_count(
@@ -700,6 +716,7 @@ fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran>
             held_back: 0,
         };
     }
+    let mut panicked = 0;
     thread::scope(|s| {
         s.spawn(|| {
             while !finished.load(Ordering::Relaxed) {
@@ -733,11 +750,9 @@ fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran>
                 })
             })
             .collect();
-        for w in workers {
-            w.join().expect("regress worker panicked");
-        }
-        finished.store(true, Ordering::Relaxed);
+        panicked = join_then_stop(workers, &finished);
     });
+    assert!(panicked == 0, "regress worker panicked");
     let p = ptys.into_inner().expect("ptys");
     if p.max > 0 {
         eprintln!(
@@ -987,6 +1002,27 @@ fn run_inner() -> Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panicking_worker_does_not_hang_the_sampler_scope() {
+        use std::sync::atomic::AtomicBool;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let finished = AtomicBool::new(false);
+            let mut panicked = 0;
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    while !finished.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                });
+                let w = vec![s.spawn(|| panic!("boom")), s.spawn(|| {})];
+                panicked = join_then_stop(w, &finished);
+            });
+            let _ = tx.send(panicked);
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(1));
+    }
+
     use super::*;
     use crate::reap::ps;
     use std::os::unix::net::UnixListener;
