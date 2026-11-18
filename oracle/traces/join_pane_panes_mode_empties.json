@@ -1,0 +1,223 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "join_pane_panes_mode_empties",
+  "inputs": {
+    "name": "join_pane_panes_mode_empties",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "focus-events",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "pane-scrollbars",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-Z",
+          "-d",
+          "0",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-d",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-Z",
+          "-d",
+          "0",
+          "-t",
+          "a:2"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-d",
+          "-h",
+          "-s",
+          "a:2",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} #{window_panes} #{window_layout}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_in_mode} #{pane_mode} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 3 {\"V\":2,\"L\":{\"t\":\"v\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"h\",\"w\":80,\"h\":12,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":40,\"h\":12,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":39,\"h\":12,\"x\":41,\"y\":0,\"i\":1,\"I\":\"%2\"}]},{\"t\":\"p\",\"w\":80,\"h\":11,\"x\":0,\"y\":13,\"i\":2,\"I\":\"%1\"}]}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0.0 1 1 panes-mode 39x12 0,0\na:0.1 0 1 panes-mode 38x12 41,0\na:0.2 0 0  79x11 0,13\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

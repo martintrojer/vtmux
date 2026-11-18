@@ -66,7 +66,9 @@ pub struct Drawn {
     /// The floating panes (`window_panes_pane_floating`: floating in the
     /// full layout) with their indexes, bottom of the z-order first.
     pub floating: Vec<(PaneId, u32)>,
-    pub active: PaneId,
+    /// None for a source window emptied by join-pane before it goes
+    /// (`w->active == wp` is then never true).
+    pub active: Option<PaneId>,
     pub screens: BTreeMap<PaneId, Snapshot>,
     /// `display-panes-format` expanded for each tiled pane then (it shows
     /// the pane's size and title of that moment); empty when unset.
@@ -301,7 +303,7 @@ impl crate::model::Model {
             cells,
             tiled,
             floating,
-            active: window.active(),
+            active: window.panes.active,
             screens,
             formats,
             format_set: !format.is_empty(),

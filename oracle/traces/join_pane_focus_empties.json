@@ -1,0 +1,224 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "join_pane_focus_empties",
+  "inputs": {
+    "name": "join_pane_focus_empties",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "focus-events",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "movep",
+          "-d",
+          "-b",
+          "-f",
+          "-h",
+          "-s",
+          "a:2",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "b:0",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} #{session_windows}"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_active} #{window_panes} #{window_layout}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 1 4 {\"V\":2,\"L\":{\"t\":\"h\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":40,\"h\":24,\"x\":0,\"y\":0,\"i\":2,\"I\":\"%2\"},{\"t\":\"v\",\"w\":39,\"h\":24,\"x\":41,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":39,\"h\":6,\"x\":41,\"y\":0,\"l\":1,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":39,\"h\":5,\"x\":41,\"y\":7,\"a\":true,\"i\":1,\"I\":\"%3\"},{\"t\":\"p\",\"w\":39,\"h\":11,\"x\":41,\"y\":13,\"l\":0,\"i\":3,\"I\":\"%1\"}]}]}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0.0 0 39x6 41,0\na:0.1 1 39x5 41,7\na:0.2 0 40x24 0,0\na:0.3 0 39x11 41,13\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

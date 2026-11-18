@@ -1,0 +1,11 @@
+name = "join_pane_panes_mode_moved"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "focus-events", "off"] },
+  { run = ["set", "-g", "pane-scrollbars", "on"] },
+  { run = ["neww", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["display-panes", "-Z", "-d", "0", "-t", "a:1"] },
+  { run = ["joinp", "-d", "-s", "a:1", "-t", "a:0"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_panes} #{window_layout}"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_in_mode} #{pane_mode} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+]

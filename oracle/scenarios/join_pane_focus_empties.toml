@@ -1,0 +1,14 @@
+name = "join_pane_focus_empties"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["neww", "-t", "a:1", "cat", "-"] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:0"] },
+  { run = ["neww", "-t", "a:2", "cat", "-"] },
+  { run = ["movep", "-d", "-b", "-f", "-h", "-s", "a:2", "-t", "a:0"] },
+  { run = ["new", "-d", "-s", "b", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["joinp", "-s", "b:0", "-t", "a:0.0"] },
+  { run = ["ls", "-F", "#{session_name} #{session_windows}"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_active} #{window_panes} #{window_layout}"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+]

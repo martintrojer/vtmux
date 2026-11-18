@@ -755,7 +755,7 @@ impl Source<'_> {
         let wtree = TreeId::Window(mode_pane.window);
         let found = self.panes_found(m, m.source_window, q);
         let ctx = self.ctx(found, caps);
-        let name = if drawn.active == q {
+        let name = if drawn.active == Some(q) {
             "display-panes-active-colour"
         } else {
             "display-panes-colour"

@@ -1406,7 +1406,9 @@ impl Model {
             let actives: Vec<PaneId> = old_w
                 .into_iter()
                 .chain([w])
-                .filter_map(|x| self.windows.get(&x).map(Window::active))
+                // window_update_focus skips a NULL w->active: a source
+                // window emptied by join-pane before it is killed.
+                .filter_map(|x| self.windows.get(&x).and_then(|x| x.panes.active))
                 .collect();
             for p in actives {
                 self.push_focus_check(p);
