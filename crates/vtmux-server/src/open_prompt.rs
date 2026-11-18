@@ -379,11 +379,9 @@ impl Server {
         let (Some(s), Some(prompt)) = (client.attached, client.status.prompt()) else {
             return false;
         };
-        let Some((cols, rows)) = client
-            .hello
-            .as_ref()
-            .and_then(|h| h.tty.as_ref())
-            .map(|t| (t.cols as usize, t.rows))
+        let Some((cols, rows)) = self
+            .drawn_size(c)
+            .map(|(cols, rows)| (usize::from(cols), u32::from(rows)))
         else {
             return false;
         };

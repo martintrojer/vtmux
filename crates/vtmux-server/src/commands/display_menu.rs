@@ -42,7 +42,7 @@ pub fn exec(
         .map(|t| vtmux_core::format::expand_str(t, &ctx))
         .unwrap_or_default();
     // menu_add_item: `c->tty.sx`.
-    let cols = server.tty_size(tc).map_or(80, |(c, _)| u32::from(c));
+    let cols = server.drawn_size(tc).map_or(80, |(c, _)| u32::from(c));
     let mut items = Items::new(title);
     let words: Vec<String> = args
         .positionals
@@ -141,7 +141,7 @@ fn position(
     let lines = i64::from(server.status_line_size(client));
     // tty_window_offset: the view's offset, and its rows (sy).
     let (ox, oy) = (i64::from(client.view.ox), i64::from(client.view.oy));
-    let rows = server.tty_size(tc).map_or(wsy, |(_, r)| i64::from(r));
+    let rows = server.drawn_size(tc).map_or(wsy, |(_, r)| i64::from(r));
     let sy = wsy.min(rows - lines);
     let mut vars: Vec<(&'static str, i64)> = Vec::new();
     if let Some(m) = &item.mouse {
@@ -171,7 +171,7 @@ fn position(
         let top = server.model.status_top(TreeId::Session(s));
         let source = server.render_source();
         let ctx = server.format_ctx(Found::from_session(&server.model, s), Some(tc));
-        let cols = server.tty_size(tc).map_or(80, |(c, _)| usize::from(c));
+        let cols = server.drawn_size(tc).map_or(80, |(c, _)| usize::from(c));
         let ranges = crate::render::status::status_ranges(
             &source,
             &ctx,

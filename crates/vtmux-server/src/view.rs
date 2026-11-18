@@ -272,7 +272,8 @@ impl Server {
         let (_, w, active) = self.model.current_of(s)?;
         let win = self.model.windows.get(&w)?;
         let lines = self.status_line_size(c);
-        let area = (tty.cols, tty.rows.saturating_sub(lines));
+        let (cols, rows) = crate::resize::drawn_size(tty.cols, tty.rows);
+        let area = (u32::from(cols), u32::from(rows).saturating_sub(lines));
         let size = (win.sx(), win.sy());
         // The cursor matters only when the window does not fit.
         let cursor = if area.0 >= size.0 && area.1 >= size.1 {

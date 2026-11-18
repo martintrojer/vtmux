@@ -415,7 +415,9 @@ impl Server {
             .hello
             .as_ref()
             .and_then(|h| h.tty.as_ref())
-            .map_or(24, |t| t.rows);
+            .map_or(24, |t| {
+                u32::from(crate::resize::drawn_size(t.cols, t.rows).1)
+            });
         (Some(rows.saturating_sub(lines)), lines)
     }
 
@@ -425,7 +427,8 @@ impl Server {
     pub(crate) fn status_range_at(&self, id: ClientId, x: u32, line: u32) -> Option<RangeKind> {
         let c = self.clients.get(&id)?;
         let s = c.attached?;
-        let cols = c.hello.as_ref()?.tty.as_ref()?.cols;
+        let tty = c.hello.as_ref()?.tty.as_ref()?;
+        let cols = crate::resize::drawn_size(tty.cols, tty.rows).0;
         let lines = self.status_line_size(c);
         let source = self.render_source();
         let ctx = self.format_ctx(Found::from_session(&self.model, s), Some(id));
@@ -433,7 +436,7 @@ impl Server {
             &source,
             &ctx,
             s,
-            usize::try_from(cols).ok()?,
+            usize::from(cols),
             usize::try_from(lines).ok()?,
         );
         let x = usize::try_from(x).ok()?;

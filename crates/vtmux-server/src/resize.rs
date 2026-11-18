@@ -24,6 +24,44 @@ use crate::server::{Client, ClientId, Server};
 pub const WINDOW_MINIMUM: u32 = 1;
 pub const WINDOW_MAXIMUM: u32 = 10_000;
 
+/// The most cells a client's frame has: a 2048x2048 terminal, more than
+/// an 8K display shows at a 4-pixel font. A frame costs about 190 bytes a
+/// cell (its buffers, the scene, the panes' drawings; a debug build): 800
+/// MB here, where a `WINDOW_MAXIMUM` square would be 19 GB.
+pub const FRAME_CELLS: u64 = 1 << 22;
+
+#[cfg(test)]
+thread_local! {
+    /// [`FRAME_CELLS`] for this test thread, so a test can pass it
+    /// without allocating gigabytes.
+    pub static TEST_FRAME_CELLS: std::cell::Cell<u64> = const { std::cell::Cell::new(FRAME_CELLS) };
+}
+
+/// The size a client's frames are drawn at: its terminal's (at least
+/// 1x1), unless that is more than [`FRAME_CELLS`] cells; then each side is
+/// cut to the square root of that, 2048, and the frame is the terminal's
+/// top-left corner (D-077). tmux draws the whole terminal
+/// (`redraw_build_cells`, screen-redraw.c, allocates `tty.sx * tty.sy`
+/// cells), so a terminal reporting 65535x65535 (`stty`, or a crafted Hello
+/// or Resize) costs it some 340 GB and vtmux, uncapped, more. The formats and
+/// `client-resized` keep the size the terminal reports.
+#[must_use]
+pub fn drawn_size(cols: u32, rows: u32) -> (u16, u16) {
+    #[cfg(test)]
+    let max = TEST_FRAME_CELLS.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let max = FRAME_CELLS;
+    let (cols, rows) = (cols.max(1), rows.max(1));
+    let (cols, rows) = if u64::from(cols) * u64::from(rows) > max {
+        let side = u32::try_from(max.isqrt()).unwrap_or(u32::MAX);
+        (cols.min(side), rows.min(side))
+    } else {
+        (cols, rows)
+    };
+    let side = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
+    (side(cols), side(rows))
+}
+
 /// `window-size` (options-table.c:91, `WINDOW_SIZE_*`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SizePolicy {

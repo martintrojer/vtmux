@@ -274,7 +274,7 @@ impl Server {
         if open.sx < min || open.sy < min {
             return false;
         }
-        let Some((cols, rows)) = self.tty_size(c) else {
+        let Some((cols, rows)) = self.drawn_size(c) else {
             return false;
         };
         if cols < open.sx || rows < open.sy {
@@ -416,7 +416,7 @@ impl Server {
     /// clipped to the terminal and moved back inside; its terminal and job
     /// follow, unless a bordered popup shrank to 2 cells or fewer.
     pub(crate) fn popup_resize(&mut self, c: ClientId) {
-        let Some((cols, rows)) = self.tty_size(c) else {
+        let Some((cols, rows)) = self.drawn_size(c) else {
             return;
         };
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
@@ -751,7 +751,7 @@ impl Server {
     /// preferred one from then on.
     fn popup_drag(&mut self, c: ClientId, m: &MouseInput) {
         const DRAG: u32 = 32;
-        let Some((cols, rows)) = self.tty_size(c) else {
+        let Some((cols, rows)) = self.drawn_size(c) else {
             return;
         };
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
@@ -810,6 +810,14 @@ impl Server {
             u16::try_from(tty.cols).unwrap_or(u16::MAX),
             u16::try_from(tty.rows).unwrap_or(u16::MAX),
         ))
+    }
+
+    /// The size the client's frames are drawn at
+    /// ([`crate::resize::drawn_size`]): what popups, menus and the status
+    /// line are placed in.
+    pub(crate) fn drawn_size(&self, c: ClientId) -> Option<(u16, u16)> {
+        let tty = self.clients.get(&c)?.hello.as_ref()?.tty.as_ref()?;
+        Some(crate::resize::drawn_size(tty.cols, tty.rows))
     }
 
     /// `popup_reapply_styles` (popup.c:96-135): `popup-style` and

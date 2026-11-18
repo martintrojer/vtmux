@@ -549,7 +549,7 @@ impl Server {
             (format!("#[align=centre]{name}"), M::MENU)
         };
         // menu_add_item: `c->tty.sx`.
-        let cols = self.tty_size(c).map_or(80, |(cols, _)| u32::from(cols));
+        let cols = self.drawn_size(c).map_or(80, |(cols, _)| u32::from(cols));
         let mut items = crate::menu::Items::new(title);
         for (text, key) in list {
             if text.is_empty() {

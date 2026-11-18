@@ -34,7 +34,7 @@ pub fn exec(
         return Ok(());
     }
     let modify = server.popup_present(tc);
-    let Some((cols, rows)) = server.tty_size(tc) else {
+    let Some((cols, rows)) = server.drawn_size(tc) else {
         return Ok(());
     };
     let Some(s) = found.session.or_else(|| server.client_session(tc)) else {

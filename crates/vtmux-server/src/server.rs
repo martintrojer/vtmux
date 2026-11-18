@@ -3642,8 +3642,7 @@ impl Server {
         caps.overlay = client.popup.is_some();
         caps.attrs.italics_as_standout = self.italics_as_standout();
         caps.graphics = self.graphics_client(client, caps);
-        let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
-        let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
+        let (cols, rows) = crate::resize::drawn_size(tty.cols, tty.rows);
         let queued = client.unacked.bytes;
         let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
         let client = self.clients.get_mut(&id).expect("client");
@@ -8856,6 +8855,75 @@ mod tests {
                 "plain frames tag every row: {tags:?}"
             );
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A terminal of more than [`crate::resize::FRAME_CELLS`] cells (`stty
+    /// rows 65535 cols 65535`, or a crafted Hello or Resize) is drawn in
+    /// frames of at most 2048 cells a side (D-077): a 65535x65535 one
+    /// would be 4.3e9 cells a frame. A smaller terminal is drawn whole, as
+    /// tmux draws it, however wide. The formats and `client-resized` keep
+    /// the reported size, tmux's `tty.sx`/`tty.sy` (tty.c `tty_set_size`).
+    #[test]
+    fn huge_terminal_frames_are_capped() {
+        use crate::resize::{TEST_FRAME_CELLS, drawn_size};
+        use vtmux_core::options::{TreeId, Value};
+        assert_eq!(drawn_size(65535, 65535), (2048, 2048));
+        assert_eq!(drawn_size(10_000, 1000), (2048, 1000));
+        assert_eq!(drawn_size(2048, 2048), (2048, 2048));
+        assert_eq!(drawn_size(20_000, 5), (20_000, 5));
+        assert_eq!(drawn_size(65535, 64), (65535, 64));
+        assert_eq!(drawn_size(0, 0), (1, 1));
+        assert_eq!(drawn_size(u32::MAX, 1), (2048, 1));
+        // The render path, with a cap of 100 cells (10 a side), so the
+        // test stays small.
+        TEST_FRAME_CELLS.set(100);
+        let (mut server, _, s, _, dir) = setup();
+        server.model.options.set_table_value(
+            TreeId::GlobalSession,
+            "status-right",
+            Value::String(String::new()),
+        );
+        let (id, mut peer) = attach_as(&mut server, s, &dir, "xterm-256color", (65535, 3));
+        // Frames this wide fill the socket: drop what it holds and ack.
+        let render = |server: &mut super::Server, peer: &mut mio::net::UnixStream| {
+            use std::io::Read as _;
+            for _ in 0..4 {
+                server.render_clients();
+                let mut buf = vec![0u8; 1 << 16];
+                while let Ok(1..) = peer.read(&mut buf) {}
+                server.clients.get_mut(&id).unwrap().unacked.ack(u64::MAX);
+            }
+        };
+        render(&mut server, &mut peer);
+        let shown = |server: &super::Server| {
+            let (last, _) = server.clients[&id].compositor.last().unwrap();
+            (last.cols, last.rows, last.cells.len())
+        };
+        assert_eq!(shown(&server), (10, 3, 30));
+        let size = |server: &super::Server| {
+            let found = crate::target::Found::from_session(&server.model, s);
+            let ctx = server.format_ctx(found, Some(id));
+            vtmux_core::format::expand_str("#{client_width}x#{client_height}", &ctx)
+        };
+        assert_eq!(size(&server), "65535x3");
+        server.resize_client(id, 4, 65535);
+        render(&mut server, &mut peer);
+        assert_eq!(shown(&server), (4, 10, 40));
+        assert_eq!(size(&server), "4x65535");
+        // The bottom status line is the frame's last row.
+        let (last, _) = server.clients[&id].compositor.last().unwrap();
+        let row = |y: usize| -> String {
+            last.cells[y * 4..(y + 1) * 4]
+                .iter()
+                .map(|c| c.text.as_str())
+                .collect()
+        };
+        assert!(row(9).starts_with('['), "{:?}", row(9));
+        // Within the cap, the terminal's size.
+        server.resize_client(id, 20, 5);
+        render(&mut server, &mut peer);
+        assert_eq!(shown(&server), (20, 5, 100));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

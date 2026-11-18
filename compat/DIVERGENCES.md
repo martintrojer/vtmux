@@ -80,6 +80,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-074](#d-074) | `#{c/f:theme...}` and `#{c/b:theme...}` give the slot's terminal colour, whatever the client's theme | Deferred | deferred |
 | [D-075](#d-075) | ICH reaching the end of the line clears the rest of it, as xterm does; tmux's grid keeps it | Ghostty grid | open |
 | [D-076](#d-076) | ECH that ends on the first column of a wide character clears all of it; tmux leaves its second column a padding cell | Ghostty grid | open |
+| [D-077](#d-077) | A terminal of more than 2048x2048 cells is drawn in its top-left 2048x2048 | tmux bug | open |
 
 Closed (vtmux matches tmux):
 
@@ -1272,6 +1273,15 @@ Closed (vtmux matches tmux):
   - `grid_string_cells` (grid.c) skips padding cells, so `capture-pane -J` and `-T` print one space fewer than the line's `cellused`; a reflow moves the cell with the line and keeps `GRID_LINE_EXTENDED` (`X`) on the line it lands on.
 - **vtmux:** the whole character is cleared (two blanks), so those captures print a space more, and after a widening the row's flags show `-` where tmux shows `X`. Whether the line wraps or is emptied follows tmux's count, not the widened one (Ghostty patch 0047).
 - **Evidence:** reference tmux 3.8, 30 columns, `printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123abcdefghijklmnopqrstuvwxyzab\344\270\200bcdefg\033[2;1H\033[29X'`: `capture-pane -pJT` gives the first line, 29 spaces and `bcdefg`; vtmux 30 spaces. `-pF` gives `W`, `WX`, `-` on both.
+
+<a id="d-077"></a>
+### D-077: a terminal of more than 2048x2048 cells is drawn in its top-left 2048x2048
+
+- **Category:** Do not copy tmux bug: tmux's redraw memory grows with the terminal's cells, so a terminal that reports 65535x65535 (`stty`) takes it hundreds of gigabytes.
+- **Test:** `server::tests::huge_terminal_frames_are_capped` (crates/vtmux-server/src/server.rs).
+- **tmux:** `tty_set_size` (tty.c) keeps the size the terminal reports; `redraw_build_cells` (screen-redraw.c) allocates and fills `tty.sx * tty.sy` cells on every redraw.
+- **vtmux:** a terminal of more than 2^22 cells (`FRAME_CELLS`, resize.rs) is drawn in frames of at most 2048 columns and 2048 rows, the terminal's top-left corner; the rest is not written. A smaller one is drawn whole, however wide. `#{client_width}`, `#{client_height}` and `client-resized` keep the reported size, as in tmux.
+- **Evidence:** macOS, debug build, `window-size manual`, a client in a PTY: tmux 3.8 takes 318 MB at 2000x2000 and 1257 MB at 4000x4000 (about 80 bytes a cell, so 340 GB at 65535x65535); vtmux uncapped 785 MB and 3090 MB (190 bytes a cell), and at 65535x65535 passed 12 GB and stopped answering. Capped: 818 MB at 65535x65535, answering, `list-clients -F '#{client_width}x#{client_height}'` `65535x65535`. At 20000x5 and 30000x4 both draw the same screen (the window, its border at column 10001, `·` fill to the last column, the status line), and both report and hook `20000x5`, `30000x4`.
 
 ## Adding an entry
 
