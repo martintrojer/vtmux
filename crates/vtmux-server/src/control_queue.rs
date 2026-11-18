@@ -416,9 +416,12 @@ impl Queue {
             let Some(lane) = self.lanes.get_mut(&pane) else {
                 break;
             };
-            // An emptied lane is removed as its last block goes (below).
+            // An emptied lane is removed as its last block goes (below);
+            // one left empty goes with whatever `all` holds of it, so
+            // the lines behind it are not held back.
             let Some(block) = lane.front_mut() else {
                 self.lanes.remove(&pane);
+                self.all.retain(|_, e| *e != Entry::Output(pane));
                 break;
             };
             age.get_or_insert_with(|| now.saturating_duration_since(block.read));
@@ -638,6 +641,22 @@ mod tests {
         push(&mut q, &mut s, Q, b"q");
         q.discard_output();
         assert!(q.is_empty() && q.oldest().next().is_none());
+    }
+
+    /// A lane found empty (its blocks lost) does not hold back the lines
+    /// queued behind it, nor keep its pane pending.
+    #[test]
+    fn an_empty_lane_does_not_strand_the_lines_behind_it() {
+        let mut s = Streams::default();
+        let mut q = Queue::default();
+        push(&mut q, &mut s, P, b"p");
+        q.push_line(b"%exit-reply\n".to_vec());
+        q.lanes.get_mut(&P).unwrap().clear();
+        assert_eq!(
+            drain(&mut q, &s, 0),
+            [Sent::Line(b"%exit-reply\n".to_vec())]
+        );
+        assert!(q.is_empty() && q.line_bytes() == 0 && q.pending() == 0);
     }
 
     #[test]

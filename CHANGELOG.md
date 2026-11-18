@@ -22,6 +22,7 @@ vtmux's version is the tmux release it is tested against: `3.8-rc1` is the first
 - Live upgrade: a SIGTERM or SIGHUP that reaches an attached client as it re-executes ends it (`[terminated]`, `[lost tty]`). One arriving in the microseconds between reading the signals caught so far and the exec was lost, and the client stayed attached.
 - Live upgrade: a terminal resized while its client re-executes is started again at its new height. With `clear-on-attach off`, the scroll into history and the scroll region used the old height.
 - Live upgrade: the server serves on while a downgrade waits for the old binary's `-V`. Every client froze for up to 5 s when that binary hung.
+- A typed extended key (`ESC [ … u`, `ESC [ 27 ; … ~`) whose digits and `;` run past 62 bytes is `M-[` and text, as in tmux, not the key. A 16 MiB one typed behind a bound `vtmux-upgrade` no longer crashes the server.
 - `vtmux-upgrade` without `-b`, once the binary the server was started as is deleted (a version manager pruned it), says to name the new one with `-b`.
 - A terminal whose reply adds capabilities its `TERM` lacks (Ghostty or foot under `TERM=vt100`) gets the mouse mode, cursor style and cursor colour at once, as in tmux, not only once a pane changes them.
 - A soft-wrapped line erased in part with ECH (`printf '\033[X'`) stays one line, as in tmux: `capture-pane -J` joins it, `-F` flags it `W`, and a wider pane shows it whole. Only an ECH over the whole line from column 0 unwraps it.

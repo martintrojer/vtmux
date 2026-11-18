@@ -677,7 +677,15 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
         Next1::Partial => return None,
         Next1::Missing => {}
     }
-    if bytes[1] == b'[' {
+    // tty_keys_extended_key and tty_keys_winsz copy the parameters to a
+    // `tmp[64]` (tty-keys.c:1117-1126, 704-713): a run of digits and `;`
+    // that fills it is neither, nor partial, so it is `ESC [` with Meta
+    // and text. A key's bytes stay under 64 so.
+    let overlong = bytes.len() > CSI_KEY_MAX
+        && bytes[2..CSI_KEY_MAX]
+            .iter()
+            .all(|b| b.is_ascii_digit() || *b == b';');
+    if bytes[1] == b'[' && !overlong {
         let final_index = bytes
             .iter()
             .enumerate()
@@ -751,6 +759,10 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
     k.esc_prefix = true;
     Some((Event::Key(k), 2))
 }
+
+/// `sizeof tmp` in `tty_keys_extended_key` and `tty_keys_winsz`: a CSI
+/// whose digits and `;` run this far is no key nor size report.
+pub(crate) const CSI_KEY_MAX: usize = 64;
 
 /// What `tty_keys_next1` (tty-keys.c:603-665) finds at the start of the
 /// buffer.
@@ -1149,6 +1161,35 @@ mod tests {
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
         );
+    }
+
+    /// `tty_keys_extended_key` (tty-keys.c:1117-1126): parameters that
+    /// fill its `tmp[64]` are no key, and stop waiting there, so `ESC [`
+    /// is M-[ and the rest text; 64 bytes of them still wait. A key's
+    /// bytes stay under [`CSI_KEY_MAX`].
+    #[test]
+    fn an_extended_key_that_fills_tmux_s_buffer_is_text() {
+        let now = Instant::now();
+        let mut d = Decoder::default();
+        d.feed(b"\x1b[");
+        d.feed(&[b'0'; CSI_KEY_MAX - 2]);
+        assert_eq!(d.drain(now), Vec::new(), "64 bytes may be a key yet");
+        d.feed(b"97;5u");
+        let events = d.drain_with_bytes(now);
+        let mut meta = key(Base::Char('['));
+        meta.meta = true;
+        meta.esc_prefix = true;
+        assert_eq!(events[0], (Event::Key(meta), b"\x1b[".to_vec()));
+        assert_eq!(events.len(), 1 + CSI_KEY_MAX - 2 + 5);
+        assert!(events.iter().all(|(_, raw)| raw.len() < CSI_KEY_MAX));
+        assert_eq!(d.held(), []);
+        // Just under: still the key.
+        d.feed(b"\x1b[");
+        d.feed(&[b'0'; CSI_KEY_MAX - 8]);
+        d.feed(b"97;5u");
+        let events = d.drain_with_bytes(now);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].1.len(), CSI_KEY_MAX - 1);
     }
 
     /// tty-keys.c:990-1012: a partial key waits `escape-time` (1 ms for

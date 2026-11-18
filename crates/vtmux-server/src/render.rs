@@ -681,6 +681,13 @@ impl Compositor {
     /// [`Self::frame`] of a screen with row tags ([`Self::buffer`]).
     #[expect(clippy::too_many_lines, reason = "one pass over the screen's cells")]
     pub fn frame_tagged(&mut self, screen: Snapshot, tags: Vec<u64>, caps: Caps) -> Vec<u8> {
+        // A Snapshot holds `cols * rows` cells. One that does not is not
+        // drawn, nor kept as what the terminal shows: the next frame is
+        // drawn whole.
+        if screen.cells.len() != usize::from(screen.cols) * usize::from(screen.rows) {
+            self.invalidate();
+            return Vec::new();
+        }
         let same_size = self
             .last
             .as_ref()
@@ -724,11 +731,9 @@ impl Compositor {
                 if x >= end && after_regional.is_none_or(|a| a < x) {
                     break;
                 }
-                // A Snapshot holds `cols * rows` cells; a short one
-                // writes no more of the row.
-                let Some(cell) = screen.cell(x, y) else {
-                    break;
-                };
+                let cell = screen
+                    .cell(x, y)
+                    .expect("a screen of cols * rows cells (checked above)");
                 let changed_at = |x: u16| {
                     !same_size
                         || is_forced(x, y)
@@ -1287,6 +1292,25 @@ mod tests {
             hyperlinks: false,
             graphics: None,
         }
+    }
+
+    /// A snapshot short of `cols * rows` cells is not drawn nor kept as
+    /// what the terminal shows: the next, whole one is drawn in full.
+    #[test]
+    fn a_short_snapshot_is_not_shown_and_the_next_is_drawn_whole() {
+        let mut compositor = Compositor::default();
+        let mut whole = blank(None, 2, 2);
+        for (cell, text) in whole.cells.iter_mut().zip(["a", "b", "c", "d"]) {
+            cell.text = text.into();
+            cell.width = 1;
+        }
+        let _ = compositor.frame(whole.clone(), test_caps());
+        let mut short = blank(None, 2, 2);
+        short.cells.truncate(1);
+        assert_eq!(compositor.frame(short, test_caps()), Vec::new());
+        whole.cells[0].text = "X".into();
+        let frame = String::from_utf8(compositor.frame(whole, test_caps())).unwrap();
+        assert!(frame.contains("Xb") && frame.contains("cd"), "{frame:?}");
     }
 
     /// tty.c `tty_hyperlink`: a terminal with `Hls` is told each cell's

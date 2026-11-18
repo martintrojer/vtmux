@@ -603,6 +603,41 @@ fn keys_given_back_stay_ahead_of_bytes_the_decoder_holds() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// An extended key too long for tmux's parser (tty-keys.c:1117-1126,
+/// `tmp[64]`) typed behind a bound upgrade goes back as the keys it
+/// decodes as, M-[ and text, each a frame of its own: no key is longer
+/// than `CSI_KEY_MAX`, so every frame fits (`upgrade_behind`'s encode).
+#[test]
+fn an_oversized_key_typed_after_a_bound_upgrade_goes_back_as_text() {
+    let (mut server, dir) = setup("long");
+    let binary = passing(&dir);
+    let bind = format!("vtmux-upgrade -b {}", binary.to_str().unwrap());
+    st::ok(&mut server, &dir, &["bind", "-n", "F5", &bind]);
+    let (term, _peer) = st::attach(&mut server, &dir, "a", &[]);
+    let zeros = [b'0'; 100];
+    let typed = [&b"\x1b[15~\x1b["[..], &zeros, b"97;5u"].concat();
+    server.on_client_input(term, &typed).unwrap();
+    until_exec(&mut server);
+    let exec = execs().pop().expect("the upgrade was not refused");
+    let s = snap::decode(&exec.bytes).unwrap();
+    let client = s
+        .clients
+        .iter()
+        .find(|c| usize::try_from(c.id) == Ok(term.0))
+        .unwrap();
+    let input = |b: &[u8]| {
+        vtmux_core::protocol::encode(&vtmux_core::protocol::ClientMsg::Input(b.to_vec())).unwrap()
+    };
+    let mut want = input(b"\x1b[");
+    for b in zeros.iter().chain(b"97;5u") {
+        want.extend(input(&[*b]));
+    }
+    assert_eq!(client.inbuf, want);
+    assert_eq!(client.given_back_keys, 1 + 100 + 5);
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A lone ESC waiting out `escape-time` at the exec, with no keys queued
 /// behind the upgrade, is carried in the client's input too: F5 (the
 /// upgrade) then ESC leave the input as ESC.

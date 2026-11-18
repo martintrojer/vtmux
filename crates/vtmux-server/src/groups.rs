@@ -203,9 +203,11 @@ impl Model {
         session.link_seq.clear();
         for (i, w) in &from {
             let stamp = self.next_link_stamp();
-            let Some(session) = self.sessions.get_mut(&s) else {
-                return;
-            };
+            // `fire_winlink` only queues an event: `s` is still there.
+            let session = self
+                .sessions
+                .get_mut(&s)
+                .expect("relinking removes no session");
             session.windows.insert(*i, *w);
             session.link_tree.insert(*i);
             session.link_seq.insert(*i, stamp);
@@ -215,9 +217,12 @@ impl Model {
             self.fire_winlink("window-linked", s, *i, *w);
         }
 
-        let Some(session) = self.sessions.get_mut(&s) else {
-            return;
-        };
+        // The old links are taken out but not yet torn down: `s` must
+        // still be there for them to be.
+        let session = self
+            .sessions
+            .get_mut(&s)
+            .expect("relinking removes no session");
         let first = session.windows.keys().next().copied();
         let keep = if had_current {
             session.current

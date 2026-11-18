@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use vtmux_core::ids::PaneId;
+use vtmux_core::ids::{PaneId, WindowId};
 use vtmux_core::layout::{AddFlags, Geometry};
 use vtmux_core::options::{TreeId, Value};
 
@@ -72,6 +72,19 @@ fn temp_file(value: &[u8]) -> Option<PathBuf> {
     None
 }
 
+/// The window `spawn_editor` makes its pane in. Nothing it does removes a
+/// window: the spawn, `fix_panes` and `fire_pane_created` (which queues
+/// its hooks) leave the windows as they are, so a missing one is a bug,
+/// not a fallback (a pane half made, the edit file left behind).
+fn window_mut(
+    windows: &mut std::collections::BTreeMap<WindowId, crate::model::Window>,
+    w: WindowId,
+) -> &mut crate::model::Window {
+    windows
+        .get_mut(&w)
+        .expect("spawn_editor's window stays while it makes the pane")
+}
+
 impl Server {
     /// `spawn_editor` (spawn.c:703-788) for the mode on `mode_pane`, from
     /// `client`: in the current window of its session, unless it has
@@ -113,9 +126,7 @@ impl Server {
         let was_zoomed = self.model.push_zoom(w, false, true);
         // layout_floating_pane(w, NULL): after the whole layout.
         let new = self.model.pane_ids.allocate();
-        let Some(window) = self.model.windows.get_mut(&w) else {
-            return false;
-        };
+        let window = window_mut(&mut self.model.windows, w);
         window.layout.add_floating(None, new, cell);
         window.panes.add(
             new,
@@ -145,10 +156,9 @@ impl Server {
             empty: false,
         });
         let Ok(mut pane) = spawned else {
-            if let Some(window) = self.model.windows.get_mut(&w) {
-                window.layout.close_pane(new);
-                window.panes.remove(new);
-            }
+            let window = window_mut(&mut self.model.windows, w);
+            window.layout.close_pane(new);
+            window.panes.remove(new);
             self.model.fix_panes(w);
             self.model.pop_zoom(w, was_zoomed);
             let _ = std::fs::remove_file(&path);
@@ -171,10 +181,9 @@ impl Server {
             .fix_panes_resized_from(w, None, assigned.then_some((new, created)));
         self.fire_pane_created(s, index, new, false, false);
         // spawn.c:596-603.
-        if let Some(window) = self.model.windows.get_mut(&w) {
-            window.panes.modal_last = window.panes.active;
-            window.panes.modal = Some(new);
-        }
+        let window = window_mut(&mut self.model.windows, w);
+        window.panes.modal_last = window.panes.active;
+        window.panes.modal = Some(new);
         self.model.switch_active(w, new);
         self.model.layout_changed(w);
         self.model.pop_zoom(w, was_zoomed);

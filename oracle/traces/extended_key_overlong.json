@@ -1,0 +1,190 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "extended_key_overlong",
+  "inputs": {
+    "name": "extended_key_overlong",
+    "size": [
+      100,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "",
+          ";",
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "100",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "stty raw -echo opost onlcr; tmux wait-for -S rdy; LC_ALL=C exec cat -v"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-[",
+          "set",
+          "-ga",
+          "@k",
+          "M[,"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "C-a",
+          "set",
+          "-ga",
+          "@k",
+          "Ca,"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@k",
+          ""
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001b[00000000000000000000000000000000000000000000000000000097;5u"
+      },
+      {
+        "keys": "\u001b[0000000000000000000000000000000000000000000000000000000000000097;5u\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@k"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0000000000000000000000000000000000000000000000000000000000000097;5u^M",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w0*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          69,
+          0
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "Ca,M[,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
