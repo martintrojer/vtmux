@@ -734,7 +734,7 @@ fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran>
             })
             .collect();
         for w in workers {
-            let _ = w.join();
+            w.join().expect("regress worker panicked");
         }
         finished.store(true, Ordering::Relaxed);
     });
@@ -770,7 +770,12 @@ struct Verdict {
     unexpected_pass: Vec<String>,
 }
 
-fn judge(all: &[String], ran: &[Ran], expected: &BTreeMap<String, Entry>) -> Verdict {
+fn judge(
+    all: &[String],
+    ran: &[Ran],
+    expected: &BTreeMap<String, Entry>,
+    only: Option<&str>,
+) -> Verdict {
     let mut v = Verdict::default();
     for name in all {
         let e = &expected[name];
@@ -779,7 +784,11 @@ fn judge(all: &[String], ran: &[Ran], expected: &BTreeMap<String, Entry>) -> Ver
             continue;
         }
         let Some(r) = ran.iter().find(|r| &r.name == name) else {
-            continue; // not selected by --only
+            if selected(only, name) {
+                // Selected and runnable but no result: its worker died.
+                v.unexpected_fail.push(name.clone());
+            }
+            continue;
         };
         let ok = r.outcome.passed();
         match (e.flaky, e.status == Status::Pass, ok) {
@@ -931,7 +940,7 @@ fn run_inner() -> Result<ExitCode> {
         });
     }
 
-    let mut v = judge(&all, &ran, &expected);
+    let mut v = judge(&all, &ran, &expected, opts.only.as_deref());
     if opts.update && !v.unexpected_pass.is_empty() {
         let flips = std::mem::take(&mut v.unexpected_pass);
         fs::write(&expected_path, rewrite_flips(&expected_text, &flips))?;
@@ -981,6 +990,23 @@ mod tests {
     use super::*;
     use crate::reap::ps;
     use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn judge_fails_selected_test_without_result() {
+        let all = vec!["a.sh".to_string(), "b.sh".to_string()];
+        let e = |status| Entry {
+            status,
+            flaky: false,
+        };
+        let expected = BTreeMap::from([
+            ("a.sh".to_string(), e(Status::Pass)),
+            ("b.sh".to_string(), e(Status::Pass)),
+        ]);
+        let v = judge(&all, &[], &expected, None);
+        assert_eq!(v.unexpected_fail, all);
+        let v = judge(&all, &[], &expected, Some("a"));
+        assert_eq!(v.unexpected_fail, vec!["a.sh".to_string()]);
+    }
 
     #[test]
     fn labels_select_a_scripts_servers() {
