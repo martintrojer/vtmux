@@ -1,0 +1,19 @@
+name = "hook_source_file_borrows"
+# source-file always waits (cmd-source-file.c:265-266), so a hook's
+# source-file has given back the client it borrowed (cmd-queue.c:622)
+# before the file's commands go in: they borrow their own, and their
+# output reaches the control client without %begin/%end.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["run-shell", "printf 'display -p FROM_SOURCE\\nwait-for -S hk\\n' > '#{d:socket_path}/sub.conf'"] },
+  { run = ["set-hook", "-g", "session-renamed", "source-file -F '#{d:socket_path}/sub.conf'"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { run = ["rename-session", "-t", "a", "a2"] },
+  { wait_for = "hk" },
+  { control_send = { id = "c1", line = "display -p DONE" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["kill-server"] },
+]

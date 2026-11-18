@@ -1,0 +1,18 @@
+name = "hook_no_target_slot_target_client"
+# A command with no target slot finds its target from the -t client
+# (`item->target_client` before cmd_find_from_client, cmd-queue.c:518-521,
+# 608-616), so refresh-client -t <client on a> runs its after- hook in a,
+# not in the session of the most recent client.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w1", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "@log", ""] },
+  { attach = { session = "a" } },
+  { attach = { session = "b", id = "cb" } },
+  { run = ["set-hook", "-g", "after-refresh-client", "set -agF @log '|arc:#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["run-shell", "tmux refresh-client -t \"$(tmux list-clients -F '##{client_name}' -f '##{==:##{client_session},a}')\""] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

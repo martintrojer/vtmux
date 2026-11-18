@@ -337,16 +337,14 @@ impl Item {
 /// of its group. A waiting command (`CMD_RETURN_WAIT`) still closes its
 /// guard with `%end`.
 pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
+    // cmd-queue.c:584-585: the client a hook step was given (the queue
+    // made it the item's) gone since is an error before the guard.
     if item.borrow_client
-        && let Some(c) = item.pinned
+        && item
+            .pinned
+            .is_some_and(|c| !server.clients.contains_key(&c))
     {
-        // cmd-queue.c:584-585: a client gone since is an error before the
-        // guard.
-        if !server.clients.contains_key(&c) {
-            return false;
-        }
-        item.client = Some(c);
-        item.control = server.is_control(c).then_some(0);
+        return false;
     }
     let guard = server.control_begin(item);
     item.hook_target = None;
@@ -433,15 +431,26 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
     // `CMD_CLIENT_TFLAG` without `CMD_CLIENT_CANFAIL` find the `-c` or `-t`
     // client (else the current one) before the source, the target and
     // anything the command itself checks, so a missing one is the error.
+    // With `CMD_CLIENT_CANFAIL` a missing one is no error, and the target
+    // client is none. Either way it is `item->target_client`, which a
+    // command without a target slot finds its target from.
     let client_flag = match call.entry.name {
-        "display-menu" | "display-popup" | "switch-client" => Some('c'),
+        "display-menu" | "display-popup" | "switch-client" => Some(('c', false)),
         "command-prompt" | "confirm-before" | "detach-client" | "suspend-client"
-        | "lock-client" | "refresh-client" => Some('t'),
+        | "lock-client" | "refresh-client" => Some(('t', false)),
+        "display-message" | "send-keys" => Some(('c', true)),
+        "load-buffer" | "set-buffer" | "show-messages" => Some(('t', true)),
         _ => None,
     };
-    if let Some(flag) = client_flag {
-        command_prompt::target_client(server, item, call.args.value(flag))?;
-    }
+    let tc = match client_flag {
+        Some((flag, false)) => Some(command_prompt::target_client(
+            server,
+            item,
+            call.args.value(flag),
+        )?),
+        Some((flag, true)) => server.find_client(item.client, item.origin, call.args.value(flag)),
+        None => server.target_client(item.client, item.origin),
+    };
     let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
     // command runs; commands without a target slot get the target client's
@@ -470,7 +479,6 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             spec.flags,
         )?
     } else {
-        let tc = server.target_client(item.client, item.origin);
         match tc.and_then(|c| server.client_session(c)) {
             Some(s) => Found::from_session(&server.model, s),
             // cmd_find_from_client(NULL): cmd_find_from_nothing.

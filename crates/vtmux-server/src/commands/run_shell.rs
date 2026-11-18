@@ -87,6 +87,11 @@ impl Done {
         }
         let cwd = server.client_cwd(self.client, None);
         let mut item = Item::new(self.client, cwd);
+        // cmdq_append(NULL, ...) (cmd-if-shell.c:161-163,
+        // cmd-run-shell.c:233-235): with no client the commands go on the
+        // global queue and each borrows one when it fires
+        // (cmd-queue.c:597-598).
+        item.borrow_client = self.client.is_none();
         // cmdq_get_command(cmdlist, NULL): a new state, so neither the
         // current target nor the mouse event of the command that ran.
         item.origin = Origin {

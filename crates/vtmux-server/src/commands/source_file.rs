@@ -154,7 +154,7 @@ impl Cont {
         }
         let state = server.cmdq_copy_state(self.step, self.current);
         self.after = server
-            .cmdq_insert_with_state(self.after, groups, Some(&state))
+            .cmdq_insert_after_wait(self.after, groups, Some(&state))
             .unwrap_or(self.after);
     }
 }

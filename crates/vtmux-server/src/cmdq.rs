@@ -562,8 +562,32 @@ impl Server {
         groups: Groups,
         state: Option<&Rc<StepState>>,
     ) -> Option<StepId> {
-        let batch = self.cmdq.batch_of(after)?;
         let client = self.cmdq.client_after(after);
+        self.cmdq_insert_for(after, groups, state, client)
+    }
+
+    /// [`Self::cmdq_insert_with_state`] from a command that waits first
+    /// (`source-file` always does, cmd-source-file.c:265-266): by then
+    /// `after` has given back the client it borrowed
+    /// (cmd-queue.c:622), so the steps get only the one it was given.
+    pub(crate) fn cmdq_insert_after_wait(
+        &mut self,
+        after: StepId,
+        groups: Groups,
+        state: Option<&Rc<StepState>>,
+    ) -> Option<StepId> {
+        let client = self.cmdq.client_of(after);
+        self.cmdq_insert_for(after, groups, state, client)
+    }
+
+    fn cmdq_insert_for(
+        &mut self,
+        after: StepId,
+        groups: Groups,
+        state: Option<&Rc<StepState>>,
+        client: Option<ClientId>,
+    ) -> Option<StepId> {
+        let batch = self.cmdq.batch_of(after)?;
         let steps = self.cmdq.command_steps(batch, groups, state, client);
         self.cmdq.insert_after(after, steps)
     }
@@ -677,7 +701,15 @@ impl Server {
                 // Continued after a wait: a client's file operation
                 // reports first, or keeps waiting while it is open.
                 front.woken = false;
-                if let Some(c) = q
+                if q.is_none()
+                    && let Some(mut item) = self.cmdq.batches.remove(&batch)
+                {
+                    // A hook step that waited with the client it was given.
+                    if item.borrow_client && item.client.is_some() {
+                        self.release_borrowed(&mut item);
+                    }
+                    self.cmdq.batches.insert(batch, item);
+                } else if let Some(c) = q
                     && let Some(mut item) = self.cmdq.batches.remove(&batch)
                 {
                     let done = self.file_resume(c, &mut item);
@@ -725,6 +757,16 @@ impl Server {
         }
     }
 
+    /// The end of a hook command's turn with a client it borrowed or was
+    /// given (`item->client = saved`, cmd-queue.c:622): its output as
+    /// [`Self::end_quiet`] hands it, then the batch has no client again.
+    fn release_borrowed(&mut self, item: &mut Item) {
+        self.end_quiet(item);
+        item.client = None;
+        item.control = None;
+        item.pinned = None;
+    }
+
     fn set_waiting(&mut self, q: QueueId, id: StepId) {
         if let Some(s) = self
             .cmdq
@@ -753,6 +795,16 @@ impl Server {
                 };
                 item.step = Some(id);
                 item.pinned = self.cmdq.client_of(id);
+                // cmdq_insert_after gave the step its client
+                // (cmd-queue.c:340): it is the item's from the start, so
+                // the message log names it. One gone since fails in
+                // commands::fire (cmd-queue.c:584-585).
+                if item.borrow_client
+                    && let Some(c) = item.pinned.filter(|c| self.clients.contains_key(c))
+                {
+                    item.client = Some(c);
+                    item.control = self.is_control(c).then_some(0);
+                }
                 // load_cfg: the file's commands (and what they queue)
                 // carry `current_file` in their state.
                 let outer = std::mem::replace(
@@ -808,16 +860,16 @@ impl Server {
                 }
                 self.info.current_file = outer;
                 self.cmd_formats.clear();
-                if item.borrow_client {
-                    // The borrowed client's output, as end_quiet hands it.
-                    self.end_quiet(&mut item);
-                    item.client = None;
-                    item.control = None;
-                    item.pinned = None;
-                }
-                (item.origin.current, item.control, item.no_hooks) = saved;
-                self.flush_item(&mut item);
                 let wait = std::mem::take(&mut item.blocked);
+                // A step given its client keeps it while it waits
+                // (`item->client = saved`, cmd-queue.c:622): what its job
+                // prints later reaches that client. A borrowed one is put
+                // back now.
+                (item.origin.current, item.control, item.no_hooks) = saved;
+                if item.borrow_client && !(wait && item.pinned.is_some()) {
+                    self.release_borrowed(&mut item);
+                }
+                self.flush_item(&mut item);
                 if self.cmdq.queues.contains_key(&q) {
                     self.cmdq.batches.insert(batch, item);
                 }

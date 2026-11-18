@@ -1,0 +1,19 @@
+name = "hook_pinned_child_run_shell_waits"
+# A step if-shell -F inserts after a hook command gets the client that
+# command borrowed (cmdq_insert_after, cmd-queue.c:332-349) and keeps it
+# across run-shell's wait (`item->client = saved`, cmd-queue.c:622): the
+# job's output and its failure text reach the control client after the
+# child's guard, before the hook's next command.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set-hook", "-g", "session-renamed", "if -F 1 { run-shell 'printf RV_WAIT; exit 7' } ; display -p RV_DONE ; wait-for -S hk"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { run = ["rename-session", "-t", "a", "a2"] },
+  { wait_for = "hk" },
+  { control_send = { id = "c1", line = "display -p DONE" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["kill-server"] },
+]

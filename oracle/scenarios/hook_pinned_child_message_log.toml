@@ -1,0 +1,15 @@
+name = "hook_pinned_child_message_log"
+# A step if-shell -F inserts after a hook command has the borrowed client
+# from the start (cmdq_insert_after, cmd-queue.c:340), so the message log
+# names it (cmdq_add_message, cmd-queue.c:587-588 before the guard).
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { attach = { session = "a" } },
+  { run = ["set-hook", "-g", "session-renamed", "if -F 1 { set -g @x 1 } ; wait-for -S hk"] },
+  { run = ["rename-session", "-t", "a", "a2"] },
+  { wait_for = "hk" },
+  { run = ["run-shell", "tmux show-messages | grep 'command: set-option -g @x 1$' | sed -e 's/^.* \\([^ ]*\\) command:/\\1 command:/'"] },
+  { run = ["kill-server"] },
+]

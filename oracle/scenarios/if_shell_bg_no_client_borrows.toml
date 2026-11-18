@@ -1,0 +1,19 @@
+name = "if_shell_bg_no_client_borrows"
+# if-shell -b started with no client appends its commands with none
+# (cmdq_append(NULL, ...), cmd-if-shell.c:161-163): each borrows the
+# current client when it fires (cmd-queue.c:597-598), so they run in that
+# client's session and display -p shows in its pane's view mode.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["if-shell", "-b", "tmux wait-for go", "set -agF @log '|s=#{session_name}/c=#{client_session}' ; display -p HELLO_BG ; wait-for -S hk"] },
+  { attach = { session = "a" } },
+  { run = ["new", "-d", "-s", "b", "-n", "w1", "cat", "-"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "hk" },
+  { run = ["display", "-p", "-t", "a:0", "#{pane_mode}"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]
