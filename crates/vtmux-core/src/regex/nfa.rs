@@ -333,7 +333,8 @@ impl Nfa {
         while let Some((t, done)) = stack.pop() {
             if done {
                 if matches!(tree[t].kind, TKind::Concat) {
-                    tree[t].first = tree[tree[t].left.unwrap()].first;
+                    tree[t].first =
+                        tree[tree[t].left.expect("Concat and Star have a left child")].first;
                 } else {
                     tree[t].first = t;
                     tree[t].idx = count;
@@ -354,10 +355,11 @@ impl Nfa {
         while let Some(t) = stack.pop() {
             let (left, right, next) = (tree[t].left, tree[t].right, tree[t].next);
             match tree[t].kind {
-                TKind::Star => tree[left.unwrap()].next = Some(t),
+                TKind::Star => tree[left.expect("Star has a left child")].next = Some(t),
                 TKind::Concat => {
-                    tree[left.unwrap()].next = Some(tree[right.unwrap()].first);
-                    tree[right.unwrap()].next = next;
+                    tree[left.expect("Concat has a left child")].next =
+                        Some(tree[right.expect("Concat has a right child")].first);
+                    tree[right.expect("Concat has a right child")].next = next;
                 }
                 _ => {
                     for c in [left, right].into_iter().flatten() {
@@ -388,13 +390,21 @@ impl Nfa {
             node.kind = kind;
             match kind {
                 Kind::End => {}
-                Kind::Literal(_) | Kind::Any | Kind::Bracket(_) => node.next = next.unwrap(),
+                Kind::Literal(_) | Kind::Any | Kind::Bracket(_) => {
+                    node.next = next.expect("only End on the rightmost spine has no next");
+                }
                 Kind::Open(..) | Kind::Close(..) | Kind::Assert(_) => {
-                    node.edests = vec![next.unwrap()];
+                    node.edests = vec![next.expect("only End on the rightmost spine has no next")];
                 }
                 Kind::Split => {
-                    let left = n.left.map_or_else(|| next.unwrap(), idx);
-                    let right = n.right.map_or_else(|| next.unwrap(), idx);
+                    let left = n.left.map_or_else(
+                        || next.expect("only End on the rightmost spine has no next"),
+                        idx,
+                    );
+                    let right = n.right.map_or_else(
+                        || next.expect("only End on the rightmost spine has no next"),
+                        idx,
+                    );
                     // re_node_set_init_2 sorts and dedups.
                     node.edests = if left == right {
                         vec![left]
