@@ -1,0 +1,16 @@
+name = "join_pane_scrollbars_empties"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "pane-scrollbars", "on"] },
+  { run = ["neww", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:0"] },
+  { run = ["neww", "-d", "-t", "a:2", "cat", "-"] },
+  { run = ["movep", "-d", "-h", "-s", "a:2", "-t", "a:0.0"] },
+  { run = ["neww", "-d", "-t", "a:3", "cat", "-"] },
+  { run = ["breakp", "-d", "-s", "a:0.1", "-t", "a:3"] },
+  { run = ["breakp", "-d", "-s", "a:0.1", "-t", "a:4"] },
+  { run = ["breakp", "-d", "-s", "a:4", "-t", "a:5"] },
+  { run = ["joinp", "-d", "-s", "a:5", "-t", "a:0.0"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_panes} #{window_layout}"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+]

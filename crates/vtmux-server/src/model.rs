@@ -1099,8 +1099,10 @@ impl Model {
             .windows
             .get(&w)
             .filter(|_| self.scrollbars(w) == crate::scrollbar::Scrollbars::On)
-            .map(|x| {
-                let s = self.scrollbar_style(x.active());
+            // A window being emptied (join-pane) has no active pane.
+            .and_then(|x| x.panes.active)
+            .map(|a| {
+                let s = self.scrollbar_style(a);
                 s.width + s.pad
             });
         let Some(window) = self.windows.get_mut(&w) else {
@@ -1734,7 +1736,9 @@ impl Model {
         let Some(window) = self.windows.get(&w).filter(|x| x.zoomed()) else {
             return false;
         };
-        let active = window.active();
+        let Some(active) = window.panes.active else {
+            return false;
+        };
         self.over_zoom(active) && window.is_floating_now(active)
     }
 
@@ -1748,7 +1752,7 @@ impl Model {
         let Some(window) = self.windows.get(&w) else {
             return false;
         };
-        if window.zoomed() || window.panes.panes.len() == 1 {
+        if window.zoomed() || window.panes.panes.len() <= 1 {
             return false;
         }
         let active = window.active();
@@ -1910,10 +1914,9 @@ impl Model {
             return false;
         };
         let before = window.was_zoomed.take();
-        if !was_zoomed {
+        let (true, Some(active)) = (was_zoomed, window.panes.active) else {
             return false;
-        }
-        let active = window.active();
+        };
         let window = &self.windows[&w];
         let target = if self.over_zoom(active) && window.is_floating_now(active) {
             before.filter(|p| window.panes.panes.contains(p))

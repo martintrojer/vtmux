@@ -101,7 +101,12 @@ pub fn exec(
     }
     m.options.move_pane(src_wp, dst_w);
     m.fix_panes(dst_w);
-    if src_w != dst_w {
+    // An emptied source window is killed below, with nothing to resize.
+    if src_w != dst_w
+        && m.windows
+            .get(&src_w)
+            .is_some_and(|x| !x.panes.panes.is_empty())
+    {
         m.fix_panes(src_w);
     }
 

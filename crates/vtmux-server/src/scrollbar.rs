@@ -145,9 +145,10 @@ impl Model {
             return false;
         };
         if window.zoomed()
-            && self
+            && window
                 .panes
-                .get(&window.active())
+                .active
+                .and_then(|a| self.panes.get(&a))
                 .and_then(|a| a.modes.first())
                 .is_some_and(Mode::hides_scrollbars)
         {

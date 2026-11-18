@@ -1,0 +1,260 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "join_pane_scrollbars_empties",
+  "inputs": {
+    "name": "join_pane_scrollbars_empties",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "pane-scrollbars",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "movep",
+          "-d",
+          "-h",
+          "-s",
+          "a:2",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:0.1",
+          "-t",
+          "a:3"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:0.1",
+          "-t",
+          "a:4"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:4",
+          "-t",
+          "a:5"
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-d",
+          "-s",
+          "a:5",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} #{window_panes} #{window_layout}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index} #{pane_active} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "index in use: 3\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 3 {\"V\":2,\"L\":{\"t\":\"v\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":80,\"h\":6,\"x\":0,\"y\":0,\"l\":0,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":80,\"h\":5,\"x\":0,\"y\":7,\"i\":1,\"I\":\"%2\"},{\"t\":\"p\",\"w\":80,\"h\":11,\"x\":0,\"y\":13,\"a\":true,\"i\":2,\"I\":\"%1\"}]}}\n3 1 {\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%3\"}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0.0 0 79x6 0,0\na:0.1 0 79x5 0,7\na:0.2 1 79x11 0,13\na:3.0 1 79x24 0,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
