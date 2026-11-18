@@ -58,6 +58,11 @@ pub struct Event {
     pub name: String,
     pub items: BTreeMap<String, Value>,
     pub target: Option<Found>,
+    /// The hooks' target when it was found where the event fired, as
+    /// `events_fire_pane` then `hooks_insert` do synchronously: `Some(None)`
+    /// when nothing was (no session to start from, hooks.c:116-119). Else
+    /// it is found from `target` when the event is taken off the queue.
+    pub hook_target: Option<Option<Found>>,
     /// `_cmdq_item`: the command an `after-*` or `command-error` event is
     /// for; its hooks go in right after it.
     pub step: Option<StepId>,
@@ -270,7 +275,42 @@ impl Model {
             pane: p,
             window: w,
             sessions,
+            target: self.hook_target(Some(Found::from_pane(self, p))),
         })
+    }
+
+    /// `event_payload_get_target` then `cmd_find_from_nothing` when that is
+    /// not valid (hooks.c:116-119).
+    #[must_use]
+    pub fn hook_target(&self, t: Option<Found>) -> Option<Found> {
+        let m = self;
+        if let Some(t) = t {
+            if t.still_valid(m) {
+                return Some(t);
+            }
+            // Valid when it fired ([`Model::push_event`]) and gone since
+            // (a pane killed by the command that fired it): tmux keeps
+            // the state, and its commands find their current target from
+            // the client or from nothing when they run (cmd-find.c:995-1006).
+            if t.valid() {
+                return Some(t);
+            }
+            if let Some(p) = t.pane.filter(|p| m.panes.contains_key(p)) {
+                let f = Found::from_pane(m, p);
+                if f.still_valid(m) {
+                    return Some(f);
+                }
+            }
+            if let (Some(s), Some(w)) = (t.session, t.window)
+                && let Some(i) = m.index_of(s, w)
+            {
+                return Some(Found::from_winlink(m, s, i));
+            }
+            if let Some(s) = t.session.filter(|s| m.sessions.contains_key(s)) {
+                return Some(Found::from_session(m, s));
+            }
+        }
+        target::best_session(m, None, None).map(|s| Found::from_session(m, s))
     }
 
     /// Queue `tty_update_window_offset` for window `w`: the views of the
@@ -403,6 +443,11 @@ pub struct FocusCheck {
     /// The sessions showing that window then, empty when the pane was not
     /// its active pane or the window had a menu up.
     pub sessions: Vec<SessionId>,
+    /// The pane-focus hooks' target then (`events_fire_pane`,
+    /// events.c:173-183, then hooks.c:115-119): a session showing a window
+    /// with no active pane is no target (cmd-find.c:151-160), and a window
+    /// linked twice is found at its session's current index or its first.
+    pub target: Option<Found>,
 }
 
 /// What `server_destroy_session` (server-fn.c:486-527) reads when a session
@@ -505,7 +550,9 @@ impl Server {
     /// (`options_hook_fired`) is done, without the event.
     pub(crate) fn fire_pane_often(&mut self, name: &str, p: PaneId) {
         if !self.cmdq.firing() && !self.event_waits.iter().any(|w| w.name == name) {
-            let fs = self.hook_target(Some(Found::from_pane(&self.model, p)));
+            let fs = self
+                .model
+                .hook_target(Some(Found::from_pane(&self.model, p)));
             let Some(tree) = self.hook_tree(name, fs) else {
                 return;
             };
@@ -646,7 +693,9 @@ impl Server {
         ev: &Event,
         payload: impl FnOnce() -> Vec<(String, String)>,
     ) {
-        let fs = self.hook_target(ev.target);
+        let fs = ev
+            .hook_target
+            .unwrap_or_else(|| self.model.hook_target(ev.target));
         let Some((tree, lists)) = self.hook_commands(&ev.name, fs) else {
             return;
         };
@@ -659,7 +708,9 @@ impl Server {
     /// (`hooks_parse`); a parse error is only logged. Nothing runs from a
     /// command that has hooks off.
     fn hooks_monitor_insert(&mut self, tree: TreeId, ev: &Event) {
-        let fs = self.hook_target(ev.target);
+        let fs = ev
+            .hook_target
+            .unwrap_or_else(|| self.model.hook_target(ev.target));
         let Some(entry) = self.model.options.tree(tree).get_only(&ev.name) else {
             return;
         };
@@ -723,39 +774,6 @@ impl Server {
         batch.groups = groups;
         batch.state = Some(state);
         self.cmdq_append(None, batch);
-    }
-
-    /// `event_payload_get_target` then `cmd_find_from_nothing` when that is
-    /// not valid (hooks.c:116-119).
-    fn hook_target(&self, t: Option<Found>) -> Option<Found> {
-        let m = &self.model;
-        if let Some(t) = t {
-            if t.still_valid(m) {
-                return Some(t);
-            }
-            // Valid when it fired ([`Model::push_event`]) and gone since
-            // (a pane killed by the command that fired it): tmux keeps
-            // the state, and its commands find their current target from
-            // the client or from nothing when they run (cmd-find.c:995-1006).
-            if t.valid() {
-                return Some(t);
-            }
-            if let Some(p) = t.pane.filter(|p| m.panes.contains_key(p)) {
-                let f = Found::from_pane(m, p);
-                if f.still_valid(m) {
-                    return Some(f);
-                }
-            }
-            if let (Some(s), Some(w)) = (t.session, t.window)
-                && let Some(i) = m.index_of(s, w)
-            {
-                return Some(Found::from_winlink(m, s, i));
-            }
-            if let Some(s) = t.session.filter(|s| m.sessions.contains_key(s)) {
-                return Some(Found::from_session(m, s));
-            }
-        }
-        target::best_session(m, None, None).map(|s| Found::from_session(m, s))
     }
 
     /// The tree of the hook's option (hooks.c:121-140): the session's (or

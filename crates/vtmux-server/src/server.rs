@@ -3381,10 +3381,15 @@ impl Server {
         } else {
             "pane-focus-out"
         };
-        let ev = crate::events::Event::new(name)
-            .target(crate::target::Found::from_pane(&self.model, p))
-            .pane("pane", p)
-            .window(&self.model, "window", w);
+        // The target and the hook are found where the focus changed, with
+        // the moved pane already in its new window and the session still
+        // showing the old one (events.c:173-183, hooks.c:115-140).
+        let mut ev =
+            crate::events::Event::new(name)
+                .pane("pane", p)
+                .window(&self.model, "window", w);
+        ev.target = check.target;
+        ev.hook_target = Some(check.target);
         Some(ev)
     }
 

@@ -1,0 +1,996 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "join_pane_focus_hook_target",
+  "inputs": {
+    "name": "join_pane_focus_hook_target",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p0"
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "b0",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "p1"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "focus-events",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-focus-in",
+          "set -agF @log '|Hg:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-t",
+          "a",
+          "pane-focus-in",
+          "set -agF @log '|Ha:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-t",
+          "b",
+          "pane-focus-in",
+          "set -agF @log '|Hb:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-focus-out",
+          "set -agF @log '|Hg:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-t",
+          "a",
+          "pane-focus-out",
+          "set -agF @log '|Ha:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-t",
+          "b",
+          "pane-focus-out",
+          "set -agF @log '|Hb:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:1",
+          "-n",
+          "sA",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sA; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sA"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:1",
+          "-n",
+          "sB",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sB; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sB"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "movep",
+          "-s",
+          "a:1",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "killp",
+          "-a",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "linkw",
+          "-d",
+          "-s",
+          "a:0",
+          "-t",
+          "a:5"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:1",
+          "-n",
+          "sC",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sC; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sC"
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:1",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sD; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sD"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:1",
+          "-t",
+          "a:5"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "killp",
+          "-a",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "killw",
+          "-t",
+          "a:1"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:1",
+          "-n",
+          "sE",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sE; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sE"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:1",
+          "-t",
+          "a:5"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "killp",
+          "-a",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-t",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-t",
+          "a:2",
+          "-n",
+          "sF",
+          "sh",
+          "-c",
+          "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sF; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "sF"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:2",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%7",
+          "zz"
+        ]
+      },
+      {
+        "wait_pane": {
+          "pane": "%7",
+          "has": "zz"
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%7"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Ha:pane-focus-in:%0/Ta:0.%0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Hb:pane-focus-out:%2/Tb:0.%1|Ha:pane-focus-in:%2/Ta:0.%2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Hb:pane-focus-out:%3/Tb:0.%1|Ha:pane-focus-in:%3/Ta:0.%3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Hg:pane-focus-in:%5/Ta:1.%5|Ha:pane-focus-out:%4/Ta:0.%4|Hg:pane-focus-out:%5/Ta:1.%5|Ha:pane-focus-in:%4/Ta:5.%4\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Hb:pane-focus-out:%6/Tb:0.%1|Ha:pane-focus-in:%6/Ta:5.%6\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|Ha:pane-focus-in:%7/Ta:0.%7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0.0 %0 0\na:0.1 %7 1\na:5.0 %0 0\na:5.1 %7 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[[O^[[Izz\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

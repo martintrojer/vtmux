@@ -1,0 +1,79 @@
+name = "join_pane_focus_hook_target"
+# The pane-focus-out hook of a join-pane or move-pane of the focused pane
+# finds its target and its hook when the focus is checked, synchronously
+# (window.c:741-747 window_pane_update_focus, events.c:173-183
+# events_fire_pane, hooks.c:115-140 hooks_insert): the moved pane is in
+# the destination window while the session still shows the source window.
+# A session whose current window has no active pane is no target
+# (cmd-find.c:151-160 cmd_find_session_valid), so joining the last pane of
+# the shown window starts the hook from the best other session (b, whose
+# window b0 has the Hb hook), or from nothing when there is none: then
+# only the global session options are looked at, and the pane hooks (window
+# and pane scope) set there are none, so no focus-out hook runs. A window
+# linked twice is found at the session's current index or its first
+# (cmd-find.c:225-247), not at the index the join then selects. The
+# pane-focus hooks are set globally (Hg) and on a's and b's first windows
+# (set-hook -t a/-t b: Ha, Hb), and append the hook and its target to @log.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p0; exec cat -"] },
+  { wait_for = "p0" },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S p1; exec cat -"] },
+  { wait_for = "p1" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-focus-in", "set -agF @log '|Hg:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-t", "a", "pane-focus-in", "set -agF @log '|Ha:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-t", "b", "pane-focus-in", "set -agF @log '|Hb:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-g", "pane-focus-out", "set -agF @log '|Hg:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-t", "a", "pane-focus-out", "set -agF @log '|Ha:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { run = ["set-hook", "-t", "b", "pane-focus-out", "set -agF @log '|Hb:#{hook}:#{hook_pane}/T#{session_name}:#{window_index}.#{pane_id}'"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["neww", "-t", "a:1", "-n", "sA", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sA; exec cat -"] },
+  { wait_for = "sA" },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["neww", "-t", "a:1", "-n", "sB", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sB; exec cat -"] },
+  { wait_for = "sB" },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["movep", "-s", "a:1", "-t", "a:0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["killp", "-a", "-t", "%0"] },
+  { run = ["linkw", "-d", "-s", "a:0", "-t", "a:5"] },
+  { run = ["neww", "-t", "a:1", "-n", "sC", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sC; exec cat -"] },
+  { wait_for = "sC" },
+  { run = ["splitw", "-d", "-t", "a:1", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sD; exec cat -"] },
+  { wait_for = "sD" },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:5"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["killp", "-a", "-t", "%0"] },
+  { run = ["killw", "-t", "a:1"] },
+  { run = ["neww", "-t", "a:1", "-n", "sE", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sE; exec cat -"] },
+  { wait_for = "sE" },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:5"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["killp", "-a", "-t", "%0"] },
+  { run = ["kill-session", "-t", "b"] },
+  { run = ["neww", "-t", "a:2", "-n", "sF", "sh", "-c", "stty echo echoctl; printf '\\033[?1004h'; tmux wait-for -S sF; exec cat -"] },
+  { wait_for = "sF" },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-s", "a:2", "-t", "a:0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active}"] },
+  { run = ["send-keys", "-t", "%7", "zz"] },
+  { wait_pane = { pane = "%7", has = "zz" } },
+  { run = ["capture-pane", "-p", "-t", "%7"] },
+  { run = ["kill-server"] },
+]
