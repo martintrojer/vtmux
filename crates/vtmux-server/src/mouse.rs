@@ -1616,7 +1616,15 @@ pub fn encode_mouse(modes: MouseModes, m: &MouseInput, x: u32, y: u32) -> Option
     }
     if let Some(g) = m.sgr.filter(|_| modes.sgr) {
         let end = if g.release { 'm' } else { 'M' };
-        return Some(format!("\x1b[<{};{};{}{end}", g.b, x + 1, y + 1).into_bytes());
+        return Some(
+            format!(
+                "\x1b[<{};{};{}{end}",
+                g.b,
+                x.saturating_add(1),
+                y.saturating_add(1)
+            )
+            .into_bytes(),
+        );
     }
     let mut out = b"\x1b[M".to_vec();
     if modes.utf8 {
@@ -1633,13 +1641,15 @@ pub fn encode_mouse(modes: MouseModes, m: &MouseInput, x: u32, y: u32) -> Option
         }
         return Some(out);
     }
-    if m.b + PARAM_BUTTON_OFFSET > PARAM_MAX {
+    // input_key_get_mouse (input-keys.c): `b + MOUSE_PARAM_BTN_OFF >
+    // MOUSE_PARAM_MAX` drops the event (the sum is checked without wrapping).
+    if m.b > PARAM_MAX - PARAM_BUTTON_OFFSET {
         return None;
     }
     for v in [
         m.b + PARAM_BUTTON_OFFSET,
-        (x + PARAM_POSITION_OFFSET).min(PARAM_MAX),
-        (y + PARAM_POSITION_OFFSET).min(PARAM_MAX),
+        x.saturating_add(PARAM_POSITION_OFFSET).min(PARAM_MAX),
+        y.saturating_add(PARAM_POSITION_OFFSET).min(PARAM_MAX),
     ] {
         out.push(u8::try_from(v).unwrap_or(u8::MAX));
     }
@@ -1685,6 +1695,19 @@ mod tests {
             lb,
             ..MouseInput::default()
         }
+    }
+
+    #[test]
+    fn huge_button_or_position_never_overflows() {
+        for b in [4_294_967_264, u32::MAX, 224, 223] {
+            for (utf8, sgr_mode) in [(false, false), (true, false)] {
+                let m = modes(MouseTracking::All, utf8, sgr_mode);
+                let got = encode_mouse(m, &x10(b, 0), u32::MAX - 1, u32::MAX - 1);
+                assert_eq!(got.is_some(), !utf8 && b == 223, "b={b}");
+            }
+        }
+        let m = modes(MouseTracking::All, false, true);
+        assert!(encode_mouse(m, &sgr(u32::MAX, false), u32::MAX, u32::MAX).is_some());
     }
 
     #[test]

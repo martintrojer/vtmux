@@ -1412,6 +1412,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn mouse_report_with_huge_numbers_parses() {
+        let mut d = Decoder::default();
+        d.feed(b"\x1b[<4294967264;4294967295;4294967295M\x1b[<4294967295;3;3M");
+        let events = d.drain(Instant::now());
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], Event::Mouse(m, _) if m.x == u32::MAX - 1));
+    }
+
     /// tty-keys.c:1210-1347: SGR and X10 reports, the previous position,
     /// and the reports tmux drops.
     #[test]
