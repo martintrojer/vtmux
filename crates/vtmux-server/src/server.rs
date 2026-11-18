@@ -671,10 +671,13 @@ pub fn spawn_failed(e: &io::Error) -> String {
 /// before the old master closes.
 fn hang_up(io: PaneIo, pid: i32) {
     drop(io);
-    let _ = rustix::process::kill_process_group(
-        rustix::process::Pid::from_raw(pid).expect("pane pid is positive"),
-        rustix::process::Signal::HUP,
-    );
+    // A pid <= 0 would name no process or a group: signal nothing.
+    if let Some(pid) = Some(pid)
+        .filter(|&p| p > 0)
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::HUP);
+    }
 }
 
 /// The client's `PATH`, if it sent one.

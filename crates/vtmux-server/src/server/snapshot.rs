@@ -600,6 +600,31 @@ pub(super) fn validate(s: &snap::Snapshot) -> io::Result<()> {
         _ => Ok(()),
     };
     let sv = &s.server;
+    // An allocator at the top would panic on its next id.
+    for (what, next) in [
+        ("session", sv.next_session),
+        ("window", sv.next_window),
+        ("pane", sv.next_pane),
+    ] {
+        if next == u32::MAX {
+            return Err(invalid(format!("next {what} id exhausted")));
+        }
+    }
+    // A pid is signalled on hang-up and close: a negative one would name a
+    // process group, and a pane or popup with a PTY needs a real process.
+    let has_fd = |role: snap::Role| s.descriptors.iter().any(|d| d.role == role);
+    for p in &s.panes {
+        if p.pid < 0 || (p.pid == 0 && has_fd(snap::Role::PanePty(p.id))) {
+            return Err(invalid(format!("%{} pid {}", p.id, p.pid)));
+        }
+    }
+    for c in &s.clients {
+        if let Some(p) = &c.popup
+            && (p.pid < 0 || (p.pid == 0 && has_fd(snap::Role::PopupPty(c.id))))
+        {
+            return Err(invalid(format!("client {} popup pid {}", c.id, p.pid)));
+        }
+    }
     past(
         "session",
         sv.next_session,

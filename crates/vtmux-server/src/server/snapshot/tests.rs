@@ -2269,6 +2269,13 @@ fn from_snapshot_refuses_inconsistent_input() {
         ("window counter", |s| s.server.next_window = 0),
         ("pane counter", |s| s.server.next_pane = 1),
         ("session counter", |s| s.server.next_session = 0),
+        ("session counter at MAX", |s| {
+            s.server.next_session = u32::MAX;
+        }),
+        ("window counter at MAX", |s| s.server.next_window = u32::MAX),
+        ("pane counter at MAX", |s| s.server.next_pane = u32::MAX),
+        ("pane pid 0 with a PTY", |s| s.panes[0].pid = 0),
+        ("negative pane pid", |s| s.panes[0].pid = -5),
         ("no active pane", |s| s.windows[0].active = None),
         ("huge pane", |s| {
             s.panes[0].geometry.sx = 1_000_000;
@@ -2298,6 +2305,36 @@ fn from_snapshot_refuses_inconsistent_input() {
         f(&mut s);
         let got = from_snapshot(&dir, &s);
         assert!(got.is_err(), "{what}: accepted");
+    }
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A popup whose pid is zero next to its PTY, or negative, is refused too.
+#[test]
+fn from_snapshot_refuses_a_bad_popup_pid() {
+    let dir = temp_dir("badpop");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let mut good = a.to_snapshot(snap::Meta::default());
+    let c = good
+        .clients
+        .iter()
+        .position(|c| c.id as usize == client.0)
+        .unwrap();
+    good.clients[c].popup = Some(snap::Popup::default());
+    good.descriptors.push(snap::Descriptor {
+        fd: 0,
+        role: snap::Role::PopupPty(good.clients[c].id),
+    });
+    for pid in [0, -7] {
+        let mut s = good.clone();
+        s.clients[c].popup.as_mut().unwrap().pid = pid;
+        assert!(
+            from_snapshot(&dir, &s).is_err(),
+            "popup pid {pid}: accepted"
+        );
     }
     drop(a);
     let _ = std::fs::remove_dir_all(dir);

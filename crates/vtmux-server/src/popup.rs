@@ -447,7 +447,10 @@ impl Server {
             io.deregister(self.poll.registry());
         }
         if popup.running
-            && let Some(pid) = popup.pid.and_then(rustix::process::Pid::from_raw)
+            && let Some(pid) = popup
+                .pid
+                .filter(|&p| p > 0)
+                .and_then(rustix::process::Pid::from_raw)
         {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }
