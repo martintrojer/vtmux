@@ -3511,7 +3511,11 @@ impl Server {
     /// Whether client `id` takes no frame now: the server is exiting, its
     /// session is gone, or it is suspended (its terminal is not ours).
     fn render_skips(&mut self, id: ClientId, s: SessionId) -> bool {
-        let suspended = self.clients[&id].suspended;
+        // Gone while an earlier client of the turn was drawn or let go.
+        let Some(c) = self.clients.get(&id) else {
+            return true;
+        };
+        let suspended = c.suspended;
         if self.shutdown {
             // server_send_exit (server.c:321-323): a suspended client
             // is dropped, not told.
@@ -5973,17 +5977,27 @@ impl Server {
             .filter(|(_, c)| c.attached == Some(d.session))
             .map(|(id, _)| *id)
             .collect();
+        // Moving one client on can drop another (a notification flushes a
+        // closing control client whose queue drained): a client gone by
+        // its turn is skipped.
         for id in ids {
-            let use_s = s_new.or(cs_new.filter(|_| self.clients[&id].flags.no_detach_on_destroy));
-            let Some(to) = use_s else { continue };
-            let c = self.clients.get_mut(&id).expect("listed above");
+            let Some(c) = self.clients.get(&id) else {
+                continue;
+            };
+            let no_detach = c.flags.no_detach_on_destroy;
+            let Some(to) = s_new.or(cs_new.filter(|_| no_detach)) else {
+                continue;
+            };
+            let Some(c) = self.clients.get_mut(&id) else {
+                continue;
+            };
             // c->session = NULL, c->last_session = NULL first.
             c.attached = None;
             c.last_session = None;
             if self.model.sessions.contains_key(&to) {
                 self.switch_session(id, to);
             } else {
-                self.clients.get_mut(&id).expect("listed above").attached = Some(to);
+                c.attached = Some(to);
             }
         }
     }
@@ -8105,6 +8119,59 @@ mod tests {
             .unwrap();
         let p = server.model.current_of(s).unwrap().2;
         (server, p, s, dir)
+    }
+
+    /// A session's destruction moves its clients on one by one, and moving
+    /// one can drop another: here the terminal client's switch ends in
+    /// `server_check_unattached`, which destroys `c`, and the notification
+    /// flushes the control client listed after it (closing, its queue just
+    /// drained), which drops it. The loop skips it, not panics.
+    #[test]
+    fn session_destroyed_skips_a_client_dropped_by_an_earlier_one() {
+        use crate::server::snapshot::tests::{connect, hello, ok};
+        use vtmux_core::protocol::ControlMode;
+        let (mut server, _p, s, dir) = share_server("sdrop");
+        ok(&mut server, &dir, &["new", "-d", "-s", "c", "cat", "-"]);
+        ok(&mut server, &dir, &["new", "-d", "-s", "b", "cat", "-"]);
+        ok(
+            &mut server,
+            &dir,
+            &["set", "-g", "detach-on-destroy", "off"],
+        );
+        let (term, _term_peer) = attach_test_client(&mut server, s, &dir);
+        let (control, mut control_peer) = connect(
+            &mut server,
+            hello(&["attach", "-t", "a"], &dir, None, ControlMode::Control),
+        );
+        assert_eq!(server.clients[&control].attached, Some(s));
+        // Backpressured: its socket takes no more, a little is left queued.
+        while server.clients[&control].out.is_empty() {
+            server.send(control, &super::ServerMsg::Stdout(vec![b'x'; 512]));
+        }
+        // finish_client_with (the ACL refusal's path): the exit is queued,
+        // the client marked closing while still attached.
+        server.finish_client(control, 0);
+        assert!(server.clients[&control].closing);
+        // Its terminal catches up: the next flush empties the queue.
+        let mut buf = vec![0u8; 65536];
+        while let Ok(1..) = std::io::Read::read(&mut control_peer, &mut buf) {}
+        // The terminal client's switch ends with server_check_unattached,
+        // which destroys `c`; its notifications flush the control client.
+        let c = server
+            .model
+            .sessions
+            .iter()
+            .find(|(_, x)| x.name == "c")
+            .map(|(id, _)| *id)
+            .unwrap();
+        server.model.options.set_table_value(
+            vtmux_core::options::TreeId::Session(c),
+            "destroy-unattached",
+            vtmux_core::options::Value::Choice(1),
+        );
+        ok(&mut server, &dir, &["kill-session", "-t", "a"]);
+        assert!(!server.clients.contains_key(&control), "dropped mid-loop");
+        assert!(server.clients[&term].attached.is_some());
     }
 
     /// A plain frame's status row is tagged like a composed row, by its
