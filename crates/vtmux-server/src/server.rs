@@ -3581,8 +3581,8 @@ impl Server {
         let attached: Vec<_> = self
             .clients
             .iter()
-            .filter(|(_, c)| c.control.is_none())
-            .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
+            .filter(|(_, c)| c.control.is_none() && c.attached.is_some())
+            .map(|(&id, _)| id)
             .collect();
         // The rows each pane wrote under synchronized output that ended,
         // drawn whole for every client ([`Self::force_sync_flush`]).
@@ -3600,7 +3600,12 @@ impl Server {
         // Every client of the turn sees one time and one foreground
         // process per pane (crate::live).
         self.model.live.hold();
-        for (id, s) in attached {
+        for id in attached {
+            // Its session as of its turn: letting an earlier client go can
+            // move it on (server_check_unattached, then detach-on-destroy).
+            let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+                continue;
+            };
             #[cfg(test)]
             if self.sharing == crate::render::share::Sharing::Off {
                 turn = crate::render::share::Turn::default();
@@ -8172,6 +8177,62 @@ mod tests {
         ok(&mut server, &dir, &["kill-session", "-t", "a"]);
         assert!(!server.clients.contains_key(&control), "dropped mid-loop");
         assert!(server.clients[&term].attached.is_some());
+    }
+
+    /// A client moved to another session while an earlier client of the
+    /// turn is let go is drawn on its new session, not told its old one is
+    /// gone: A on `a` is detached when `a` is killed, which leaves the
+    /// suspended B the only one on `b` (destroy-unattached on), so `b` goes
+    /// and B (detach-on-destroy off) moves to `c`, as with tmux 3.8.
+    #[test]
+    fn render_draws_a_client_on_the_session_it_moved_to_mid_loop() {
+        use crate::server::snapshot::tests::{connect, hello, ok};
+        use vtmux_core::options::{TreeId, Value};
+        use vtmux_core::protocol::ControlMode;
+        let (mut server, _p, a, dir) = share_server("rmove");
+        ok(&mut server, &dir, &["new", "-d", "-s", "c", "cat", "-"]);
+        ok(&mut server, &dir, &["new", "-d", "-s", "b", "cat", "-"]);
+        let find = |server: &super::Server, name: &str| {
+            server
+                .model
+                .sessions
+                .iter()
+                .find(|(_, x)| x.name == name)
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let (b, c) = (find(&server, "b"), find(&server, "c"));
+        let (client_a, _peer_a) = attach_test_client(&mut server, a, &dir);
+        let (client_b, _peer_b) = attach_test_client(&mut server, b, &dir);
+        ok(
+            &mut server,
+            &dir,
+            &["set", "-t", "b", "detach-on-destroy", "off"],
+        );
+        server.model.options.set_table_value(
+            TreeId::Session(b),
+            "destroy-unattached",
+            Value::Choice(1),
+        );
+        server.render_clients();
+        server.suspend_client(client_b);
+        // As the server's turn has it: the command client that ran
+        // kill-session is let go after the render (render_and_exit).
+        let (_cmd, _cmd_peer) = connect(
+            &mut server,
+            hello(&["kill-session", "-t", "a"], &dir, None, ControlMode::None),
+        );
+        server.render_and_exit();
+        assert!(
+            server
+                .clients
+                .get(&client_a)
+                .is_none_or(|x| x.attached.is_none()),
+            "A let go with `a`"
+        );
+        let client = server.clients.get(&client_b).expect("B kept");
+        assert_eq!(client.attached, Some(c));
+        assert!(!client.closing, "B not told to exit");
     }
 
     /// A plain frame's status row is tagged like a composed row, by its
