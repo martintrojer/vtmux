@@ -241,9 +241,36 @@ impl Model {
     }
 
     /// Queue `window_pane_update_focus` for `p`: it runs in order with the
-    /// events around it, as tmux runs it where the change happens.
+    /// events around it, as tmux runs it where the change happens, against
+    /// the model as it is now ([`FocusCheck`]).
     pub fn push_focus_check(&mut self, p: PaneId) {
-        self.events.push(Queued::Focus(p));
+        if let Some(check) = self.focus_check(p) {
+            self.events.push(Queued::Focus(check));
+        }
+    }
+
+    /// The model's half of `window_pane_update_focus` (window.c:716-735)
+    /// for pane `p` now: none for a pane that is gone.
+    #[must_use]
+    pub fn focus_check(&self, p: PaneId) -> Option<FocusCheck> {
+        let w = self.panes.get(&p)?.window;
+        let window = self.windows.get(&w);
+        // window.c:723-735: only the active pane, and not while the window
+        // has a menu up, is focused by a client showing the window.
+        let sessions = if window.is_some_and(|x| x.panes.active == Some(p) && x.menu.is_none()) {
+            self.sessions
+                .iter()
+                .filter(|(_, s)| s.windows.get(&s.current) == Some(&w))
+                .map(|(id, _)| *id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some(FocusCheck {
+            pane: p,
+            window: w,
+            sessions,
+        })
     }
 
     /// Queue `tty_update_window_offset` for window `w`: the views of the
@@ -354,12 +381,28 @@ impl Model {
 #[derive(Clone, Debug)]
 pub enum Queued {
     Event(Event),
-    Focus(PaneId),
+    Focus(FocusCheck),
     /// `tty_update_window_offset` for a window.
     Offset(WindowId),
     /// A session went: its clients move on before its `session-closed`
     /// ([`crate::server::Server::session_destroyed`]).
     Destroyed(Destroyed),
+}
+
+/// A focus check queued where the state changed. tmux's
+/// `window_pane_update_focus` runs there, synchronously: join-pane looks at
+/// the moved pane once while the session still shows the emptied source
+/// window (focus out) and again after `session_select` (focus in),
+/// cmd-join-pane.c:523-526. So the model's half is taken when the check is
+/// queued; the clients' half (focused, attached, no overlay) when it runs.
+#[derive(Clone, Debug)]
+pub struct FocusCheck {
+    pub pane: PaneId,
+    /// The pane's window when the check was queued.
+    pub window: WindowId,
+    /// The sessions showing that window then, empty when the pane was not
+    /// its active pane or the window had a menu up.
+    pub sessions: Vec<SessionId>,
 }
 
 /// What `server_destroy_session` (server-fn.c:486-527) reads when a session
@@ -424,8 +467,8 @@ impl Server {
             while let Some(q) = queue.pop_front() {
                 match q {
                     Queued::Event(ev) => self.fire_event(&ev),
-                    Queued::Focus(p) => {
-                        if let Some(ev) = self.pane_focus(p) {
+                    Queued::Focus(check) => {
+                        if let Some(ev) = self.pane_focus_at(&check) {
                             self.fire_event(&ev);
                         }
                     }

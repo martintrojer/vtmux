@@ -3342,24 +3342,28 @@ impl Server {
     /// the window. A change is reported to a pane that asked for it
     /// (`?1004h`) and is the pane-focus-in/out event returned.
     pub(crate) fn pane_focus(&mut self, p: PaneId) -> Option<crate::events::Event> {
+        let check = self.model.focus_check(p)?;
+        self.pane_focus_at(&check)
+    }
+
+    /// [`Self::pane_focus`] with the model's half taken earlier, where the
+    /// state changed ([`crate::events::FocusCheck`]).
+    pub(crate) fn pane_focus_at(
+        &mut self,
+        check: &crate::events::FocusCheck,
+    ) -> Option<crate::events::Event> {
+        let p = check.pane;
         let pane = self.model.panes.get(&p)?;
         if pane.exited {
             return None;
         }
-        let w = pane.window;
+        let w = check.window;
         self.focus_stale.remove(&w);
-        let window = self.model.windows.get(&w);
-        let active = window.map(Window::active) == Some(p);
-        // window.c:731: not while the window has a menu up.
-        let focused = active
-            && window.is_some_and(|x| x.menu.is_none())
-            && self.clients.values().any(|c| {
-                c.focused
-                    && c.popup.is_none()
-                    && c.attached
-                        .and_then(|s| self.model.current_of(s))
-                        .is_some_and(|(_, cw, _)| cw == w)
-            });
+        let focused = self.clients.values().any(|c| {
+            c.focused
+                && c.popup.is_none()
+                && c.attached.is_some_and(|s| check.sessions.contains(&s))
+        });
         let pane = self.model.panes.get_mut(&p)?;
         if focused == pane.focused {
             return None;
