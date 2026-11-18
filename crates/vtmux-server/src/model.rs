@@ -2026,6 +2026,20 @@ impl Model {
         }
     }
 
+    /// [`Pane::follow_term`] for pane `p` (a failed resize as its
+    /// alternate screen ended), with `pane-resized` and a redraw when it
+    /// took its terminal's size.
+    pub(crate) fn follow_term(&mut self, p: PaneId) {
+        let Some(pane) = self.panes.get_mut(&p) else {
+            return;
+        };
+        if let Some(old) = pane.follow_term() {
+            let w = pane.window;
+            self.fire_pane_resized(p, old);
+            self.redraw(Redraw::Window(w));
+        }
+    }
+
     /// The event at the end of `window_pane_resize` (window.c:1731-1740).
     fn fire_pane_resized(&mut self, p: PaneId, (old_width, old_height): (u32, u32)) {
         let Some(pane) = self.panes.get(&p) else {
@@ -2378,8 +2392,9 @@ impl Pane {
     ///
     /// When libghostty can't take the size (out of memory), for the
     /// terminal or the shown view mode's backing, the pane keeps its old
-    /// size (or what the terminal was left at): its rect, the size queued
-    /// for the program and its terminal agree, only the offsets move.
+    /// size, or what the terminal and the mode were left at ([`Self::settle`]):
+    /// its rect, the size queued for the program, its terminal and its
+    /// mode agree, only the offsets move.
     pub fn set_rect(&mut self, rect: Geometry) -> Option<(u32, u32)> {
         let from = (self.rect.sx, self.rect.sy);
         self.rect = rect;
@@ -2388,16 +2403,53 @@ impl Pane {
         }
         if !(self.term.resize(clamp16(rect.sx), clamp16(rect.sy)) && self.resize_mode()) {
             // Back to the old size, the shown mode with it.
-            let old = (clamp16(from.0).max(1), clamp16(from.1).max(1));
+            let old = term_size(from);
             self.term.resize(old.0, old.1);
-            self.resize_mode();
-            let have = (self.term.cols(), self.term.rows());
-            (self.rect.sx, self.rect.sy) = if have == old {
-                from
-            } else {
-                (u32::from(have.0), u32::from(have.1))
-            };
+            self.settle(from);
         }
+        self.resized_from(from)
+    }
+
+    /// The terminal changed size by itself: the alternate screen ended and
+    /// libghostty failed to give the primary screen the pane's size back
+    /// ([`vtmux_vt::PaneTerm::feed`]). It is tried once more; failing
+    /// that the pane takes the terminal's size, as [`Self::set_rect`]
+    /// does. The old size when the size changed, for `pane-resized`.
+    pub fn follow_term(&mut self) -> Option<(u32, u32)> {
+        let from = (self.rect.sx, self.rect.sy);
+        let size = term_size(from);
+        if (self.term.cols(), self.term.rows()) == size {
+            return None;
+        }
+        if !(self.term.resize(size.0, size.1) && self.resize_mode()) {
+            self.settle(from);
+        }
+        self.resized_from(from)
+    }
+
+    /// After a resize libghostty failed: the shown mode follows the
+    /// terminal, or the terminal a view mode whose backing can't, and the
+    /// rect takes the size they were left at (`from` when that is its
+    /// terminal size).
+    fn settle(&mut self, from: (u32, u32)) {
+        if !self.resize_mode()
+            && let Some(crate::mode::Mode::View(m)) = self.modes.first()
+        {
+            let (cols, rows) = m.backing_size();
+            self.term.resize(cols, rows);
+            self.resize_mode();
+        }
+        let have = (self.term.cols(), self.term.rows());
+        (self.rect.sx, self.rect.sy) = if have == term_size(from) {
+            from
+        } else {
+            (u32::from(have.0), u32::from(have.1))
+        };
+    }
+
+    /// Queue the program's resize from `from` to the rect's size, if it
+    /// changed: [`Self::set_rect`]'s result.
+    fn resized_from(&mut self, from: (u32, u32)) -> Option<(u32, u32)> {
         self.compress.observe(&self.term, Instant::now());
         let to = (self.rect.sx, self.rect.sy);
         if to == from {
@@ -2505,6 +2557,11 @@ impl Pane {
 
 fn clamp16(n: u32) -> u16 {
     u16::try_from(n).unwrap_or(u16::MAX)
+}
+
+/// The terminal size a pane of `size` has: at least a cell each way.
+fn term_size((sx, sy): (u32, u32)) -> (u16, u16) {
+    (clamp16(sx).max(1), clamp16(sy).max(1))
 }
 
 /// `ws_xpixel` and `ws_ypixel` for a PTY of `cols` x `rows` cells of

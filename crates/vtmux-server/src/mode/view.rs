@@ -164,8 +164,8 @@ impl ViewMode {
         self.term.fail_resizes(script);
     }
 
-    /// The backing's size.
-    #[cfg(test)]
+    /// The backing's size: the view's, which [`Self::resize`] may have
+    /// left at another than the pane's.
     pub fn backing_size(&self) -> (u16, u16) {
         (self.term.cols(), self.term.rows())
     }

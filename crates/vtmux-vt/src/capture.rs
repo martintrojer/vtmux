@@ -520,6 +520,45 @@ pub fn capture_lines(lines: &dyn Lines, sx: usize, opts: CaptureOpts) -> Vec<u8>
     capture_from(&Source::Mode(lines, sx), opts)
 }
 
+/// Rows `rows` of `term`'s active screen (`y` counts from its oldest
+/// retained row), each as `capture-pane -e -N` writes it from the default
+/// pen, no charset and no link: what writes the row's cells back. A cell
+/// of the line-drawing set comes with SO, so G1 must be it.
+pub(crate) fn rows_as_written(
+    term: &Terminal<'_, '_>,
+    rows: std::ops::Range<usize>,
+    cols: usize,
+) -> Vec<Vec<u8>> {
+    let mut last = None;
+    let frozen: Vec<FrozenRow> = rows
+        .map(|y| FrozenRow::capture(term, y, cols, &mut last))
+        .collect();
+    let n = frozen.len();
+    let src = Source::Saved(Rc::new(frozen), cols);
+    (0..n)
+        .map(|y| {
+            let y = LineRef::Line(i64::try_from(y).unwrap_or(i64::MAX));
+            let opts = CaptureOpts {
+                escapes: true,
+                keep_spaces: true,
+                start: y,
+                end: y,
+                ..CaptureOpts::default()
+            };
+            let mut out = capture_from(&src, opts);
+            out.pop();
+            out
+        })
+        .collect()
+}
+
+/// The SGR sequence that takes the default pen to `pen`.
+pub(crate) fn pen_sgr(pen: &Style) -> Vec<u8> {
+    let mut out = Vec::new();
+    sgr_code(&mut out, &Style::default(), pen);
+    out
+}
+
 /// `cmd_capture_pane_history` (cmd-capture-pane.c:254-422).
 fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
     let (hsize, sy) = src.size();

@@ -3106,6 +3106,111 @@ fn a_pane_resize_libghostty_fails_keeps_the_old_size_everywhere() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The alternate screen ends and libghostty fails to give the primary
+/// screen the pane's size back: the pane tries again, and its rect, its
+/// program's size and its terminal agree, so a snapshot restores.
+#[test]
+fn a_failed_resize_as_the_alternate_screen_ends_is_tried_again() {
+    // Once, then the retry takes; twice, then the pane takes the
+    // terminal's size and its program is told.
+    for (script, want, queued) in [
+        (&[false][..], (40, 24), None),
+        (&[false, false], (80, 24), Some(((40, 24), (80, 24)))),
+    ] {
+        let dir = temp_dir("alt-oom");
+        let mut a = server(&dir);
+        ok(
+            &mut a,
+            &dir,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "s",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "/bin/sleep",
+                "60",
+            ],
+        );
+        let p = PaneId(0);
+        a.pane_input(p, b"primary\x1b[?1049h", false);
+        assert!(a.model.panes[&p].term.alternate_on());
+        ok(
+            &mut a,
+            &dir,
+            &["resize-window", "-t", "s", "-x", "40", "-y", "24"],
+        );
+        a.send_pane_resizes();
+        assert_eq!(pty_size(&a, 0), (40, 24));
+        assert_eq!(a.model.panes[&p].term.cols(), 40);
+        a.model.panes.get_mut(&p).unwrap().term.fail_resizes(script);
+        a.pane_input(p, b"\x1b[?1049l", false);
+        let pane = &a.model.panes[&p];
+        assert!(!pane.term.alternate_on());
+        let size = (pane.term.cols(), pane.term.rows());
+        let rect = (pane.rect.sx, pane.rect.sy);
+        let last = pane.resizes.last().copied();
+        let taken = a.to_snapshot(snap::Meta::default()).unwrap();
+        let err = restore(&dir, "b", &taken).err().map(|e| e.to_string());
+        drop(a);
+        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(
+            (size, rect, last, err),
+            (want, (want.0.into(), want.1.into()), queued, None)
+        );
+    }
+}
+
+/// The view mode's backing fails the new size, then the terminal fails
+/// the old one back: the terminal takes the view's size, and the view's
+/// backing, its copy and the pane agree.
+#[test]
+fn a_failed_view_resize_and_rollback_end_at_one_size() {
+    let dir = temp_dir("view-oom");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "/bin/sleep",
+            "60",
+        ],
+    );
+    let pane = a.model.panes.get_mut(&PaneId(0)).unwrap();
+    let mut v = crate::mode::ViewMode::new((80, 24), false, None).unwrap();
+    v.fail_resizes(&[false, false]);
+    pane.modes.insert(0, crate::mode::Mode::View(Box::new(v)));
+    pane.term.fail_resizes(&[true, false]);
+    ok(
+        &mut a,
+        &dir,
+        &["resize-window", "-t", "s", "-x", "40", "-y", "24"],
+    );
+    let pane = &a.model.panes[&PaneId(0)];
+    let Some(crate::mode::Mode::View(v)) = pane.modes.first() else {
+        unreachable!()
+    };
+    let term = (pane.term.cols(), pane.term.rows());
+    let rect = (pane.rect.sx, pane.rect.sy);
+    let view = v.backing_size();
+    let copy = v.copy.size();
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+    assert_eq!(term, (80, 24));
+    assert_eq!((view, copy, rect), (term, (80, 24), (80, 24)));
+}
+
 /// View mode's backing libghostty fails to resize part way (the height
 /// went, the width did not): the backing goes back to its old size and
 /// the copy stays at it.

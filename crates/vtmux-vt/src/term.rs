@@ -417,7 +417,8 @@ pub struct PaneTerm {
     /// A cell's width and height in pixels (`w->xpixel`, `w->ypixel`):
     /// XTWINOPS and mode 2048 report with it, and Ghostty is sized by it.
     cell_px: (u32, u32),
-    /// [`Self::fail_resizes`]'s script, empty but in tests.
+    /// `fail_resizes`'s script.
+    #[cfg(any(test, feature = "test-hooks"))]
     resize_faults: Vec<bool>,
     /// The primary screen's visible rows, copied as the alternate screen
     /// came up (tmux's `saved_grid`, screen.c:704-705), while it is up.
@@ -532,6 +533,15 @@ pub struct Passthrough {
     /// The pane already had a redraw coming from earlier in the same input
     /// (`PANE_REDRAW`, screen-write.c:155).
     pub redraw: bool,
+}
+
+/// The lines [`PaneTerm::eat_below_cursor`] erased.
+struct EatenRows {
+    /// Each line's distance below the cursor's row, and its cells as
+    /// `capture-pane -e -N` writes them.
+    cells: Vec<(u16, Vec<u8>)>,
+    /// The pen's SGR.
+    pen: Vec<u8>,
 }
 
 impl PaneTerm {
@@ -673,6 +683,7 @@ impl PaneTerm {
             mouse,
             inband,
             cell_px: DEFAULT_CELL_PX,
+            #[cfg(any(test, feature = "test-hooks"))]
             resize_faults: Vec::new(),
             scan: AltModeScanner {
                 cursor: cursor_scan,
@@ -1962,29 +1973,39 @@ impl PaneTerm {
     /// (out of memory): a failed resize leaves the terminal at some size
     /// with its history accounted for, and a second resize, to the old
     /// size, brings it back with the limits the first one lifted set again.
+    /// The rows [`Self::eat_below_cursor`] erased go back when the size
+    /// does not change after all.
     fn resize_or_keep(&mut self, cols: u16, rows: u16) -> bool {
         let old = (self.cols(), self.rows());
-        if self.resize_grid(cols, rows).is_ok() {
+        let mut eaten = None;
+        if self.resize_grid(cols, rows, &mut eaten).is_ok() {
             return true;
         }
         if (self.cols(), self.rows()) != old {
-            let _ = self.resize_grid(old.0, old.1);
+            let _ = self.resize_grid(old.0, old.1, &mut None);
+        }
+        if let Some(eaten) = eaten
+            && (self.cols(), self.rows()) == old
+        {
+            self.uneat(&eaten);
         }
         false
     }
 
-    /// Resize Ghostty's grid; [`Self::fail_resizes`] can refuse it.
+    /// Resize Ghostty's grid; `fail_resizes` (feature `test-hooks`) can
+    /// refuse it.
     fn grid_resize(&mut self, cols: u16, rows: u16) -> Result<(), libghostty_vt::Error> {
+        #[cfg(any(test, feature = "test-hooks"))]
         if !self.resize_faults.is_empty() && !self.resize_faults.remove(0) {
             return Err(libghostty_vt::Error::OutOfMemory);
         }
         self.term.resize(cols, rows, self.cell_px.0, self.cell_px.1)
     }
 
-    /// A test hook: the next libghostty resizes, one per entry, succeed
-    /// (`true`) or fail as out of memory (`false`); after them, resizes
-    /// are libghostty's again.
-    #[doc(hidden)]
+    /// A test hook (feature `test-hooks`): the next libghostty resizes,
+    /// one per entry, succeed (`true`) or fail as out of memory (`false`);
+    /// after them, resizes are libghostty's again.
+    #[cfg(any(test, feature = "test-hooks"))]
     pub fn fail_resizes(&mut self, script: &[bool]) {
         self.resize_faults = script.to_vec();
     }
@@ -2007,7 +2028,13 @@ impl PaneTerm {
         }
     }
 
-    fn resize_grid(&mut self, cols: u16, rows: u16) -> Result<(), libghostty_vt::Error> {
+    /// `eaten`: the rows [`Self::eat_below_cursor`] erased, if any.
+    fn resize_grid(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        eaten: &mut Option<EatenRows>,
+    ) -> Result<(), libghostty_vt::Error> {
         let before = self.retained_rows();
         let old_cols = self.cols();
         let on_primary = !self.alternate_on();
@@ -2031,7 +2058,7 @@ impl PaneTerm {
             let _ = self.term.vtmux_set_hscrolled(self.hscrolled, origin);
         }
         if on_primary {
-            self.eat_below_cursor(rows.max(1));
+            *eaten = self.eat_below_cursor(rows.max(1));
         }
         // Every resize below may fail: what follows accounts for the size
         // the terminal was left at, whatever it is.
@@ -2145,22 +2172,96 @@ impl PaneTerm {
     /// memory of a pane that never drew there (an idle split pane). A
     /// cursor waiting to wrap keeps its lines: moving it back would lose
     /// the wrap.
-    fn eat_below_cursor(&mut self, rows: u16) {
+    ///
+    /// The lines erased, to write back should the resize fail
+    /// ([`Self::uneat`]). Lines that can't be kept (libghostty out of
+    /// memory) are not erased.
+    fn eat_below_cursor(&mut self, rows: u16) -> Option<EatenRows> {
         let old = self.rows();
         if rows >= old || self.term.is_cursor_pending_wrap().unwrap_or(false) {
-            return;
+            return None;
         }
         let (cx, cy) = self.cursor();
         let eat = (old - 1 - cy.min(old - 1)).min(old - rows);
         if eat == 0 || self.bottom_rows_blank(eat) {
-            return;
+            return None;
         }
+        let eaten = self.format_rows(old - eat..old, cy)?;
         self.write_screen_moves(&format!(
             "\x1b[{};1H\x1b[J\x1b[{};{}H",
             old - eat + 1,
             cy + 1,
             cx + 1
         ));
+        Some(eaten)
+    }
+
+    /// Screen rows `rows` as they are written ([`crate::capture::rows_as_written`]),
+    /// and the pen, `cursor_row` the cursor's row. `None` when libghostty
+    /// fails to say (out of memory).
+    fn format_rows(&self, rows: std::ops::Range<u16>, cursor_row: u16) -> Option<EatenRows> {
+        let pen = crate::Style::from(self.term.cursor_style().ok()?);
+        let top = self.retained_rows();
+        let written = crate::capture::rows_as_written(
+            &self.term,
+            top + usize::from(rows.start)..top + usize::from(rows.end),
+            usize::from(self.cols()),
+        );
+        Some(EatenRows {
+            cells: rows.map(|y| y - cursor_row).zip(written).collect(),
+            pen: crate::capture::pen_sgr(&pen),
+        })
+    }
+
+    /// Write back the lines [`Self::eat_below_cursor`] erased, as far below
+    /// the cursor as they were (those that fall off the screen are lost),
+    /// then give back the cursor, the pen, its link and the charsets.
+    /// Insert mode is off meanwhile. The lines' wrap marks are not kept,
+    /// nor is the character REP repeats.
+    fn uneat(&mut self, eaten: &EatenRows) {
+        if self.term.is_cursor_pending_wrap().unwrap_or(false) {
+            return;
+        }
+        let (cx, cy) = self.cursor();
+        let rows = self.rows();
+        // From the default pen, no link, ASCII in G0 and GL and the
+        // line-drawing set in G1, as `capture-pane -e` writes; a
+        // line-drawing cell is marked by its protection
+        // ([`Charset`]).
+        let mut seq = b"\x1b[0m\x1b]8;;\x1b\\\x1b[0\"q\x1b(B\x1b)0\x0f".to_vec();
+        for (below, cells) in &eaten.cells {
+            let y = cy.saturating_add(*below);
+            if y >= rows {
+                break;
+            }
+            seq.extend_from_slice(format!("\x1b[{};1H\x1b[0m", y + 1).as_bytes());
+            for &b in cells {
+                match b {
+                    0x0e => seq.extend_from_slice(b"\x0e\x1b[1\"q"),
+                    0x0f => seq.extend_from_slice(b"\x0f\x1b[0\"q"),
+                    _ => seq.push(b),
+                }
+            }
+            seq.extend_from_slice(b"\x0f\x1b[0\"q");
+        }
+        seq.extend_from_slice(b"\x1b]8;;\x1b\\\x1b[0m");
+        seq.extend_from_slice(&eaten.pen);
+        let charset = self.scan.charset;
+        seq.extend_from_slice(if charset.g0 { b"\x1b(0" } else { b"\x1b(B" });
+        seq.extend_from_slice(if charset.g1 { b"\x1b)0" } else { b"\x1b)B" });
+        seq.push(if charset.shifted { 0x0e } else { 0x0f });
+        seq.extend_from_slice(format!("\x1b[{};{}H", cy + 1, cx + 1).as_bytes());
+        let insert = self.term.mode(Mode::INSERT).unwrap_or(false);
+        if insert {
+            let _ = self.term.set_mode(Mode::INSERT, false);
+        }
+        self.write_screen_moves(&seq);
+        if insert {
+            let _ = self.term.set_mode(Mode::INSERT, true);
+        }
+        // Ghostty has no link now.
+        self.scan.links.ghostty = None;
+        self.sync_pen();
     }
 
     /// Whether the bottom `n` rows of the screen hold no text (Ghostty's
@@ -2189,7 +2290,7 @@ impl PaneTerm {
     /// taken out of Ghostty's parser first and given back after: CAN ends
     /// it without dispatching it (an OSC is dropped, `osc.Parser.end`), and
     /// the program's next bytes finish it.
-    fn write_screen_moves(&mut self, seq: &str) {
+    fn write_screen_moves(&mut self, seq: &(impl AsRef<[u8]> + ?Sized)) {
         let partial = self.ghostty_partial();
         if !partial.is_empty() {
             self.term.vt_write(b"\x18");
@@ -2198,7 +2299,7 @@ impl PaneTerm {
         if origin {
             let _ = self.term.set_mode(Mode::ORIGIN, false);
         }
-        self.term.vt_write(seq.as_bytes());
+        self.term.vt_write(seq.as_ref());
         if origin {
             let _ = self.term.set_mode(Mode::ORIGIN, true);
         }
@@ -7882,8 +7983,9 @@ mod tests {
 
     /// A resize libghostty fails part way (out of memory) leaves the pane
     /// at its old size with its history as two resizes would have left
-    /// it: to the height it got to, then back. The height changed and the
-    /// width's resize failed; or the reflow's fix-up failed after both.
+    /// it: to the height it got to, then back, with the lines the shorter
+    /// height ate below the cursor written back. The height changed and
+    /// the width's resize failed; or the reflow's fix-up failed after both.
     #[test]
     fn a_failed_resize_keeps_the_old_size_and_its_history() {
         let fill = |t: &mut PaneTerm, n: usize, up: u16| {
@@ -7903,8 +8005,20 @@ mod tests {
                 assert!(!t.resize(to.0, to.1), "{what}");
                 let mut want = PaneTerm::new(20, 10, 100);
                 fill(&mut want, n, up);
+                let below = |t: &PaneTerm| {
+                    let from = t.history_size() + usize::from(t.cursor().1) + 1;
+                    (from..t.history_size() + 10)
+                        .map(|y| t.row(y).text())
+                        .collect::<Vec<_>>()
+                };
+                let eaten = below(&want);
                 assert!(want.resize(20, to.1) && want.resize(20, 10), "{what}");
-                assert_eq!(resize_look(&t), resize_look(&want), "{what}");
+                let mut want = resize_look(&want);
+                let at = want.2 + usize::from(want.3.1) + 1;
+                for (row, text) in want.4[at..].iter_mut().zip(eaten) {
+                    row.0 = text;
+                }
+                assert_eq!(resize_look(&t), want, "{what}");
                 // Both went; the reflow's blank rows failed, where it
                 // had any to fix.
                 let mut t = PaneTerm::new(20, 10, 100);
@@ -7918,6 +8032,49 @@ mod tests {
             }
         }
         assert!(failed_fixup, "some reflow had blank rows to fix");
+    }
+
+    /// A resize that fails before the height changed keeps the lines a
+    /// shorter screen would have eaten below the cursor
+    /// (`eat_below_cursor`), with their styles and link, and the cursor,
+    /// pen, link and charsets the program left.
+    #[test]
+    fn a_failed_resize_keeps_the_lines_below_the_cursor() {
+        let mut t = PaneTerm::new(20, 10, 100);
+        t.feed(b"top\x1b[8;1H\x1b[1;31mred\x1b[0m \x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\");
+        t.feed(b"\x1b[9;1H\x1b)0\x0eqq\x0f\x1b)B \x1b[41m  \x1b[0m \xe4\xb8\xad\t|");
+        t.feed(b"\x1b[10;1Hbottom\x1b[2;3H\x1b[4;32m\x1b]8;id=a;http://y\x1b\\\x1b)0\x0e\x1b[4h");
+        let look = |t: &PaneTerm| {
+            let opts = crate::CaptureOpts {
+                escapes: true,
+                ..crate::CaptureOpts::default()
+            };
+            (crate::capture(t, opts), t.cursor())
+        };
+        let before = look(&t);
+        t.fail_resizes(&[false]);
+        assert!(!t.resize(20, 6));
+        assert_eq!((t.cols(), t.rows()), (20, 10));
+        assert_eq!(t.row(9).text(), "bottom");
+        assert_eq!(look(&t), before);
+        // The pen, link, charsets and modes are the program's: green
+        // underline, linked, G1 (line drawing) in GL, inserting.
+        assert!(t.screen_modes().insert);
+        t.feed(b"\x1b[4lq\x0fq");
+        let mut want = PaneTerm::new(20, 10, 100);
+        want.feed(b"\x1b[2;3H\x1b[4;32m\x1b]8;id=a;http://y\x1b\\\x1b)0\x0eq\x0fq");
+        assert_eq!(t.row(1), want.row(1));
+        // Height and width both: the height went, the width failed. G1
+        // is not the line-drawing set after.
+        let mut t = PaneTerm::new(20, 10, 100);
+        t.feed(b"top\x1b[9;1H\x1b)0\x0eqq\x0f\x1b)B\x1b[10;1Hbottom\x1b[2;3H");
+        let before = look(&t);
+        t.fail_resizes(&[true, false]);
+        assert!(!t.resize(10, 6));
+        assert_eq!((t.cols(), t.rows()), (20, 10));
+        assert_eq!(look(&t), before);
+        t.feed(b"\x0eq");
+        assert_eq!(t.row(1).text(), "  q");
     }
 
     /// `?1049h` saves the cursor in a slot of its own, kept after the

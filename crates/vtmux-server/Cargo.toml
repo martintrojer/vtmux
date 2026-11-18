@@ -24,5 +24,9 @@ vtmux-core.workspace = true
 vtmux-vt.workspace = true
 vtmux-snapshot.workspace = true
 
+[dev-dependencies]
+# PaneTerm::fail_resizes. A path alone (no version), so publishing drops it.
+vtmux-vt = { path = "../vtmux-vt", features = ["test-hooks"] }
+
 [lints]
 workspace = true

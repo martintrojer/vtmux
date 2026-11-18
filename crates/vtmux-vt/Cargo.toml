@@ -22,5 +22,10 @@ libghostty-vt = { package = "vtmux-ghostty-vt", version = "=3.8.0-rc.1", path = 
 png = "0.18"
 flate2 = "1"
 
+[features]
+# PaneTerm::fail_resizes, for vtmux-server's tests (its dev-dependency
+# turns it on): libghostty resizes that fail on cue.
+test-hooks = []
+
 [lints]
 workspace = true

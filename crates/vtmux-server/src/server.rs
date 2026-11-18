@@ -6332,6 +6332,7 @@ impl Server {
             w.activity_secs = crate::model::now_epoch();
         }
         self.model.alerts_queue(window, alerts::ACTIVITY);
+        self.model.follow_term(p);
         // screen_write_alternateon/off (screen-write.c:3162, 3191):
         // layout_fix_panes, so a reserved scrollbar comes and goes.
         if toggled_alternate && self.model.scrollbars(window) != crate::scrollbar::Scrollbars::Off {
