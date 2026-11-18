@@ -770,7 +770,7 @@ pub(crate) fn adopt(a: &Server, role: &snap::Role) -> Option<OwnedFd> {
 /// `a` snapshotted, encoded, decoded and rebuilt on a listener named
 /// `name`, adopting `a`'s descriptors.
 pub(crate) fn rebuild(a: &Server, dir: &Path, name: &str) -> Server {
-    let taken = a.to_snapshot(snap::Meta::default());
+    let taken = a.to_snapshot(snap::Meta::default()).unwrap();
     let decoded = snap::decode(&snap::encode(&taken)).unwrap();
     decoded.check().unwrap();
     let (l, _) = listener(dir, name);
@@ -822,7 +822,7 @@ fn a_rebuilt_model_answers_every_listing_alike() {
         writer_version: "test".into(),
         ..snap::Meta::default()
     };
-    let taken = a.to_snapshot(meta.clone());
+    let taken = a.to_snapshot(meta.clone()).unwrap();
     assert!(
         taken
             .descriptors
@@ -847,8 +847,8 @@ fn a_rebuilt_model_answers_every_listing_alike() {
 
     // Everything the snapshot carries comes back.
     assert_eq!(
-        normalised(b.to_snapshot(meta.clone())),
-        normalised(a.to_snapshot(meta))
+        normalised(b.to_snapshot(meta.clone()).unwrap()),
+        normalised(a.to_snapshot(meta).unwrap())
     );
     assert_eq!(b.model.options, a.model.options);
     assert_eq!(b.key_bindings, a.key_bindings);
@@ -970,7 +970,7 @@ fn descriptors_name_the_open_sockets_and_ptys() {
     let (l, socket) = listener(&dir, "a");
     let mut a = Server::new(l, socket, ServerConfig::default()).unwrap();
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    let s = a.to_snapshot(snap::Meta::default());
+    let s = a.to_snapshot(snap::Meta::default()).unwrap();
     let pty = a
         .model
         .panes
@@ -1114,10 +1114,12 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     echoed(&mut a, 0, "^[[48;24;80;768;1280t");
     ok(&mut a, &dir, &["split-window", "-h", "-t", "s", "cat", "-"]);
     assert_eq!(pty_size(&a, 0), (80, 24), "the new size is still queued");
-    let s = a.to_snapshot(snap::Meta {
-        purpose: snap::Purpose::Upgrade,
-        ..snap::Meta::default()
-    });
+    let s = a
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        })
+        .unwrap();
     let granted: Vec<bool> = s
         .panes
         .iter()
@@ -1135,10 +1137,12 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     assert_eq!(pty_size(&b, 0), (40, 24));
     echoed(&mut b, 0, "^[[48;24;40;768;640t");
     b.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[?2048l", false);
-    let s = b.to_snapshot(snap::Meta {
-        purpose: snap::Purpose::Upgrade,
-        ..snap::Meta::default()
-    });
+    let s = b
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        })
+        .unwrap();
     assert!(
         s.panes
             .iter()
@@ -1357,7 +1361,7 @@ fn a_clients_terminal_title_is_kept() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let (client, _peer) = attach(&mut a, &dir, "s", &[]);
-    let plain = a.to_snapshot(snap::Meta::default());
+    let plain = a.to_snapshot(snap::Meta::default()).unwrap();
     assert!(plain.clients.iter().all(|c| c.terminal_title.is_none()));
     a.clients.get_mut(&client).unwrap().terminal_title = Some("INNER".into());
     let b = rebuild(&a, &dir, "b");
@@ -1374,7 +1378,7 @@ fn a_clients_pan_is_kept() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let (client, _peer) = attach(&mut a, &dir, "s", &[]);
-    let plain = a.to_snapshot(snap::Meta::default());
+    let plain = a.to_snapshot(snap::Meta::default()).unwrap();
     assert!(plain.clients.iter().all(|c| c.pan.is_none()));
     let pan = crate::view::Pan {
         window: vtmux_core::ids::WindowId(0),
@@ -1455,7 +1459,7 @@ fn a_graphics_grant_survives_a_rebuild_and_its_images_do_not() {
     let image = b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;/wAA\x1b\\";
     a.pane_input(p0, image, false);
     a.pane_input(p1, image, false);
-    let s = a.to_snapshot(snap::Meta::default());
+    let s = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(s.meta.requires, [snap::GRAPHICS_GRANT_FEATURE]);
     assert_eq!(s.panes[0].graphics_owner_primary, Some(alive));
     assert!(s.panes[0].term.as_ref().unwrap().graphics_primary);
@@ -1509,7 +1513,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     // left over, is state an ordinary session holds.
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;3;\x1b\\", false);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;1;50\x1b\\", false);
-    let shown = a.to_snapshot(snap::Meta::default());
+    let shown = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(
         shown.panes[0].term.as_ref().unwrap().progress_bar.progress,
         50
@@ -1548,12 +1552,12 @@ fn an_ordinary_attached_client_requires_no_feature() {
     ok(&mut a, &dir, &["set", "-s", "vtmux-kitty-keys", "on"]);
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b[>1u", false);
     assert!(
-        a.to_snapshot(snap::Meta::default()).panes[0]
+        a.to_snapshot(snap::Meta::default()).unwrap().panes[0]
             .kitty_owner_primary
             .is_some()
     );
     a.render_clients();
-    let drawn = a.to_snapshot(snap::Meta::default());
+    let drawn = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(drawn.panes[0].term.as_ref().unwrap().drawn_links.len(), 1);
     // And the counter that numbers them (`Server::link_number`).
     let kept = drawn.panes[0].term.as_ref().unwrap().drawn_links[0].number;
@@ -1601,7 +1605,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
         false,
     );
     ok(&mut a, &dir, &["resize-window", "-t", "s:0", "-x", "60"]);
-    let narrowed = a.to_snapshot(snap::Meta::default());
+    let narrowed = a.to_snapshot(snap::Meta::default()).unwrap();
     let primary = &narrowed.panes[0].term.as_ref().unwrap().primary;
     assert!(
         primary.rows.iter().any(|r| r.past.len() == 20),
@@ -1640,10 +1644,12 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .unwrap()
         .ext
         .keeps_raw = true;
-    let s = a.to_snapshot(snap::Meta {
-        purpose: snap::Purpose::Upgrade,
-        ..snap::Meta::default()
-    });
+    let s = a
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        })
+        .unwrap();
     assert_eq!(s.panes[0].input_queued, b"typed ahead");
     assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
     assert!(s.clients[0].stopped);
@@ -1677,20 +1683,23 @@ fn an_ordinary_attached_client_requires_no_feature() {
         adopt(&a, r)
     })
     .unwrap()
-    .to_snapshot(snap::Meta::default());
+    .to_snapshot(snap::Meta::default())
+    .unwrap();
     assert!(
         read.panes
             .iter()
             .all(|p| p.restored_from.is_none() && p.restart_from.is_none())
     );
     assert_eq!(read.server.persist_hold, 0);
-    let rows = a.to_snapshot_with(
-        snap::Meta {
-            purpose: snap::Purpose::Upgrade,
-            ..snap::Meta::default()
-        },
-        crate::snapshot_term::Form::Rows,
-    );
+    let rows = a
+        .to_snapshot_with(
+            snap::Meta {
+                purpose: snap::Purpose::Upgrade,
+                ..snap::Meta::default()
+            },
+            crate::snapshot_term::Form::Rows,
+        )
+        .unwrap();
     let term = rows.panes[0].term.as_ref().unwrap();
     let alt = term.alt_entry.as_ref().expect("the editor's entry");
     let copied: u64 = alt.history.iter().map(|p| u64::from(p.rows)).sum();
@@ -1706,7 +1715,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
     ok(&mut a, &dir, &["split-window", "-d", "-t", "s", "cat", "-"]);
     let second = *a.model.panes.keys().max().unwrap();
     a.pane_input(second, b"\x1b[48;2;9;8;7m\x1b[S\x1b[m", false);
-    let scrolled = a.to_snapshot(snap::Meta::default());
+    let scrolled = a.to_snapshot(snap::Meta::default()).unwrap();
     let rows = &scrolled
         .panes
         .last()
@@ -1741,7 +1750,7 @@ fn a_beta3_streams_persistence_state_is_read_and_dropped() {
     ok(&mut a, &dir, &["split-window", "-d", "-t", "s", "cat", "-"]);
     ok(&mut a, &dir, &["set", "-g", "@keep", "1"]);
     ok(&mut a, &dir, &["set", "-t", "s", "@mine", "2"]);
-    let mut s = a.to_snapshot(snap::Meta::default());
+    let mut s = a.to_snapshot(snap::Meta::default()).unwrap();
     s.server.persist_hold = snap::PERSIST_HOLD_WHILE_THERE;
     let entry = |name: &str, value: snap::OptionValue| snap::OptionEntry {
         name: name.into(),
@@ -1804,7 +1813,7 @@ fn a_beta3_streams_persistence_state_is_read_and_dropped() {
         shown.contains("\n1\n--stderr") && shown.contains("\n2\n--stderr"),
         "{shown}"
     );
-    let again = b.to_snapshot(snap::Meta::default());
+    let again = b.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(again.server.persist_hold, 0);
     assert!(
         again
@@ -1841,13 +1850,13 @@ fn kitty_server(dir: &Path, foreground: i32) -> Server {
 /// What a key sent to %0 is encoded with, and its stack as exported.
 fn kitty_of(server: &mut Server) -> (u8, [u8; 8]) {
     let kitty = server.model.key_modes_now(PaneId(0)).unwrap().kitty;
-    let state = server.model.panes[&PaneId(0)].term.export_state();
+    let state = server.model.panes[&PaneId(0)].term.export_state().unwrap();
     (kitty, state.primary.kitty_flags)
 }
 
 /// `a` rebuilt from its snapshot as `edit` leaves it.
 fn rebuild_with(a: &Server, dir: &Path, edit: impl FnOnce(&mut snap::Snapshot)) -> Server {
-    let mut taken = a.to_snapshot(snap::Meta::default());
+    let mut taken = a.to_snapshot(snap::Meta::default()).unwrap();
     edit(&mut taken);
     let decoded = snap::decode(&snap::encode(&taken)).unwrap();
     decoded.check().unwrap();
@@ -2090,11 +2099,13 @@ fn the_reattach_wait_counts_from_the_rebuild() {
     let (client, _peer) = attach(&mut a, &dir, "s", &[]);
     let taken = std::time::SystemTime::now() - Duration::from_secs(9);
     let since_epoch = taken.duration_since(std::time::UNIX_EPOCH).unwrap();
-    let mut s = a.to_snapshot(snap::Meta {
-        purpose: snap::Purpose::Upgrade,
-        written_us: i64::try_from(since_epoch.as_micros()).unwrap(),
-        ..snap::Meta::default()
-    });
+    let mut s = a
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            written_us: i64::try_from(since_epoch.as_micros()).unwrap(),
+            ..snap::Meta::default()
+        })
+        .unwrap();
     for c in &mut s.clients {
         c.token = 0x0123_4567_89ab_cdef;
     }
@@ -2124,14 +2135,17 @@ fn the_link_counter_crosses_a_snapshot() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let made = a.link_numbers.fresh("http://made-before").number();
-    let mut s = a.to_snapshot(snap::Meta::default());
+    let mut s = a.to_snapshot(snap::Meta::default()).unwrap();
     assert!(s.server.link_number > made, "{}", s.server.link_number);
     let other = vtmux_vt::LinkNumbers::default();
     for _ in 0..3 {
         let _ = other.fresh("http://another-server");
     }
     assert_eq!(
-        a.to_snapshot(snap::Meta::default()).server.link_number,
+        a.to_snapshot(snap::Meta::default())
+            .unwrap()
+            .server
+            .link_number,
         s.server.link_number
     );
     let far = s.server.link_number + 10_000;
@@ -2173,7 +2187,7 @@ fn pipe_pane_output_not_yet_written_survives() {
     };
     let pending = pipe(&a, 0).3;
     assert!(!pending.is_empty() && flood.ends_with(&pending));
-    let taken = a.to_snapshot(snap::Meta::default());
+    let taken = a.to_snapshot(snap::Meta::default()).unwrap();
     let outputs: Vec<bool> = taken
         .panes
         .iter()
@@ -2237,7 +2251,7 @@ fn a_working_directory_not_utf8_survives_a_rebuild() {
         )
     };
     assert_eq!(cwds(&a), (bad.clone(), bad.clone(), bad.clone()));
-    let taken = a.to_snapshot(snap::Meta::default());
+    let taken = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(taken.meta.requires, Vec::<String>::new());
     let b = rebuild(&a, &dir, "b");
     assert_eq!(cwds(&b), cwds(&a));
@@ -2261,7 +2275,7 @@ fn from_snapshot_refuses_inconsistent_input() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     ok(&mut a, &dir, &["new-window", "-d", "-t", "s", "cat", "-"]);
-    let good = a.to_snapshot(snap::Meta::default());
+    let good = a.to_snapshot(snap::Meta::default()).unwrap();
     assert!(from_snapshot(&dir, &good).is_ok());
 
     let cases: &[(&str, Break)] = &[
@@ -2317,7 +2331,7 @@ fn from_snapshot_refuses_a_bad_popup_pid() {
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
     let (client, _peer) = attach(&mut a, &dir, "s", &[]);
-    let mut good = a.to_snapshot(snap::Meta::default());
+    let mut good = a.to_snapshot(snap::Meta::default()).unwrap();
     let c = good
         .clients
         .iter()
@@ -2426,7 +2440,7 @@ fn a_primary_screen_left_at_its_size_requires_nothing() {
         crate::snapshot_term::Form::SamePin,
         crate::snapshot_term::Form::Rows,
     ] {
-        let sized = a.to_snapshot_with(snap::Meta::default(), form);
+        let sized = a.to_snapshot_with(snap::Meta::default(), form).unwrap();
         assert_eq!(sized.meta.requires, Vec::<String>::new(), "{form:?}");
     }
 
@@ -2475,7 +2489,7 @@ fn kept_line_flags_require_nothing() {
             crate::snapshot_term::Form::SamePin,
             crate::snapshot_term::Form::Rows,
         ] {
-            let taken = a.to_snapshot_with(snap::Meta::default(), form);
+            let taken = a.to_snapshot_with(snap::Meta::default(), form).unwrap();
             assert_eq!(
                 taken.meta.requires,
                 Vec::<String>::new(),
@@ -2497,7 +2511,7 @@ fn an_auto_hide_scrollbar_stays_as_shown() {
     let dir = temp_dir("sbar");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    let plain = a.to_snapshot(snap::Meta::default());
+    let plain = a.to_snapshot(snap::Meta::default()).unwrap();
     assert!(plain.meta.requires.is_empty(), "{:?}", plain.meta.requires);
     let p = vtmux_core::ids::PaneId(0);
     let hide_at = Instant::now() + Duration::from_secs(5);
@@ -2506,7 +2520,7 @@ fn an_auto_hide_scrollbar_stays_as_shown() {
         hover: true,
         hide_at: Some(hide_at),
     };
-    let shown = a.to_snapshot(snap::Meta::default());
+    let shown = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(
         shown.meta.requires,
         vec![snap::SCROLLBAR_FEATURE.to_string()]
@@ -2553,6 +2567,7 @@ fn timers_count_from_when_the_snapshot_was_taken() {
             written_us,
             ..snap::Meta::default()
         })
+        .unwrap()
     };
     let hide_at = |s: &snap::Snapshot| {
         let b = from_snapshot(&dir, s).unwrap();
@@ -2639,7 +2654,7 @@ fn an_unreadable_monitor_leaves_the_others_alone() {
         &["set-hook", "-g", "-B", "@m2::#{session_name}", "display y"],
     );
     a.hook_monitors_sync();
-    let mut taken = a.to_snapshot(snap::Meta::default());
+    let mut taken = a.to_snapshot(snap::Meta::default()).unwrap();
     assert_eq!(
         taken.server.monitors.len(),
         2,
@@ -2754,7 +2769,7 @@ fn terminal_state_goes_in_the_form_asked() {
     };
 
     // Upgrade.
-    let up = old.to_snapshot(meta(snap::Purpose::Upgrade));
+    let up = old.to_snapshot(meta(snap::Purpose::Upgrade)).unwrap();
     assert_eq!(up.meta.ghostty_patches, vtmux_vt::PATCH_STACK);
     let (ghostty, all) = pages(&up);
     assert!(all > 0);
@@ -2786,10 +2801,12 @@ fn terminal_state_goes_in_the_form_asked() {
 
     // Rows (an upgrade onto another patch stack): readable by any reader;
     // the history is resident again and due for the compressor at once.
-    let full = old.to_snapshot_with(
-        meta(snap::Purpose::Upgrade),
-        crate::snapshot_term::Form::Rows,
-    );
+    let full = old
+        .to_snapshot_with(
+            meta(snap::Purpose::Upgrade),
+            crate::snapshot_term::Form::Rows,
+        )
+        .unwrap();
     assert_eq!(pages(&full).0, 0);
     assert_eq!(full.meta.requires, Vec::<String>::new());
     let before = Instant::now();
@@ -2842,13 +2859,12 @@ fn a_pane_terminal_that_does_not_fit_is_refused() {
             "-",
         ],
     );
-    let good = old.to_snapshot(snap::Meta::default());
+    let good = old.to_snapshot(snap::Meta::default()).unwrap();
     let other = vtmux_vt::PaneTerm::new(40, 10, 100);
     let mut wrong = good.clone();
-    wrong.panes[0].term = Some(crate::snapshot_term::term_to_snapshot(
-        &other,
-        crate::snapshot_term::Form::Rows,
-    ));
+    wrong.panes[0].term = Some(
+        crate::snapshot_term::term_to_snapshot(&other, crate::snapshot_term::Form::Rows).unwrap(),
+    );
     let mut short = good.clone();
     short.panes[0].term.as_mut().unwrap().primary.rows.pop();
     for (what, bad) in [("size", wrong), ("rows", short)] {
@@ -2917,7 +2933,7 @@ fn a_title_restored_without_its_terminal_is_not_escaped_again() {
     let title = ["display", "-p", "-t", "s", "#{pane_title}"];
     let before = run(&mut a, &dir, &title);
     assert!(before.contains("\na\\\\b#c\n"), "{before:?}");
-    let mut taken = a.to_snapshot(snap::Meta::default());
+    let mut taken = a.to_snapshot(snap::Meta::default()).unwrap();
     for p in &mut taken.panes {
         p.term = None;
     }
@@ -2941,7 +2957,7 @@ fn the_progress_bar_survives_a_rebuild() {
     let dir = temp_dir("progress");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
-    let required = |s: &Server| s.to_snapshot(snap::Meta::default()).meta.requires;
+    let required = |s: &Server| s.to_snapshot(snap::Meta::default()).unwrap().meta.requires;
     assert_eq!(required(&a), Vec::<String>::new());
     a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;2;64\x1b\\", false);
     let bar = [
@@ -2968,4 +2984,140 @@ fn the_progress_bar_survives_a_rebuild() {
     drop(b);
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A pane whose primary screen is past the sizes a state may carry (10001
+/// columns, as `new-session -x 10001` made before it was held to
+/// `WINDOW_MAXIMUM`), on the alternate screen at another size: the row
+/// form of the snapshot (an upgrade onto another patch stack) is refused,
+/// naming the pane, and the server keeps the pane as it was. Before, the
+/// copy of the primary screen for older readers
+/// (`PaneTerm::with_primary_resized`) panicked in the old server.
+#[test]
+fn a_primary_screen_too_wide_for_a_state_refuses_the_row_form() {
+    let dir = temp_dir("toowide");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let mut wide = vtmux_vt::PaneTerm::new(10_001, 4, 100);
+    wide.feed(b"left\x1b[?1049h");
+    wide.resize(80, 4);
+    a.model.panes.get_mut(&PaneId(0)).unwrap().term = wide;
+    let upgrade = snap::Meta {
+        purpose: snap::Purpose::Upgrade,
+        ..snap::Meta::default()
+    };
+    let e = a
+        .to_snapshot_with(upgrade, crate::snapshot_term::Form::Rows)
+        .unwrap_err();
+    assert!(
+        e.starts_with("pane %0: ") && e.contains("primary screen size"),
+        "{e}"
+    );
+    let term = &a.model.panes[&PaneId(0)].term;
+    assert_eq!(
+        (term.cols(), term.rows(), term.alternate_on()),
+        (80, 4, true)
+    );
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A pane whose terminal (or shown view mode's backing) libghostty can't
+/// resize (out of memory) keeps its old size: its rect, the size queued
+/// for the program and its terminal agree, so a snapshot of it restores.
+/// (Before: the rect and the queued size took the new size and the
+/// terminal kept the old one, and the snapshot was refused.)
+#[test]
+fn a_pane_resize_libghostty_fails_keeps_the_old_size_everywhere() {
+    let dir = temp_dir("failresize");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    let pane = a.model.panes.get_mut(&p).unwrap();
+    pane.term.feed(b"some text\r\n");
+    pane.resizes.clear();
+    let size = |a: &Server| {
+        let pane = &a.model.panes[&p];
+        (
+            (pane.rect.sx, pane.rect.sy),
+            (pane.term.cols(), pane.term.rows()),
+            pane.resizes.clone(),
+        )
+    };
+    // The terminal refuses (height, then the way back is libghostty's).
+    a.model
+        .panes
+        .get_mut(&p)
+        .unwrap()
+        .term
+        .fail_resizes(&[false]);
+    ok(
+        &mut a,
+        &dir,
+        &["resize-window", "-t", "s", "-x", "40", "-y", "10"],
+    );
+    assert_eq!(size(&a), ((80, 24), (80, 24), vec![]));
+    let snapshot = a.to_snapshot(snap::Meta::default()).unwrap();
+    assert!(restore(&dir, "b", &snapshot).is_ok());
+    // The terminal takes the size, the view mode's backing refuses it: the
+    // pane goes back, the view's copy and backing with it.
+    let view = crate::mode::ViewMode::new((80, 24), false, None).unwrap();
+    let pane = a.model.panes.get_mut(&p).unwrap();
+    pane.modes
+        .insert(0, crate::mode::Mode::View(Box::new(view)));
+    let Some(crate::mode::Mode::View(v)) = pane.modes.first_mut() else {
+        unreachable!()
+    };
+    v.fail_resizes(&[false]);
+    ok(
+        &mut a,
+        &dir,
+        &["resize-window", "-t", "s", "-x", "30", "-y", "12"],
+    );
+    assert_eq!(size(&a), ((80, 24), (80, 24), vec![]));
+    let Some(crate::mode::Mode::View(v)) = a.model.panes[&p].modes.first() else {
+        unreachable!()
+    };
+    assert_eq!(v.backing_size(), (80, 24));
+    assert_eq!(v.copy.size(), (80, 24));
+    // And the next resize goes through.
+    ok(
+        &mut a,
+        &dir,
+        &["resize-window", "-t", "s", "-x", "30", "-y", "12"],
+    );
+    assert_eq!(size(&a), ((30, 12), (30, 12), vec![((80, 24), (30, 12))]));
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// View mode's backing libghostty fails to resize part way (the height
+/// went, the width did not): the backing goes back to its old size and
+/// the copy stays at it.
+#[test]
+fn a_view_mode_resize_libghostty_fails_keeps_copy_and_backing_together() {
+    let mut v = crate::mode::ViewMode::new((20, 10), false, None).unwrap();
+    v.add(b"hello");
+    v.fail_resizes(&[true, false]);
+    assert!(!v.resize(10, 6));
+    assert_eq!(v.backing_size(), (20, 10));
+    assert_eq!(v.copy.size(), (20, 10));
+    assert!(v.resize(10, 6));
+    assert_eq!(v.backing_size(), (10, 6));
+    assert_eq!(v.copy.size(), (10, 6));
 }

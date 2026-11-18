@@ -2375,24 +2375,49 @@ impl Pane {
     /// terminal reflows at once; the program hears of a new size later,
     /// from the queue [`Self::send_resizes`] works through. The old size
     /// when the size changed, for `pane-resized`.
+    ///
+    /// When libghostty can't take the size (out of memory), for the
+    /// terminal or the shown view mode's backing, the pane keeps its old
+    /// size (or what the terminal was left at): its rect, the size queued
+    /// for the program and its terminal agree, only the offsets move.
     pub fn set_rect(&mut self, rect: Geometry) -> Option<(u32, u32)> {
         let from = (self.rect.sx, self.rect.sy);
         self.rect = rect;
         if from == (rect.sx, rect.sy) {
             return None;
         }
-        self.resizes.push((from, (rect.sx, rect.sy)));
-        self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
+        if !(self.term.resize(clamp16(rect.sx), clamp16(rect.sy)) && self.resize_mode()) {
+            // Back to the old size, the shown mode with it.
+            let old = (clamp16(from.0).max(1), clamp16(from.1).max(1));
+            self.term.resize(old.0, old.1);
+            self.resize_mode();
+            let have = (self.term.cols(), self.term.rows());
+            (self.rect.sx, self.rect.sy) = if have == old {
+                from
+            } else {
+                (u32::from(have.0), u32::from(have.1))
+            };
+        }
         self.compress.observe(&self.term, Instant::now());
-        // window_pane_resize: the shown mode follows.
+        let to = (self.rect.sx, self.rect.sy);
+        if to == from {
+            return None;
+        }
+        self.resizes.push((from, to));
+        Some(from)
+    }
+
+    /// `window_pane_resize`: the shown mode follows the terminal's size.
+    /// Whether it took it.
+    pub(crate) fn resize_mode(&mut self) -> bool {
         let size = (usize::from(self.term.cols()), usize::from(self.term.rows()));
         match self.modes.first_mut() {
             Some(crate::mode::Mode::Copy(m)) => m.resize(size.0, size.1),
-            Some(crate::mode::Mode::View(m)) => m.resize(size.0, size.1),
+            Some(crate::mode::Mode::View(m)) => return m.resize(size.0, size.1),
             Some(crate::mode::Mode::Clock(m)) => m.resize(size.0, size.1),
             _ => {}
         }
-        Some(from)
+        true
     }
 
     /// `server_client_check_pane_resize` (server-client.c:1984-2041): once

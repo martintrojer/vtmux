@@ -258,8 +258,8 @@ impl Server {
     }
 
     /// `popup_display` (popup.c:561-661): `false` when the popup is too
-    /// small for its border or larger than the client, or the job could
-    /// not start; nothing is shown then.
+    /// small for its border or larger than the client, there is no memory
+    /// for its terminal, or the job could not start; nothing is shown then.
     pub(crate) fn popup_display(&mut self, c: ClientId, open: Open) -> bool {
         let tree = TreeId::Session(open.session);
         // popup.c:577-578: the session's current window's option.
@@ -304,6 +304,11 @@ impl Server {
             }
             Command::Argv(argv) => sys::pty::Program::Argv(argv),
         };
+        // screen_set_default_cursor and no history: a popup keeps none.
+        // Made before the fork, so no job is left behind without it.
+        let Some(mut term) = PaneTerm::try_new(jx.max(1), jy.max(1), 0) else {
+            return false;
+        };
         let Ok(spawned) = sys::pty::spawn(&sys::pty::SpawnSpec {
             program,
             shell,
@@ -325,8 +330,6 @@ impl Server {
         {
             return false;
         }
-        // screen_set_default_cursor and no history: a popup keeps none.
-        let mut term = PaneTerm::new(jx.max(1), jy.max(1), 0);
         term.number_links_from(&self.link_numbers);
         // screen_init: the popup's key mode follows `extended-keys` too.
         term.set_extended_keys(self.model.extended_keys());
@@ -397,7 +400,7 @@ impl Server {
                 let (jx, jy) = p.inner();
                 p.term.resize(jx.max(1), jy.max(1));
                 if let Some(io) = &p.io {
-                    let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
+                    let _ = io.resize(p.term.cols(), p.term.rows(), (0, 0));
                 }
             }
         }
@@ -431,7 +434,7 @@ impl Server {
             let (jx, jy) = p.inner();
             p.term.resize(jx.max(1), jy.max(1));
             if let Some(io) = &p.io {
-                let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
+                let _ = io.resize(p.term.cols(), p.term.rows(), (0, 0));
             }
         }
     }
@@ -796,7 +799,7 @@ impl Server {
                 let (jx, jy) = p.inner();
                 p.term.resize(jx.max(1), jy.max(1));
                 if let Some(io) = &p.io {
-                    let _ = io.resize(jx.max(1), jy.max(1), (0, 0));
+                    let _ = io.resize(p.term.cols(), p.term.rows(), (0, 0));
                 }
             }
         }

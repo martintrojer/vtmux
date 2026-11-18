@@ -140,7 +140,7 @@ pub fn by_rank(snap: &mut vtmux_vt::Snapshot) {
 /// The export, with what differs between two exports of one terminal
 /// (the time left on a sync hold) zeroed.
 pub fn exported(t: &PaneTerm) -> TermState {
-    let mut s = t.export_state();
+    let mut s = t.export_state().unwrap();
     if let Some((held, left)) = s.pane.sync.as_mut() {
         *left = std::time::Duration::ZERO;
         by_rank(held);

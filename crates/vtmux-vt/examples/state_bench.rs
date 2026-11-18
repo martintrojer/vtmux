@@ -83,7 +83,7 @@ fn stream(terms: &[PaneTerm], mode: CompressedPages, captures: &[Vec<u8>], all: 
         .iter()
         .map(|t| {
             let mut import =
-                StateImport::new(&t.export_state_head(), ImportCheck::Lazy).expect("head");
+                StateImport::new(&t.export_state_head().unwrap(), ImportCheck::Lazy).expect("head");
             t.export_pages(mode, |screen, page| import.page(screen, &page))
                 .expect("pages");
             import.finish().expect("finish")
@@ -158,7 +158,10 @@ fn main() {
             }
             let rss0 = rss_mb();
             let t0 = Instant::now();
-            let states: Vec<TermState> = terms.iter().map(|t| t.export_state_with(mode)).collect();
+            let states: Vec<TermState> = terms
+                .iter()
+                .map(|t| t.export_state_with(mode).unwrap())
+                .collect();
             let export = t0.elapsed();
             let rss1 = rss_mb();
             let t1 = Instant::now();

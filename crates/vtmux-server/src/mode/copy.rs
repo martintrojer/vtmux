@@ -808,6 +808,12 @@ impl CopyMode {
         self.oy = (self.oy + self.hsize().saturating_sub(old)).min(self.hsize());
     }
 
+    /// The copy's size.
+    #[cfg(test)]
+    pub fn size(&self) -> (usize, usize) {
+        (self.sx, self.sy)
+    }
+
     /// `window_copy_resize` (window-copy.c:1212-1243): the copy is resized
     /// (reflowed if the width changed) keeping the cursor on its text; a
     /// cursor line now in history is shown at the top, else the view goes

@@ -108,6 +108,7 @@ fn base(blob: bool, alt: bool) -> TermState {
     } else {
         CompressedPages::Rows
     })
+    .unwrap()
 }
 
 fn mutate_blob(st: &mut TermState, r: &mut Rng) {
@@ -624,7 +625,7 @@ fn amp(pages: usize, bytes: u32) {
     for i in 0..(pages * 600) {
         a.feed(format!("{i}\r\n").as_bytes());
     }
-    let mut st = a.export_state();
+    let mut st = a.export_state().unwrap();
     let mut cut = 0;
     for page in &mut st.primary.pages {
         if let PageState::Rows(p) = page {
@@ -690,7 +691,7 @@ fn exercise(b: &mut PaneTerm) {
     look(b);
     // The cursor's pen and link onto the page, both screens switched.
     b.feed(b"\x1b[?2026lstyled\x1b[38;2;1;2;3mx\x1b]8;;http://n\x07L\x1b[?1049hA\x1b[?1049lB\x1b8\x1b[?1049h\x1b[?1049l\x1b]8;;\x07\x1b[m");
-    let again = b.export_state();
+    let again = b.export_state().unwrap();
     PaneTerm::import_state(&again).expect("its own export imports");
     b.feed(b"\x1b[?2026lhello\r\n\x1b[Lx\x1b[3;1Hmore\x1b[S\x1b[T\x1b8z\x1b[2Jcleared");
     for i in 0..50 {
@@ -705,8 +706,8 @@ fn exercise(b: &mut PaneTerm) {
     b.set_history_limit(100);
     b.feed(b"\x1b[?1049l\x1b[3J");
     look(b);
-    let _ = b.export_state_with(CompressedPages::Blob);
-    let _ = b.export_state();
+    let _ = b.export_state_with(CompressedPages::Blob).unwrap();
+    let _ = b.export_state().unwrap();
 }
 
 fn main() {

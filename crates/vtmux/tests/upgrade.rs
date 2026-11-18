@@ -1525,6 +1525,58 @@ fn a_program_that_exits_0_is_no_vtmux_to_upgrade_onto() {
     world.echo("a:w1", "after");
 }
 
+/// `new-session -x 10001` on the alternate screen at another size, then
+/// an upgrade onto a binary of another patch stack (`/usr/bin/true`: the
+/// row form, with the copy of the primary screen for older readers). The
+/// window is made at most `WINDOW_MAXIMUM` wide, as tmux makes it
+/// (spawn.c `default_window_size`), and the upgrade is refused with the
+/// server and its sessions as they were. Before, the primary screen was
+/// 10001 wide, past what a state may carry, and the copy panicked in the
+/// old server: `server exited unexpectedly`, every session gone.
+#[test]
+fn a_primary_screen_past_the_window_maximum_leaves_the_server_up() {
+    let world = World::new();
+    world.populate(&[]);
+    let pid = world.pid();
+    world.run(&[
+        "new",
+        "-d",
+        "-s",
+        "wide",
+        "-n",
+        "w",
+        "-x",
+        "10001",
+        "-y",
+        "4",
+        "printf left; printf '\\033[?1049h'; exec cat -",
+    ]);
+    wait_for(
+        "the alternate screen, and cat",
+        || {
+            world.run(&[
+                "display",
+                "-p",
+                "-t",
+                "wide:",
+                "#{alternate_on} #{pane_current_command}",
+            ])
+        },
+        |on| on.trim() == "1 cat",
+    );
+    world.run(&["select-pane", "-t", "wide:", "-T", "t5"]);
+    world.run(&["resize-window", "-t", "wide", "-x", "80", "-y", "4"]);
+    let before = world.observe();
+    let answer = world.upgrade(Path::new("/usr/bin/true"));
+    assert!(
+        matches!(answer, Some(ServerMsg::UpgradeResult { ok: false, .. })),
+        "{answer:?}"
+    );
+    assert_eq!(world.pid(), pid);
+    assert_eq!(world.observe_like(&before), before);
+    world.echo("a:w1", "still");
+}
+
 /// Decision 7: a resume that fails after the exec (the test hook) switches
 /// back to the binary that wrote the snapshot, which carries on.
 #[test]

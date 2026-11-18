@@ -1004,7 +1004,9 @@ impl<'a> Runner<'a> {
                     }
                     _ => term.feed(b),
                 },
-                Event::Resize(c, r) => term.resize(*c, *r),
+                Event::Resize(c, r) => {
+                    term.resize(*c, *r);
+                }
             }
         }
         Ok(term)

@@ -10,6 +10,7 @@ use vtmux_core::options::TreeId;
 use super::{Item, command_client, expand_as, expand_for_client};
 use crate::format_ctx::Kind;
 use crate::names::{check_name, clean_name};
+use crate::resize::WINDOW_MAXIMUM;
 use crate::server::{NewGroup, NewSession, Server};
 use crate::target::Found;
 
@@ -212,13 +213,21 @@ pub fn exec(
     // attaching fits it after. Detached: the global default-size with
     // -x/-y over it, 80x24 when it does not parse (255-266).
     let status = u32::from(server.model.status_lines(TreeId::GlobalSession) > 0);
-    let clamp = |n: u32| u16::try_from(n).unwrap_or(u16::MAX).max(1);
-    let (cols, rows) = if let (false, Some((c, r))) = (detached || control, client_size) {
-        (clamp(c), clamp(r.saturating_sub(status)))
+    let (sx, sy) = if let (false, Some((c, r))) = (detached || control, client_size) {
+        (c, r.saturating_sub(status))
     } else {
         let (dx, dy) = server.default_size(TreeId::GlobalSession);
-        (x.unwrap_or(clamp(dx)), y.unwrap_or(clamp(dy)))
+        (x.map_or(dx, u32::from), y.map_or(dy, u32::from))
     };
+    let (sx, sy) = (sx.max(1), sy.max(1));
+    // tmux accepts -x/-y up to USHRT_MAX (cmd-new-session.c:224, 240)
+    // and keeps them, or the size found when only one is given, in
+    // default-size (274-280), but the window is made at most
+    // WINDOW_MAXIMUM (spawn.c:192, default_window_size's limits,
+    // resize.c:331-338).
+    let most = u16::try_from(WINDOW_MAXIMUM).unwrap_or(u16::MAX);
+    let clamp = |n: u32| u16::try_from(n).unwrap_or(u16::MAX).min(most);
+    let (cols, rows) = (clamp(sx), clamp(sy));
     let spec = NewSession {
         name: session_name,
         window_name,
@@ -234,7 +243,7 @@ pub fn exec(
         extra_env: args.values('e').map(str::to_owned).collect(),
         update_env: item.client.is_some() && !args.flag('E'),
         default_size: (args.flag('x') || args.flag('y'))
-            .then(|| (x.unwrap_or(cols), y.unwrap_or(rows))),
+            .then(|| (x.map_or(sx, u32::from), y.map_or(sy, u32::from))),
         cell_pixels: server.new_session_pixels(item.client.filter(|_| !detached)),
         group,
         // cmd-new-session.c:191-202: the termios of a client that attaches

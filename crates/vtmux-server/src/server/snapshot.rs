@@ -951,8 +951,10 @@ impl Server {
     /// numbers now, for a live upgrade to keep open across `execve`.
     /// Terminal state keeps pages Ghostty holds compressed in its form
     /// ([`Form::SamePin`], decision 23; see [`Server::to_snapshot_with`]).
-    #[must_use]
-    pub fn to_snapshot(&self, meta: snap::Meta) -> snap::Snapshot {
+    ///
+    /// # Errors
+    /// What [`Server::to_snapshot_with`] returns.
+    pub fn to_snapshot(&self, meta: snap::Meta) -> Result<snap::Snapshot, String> {
         self.to_snapshot_with(meta, Form::SamePin)
     }
 
@@ -966,9 +968,16 @@ impl Server {
     ///
     /// Each terminal's per-turn events (replies, bells, title changes)
     /// must have been drained: the end of a loop turn.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Which pane's or popup's terminal can't be exported, and why
+    /// ([`term_to_snapshot`]): the snapshot is not written.
     #[expect(clippy::too_many_lines, reason = "one record after another")]
-    pub fn to_snapshot_with(&self, mut meta: snap::Meta, form: Form) -> snap::Snapshot {
+    pub fn to_snapshot_with(
+        &self,
+        mut meta: snap::Meta,
+        form: Form,
+    ) -> Result<snap::Snapshot, String> {
         let now = Instant::now();
         let parts = self.model.options.export();
         let mut trees: BTreeMap<(u8, u32), Vec<snap::OptionEntry>> = BTreeMap::new();
@@ -1237,7 +1246,7 @@ impl Server {
             .model
             .panes
             .values()
-            .map(|p| {
+            .map(|p| -> Result<snap::Pane, String> {
                 if let Some(io) = &p.io {
                     descriptors.push(snap::Descriptor {
                         fd: io.fd().as_raw_fd(),
@@ -1250,7 +1259,9 @@ impl Server {
                         role: snap::Role::PipePane(p.id.0),
                     });
                 }
-                snap::Pane {
+                let term = term_to_snapshot(&p.term, form)
+                    .map_err(|e| format!("pane %{}: {e}", p.id.0))?;
+                Ok(snap::Pane {
                     id: p.id.0,
                     window: p.window.0,
                     pid: p.pid,
@@ -1299,7 +1310,7 @@ impl Server {
                         output: pipe.output(),
                         pending: pipe.pending().to_vec(),
                     }),
-                    term: Some(term_to_snapshot(&p.term, form)),
+                    term: Some(term),
                     over_zoom: p.over_zoom,
                     capture_keys: p.capture_keys,
                     close_on_click: p.close_on_click,
@@ -1312,9 +1323,9 @@ impl Server {
                     scrollbar_visible: p.sb.visible,
                     scrollbar_hover: p.sb.hover,
                     scrollbar_hide_in_ms: p.sb.hide_at.map(|t| until(now, t)),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         let clients: Vec<snap::Client> = self
             .clients
@@ -1334,7 +1345,7 @@ impl Server {
                 }
                 Some(self.client_out(id, c, hello, form, now))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         vtmux_vt::PATCH_STACK.clone_into(&mut meta.ghostty_patches);
         let terms = || {
@@ -1382,7 +1393,7 @@ impl Server {
         // every build before them did after an upgrade, and its terminal
         // shows the next title set): `vtmux_snapshot`, *Changing the
         // format*.
-        snap::Snapshot {
+        Ok(snap::Snapshot {
             meta,
             server,
             sessions,
@@ -1390,7 +1401,7 @@ impl Server {
             panes,
             clients,
             descriptors,
-        }
+        })
     }
 
     #[expect(clippy::too_many_lines, reason = "one field after another")]
@@ -1401,7 +1412,7 @@ impl Server {
         hello: &vtmux_core::protocol::Hello,
         form: Form,
         now: Instant,
-    ) -> snap::Client {
+    ) -> Result<snap::Client, String> {
         use vtmux_core::protocol::ControlMode;
         let tty = hello.tty.as_ref();
         let level = match hello.flags.control {
@@ -1410,7 +1421,17 @@ impl Server {
             ControlMode::ControlControl => 2,
         };
         let input = carried_input(c, now);
-        snap::Client {
+        let popup = match c.popup.as_ref().and_then(|p| Some((p, p.export()?))) {
+            Some((p, mut out)) => {
+                out.term = Some(
+                    term_to_snapshot(&p.term, form)
+                        .map_err(|e| format!("popup of client {}: {e}", self.client_name(id)))?,
+                );
+                Some(out)
+            }
+            None => None,
+        };
+        Ok(snap::Client {
             id: small(id.0),
             name: self.client_name(id),
             tty: tty.map(|t| t.name.clone()).unwrap_or_default(),
@@ -1465,11 +1486,7 @@ impl Server {
                 out.level = level;
                 out
             }),
-            popup: c.popup.as_ref().and_then(|p| {
-                let mut out = p.export()?;
-                out.term = Some(term_to_snapshot(&p.term, form));
-                Some(out)
-            }),
+            popup,
             token: c.reattach.map_or(0, |r| r.token),
             fg: c.reported.fg.map(rgb_out),
             bg: c.reported.bg.map(rgb_out),
@@ -1517,7 +1534,7 @@ impl Server {
                     winsize: q.winsize,
                 })
             },
-        }
+        })
     }
 
     /// A server rebuilt from `snapshot` on `listener` (D27). `fds` hands
@@ -2246,7 +2263,10 @@ impl Server {
                 }
                 None => None,
             };
-            let mut popup = crate::popup::Popup::import(p, io, PaneTerm::new(1, 1, 0));
+            // A placeholder until the popup's own terminal is restored.
+            let placeholder = PaneTerm::try_new(1, 1, 0)
+                .ok_or_else(|| invalid(format!("no placeholder terminal for popup {}", x.id)))?;
+            let mut popup = crate::popup::Popup::import(p, io, placeholder);
             popup.term = match (restore_popup_term(self, &popup, p, patches), salvaged) {
                 (Ok(term), _) => term,
                 (Err(_), Some(salvaged)) if p.term.is_some() => {

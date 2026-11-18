@@ -417,6 +417,8 @@ pub struct PaneTerm {
     /// A cell's width and height in pixels (`w->xpixel`, `w->ypixel`):
     /// XTWINOPS and mode 2048 report with it, and Ghostty is sized by it.
     cell_px: (u32, u32),
+    /// [`Self::fail_resizes`]'s script, empty but in tests.
+    resize_faults: Vec<bool>,
     /// The primary screen's visible rows, copied as the alternate screen
     /// came up (tmux's `saved_grid`, screen.c:704-705), while it is up.
     saved: Option<Rc<Vec<FrozenRow>>>,
@@ -542,7 +544,8 @@ impl PaneTerm {
     /// go below one page.
     ///
     /// # Panics
-    /// Only if libghostty fails to allocate.
+    /// Only if libghostty fails to allocate: the server makes its panes
+    /// with [`Self::try_new`].
     #[must_use]
     pub fn new(cols: u16, rows: u16, history_lines: usize) -> Self {
         Self::try_new(cols, rows, history_lines).expect("libghostty terminal allocation")
@@ -627,7 +630,7 @@ impl PaneTerm {
             })
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")));
-        registered.expect("libghostty effect registration");
+        registered.ok()?;
 
         // tmux implements neither Kitty graphics nor the Glyph Protocol, so
         // keep their state (and memory) out. Both calls only fail when the
@@ -646,8 +649,7 @@ impl PaneTerm {
         keep_clustering(&mut term);
         // Modes 47, 1047 and 1049 as tmux switches screens, the primary
         // screen left at its size under the alternate one (patch 0028).
-        term.vtmux_set_tmux_alternate(true)
-            .expect("libghostty tmux alternate screen");
+        term.vtmux_set_tmux_alternate(true).ok()?;
 
         let mut pane = Self {
             term: Watched::new(term),
@@ -671,6 +673,7 @@ impl PaneTerm {
             mouse,
             inband,
             cell_px: DEFAULT_CELL_PX,
+            resize_faults: Vec::new(),
             scan: AltModeScanner {
                 cursor: cursor_scan,
                 mouse: mouse_scan,
@@ -1944,15 +1947,46 @@ impl PaneTerm {
     }
 
     /// Resize the pane. Primary-screen content reflows (Ghostty).
-    ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    pub fn resize(&mut self, cols: u16, rows: u16) {
+    /// Whether the terminal took the size: when libghostty can't allocate
+    /// it, the terminal goes back to the size it had, as far as libghostty
+    /// lets it ([`Self::cols`] and [`Self::rows`] say), and stays usable.
+    pub fn resize(&mut self, cols: u16, rows: u16) -> bool {
         // window_pane_resize (window.c:1712) ends synchronized output.
         if (cols.max(1), rows.max(1)) != (self.cols(), self.rows()) {
             self.stop_sync();
         }
-        self.resize_grid(cols, rows);
+        self.resize_or_keep(cols, rows)
+    }
+
+    /// [`Self::resize_grid`], or the old size back when libghostty fails
+    /// (out of memory): a failed resize leaves the terminal at some size
+    /// with its history accounted for, and a second resize, to the old
+    /// size, brings it back with the limits the first one lifted set again.
+    fn resize_or_keep(&mut self, cols: u16, rows: u16) -> bool {
+        let old = (self.cols(), self.rows());
+        if self.resize_grid(cols, rows).is_ok() {
+            return true;
+        }
+        if (self.cols(), self.rows()) != old {
+            let _ = self.resize_grid(old.0, old.1);
+        }
+        false
+    }
+
+    /// Resize Ghostty's grid; [`Self::fail_resizes`] can refuse it.
+    fn grid_resize(&mut self, cols: u16, rows: u16) -> Result<(), libghostty_vt::Error> {
+        if !self.resize_faults.is_empty() && !self.resize_faults.remove(0) {
+            return Err(libghostty_vt::Error::OutOfMemory);
+        }
+        self.term.resize(cols, rows, self.cell_px.0, self.cell_px.1)
+    }
+
+    /// A test hook: the next libghostty resizes, one per entry, succeed
+    /// (`true`) or fail as out of memory (`false`); after them, resizes
+    /// are libghostty's again.
+    #[doc(hidden)]
+    pub fn fail_resizes(&mut self, script: &[bool]) {
+        self.resize_faults = script.to_vec();
     }
 
     /// `screen_alternate_off` after the alternate screen ended at `size`
@@ -1965,7 +1999,7 @@ impl PaneTerm {
     /// puts a cursor past the last column on it.
     fn alternate_ended(&mut self, size: (u16, u16)) {
         if (self.cols(), self.rows()) != size {
-            self.resize_grid(size.0, size.1);
+            self.resize_or_keep(size.0, size.1);
         }
         if self.term.is_cursor_pending_wrap().unwrap_or(false) {
             let (x, y) = self.cursor();
@@ -1973,9 +2007,9 @@ impl PaneTerm {
         }
     }
 
-    fn resize_grid(&mut self, cols: u16, rows: u16) {
+    fn resize_grid(&mut self, cols: u16, rows: u16) -> Result<(), libghostty_vt::Error> {
         let before = self.retained_rows();
-        let same_width = cols.max(1) == self.cols();
+        let old_cols = self.cols();
         let on_primary = !self.alternate_on();
         // The oldest row tmux has (the active top when it has none): rows
         // above it stay hidden however the reflow splits or joins them.
@@ -1999,36 +2033,14 @@ impl PaneTerm {
         if on_primary {
             self.eat_below_cursor(rows.max(1));
         }
-        // A cursor at the end of its line stays at the end of the
-        // reflowed line, past the last column when that ends a row
-        // (grid_unwrap_position; Ghostty patch 0023 leaves a pending wrap
-        // there instead of a row of its own).
-        if cols.max(1) != self.cols() && on_primary {
-            // The height first, as screen_resize_y does before the reflow.
-            if rows.max(1) != self.rows() {
-                let cols = self.cols();
-                self.term
-                    .resize(cols, rows.max(1), self.cell_px.0, self.cell_px.1)
-                    .expect("libghostty resize");
-            }
-            let blank = self.trailing_blank_rows();
-            self.term
-                .resize(cols.max(1), rows.max(1), self.cell_px.0, self.cell_px.1)
-                .expect("libghostty resize");
-            self.take_hscrolled(carry);
-            if blank < rows.max(1) {
-                self.reflow_blank_rows(blank, oldest.as_ref());
-            }
-        } else {
-            self.term
-                .resize(cols.max(1), rows.max(1), self.cell_px.0, self.cell_px.1)
-                .expect("libghostty resize");
-            self.take_hscrolled(carry);
-        }
+        // Every resize below may fail: what follows accounts for the size
+        // the terminal was left at, whatever it is.
+        let resized = self.resize_steps(cols, rows, carry, on_primary, oldest.as_ref());
+        let same_width = self.cols() == old_cols;
         // At the primary screen's width: the alternate screen leaves it at
         // its own (patch 0028).
         if on_primary {
-            self.page_rows = page_rows(cols.max(1));
+            self.page_rows = page_rows(self.cols());
         }
         if on_primary {
             // Reflow moves rows in and out of history: tmux's history
@@ -2072,6 +2084,47 @@ impl PaneTerm {
             self.hscrolled = self.hscrolled.min(self.hsize);
         }
         self.generation += 1;
+        resized
+    }
+
+    /// [`Self::resize_grid`]'s resizes, the reflow's fix-ups included.
+    /// `hscrolled` is read back from Ghostty after the reflow, or after the
+    /// resize that failed before it.
+    fn resize_steps(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        carry: bool,
+        on_primary: bool,
+        oldest: Option<&TrackedGridRef>,
+    ) -> Result<(), libghostty_vt::Error> {
+        let (cols, rows) = (cols.max(1), rows.max(1));
+        // A cursor at the end of its line stays at the end of the
+        // reflowed line, past the last column when that ends a row
+        // (grid_unwrap_position; Ghostty patch 0023 leaves a pending wrap
+        // there instead of a row of its own).
+        if cols == self.cols() || !on_primary {
+            let resized = self.grid_resize(cols, rows);
+            self.take_hscrolled(carry);
+            return resized;
+        }
+        // The height first, as screen_resize_y does before the reflow.
+        let mut resized = if rows == self.rows() {
+            Ok(())
+        } else {
+            let old_cols = self.cols();
+            self.grid_resize(old_cols, rows)
+        };
+        let blank = self.trailing_blank_rows();
+        if resized.is_ok() {
+            resized = self.grid_resize(cols, rows);
+        }
+        self.take_hscrolled(carry);
+        resized?;
+        if blank < rows {
+            self.reflow_blank_rows(blank, oldest)?;
+        }
+        Ok(())
     }
 
     /// Read tmux's `hscrolled` back after the resizes that carried it,
@@ -2222,7 +2275,11 @@ impl PaneTerm {
     /// blank rows: more are added, scrolling the top rows into history.
     /// Too many: they go and as many history rows come back. The cursor
     /// stays on its line. `oldest` is the pin on tmux's oldest history row.
-    fn reflow_blank_rows(&mut self, blank: u16, oldest: Option<&TrackedGridRef>) {
+    fn reflow_blank_rows(
+        &mut self,
+        blank: u16,
+        oldest: Option<&TrackedGridRef>,
+    ) -> Result<(), libghostty_vt::Error> {
         let rows = self.rows();
         let have = self.trailing_blank_rows();
         let hidden = oldest
@@ -2236,9 +2293,7 @@ impl PaneTerm {
         let cy = self.cursor().1;
         let resize = |t: &mut Self, r: u16| {
             let cols = t.cols();
-            t.term
-                .resize(cols, r, t.cell_px.0, t.cell_px.1)
-                .expect("libghostty resize");
+            t.grid_resize(cols, r)
         };
         // The cursor changes rows only by VPA, which keeps its column and
         // a pending wrap (patch 0014): a cursor past the end of a row
@@ -2254,7 +2309,7 @@ impl PaneTerm {
             if on_last {
                 self.write_screen_moves("\x1b[1d");
             }
-            resize(self, rows + n);
+            resize(self, rows + n)?;
             let bottom = PointCoordinate {
                 x: 0,
                 y: u32::from(rows + n - 1),
@@ -2263,7 +2318,7 @@ impl PaneTerm {
             if on_last {
                 self.write_screen_moves(&format!("\x1b[{}d", rows + n));
             }
-            resize(self, rows);
+            resize(self, rows)?;
             drop(pin);
             // screen_resize_cursor: a cursor line now in history leaves the
             // cursor at the top left.
@@ -2278,13 +2333,14 @@ impl PaneTerm {
             // last row. The cursor's own line stays.
             let n = (have - want).min(rows - 1 - cy);
             if n == 0 {
-                return;
+                return Ok(());
             }
-            resize(self, rows - n);
+            resize(self, rows - n)?;
             self.write_screen_moves(&format!("\x1b[{}d", rows - n));
-            resize(self, rows);
+            resize(self, rows)?;
             self.write_screen_moves(&format!("\x1b[{}d", cy + n + 1));
         }
+        Ok(())
     }
 
     /// `resize-pane -T` (cmd-resize-pane.c:71-81, `grid_remove_history`):
@@ -5632,17 +5688,17 @@ mod tests {
         let mut t = PaneTerm::new(20, 5, 100);
         t.set_kitty_keys(true);
         t.feed(b"\x1b[>1u\x1b[?1049h\x1b[>4u");
-        assert_eq!(t.export_state().primary.kitty_flags[1], 1);
+        assert_eq!(t.export_state().unwrap().primary.kitty_flags[1], 1);
         t.reset_kitty_keys();
         assert_eq!(t.kitty_keys(), 0);
-        let state = t.export_state();
+        let state = t.export_state().unwrap();
         assert_eq!(state.primary.kitty_flags, [0; 8]);
         assert_eq!(state.alternate.as_ref().unwrap().kitty_flags, [0; 8]);
         t.feed(b"\x1b[?1049l");
         assert_eq!(t.kitty_keys(), 0);
         // A granted screen's stack goes through an export and import.
         t.feed(b"\x1b[>5u");
-        let back = PaneTerm::import_state(&t.export_state()).unwrap();
+        let back = PaneTerm::import_state(&t.export_state().unwrap()).unwrap();
         assert_eq!(back.kitty_keys(), 5);
     }
 
@@ -5679,7 +5735,7 @@ mod tests {
         // The primary screen's, not in use: its stack is exported empty.
         assert!(t.end_kitty_grant(false));
         assert_eq!(t.kitty_keys(), 4, "the alternate screen keeps its own");
-        assert_eq!(t.export_state().primary.kitty_flags, [0; 8]);
+        assert_eq!(t.export_state().unwrap().primary.kitty_flags, [0; 8]);
         t.feed(b"\x1b[?1049l");
         assert_eq!(t.kitty_keys(), 0);
         // The screen in use, but not inside a sequence or a character.
@@ -7275,7 +7331,7 @@ mod tests {
         }
         t.feed(b"\x1b]8;;\x07");
         t.resize(17, 4);
-        let state = t.export_state();
+        let state = t.export_state().unwrap();
         let (mut text, mut linked) = (0, 0);
         for page in &state.primary.pages {
             let crate::PageState::Rows(p) = page else {
@@ -7554,15 +7610,15 @@ mod tests {
     #[test]
     fn bottom_row_used_counts_written_cells() {
         let mut t = PaneTerm::new(20, 4, 100);
-        assert_eq!(t.bottom_row_used(), 0);
+        assert_eq!(t.bottom_row_used().unwrap(), 0);
         t.feed(b"\x1b[4;1Habcde\x1b[4;3H\x1b[K");
-        assert_eq!(t.bottom_row_used(), 5);
+        assert_eq!(t.bottom_row_used().unwrap(), 5);
         t.feed(b"\x1b[2K");
-        assert_eq!(t.bottom_row_used(), 0);
+        assert_eq!(t.bottom_row_used().unwrap(), 0);
         t.feed(b"\x1b[?1049h\x1b[4;1Hxy");
-        assert_eq!(t.bottom_row_used(), 2);
+        assert_eq!(t.bottom_row_used().unwrap(), 2);
         t.feed(b"\x1b[?1049l");
-        assert_eq!(t.bottom_row_used(), 0);
+        assert_eq!(t.bottom_row_used().unwrap(), 0);
     }
 
     /// tmux resizes the primary grid once as the alternate screen ends,
@@ -7631,7 +7687,7 @@ mod tests {
                     t.resize(c, r);
                 }
                 if import {
-                    t = PaneTerm::import_state(&t.export_state()).expect("import");
+                    t = PaneTerm::import_state(&t.export_state().unwrap()).expect("import");
                 }
                 t.feed(b"\x1b[?1049l");
                 assert_eq!(
@@ -7682,7 +7738,7 @@ mod tests {
                 t.feed(enter);
                 t.resize(c, r);
                 if import {
-                    t = PaneTerm::import_state(&t.export_state()).expect("import");
+                    t = PaneTerm::import_state(&t.export_state().unwrap()).expect("import");
                 }
                 t.feed(if enter.starts_with(b"\x1b[?47") {
                     b"\x1b[?47l"
@@ -7774,10 +7830,13 @@ mod tests {
             t.feed(format!("{i}{}\r\n", "x".repeat(73)).as_bytes());
         }
         t.feed(b"\x1b]133;A\x07$ \x1b[?1049h\x1b[Hvim");
-        assert!(t.with_primary_resized().is_none(), "at the terminal's size");
+        assert!(
+            t.with_primary_resized().unwrap().is_none(),
+            "at the terminal's size"
+        );
         t.resize(40, 10);
-        let copy = t.with_primary_resized().expect("left at 80x20");
-        let (a, b) = (t.export_state(), copy.export_state());
+        let copy = t.with_primary_resized().unwrap().expect("left at 80x20");
+        let (a, b) = (t.export_state().unwrap(), copy.export_state().unwrap());
         assert_eq!(a.primary_size, Some((80, 20)));
         assert_eq!(b.primary_size, None);
         assert_eq!((b.cols, b.rows), (40, 10));
@@ -7787,6 +7846,78 @@ mod tests {
         let rows =
             |s: &TermState| -> usize { s.primary.pages.iter().filter_map(PageState::rows).sum() };
         assert!(rows(&b) > rows(&a), "the 76-cell rows are split in two");
+    }
+
+    /// A primary screen past the sizes a state may have (10001 columns,
+    /// over `WINDOW_MAXIMUM`) left under the alternate screen at another
+    /// size: the copy's import refuses it, and that is an error for the
+    /// caller (an upgrade refused), not a panic that ends the server.
+    #[test]
+    fn a_copy_of_a_primary_too_wide_to_import_is_an_error() {
+        let mut t = PaneTerm::new(10_001, 4, 100);
+        t.feed(b"wide\x1b[?1049h");
+        t.resize(80, 4);
+        assert_eq!(t.export_state().unwrap().primary_size, Some((10_001, 4)));
+        let e = t.with_primary_resized().expect_err("refused");
+        assert!(matches!(e, StateError::Invalid(_)), "{e}");
+        // The pane itself carries on.
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.cols(), 80);
+    }
+
+    type ResizeLook = (u16, u16, usize, (u16, u16), Vec<(String, u64, bool)>);
+
+    /// What a resize may change, history included: each row's text and,
+    /// in history, its id and whether it has a time.
+    fn resize_look(t: &PaneTerm) -> ResizeLook {
+        let rows = (0..t.history_size() + usize::from(t.rows()))
+            .map(|y| {
+                let id = (y < t.history_size()).then(|| t.history_id(y));
+                let timed = id.is_some_and(|id| t.history_time(id) != 0);
+                (t.row(y).text(), id.unwrap_or(0), timed)
+            })
+            .collect();
+        (t.cols(), t.rows(), t.history_size(), t.cursor(), rows)
+    }
+
+    /// A resize libghostty fails part way (out of memory) leaves the pane
+    /// at its old size with its history as two resizes would have left
+    /// it: to the height it got to, then back. The height changed and the
+    /// width's resize failed; or the reflow's fix-up failed after both.
+    #[test]
+    fn a_failed_resize_keeps_the_old_size_and_its_history() {
+        let fill = |t: &mut PaneTerm, n: usize, up: u16| {
+            for i in 0..n {
+                t.feed(format!("line {i:02} abcdefghijklmn\r\n").as_bytes());
+            }
+            t.feed(format!("\x1b[{up}A").as_bytes());
+        };
+        let mut failed_fixup = false;
+        for (n, up) in [(30, 0), (30, 3), (5, 0), (5, 2)] {
+            for to in [(10, 6), (10, 14), (30, 6), (30, 14)] {
+                let what = format!("{n} lines, {up} up, to {to:?}");
+                // The height went, the width failed.
+                let mut t = PaneTerm::new(20, 10, 100);
+                fill(&mut t, n, up);
+                t.fail_resizes(&[true, false]);
+                assert!(!t.resize(to.0, to.1), "{what}");
+                let mut want = PaneTerm::new(20, 10, 100);
+                fill(&mut want, n, up);
+                assert!(want.resize(20, to.1) && want.resize(20, 10), "{what}");
+                assert_eq!(resize_look(&t), resize_look(&want), "{what}");
+                // Both went; the reflow's blank rows failed, where it
+                // had any to fix.
+                let mut t = PaneTerm::new(20, 10, 100);
+                fill(&mut t, n, up);
+                t.fail_resizes(&[true, true, false]);
+                if !t.resize(to.0, to.1) {
+                    assert_eq!((t.cols(), t.rows()), (20, 10), "{what}");
+                    assert!(t.history_size() <= t.retained_rows(), "{what}");
+                    failed_fixup = true;
+                }
+            }
+        }
+        assert!(failed_fixup, "some reflow had blank rows to fix");
     }
 
     /// `?1049h` saves the cursor in a slot of its own, kept after the
@@ -7830,7 +7961,7 @@ mod tests {
         let mut t = PaneTerm::new(20, 6, 100);
         t.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n\x1b[2Jafter\r\nA\r\nB");
         assert_eq!(t.history_size(), 10);
-        let mut u = PaneTerm::import_state(&t.export_state()).expect("import");
+        let mut u = PaneTerm::import_state(&t.export_state().unwrap()).expect("import");
         for p in [&mut t, &mut u] {
             p.resize(20, 12);
             assert_eq!((p.history_size(), p.cursor()), (8, (1, 7)));
@@ -7851,7 +7982,7 @@ mod tests {
         assert_eq!(t.history_size(), 10);
         t.resize(12, 14);
         assert_eq!((t.history_size(), t.cursor()), (4, (2, 11)));
-        let mut u = PaneTerm::import_state(&t.export_state()).expect("import");
+        let mut u = PaneTerm::import_state(&t.export_state().unwrap()).expect("import");
         assert_eq!(u.history_size(), 4);
         t.feed(b"\r\nmore");
         u.feed(b"\r\nmore");

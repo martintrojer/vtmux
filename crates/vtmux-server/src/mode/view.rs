@@ -39,18 +39,23 @@ pub struct ViewMode {
 impl ViewMode {
     /// `window_copy_view_init` (window-copy.c:652-674): an empty `sx` x
     /// `sy` backing, the cursor at the top left, no line numbers. `vi` is
-    /// `mode-keys`; `pane_search` the pane's last search.
+    /// `mode-keys`; `pane_search` the pane's last search. `None` when
+    /// libghostty can't allocate the backing.
     #[must_use]
-    pub fn new((sx, sy): (usize, usize), vi: bool, pane_search: Option<(String, bool)>) -> Self {
+    pub fn new(
+        (sx, sy): (usize, usize),
+        vi: bool,
+        pane_search: Option<(String, bool)>,
+    ) -> Option<Self> {
         let clamp = |n: usize| u16::try_from(n.max(1)).unwrap_or(u16::MAX);
-        let term = PaneTerm::new(clamp(sx), clamp(sy), HISTORY);
+        let term = PaneTerm::try_new(clamp(sx), clamp(sy), HISTORY)?;
         let copy = CopyMode::view(&term, (sx, sy), vi, pane_search);
-        Self {
+        Some(Self {
             copy,
             term,
             written: false,
             stale: false,
-        }
+        })
     }
 
     /// `window_copy_add` with `parse` set: `text` on a new line (CRLF
@@ -89,6 +94,11 @@ impl ViewMode {
         self.stale = false;
     }
 
+    /// [`CopyMode::clip_position`] of the view's copy.
+    pub fn clip_position(&mut self, last: usize) {
+        self.copy.clip_position(last);
+    }
+
     /// `window_copy_resize`: the copy follows copy mode's rules and the
     /// backing is resized with it, `screen_resize_cursor(..., 1, 0, 0)`
     /// (screen.c:354-400): a shorter screen eats no blank lines (Ghostty
@@ -97,34 +107,46 @@ impl ViewMode {
     /// (then the top left). A reflow does not keep it at all
     /// (`screen_reflow` without `cursor`, screen.c:681-684): the top left
     /// of the screen, so the next line goes on the screen's second row.
-    /// [`CopyMode::clip_position`] of the view's copy.
-    pub fn clip_position(&mut self, last: usize) {
-        self.copy.clip_position(last);
-    }
-
-    pub fn resize(&mut self, sx: usize, sy: usize) {
-        self.copy.resize(sx, sy);
+    ///
+    /// Whether the backing took the size: when libghostty fails it, the
+    /// backing goes back to the size it had and the copy stays at the
+    /// backing's size.
+    pub fn resize(&mut self, sx: usize, sy: usize) -> bool {
         let clamp = |n: usize| u16::try_from(n.max(1)).unwrap_or(u16::MAX);
         let (cols, rows) = (clamp(sx), clamp(sy));
         let (old_cols, old_rows) = (self.term.cols(), self.term.rows());
         if (cols, rows) == (old_cols, old_rows) {
-            return;
+            self.copy.resize(sx, sy);
+            return true;
         }
         let (cx, cy) = self.term.cursor();
         let line = self.term.history_size() + usize::from(cy);
         if rows < old_rows {
             self.term.feed(format!("\x1b[{old_rows};1H").as_bytes());
         }
+        // The reflow does not carry the cursor. Ghostty's does: a cursor
+        // past the end of a line split to the new width adds a row
+        // grid_reflow does not have, and one above the bottom keeps its row
+        // where grid_reflow keeps the bottom. It waits at the bottom left,
+        // after the height changed with it there.
+        let mut took = true;
         if cols != old_cols {
-            // The reflow does not carry the cursor. Ghostty's does: a
-            // cursor past the end of a line split to the new width adds a
-            // row grid_reflow does not have, and one above the bottom keeps
-            // its row where grid_reflow keeps the bottom. It waits at the
-            // bottom left, after the height changed with it there.
-            self.term.resize(old_cols, rows);
+            took = self.term.resize(old_cols, rows);
             self.term.feed(format!("\x1b[{rows};1H").as_bytes());
         }
-        self.term.resize(cols, rows);
+        took = took && self.term.resize(cols, rows);
+        if !took {
+            if (self.term.cols(), self.term.rows()) != (old_cols, old_rows) {
+                self.term.resize(old_cols, old_rows);
+            }
+            let size = (self.term.cols(), self.term.rows());
+            if size != (old_cols, old_rows) {
+                self.copy.resize(usize::from(size.0), usize::from(size.1));
+            }
+            self.stale = true;
+            return false;
+        }
+        self.copy.resize(sx, sy);
         let hsize = self.term.history_size();
         let at = if cols != old_cols || line < hsize {
             "\x1b[H".to_owned()
@@ -133,6 +155,19 @@ impl ViewMode {
         };
         self.term.feed(at.as_bytes());
         self.stale = true;
+        true
+    }
+
+    /// [`PaneTerm::fail_resizes`] for the backing.
+    #[cfg(test)]
+    pub fn fail_resizes(&mut self, script: &[bool]) {
+        self.term.fail_resizes(script);
+    }
+
+    /// The backing's size.
+    #[cfg(test)]
+    pub fn backing_size(&self) -> (u16, u16) {
+        (self.term.cols(), self.term.rows())
     }
 }
 
@@ -152,13 +187,15 @@ impl Server {
             let size = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
             let search = pane.search.clone();
             let vi = self.model.mode_keys_vi(p);
-            let numbers = self.link_numbers.clone();
+            // No memory for the backing: the text is not shown.
+            let Some(mut m) = ViewMode::new(size, vi, search) else {
+                return;
+            };
+            m.term.number_links_from(&self.link_numbers);
             self.model.push_mode(
                 p,
                 is_view,
                 |model| {
-                    let mut m = ViewMode::new(size, vi, search);
-                    m.term.number_links_from(&numbers);
                     m.copy.key_mode = screen_key_mode(model);
                     Mode::View(Box::new(m))
                 },
@@ -314,7 +351,7 @@ mod tests {
     /// the view stays at the top as they scroll into history.
     #[test]
     fn lines_append_and_the_view_stays_at_the_top() {
-        let mut v = ViewMode::new((10, 3), false, None);
+        let mut v = ViewMode::new((10, 3), false, None).unwrap();
         v.add(b"one");
         v.add(b"\x1b[1mtwo");
         assert_eq!(lines(&v), ["one", "two", ""]);
@@ -330,7 +367,7 @@ mod tests {
     /// An empty first line still counts: the next starts below it.
     #[test]
     fn an_empty_line_is_a_line() {
-        let mut v = ViewMode::new((10, 3), false, None);
+        let mut v = ViewMode::new((10, 3), false, None).unwrap();
         v.add(b"");
         v.add(b"x");
         assert_eq!(lines(&v), ["", "x", ""]);
@@ -351,7 +388,7 @@ mod tests {
     /// and nothing of the history above it. The view stays at the top.
     #[test]
     fn a_batch_reads_each_new_row_once() {
-        let mut v = ViewMode::new((80, 24), false, None);
+        let mut v = ViewMode::new((80, 24), false, None).unwrap();
         let text: Vec<Vec<u8>> = (1..=20_000).map(|i| i.to_string().into_bytes()).collect();
         let read = rows_read(|| v.add_lines(text.iter().map(Vec::as_slice)));
         assert_eq!(read, 20_000);
@@ -384,7 +421,7 @@ mod tests {
     /// backing again.
     #[test]
     fn resize_then_add() {
-        let mut v = ViewMode::new((10, 3), false, None);
+        let mut v = ViewMode::new((10, 3), false, None).unwrap();
         v.add(b"abcdefgh");
         v.resize(4, 3);
         assert_eq!(lines(&v), ["abcd", "efgh", ""]);

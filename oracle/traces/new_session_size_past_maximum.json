@@ -1,0 +1,331 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "new_session_size_past_maximum",
+  "inputs": {
+    "name": "new_session_size_past_maximum",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "init",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "8",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "wide",
+          "-n",
+          "w",
+          "-x",
+          "10001",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf 'left'; printf '\\033[?1049hvim'; tmux wait-for -S wide-p0; tmux wait-for wide-go1; printf '\\033[?1049l'; tmux wait-for -S wide-p1; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "wide-p0"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "wide:",
+          "#{window_width}x#{window_height} #{pane_width}x#{pane_height} #{alternate_on}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "wide",
+          "default-size"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "wide",
+          "-x",
+          "40",
+          "-y",
+          "3"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "wide:",
+          "#{window_width}x#{window_height} #{pane_width}x#{pane_height} #{alternate_on}"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "wide-go1"
+        ]
+      },
+      {
+        "wait_for": "wide-p1"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "wide:",
+          "#{window_width}x#{window_height} #{cursor_x},#{cursor_y} #{alternate_on}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "wide:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "tall",
+          "-n",
+          "w",
+          "-x",
+          "3",
+          "-y",
+          "65535",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "tall:",
+          "#{window_width}x#{window_height} #{pane_width}x#{pane_height}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "tall",
+          "default-size"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "over",
+          "-x",
+          "65536",
+          "-y",
+          "3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "10000x4 10000x4 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "default-size 10001x4\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "40x3 40x3 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "40x3 4,0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "left\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "3x10000 3x10000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "default-size 3x65535\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "width too large\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "init\ntall\nwide\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

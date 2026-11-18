@@ -703,7 +703,7 @@ pub struct NewSession {
     /// Copy `update-environment` variables from the client.
     pub update_env: bool,
     /// `-x`/`-y` given: the session's `default-size`.
-    pub default_size: Option<(u16, u16)>,
+    pub default_size: Option<(u32, u32)>,
     /// The window's cell size in pixels, 0 for tmux's default.
     pub cell_pixels: (u32, u32),
     /// `-t`: the session group to join.
@@ -5723,14 +5723,17 @@ impl Server {
         child
     }
 
-    /// A new pane's terminal (`window_pane_create`, `screen_init`).
+    /// A new pane's terminal (`window_pane_create`, `screen_init`), or
+    /// `ENOMEM` when libghostty can't allocate it (a 10000x10000 pane is
+    /// about 800 MB): the command fails as a fork that fails does.
     fn new_pane_term(
         &self,
         ps: &PaneSpawn<'_>,
         (cols, rows): (u16, u16),
         history: usize,
-    ) -> PaneTerm {
-        let mut term = PaneTerm::new(cols, rows, history);
+    ) -> io::Result<PaneTerm> {
+        let mut term = PaneTerm::try_new(cols, rows, history)
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOMEM))?;
         term.set_cell_pixels(ps.cell_pixels);
         term.number_links_from(&self.link_numbers);
         term.set_colour_names(vtmux_core::colour::x11_rgb);
@@ -5742,7 +5745,7 @@ impl Server {
         if ps.empty {
             empty_pane_modes(&mut term);
         }
-        term
+        Ok(term)
     }
 
     /// The control characters of client `c`'s terminal (`tcgetattr` on
@@ -5803,6 +5806,11 @@ impl Server {
         child.set("SHELL", &shell.to_string_lossy(), false);
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
+        // The terminal before the fork: no child is left behind when
+        // there is no memory for it.
+        let history_limit =
+            usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
+        let term = self.new_pane_term(ps, (cols, rows), history_limit)?;
         // spawn.c:458-464: an empty pane forks nothing.
         let spawned = if ps.empty {
             None
@@ -5822,9 +5830,6 @@ impl Server {
                 },
             })?)
         };
-        let history_limit =
-            usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
-        let term = self.new_pane_term(ps, (cols, rows), history_limit);
         let (io, pid, tty) = match spawned {
             Some(spawned) => {
                 let tty = sys::pty::tty_name(&spawned.master).unwrap_or_default();

@@ -534,13 +534,8 @@ impl Server {
         if pane.modes.is_empty() {
             pane.unseen_changes = false;
         }
-        let size = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
-        match pane.modes.first_mut() {
-            Some(Mode::Copy(next)) => next.resize(size.0, size.1),
-            Some(Mode::View(next)) => next.resize(size.0, size.1),
-            Some(Mode::Clock(next)) => next.resize(size.0, size.1),
-            _ => {}
-        }
+        // A view mode whose backing can't take the size stays at its own.
+        pane.resize_mode();
         let tree_next = pane.modes.first().and_then(Mode::tree_kind).is_some();
         let current = pane.modes.first().map(Mode::name);
         // A prompt of the mode that went goes with it.

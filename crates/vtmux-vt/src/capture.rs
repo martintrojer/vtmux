@@ -2677,7 +2677,7 @@ mod tests {
                 let mut t = PaneTerm::new(20, 4, limit);
                 t.feed(b"primary\x1b[?1049hALT");
                 if import {
-                    t = PaneTerm::import_state(&t.export_state()).expect("import");
+                    t = PaneTerm::import_state(&t.export_state().unwrap()).expect("import");
                 }
                 assert!(capture_alternate(&t, CaptureOpts::default()).is_some());
                 t.feed(b"\x1b[?1049lchanged");
@@ -3109,7 +3109,7 @@ mod tests {
             let mut alt = PaneTerm::new(20, 5, 100);
             alt.feed(b"abcdefghijklmnopqrstuvwxyz\x1b[3D\x1b[K\r\nabc       \x1b[4G\x1b[K\r\nxyz\x1b[1K\r\nend\x1b[?1049halt");
             assert_eq!(capture_alternate(&alt, opts).unwrap(), want, "join {join}");
-            let back = PaneTerm::import_state(&alt.export_state()).unwrap();
+            let back = PaneTerm::import_state(&alt.export_state().unwrap()).unwrap();
             assert_eq!(
                 capture_alternate(&back, opts).unwrap(),
                 want,

@@ -251,7 +251,7 @@ fn mark_wrapped(out: &mut Vec<u8>, term: &vtmux_vt::PaneTerm, sx: u16, sy: u16) 
         }
         // ECH over the whole new last line would unwrap the marked one
         // (grid_clear_lines), so the wide character needs a third column.
-        if sx >= 3 && term.bottom_row_used() < sx {
+        if sx >= 3 && term.bottom_row_used().is_ok_and(|used| used < sx) {
             let _ = write!(
                 out,
                 "\x1b[{y};{sx}H{}\u{4e00}\x1b[0m\x1b[{sy};1H\x1b[2X",

@@ -1438,36 +1438,33 @@ fn export_screens(
     term: &PaneTerm,
     compressed: CompressedPages,
     primary_only: bool,
-) -> (TermState, ScreenOut, ScreenOut) {
-    let v = term.export_state_head();
+) -> Result<(TermState, ScreenOut, ScreenOut), StateError> {
+    let v = term.export_state_head()?;
     let mut primary = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
     let mut alternate = ScreenOut::new(v.rows);
-    let done: Result<(), std::convert::Infallible> =
-        term.export_pages(compressed, |screen, page| {
-            match screen {
-                ScreenKind::Primary => primary.page(page),
-                ScreenKind::Alternate if !primary_only => alternate.page(page),
-                ScreenKind::Alternate => {}
-            }
-            Ok(())
-        });
-    let Ok(()) = done;
-    (v, primary, alternate)
+    term.export_pages(compressed, |screen, page| {
+        match screen {
+            ScreenKind::Primary => primary.page(page),
+            ScreenKind::Alternate if !primary_only => alternate.page(page),
+            ScreenKind::Alternate => {}
+        }
+        Ok::<(), StateError>(())
+    })?;
+    Ok((v, primary, alternate))
 }
 
 /// `term`'s primary screen alone, with its OSC 133 marks and the
 /// alternate screen's entry row in its rows.
-fn primary_of(
-    term: &PaneTerm,
-    compressed: CompressedPages,
-) -> (snap::term::Screen, Vec<snap::term::FrozenMark>, Option<u64>) {
-    let (v, out, _) = export_screens(term, compressed, true);
+type PrimaryOut = (snap::term::Screen, Vec<snap::term::FrozenMark>, Option<u64>);
+
+fn primary_of(term: &PaneTerm, compressed: CompressedPages) -> Result<PrimaryOut, StateError> {
+    let (v, out, _) = export_screens(term, compressed, true)?;
     let p = &v.pane;
-    (
+    Ok((
         screen_out(&v.primary, out),
         marks_out(&p.marks),
         p.alt_entry.map(|(y, _)| u64::from(y)),
-    )
+    ))
 }
 
 /// What a reader from before [`snap::TermState::sized_primary`],
@@ -1479,8 +1476,13 @@ fn primary_of(
 /// restores from. Only for [`Form::Rows`]: [`Form::SamePin`] goes to a
 /// binary of this patch stack, which reads all three where they are (an
 /// older one has another stack), so `?1049h` and a same-binary upgrade
-/// never pay for the copy.
-fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap::TermState) {
+/// never pay for the copy. Fails when the copy can't be made (see
+/// [`PaneTerm::with_primary_resized`]): the snapshot can't be written.
+fn for_older_readers(
+    term: &PaneTerm,
+    compressed: CompressedPages,
+    t: &mut snap::TermState,
+) -> Result<(), StateError> {
     // A reader from before Ghostty patch 0038 shows, under the alternate
     // screen, the copy of tmux's history it took on `?1049h`: the newest
     // `hsize` rows of the primary screen as it was left (not reflowed).
@@ -1493,9 +1495,9 @@ fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap:
     }
     if let Some(sized) = t.sized_primary.as_mut() {
         let copy = term
-            .with_primary_resized()
-            .expect("a primary screen at another size");
-        let (screen, marks, entry_row) = primary_of(&copy, compressed);
+            .with_primary_resized()?
+            .ok_or(StateError::Invalid("no primary screen at another size"))?;
+        let (screen, marks, entry_row) = primary_of(&copy, compressed)?;
         sized.screen = Some(std::mem::replace(&mut t.primary, screen));
         sized.marks = std::mem::replace(&mut t.marks, marks);
         if let Some(alt) = t.alt_entry.as_mut() {
@@ -1507,10 +1509,10 @@ fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap:
         .as_mut()
         .expect("written with the slot");
     if t.active != snap::term::ActiveScreen::Alternate {
-        return;
+        return Ok(());
     }
     let Some(a) = &t.alternate_saved else {
-        return;
+        return Ok(());
     };
     // `t.primary` is at the terminal's size now.
     let cols = t.cols.max(1);
@@ -1534,6 +1536,7 @@ fn for_older_readers(term: &PaneTerm, compressed: CompressedPages, t: &mut snap:
         layout.moved = true;
         layout.primary_saved = own;
     }
+    Ok(())
 }
 
 /// The newest `n` rows of `pages`, as pages: whole pages are the same
@@ -1570,14 +1573,18 @@ fn history_tail(pages: &[snap::HistoryPage], n: usize) -> Vec<snap::HistoryPage>
 
 /// Export `term` as a snapshot record, one page at a time (see the module
 /// docs). The server's per-turn events must have been drained.
-#[must_use]
+///
+/// # Errors
+/// When libghostty can't export the terminal (out of memory, a page that
+/// does not decode), or, for [`Form::Rows`], the copy of a primary screen
+/// at another size can't be made ([`PaneTerm::with_primary_resized`]).
 #[expect(clippy::too_many_lines, reason = "one line per field carried")]
-pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
+pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> Result<snap::TermState, StateError> {
     let compressed = match form {
         Form::Rows => CompressedPages::Rows,
         Form::SamePin => CompressedPages::Blob,
     };
-    let (v, primary, alternate) = export_screens(term, compressed, false);
+    let (v, primary, alternate) = export_screens(term, compressed, false)?;
     let (g, p) = (&v.ghostty, &v.pane);
     let modes = g
         .modes
@@ -1768,9 +1775,9 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         },
     };
     if form == Form::Rows {
-        for_older_readers(term, compressed, &mut t);
+        for_older_readers(term, compressed, &mut t)?;
     }
-    t
+    Ok(t)
 }
 
 fn palette_out(entries: &[(u8, vt::Rgb)]) -> Vec<snap::term::PaletteEntry> {
@@ -1792,8 +1799,14 @@ fn palette_in(entries: &[snap::term::PaletteEntry]) -> Result<Vec<(u8, vt::Rgb)>
 
 /// The modes of a fresh terminal (number, ANSI) with `recorded` over them:
 /// a mode the writer didn't list keeps this build's value.
-fn modes_in(cols: u16, rows: u16, recorded: &[snap::term::Mode]) -> Vec<ModeState> {
-    let mut modes = PaneTerm::new(cols, rows, 0).export_state().ghostty.modes;
+fn modes_in(
+    cols: u16,
+    rows: u16,
+    recorded: &[snap::term::Mode],
+) -> Result<Vec<ModeState>, TermError> {
+    let fresh = PaneTerm::try_new(cols, rows, 0)
+        .ok_or_else(|| StateError::Ghostty("out of memory".into()))?;
+    let mut modes = fresh.export_state()?.ghostty.modes;
     let mut extra = Vec::new();
     for r in recorded {
         let Ok(number) = u16::try_from(r.number) else {
@@ -1819,7 +1832,7 @@ fn modes_in(cols: u16, rows: u16, recorded: &[snap::term::Mode]) -> Vec<ModeStat
         }
     }
     modes.extend(extra);
-    modes
+    Ok(modes)
 }
 
 /// A pane that is the terminal `t` was exported from. `ghostty_patches`
@@ -1924,7 +1937,7 @@ pub fn term_from_snapshot_with(
         mouse_shape: narrow(t.emulator.mouse_shape, "mouse shape")?,
         password_input: t.emulator.password_input,
         xt_checksum: narrow(t.emulator.xt_checksum, "checksum")?,
-        modes: modes_in(cols, rows, &t.modes),
+        modes: modes_in(cols, rows, &t.modes)?,
         tab_stops: t
             .tab_stops
             .iter()

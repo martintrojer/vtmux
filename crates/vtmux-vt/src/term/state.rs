@@ -1045,31 +1045,29 @@ impl PaneTerm {
     /// [`TermState`]). Reads history without restoring compressed pages.
     /// Holds every page at once: [`PaneTerm::export_pages`] streams them.
     ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    #[must_use]
-    pub fn export_state(&self) -> TermState {
+    /// # Errors
+    /// What [`PaneTerm::export_state_head`] and
+    /// [`PaneTerm::export_pages`] return.
+    pub fn export_state(&self) -> Result<TermState, StateError> {
         self.export_state_with(CompressedPages::Rows)
     }
 
     /// [`PaneTerm::export_state`], with compressed pages as `compressed`
     /// says.
     ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    #[must_use]
-    pub fn export_state_with(&self, compressed: CompressedPages) -> TermState {
-        let mut state = self.export_state_head();
-        let done: Result<(), std::convert::Infallible> =
-            self.export_pages(compressed, |screen, page| {
-                match (screen, state.alternate.as_mut()) {
-                    (ScreenKind::Alternate, Some(alt)) => alt.pages.push(page),
-                    _ => state.primary.pages.push(page),
-                }
-                Ok(())
-            });
-        let Ok(()) = done;
-        state
+    /// # Errors
+    /// What [`PaneTerm::export_state_head`] and
+    /// [`PaneTerm::export_pages`] return.
+    pub fn export_state_with(&self, compressed: CompressedPages) -> Result<TermState, StateError> {
+        let mut state = self.export_state_head()?;
+        self.export_pages(compressed, |screen, page| {
+            match (screen, state.alternate.as_mut()) {
+                (ScreenKind::Alternate, Some(alt)) => alt.pages.push(page),
+                _ => state.primary.pages.push(page),
+            }
+            Ok::<(), StateError>(())
+        })?;
+        Ok(state)
     }
 
     /// `screen_reset_hyperlinks` (screen.c:145-151), as `clear-history -H`
@@ -1080,9 +1078,13 @@ impl PaneTerm {
     /// a new one. Ghostty keeps links with the page that holds the cells,
     /// with no call to drop them, so a screen that has links is rebuilt
     /// from its exported state (the path a live upgrade takes) without
-    /// them; a screen with none is left alone. Whether it was rebuilt.
+    /// them; a screen with none is left alone. Whether it was rebuilt
+    /// (not when the export or the import fails: the pane is left as it
+    /// was).
     pub fn reset_hyperlinks(&mut self) -> bool {
-        let mut state = self.export_state();
+        let Ok(mut state) = self.export_state() else {
+            return false;
+        };
         if !state.forget_hyperlinks() {
             return false;
         }
@@ -1101,15 +1103,14 @@ impl PaneTerm {
     /// With [`PaneTerm::export_pages`] it is the whole state, a page at a
     /// time; [`StateImport`] reads it back the same way.
     ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    #[must_use]
-    pub fn export_state_head(&self) -> TermState {
+    /// # Errors
+    /// [`StateError::Ghostty`] when libghostty fails (out of memory).
+    pub fn export_state_head(&self) -> Result<TermState, StateError> {
         let term = &self.term;
-        let raw = term.vtmux_state_export().expect("terminal state export");
+        let raw = term.vtmux_state_export().map_err(ghostty_err)?;
         let has_alternate = term
             .vtmux_page_count(gv::ALTERNATE)
-            .expect("page count")
+            .map_err(ghostty_err)?
             .is_some();
         let mut ghostty = GhosttyState::from_ffi(&raw.raw);
         term.title()
@@ -1118,20 +1119,20 @@ impl PaneTerm {
         term.pwd().unwrap_or_default().clone_into(&mut ghostty.pwd);
         ghostty.max_bytes = term.scrollback_max_bytes().ok().flatten();
         ghostty.max_lines = self.line_limit;
-        ghostty.alternate_saved = term
-            .vtmux_alternate_saved()
-            .expect("alternate saved cursor")
-            .map(|(x, y, pen)| AltSaved {
-                x,
-                y,
-                pen: StyleState::from_ffi(&pen),
-            });
+        ghostty.alternate_saved =
+            term.vtmux_alternate_saved()
+                .map_err(ghostty_err)?
+                .map(|(x, y, pen)| AltSaved {
+                    x,
+                    y,
+                    pen: StyleState::from_ffi(&pen),
+                });
         let size = (raw.raw.cols, raw.raw.rows);
+        let primary_size = term.vtmux_primary_size().map_err(ghostty_err)?;
         let mut state = TermState {
             cols: raw.raw.cols,
             rows: raw.raw.rows,
-            primary_size: Some(term.vtmux_primary_size().expect("primary size"))
-                .filter(|&p| p != size),
+            primary_size: Some(primary_size).filter(|&p| p != size),
             primary: ScreenState::from_ffi(&raw.raw.screens[0], &raw.bytes, Vec::new()),
             alternate: has_alternate
                 .then(|| ScreenState::from_ffi(&raw.raw.screens[1], &raw.bytes, Vec::new())),
@@ -1151,7 +1152,7 @@ impl PaneTerm {
                 screen.kitty_index = 0;
             }
         }
-        state
+        Ok(state)
     }
 
     /// A copy of the pane whose primary screen, which the alternate one
@@ -1163,29 +1164,33 @@ impl PaneTerm {
     /// `None` when the primary screen has the terminal's size. The copy
     /// is for export only.
     ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    #[must_use]
-    pub fn with_primary_resized(&self) -> Option<PaneTerm> {
-        let head = self.export_state_head();
-        head.primary_size?;
+    /// # Errors
+    /// What the export returns, or why the copy's import refuses the
+    /// pane's own state: a primary screen past the sizes a state may
+    /// have (`new-session -x` over `WINDOW_MAXIMUM` before it was
+    /// clamped), a page that passed the lazy import's checksum but does
+    /// not decode, or out of memory.
+    pub fn with_primary_resized(&self) -> Result<Option<PaneTerm>, StateError> {
+        let head = self.export_state_head()?;
+        if head.primary_size.is_none() {
+            return Ok(None);
+        }
         // A page at a time, compressed ones as they are (this binary's).
-        let mut import = StateImport::new(&head, ImportCheck::Lazy).expect("a pane's own state");
+        let mut import = StateImport::new(&head, ImportCheck::Lazy)?;
         self.export_pages(CompressedPages::Blob, |screen, page| {
             import.page(screen, &page)
-        })
-        .expect("a pane's own pages");
-        let mut copy = import.finish().expect("a pane's own state");
+        })?;
+        let mut copy = import.finish()?;
         // Upstream's ?47l shows the primary screen, which resizes it to
         // the terminal's first; then back to the alternate one, as it
         // was. CAN first ends a sequence the program left half-written.
         let term = &mut copy.term;
-        term.vtmux_set_tmux_alternate(false).expect("terminal mode");
+        term.vtmux_set_tmux_alternate(false).map_err(ghostty_err)?;
         term.vt_write(b"\x18\x1b[?47l");
         term.vtmux_set_active_screen(gv::ALTERNATE)
-            .expect("the alternate screen");
-        term.vtmux_set_tmux_alternate(true).expect("terminal mode");
-        Some(copy)
+            .map_err(ghostty_err)?;
+        term.vtmux_set_tmux_alternate(true).map_err(ghostty_err)?;
+        Ok(Some(copy))
     }
 
     /// Every page of the pane's screens, the primary's oldest first, then
@@ -1195,11 +1200,11 @@ impl PaneTerm {
     /// order. Stops at the first error `each` returns.
     ///
     /// # Errors
-    /// What `each` returns.
-    ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    pub fn export_pages<E>(
+    /// What `each` returns, or [`StateError::Ghostty`] when libghostty
+    /// can't export a page (out of memory, or a compressed page that
+    /// does not decode: one a live upgrade imported checking only its
+    /// checksum, [`ImportCheck::Lazy`]).
+    pub fn export_pages<E: From<StateError>>(
         &self,
         compressed: CompressedPages,
         mut each: impl FnMut(ScreenKind, PageState) -> Result<(), E>,
@@ -1209,7 +1214,7 @@ impl PaneTerm {
             let Some(n) = self
                 .term
                 .vtmux_page_count(screen.key())
-                .expect("page count")
+                .map_err(ghostty_err)?
             else {
                 continue;
             };
@@ -1221,7 +1226,7 @@ impl PaneTerm {
                         compressed == CompressedPages::Blob,
                         &mut buf,
                     )
-                    .expect("page export");
+                    .map_err(ghostty_err)?;
                 each(screen, page_state(&buf))?;
             }
         }
@@ -1231,10 +1236,9 @@ impl PaneTerm {
     /// tmux's `cellused` (Ghostty patch 0013) of the bottom row of the
     /// screen in use: the cells written to it, erased or not.
     ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
-    #[must_use]
-    pub fn bottom_row_used(&self) -> u16 {
+    /// # Errors
+    /// [`StateError::Ghostty`] when libghostty can't export the page.
+    pub fn bottom_row_used(&self) -> Result<u16, StateError> {
         let screen = if self.alternate_on() {
             ScreenKind::Alternate
         } else {
@@ -1243,18 +1247,18 @@ impl PaneTerm {
         let Some(n) = self
             .term
             .vtmux_page_count(screen.key())
-            .expect("page count")
+            .map_err(ghostty_err)?
             .filter(|&n| n > 0)
         else {
-            return 0;
+            return Ok(0);
         };
         // The bottom row is the last row of the newest page, which is in
         // the active area and never compressed.
         let mut buf = gv::Page::default();
         self.term
             .vtmux_page_export(screen.key(), n - 1, false, &mut buf)
-            .expect("page export");
-        buf.rows.last().map_or(0, |r| r.used)
+            .map_err(ghostty_err)?;
+        Ok(buf.rows.last().map_or(0, |r| r.used))
     }
 
     fn pane_state(&self) -> PaneState {
@@ -1527,11 +1531,13 @@ impl StateImport {
     /// not read (add them with [`StateImport::page`]).
     ///
     /// # Errors
-    /// A malformed state ([`StateError::Invalid`]).
+    /// A malformed state ([`StateError::Invalid`]), or no memory for the
+    /// terminal ([`StateError::Ghostty`]).
     pub fn new(head: &TermState, check: ImportCheck) -> Result<Self, StateError> {
         validate::head(head)?;
         let p = &head.pane;
-        let mut pane = PaneTerm::new(head.cols, head.rows, p.history_limit);
+        let mut pane = PaneTerm::try_new(head.cols, head.rows, p.history_limit)
+            .ok_or_else(|| StateError::Ghostty("out of memory".into()))?;
         pane.history = p.keeps_history;
         // The limits first: the import copies them into the new pages.
         let _ = pane.term.set_scrollback_max_bytes(head.ghostty.max_bytes);

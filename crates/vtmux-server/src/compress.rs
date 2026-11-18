@@ -344,7 +344,7 @@ mod tests {
         if t.compressed_pages() == 0 {
             return; // Ghostty can't compress on this target.
         }
-        let state = term_to_snapshot(&t, Form::Rows);
+        let state = term_to_snapshot(&t, Form::Rows).unwrap();
         let mut back = term_from_snapshot(&state, vtmux_vt::PATCH_STACK).unwrap();
         assert_eq!(back.compressed_pages(), 0, "rows come back resident");
         let mut c = PaneCompress::default();

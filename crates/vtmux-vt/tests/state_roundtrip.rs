@@ -73,7 +73,7 @@ fn assert_alike(a: &PaneTerm, b: &PaneTerm, ctx: &str, exact: bool) {
 /// check again, replies included.
 fn round_trip(a: &mut PaneTerm, compressed: CompressedPages, rest: &[u8], ctx: &str) -> PaneTerm {
     let _ = a.take_answers();
-    let state = a.export_state_with(compressed);
+    let state = a.export_state_with(compressed).unwrap();
     let mut b = PaneTerm::import_state(&state).unwrap_or_else(|e| panic!("{ctx}: import: {e}"));
     assert_same(a, &b, ctx);
     a.feed(rest);
@@ -103,7 +103,7 @@ fn saved_cursor_off_a_shrunk_screen() {
         let mut a = pane(30, 12, 100, b"\x1b[5;6H");
         a.feed(save);
         a.resize(30, 2);
-        let state = a.export_state();
+        let state = a.export_state().unwrap();
         let mut b = PaneTerm::import_state(&state).unwrap();
         assert_same(&a, &b, "saved off screen");
         for t in [&mut a, &mut b] {
@@ -311,7 +311,7 @@ fn a_long_dcs_carries_on_whole() {
         a.set_input_buffer_size(limit);
         a.feed(b"\x1bPtmux;");
         a.feed(&body);
-        let mut b = PaneTerm::import_state(&a.export_state()).expect("import");
+        let mut b = PaneTerm::import_state(&a.export_state().unwrap()).expect("import");
         for t in [&mut a, &mut b] {
             t.feed(b"TAIL\x1b\\");
         }
@@ -395,7 +395,7 @@ fn compressed_history_as_rows_and_blobs() {
     if a.compressed_pages() == 0 {
         return;
     }
-    let state = a.export_state_with(CompressedPages::Blob);
+    let state = a.export_state_with(CompressedPages::Blob).unwrap();
     let blobs = state
         .primary
         .pages
@@ -471,7 +471,7 @@ fn foreign_blobs_are_refused() {
     }
     let mut a = pane(80, 24, 3000, &text);
     while a.compress_step() == Compression::Pending {}
-    let mut state = a.export_state_with(CompressedPages::Blob);
+    let mut state = a.export_state_with(CompressedPages::Blob).unwrap();
     let mut changed = false;
     for p in &mut state.primary.pages {
         if let PageState::Blob(b) = p {

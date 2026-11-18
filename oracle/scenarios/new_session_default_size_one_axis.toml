@@ -1,0 +1,17 @@
+name = "new_session_default_size_one_axis"
+size = [80, 24]
+# new-session with only one of -x/-y takes the other from the global
+# default-size and stores both in the session's default-size unclamped
+# (cmd-new-session.c:256-280); only the window is held to WINDOW_MAXIMUM
+# (spawn.c:192, resize.c:331-338).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "80", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["set", "-g", "default-size", "20000x30000"] },
+  { run = ["new", "-d", "-s", "y", "-n", "w", "-y", "10", "cat", "-"] },
+  { run = ["show", "-t", "y", "default-size"] },
+  { run = ["display", "-p", "-t", "y:", "#{window_width}x#{window_height}"] },
+  { run = ["new", "-d", "-s", "x", "-n", "w", "-x", "7", "cat", "-"] },
+  { run = ["show", "-t", "x", "default-size"] },
+  { run = ["display", "-p", "-t", "x:", "#{window_width}x#{window_height}"] },
+]

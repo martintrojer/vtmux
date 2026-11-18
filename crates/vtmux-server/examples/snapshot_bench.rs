@@ -123,7 +123,7 @@ fn main() {
     for (i, t) in terms.iter().enumerate() {
         s.panes.push(snap::Pane {
             id: u32::try_from(i).unwrap(),
-            term: Some(term_to_snapshot(t, form)),
+            term: Some(term_to_snapshot(t, form).unwrap()),
             ..snap::Pane::default()
         });
     }

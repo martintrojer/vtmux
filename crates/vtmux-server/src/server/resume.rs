@@ -894,7 +894,7 @@ impl Server {
         if form == Form::SamePin {
             self.compress_all_history();
         }
-        let snapshot = self.to_snapshot_with(
+        let taken = self.to_snapshot_with(
             snap::Meta {
                 purpose: snap::Purpose::Upgrade,
                 writer_version: vtmux_core::version::display(),
@@ -907,6 +907,13 @@ impl Server {
             },
             form,
         );
+        let snapshot = match taken {
+            Ok(snapshot) => snapshot,
+            Err(e) => {
+                self.upgrade_tokens_void();
+                return Err(format!("snapshot: {e}"));
+            }
+        };
         let bytes = snap::encode(&snapshot);
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));
         match sys::memfile(dir, &bytes) {
@@ -1200,7 +1207,7 @@ mod tests {
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
         let server = Server::new(l, socket.clone(), ServerConfig::default()).unwrap();
         let shim = server.shim.as_ref().map(|s| s.dir().join("tmux"));
-        let taken = server.to_snapshot(snap::Meta::default());
+        let taken = server.to_snapshot(snap::Meta::default()).unwrap();
         assert!(
             taken
                 .descriptors
@@ -1380,7 +1387,7 @@ mod tests {
         ] {
             st::ok(&mut server, &d.0, words);
         }
-        let mut s = server.to_snapshot(snap::Meta::default());
+        let mut s = server.to_snapshot(snap::Meta::default()).unwrap();
         let ids: Vec<u32> = s.panes.iter().map(|p| p.id).collect();
         let rows = vec![snap::Row::default(); snap::row::MAX_PAGE_ROWS as usize + 1];
         let bad = snap::HistoryPage::from_rows(&rows, false);

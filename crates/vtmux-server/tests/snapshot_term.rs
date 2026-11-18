@@ -111,7 +111,7 @@ fn assert_alike(a: &PaneTerm, b: &PaneTerm, ctx: &str, times: bool) {
 /// to both and compare again, replies included.
 fn round_trip(a: &mut PaneTerm, form: Form, rest: &[u8], ctx: &str) -> PaneTerm {
     let _ = a.take_answers();
-    let t = through_stream(term_to_snapshot(a, form), form);
+    let t = through_stream(term_to_snapshot(a, form).unwrap(), form);
     let mut b = term_from_snapshot(&t, PATCH_STACK).unwrap_or_else(|e| panic!("{ctx}: {e}"));
     assert_alike(a, &b, ctx, true);
     if form == Form::SamePin {
@@ -287,14 +287,14 @@ fn long_history_in_both_forms() {
     }
     let mut a = compressed(pane(90, 30, 5000, &text));
     a.feed(b"\x1b]133;A\x07$ \x1b]8;;http://x\x07link\x1b]8;;\x07\r\nlive rows\r\n");
-    let rows = term_to_snapshot(&a, Form::Rows);
+    let rows = term_to_snapshot(&a, Form::Rows).unwrap();
     assert!(!has_ghostty_pages(&rows));
     assert!(
         rows.primary.history.len() > 10,
         "one history page a Ghostty page"
     );
     assert_eq!(rows.primary.rows.len(), 30);
-    let same = term_to_snapshot(&a, Form::SamePin);
+    let same = term_to_snapshot(&a, Form::SamePin).unwrap();
     // Only compressed pages go in Ghostty's form: the visible rows and the
     // pages still resident are rows either way.
     assert_eq!(has_ghostty_pages(&same), a.compressed_pages() > 0);
@@ -303,7 +303,7 @@ fn long_history_in_both_forms() {
     // were split, with their capacities.
     for form in [Form::SamePin, Form::Rows] {
         let b = term_from_snapshot(
-            &through_stream(term_to_snapshot(&a, form), form),
+            &through_stream(term_to_snapshot(&a, form).unwrap(), form),
             PATCH_STACK,
         )
         .expect("import");
@@ -317,7 +317,7 @@ fn long_history_in_both_forms() {
     assert!(a.compressed_pages() > 0);
     a.feed(b"\x1b[?1049hvim");
     a.resize(70, 20);
-    let rows = term_to_snapshot(&a, Form::Rows);
+    let rows = term_to_snapshot(&a, Form::Rows).unwrap();
     let sized = rows.sized_primary.as_ref().expect("left at 90x30");
     assert_eq!(rows.primary.rows.len(), 20);
     assert_ne!(rows.primary.history.len(), 0);
@@ -350,7 +350,7 @@ fn an_old_writers_copy_of_the_hidden_history_is_not_read() {
     assert!(hsize > 200, "{hsize}");
     let want: Vec<String> = (0..hsize).map(|y| a.row(y).text()).collect();
     assert_eq!(want[hsize - 1], "line 295");
-    let mut t = term_to_snapshot(&a, Form::Rows);
+    let mut t = term_to_snapshot(&a, Form::Rows).unwrap();
     let alt = t.alt_entry.as_mut().expect("alternate screen up");
     // What the old writer put there, blank rows standing in for it.
     alt.history = vec![snap::HistoryPage::from_rows(
@@ -415,7 +415,7 @@ fn an_older_reader_gets_its_copy_of_the_hidden_history() {
     assert_eq!(hsize, 3000);
     let want: Vec<String> = (0..hsize).map(|y| a.row(y).text()).collect();
     assert_eq!(want[hsize - 1], line(4995));
-    let t = term_to_snapshot(&a, Form::Rows);
+    let t = term_to_snapshot(&a, Form::Rows).unwrap();
     let alt = t.alt_entry.as_ref().expect("alternate screen up");
     assert!(alt.has_history);
     assert_eq!(pages_text(&alt.history), want);
@@ -429,7 +429,7 @@ fn an_older_reader_gets_its_copy_of_the_hidden_history() {
     );
     let back = through_stream(t, Form::Rows);
     assert_eq!(pages_text(&back.alt_entry.unwrap().history), want);
-    let t = term_to_snapshot(&a, Form::SamePin);
+    let t = term_to_snapshot(&a, Form::SamePin).unwrap();
     let alt = t.alt_entry.as_ref().expect("alternate screen up");
     assert!(alt.history.is_empty() && !alt.has_history, "{alt:?}");
     // Narrowed under the alternate screen: the primary stays 40 wide, its
@@ -438,7 +438,7 @@ fn an_older_reader_gets_its_copy_of_the_hidden_history() {
     // is not, as its `?1049h` took it.
     a.resize(30, 5);
     assert_eq!(a.history_size(), hsize);
-    let t = term_to_snapshot(&a, Form::Rows);
+    let t = term_to_snapshot(&a, Form::Rows).unwrap();
     assert!(t.sized_primary.is_some());
     let alt = t.alt_entry.as_ref().expect("alternate screen up");
     assert_eq!(pages_text(&alt.history), want);
@@ -447,6 +447,7 @@ fn an_older_reader_gets_its_copy_of_the_hidden_history() {
 /// Each page of the primary screen: rows, width and capacity, or a blob.
 fn page_shapes(t: &PaneTerm) -> Vec<String> {
     t.export_state_with(vtmux_vt::CompressedPages::Rows)
+        .unwrap()
         .primary
         .pages
         .iter()
@@ -472,13 +473,16 @@ fn kept_line_flags_cross_a_snapshot() {
     let lines = "\u{3042}B\rX\r\n\x1b]8;;http://e\x1b\\a\x1b]8;;\x1b\\\rb\r\n";
     for form in [Form::Rows, Form::SamePin] {
         let plain = pane(10, 3, 20, "\u{4e16}\x1b]8;;http://e\x1b\\a".as_bytes());
-        assert!(!keeps(term_to_snapshot(&plain, form)), "{form:?}");
+        assert!(!keeps(term_to_snapshot(&plain, form).unwrap()), "{form:?}");
         let mut a = pane(10, 3, 20, lines.as_bytes());
-        assert!(keeps(term_to_snapshot(&a, form)), "{form:?}");
+        assert!(keeps(term_to_snapshot(&a, form).unwrap()), "{form:?}");
         round_trip(&mut a, form, b"\x1b[1;5Hq", &format!("{form:?} screen"));
         let mut a = pane(10, 3, 20, format!("{lines}\r\n\r\n\r\n").as_bytes());
         assert_eq!(a.history_size(), 3);
-        assert!(keeps(term_to_snapshot(&a, Form::Rows)), "{form:?} history");
+        assert!(
+            keeps(term_to_snapshot(&a, Form::Rows).unwrap()),
+            "{form:?} history"
+        );
         round_trip(&mut a, form, b"q", &format!("{form:?} history"));
         let mut a = pane(
             10,
@@ -500,7 +504,7 @@ fn a_line_flag_a_row_lacks_crosses_a_snapshot() {
     let scrolled = b"x\x1b[48;2;9;8;7m\x1b[S\x1b[m";
     for form in [Form::Rows, Form::SamePin] {
         let mut a = pane(10, 6, 0, scrolled);
-        let t = term_to_snapshot(&a, form);
+        let t = term_to_snapshot(&a, form).unwrap();
         assert!(t.primary.rows[5].lacks.extended, "{form:?}");
         assert!(!t.primary.rows[4].lacks.any(), "{form:?}");
         round_trip(&mut a, form, b"\x1b[6Habcdefghij", &format!("{form:?}"));
@@ -581,7 +585,7 @@ fn drawn_link_ids_cross_a_snapshot() {
         a.feed(b"\x1b[?1049h\x1b]8;;http://z/\x1b\\C\x1b]8;;\x1b\\");
         let alternate = numbers(&a);
         a.feed(b"\x1b[?2026h");
-        let t = through_stream(term_to_snapshot(&a, form), form);
+        let t = through_stream(term_to_snapshot(&a, form).unwrap(), form);
         let mut b = term_from_snapshot(&t, PATCH_STACK).unwrap();
         assert_eq!(held(&b), held(&a), "{form:?}: the held screen's links");
         assert_eq!(numbers(&b), alternate, "{form:?}: the alternate screen");
@@ -636,7 +640,7 @@ fn the_full_check_imports_what_the_lazy_one_does() {
     }
     let a = compressed(pane(80, 24, 3000, &text));
     for form in [Form::SamePin, Form::Rows] {
-        let t = through_stream(term_to_snapshot(&a, form), form);
+        let t = through_stream(term_to_snapshot(&a, form).unwrap(), form);
         let full = term_from_snapshot_with(&t, PATCH_STACK, ImportCheck::Full).expect("full");
         assert_alike(&a, &full, &format!("full {form:?}"), true);
         let mut bad = t.clone();
@@ -663,7 +667,7 @@ fn foreign_ghostty_pages_are_refused() {
         text.extend_from_slice(format!("{i} {}\r\n", "q".repeat(70)).as_bytes());
     }
     let a = compressed(pane(80, 24, 3000, &text));
-    let t = term_to_snapshot(&a, Form::SamePin);
+    let t = term_to_snapshot(&a, Form::SamePin).unwrap();
     if has_ghostty_pages(&t) {
         assert_eq!(
             term_from_snapshot(&t, "another build").err(),
@@ -681,24 +685,24 @@ fn a_bad_layout_is_ignored_and_bad_rows_refused() {
         text.extend_from_slice(format!("row {i}\r\n").as_bytes());
     }
     let a = pane(40, 10, 1500, &text);
-    let mut t = term_to_snapshot(&a, Form::Rows);
+    let mut t = term_to_snapshot(&a, Form::Rows).unwrap();
     t.primary.pages[0].rows += 1;
     let b = term_from_snapshot(&t, PATCH_STACK).expect("layout ignored");
     assert_eq!(observe(&a, false), observe(&b, false));
-    let mut wide = term_to_snapshot(&a, Form::Rows);
+    let mut wide = term_to_snapshot(&a, Form::Rows).unwrap();
     wide.primary.pages.clear();
     wide.primary.rows[0].cells = vec![snap::Cell::default(); 41];
     assert!(matches!(
         term_from_snapshot(&wide, PATCH_STACK),
         Err(TermError::Snapshot(_))
     ));
-    let mut short = term_to_snapshot(&a, Form::Rows);
+    let mut short = term_to_snapshot(&a, Form::Rows).unwrap();
     short.primary.rows.pop();
     assert!(matches!(
         term_from_snapshot(&short, PATCH_STACK),
         Err(TermError::Snapshot(_))
     ));
-    let mut tall = term_to_snapshot(&a, Form::Rows);
+    let mut tall = term_to_snapshot(&a, Form::Rows).unwrap();
     tall.primary.pages[0].rows = 70_000;
     assert!(
         term_from_snapshot(&tall, PATCH_STACK).is_ok(),
@@ -725,9 +729,9 @@ fn sixty_lines() -> PaneTerm {
 fn an_older_writers_times_start_where_they_end() {
     let mut a = sixty_lines();
     a.resize(40, 20);
-    let before = term_to_snapshot(&a, Form::Rows).history.scrolled;
+    let before = term_to_snapshot(&a, Form::Rows).unwrap().history.scrolled;
     a.resize(40, 30);
-    let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+    let mut t = through_stream(term_to_snapshot(&a, Form::Rows).unwrap(), Form::Rows);
     assert!(
         t.history.scrolled < before,
         "a taller screen pulled rows back"
@@ -777,7 +781,7 @@ fn the_primary_size_crosses_a_snapshot() {
             a.resize(80, 50);
             a.feed(enter);
             a.resize(80, 20);
-            let t = through_stream(term_to_snapshot(&a, form), form);
+            let t = through_stream(term_to_snapshot(&a, form).unwrap(), form);
             let sized = t.sized_primary.as_ref().expect("the primary's size");
             assert_eq!((sized.cols, sized.rows), (80, 50));
             let (at_size, older) = match form {
@@ -845,7 +849,7 @@ fn an_older_reader_takes_the_screens_it_knows() {
             if let Some((c, r)) = resize {
                 a.resize(c, r);
             }
-            let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+            let mut t = through_stream(term_to_snapshot(&a, Form::Rows).unwrap(), Form::Rows);
             t.sized_primary = None;
             t.alternate_saved = None;
             t.alternate_saved_layout = None;
@@ -883,7 +887,7 @@ fn an_older_writers_1049_save_is_kept() {
     ] {
         let mut a = sixty_lines();
         a.feed(enter);
-        let mut t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+        let mut t = through_stream(term_to_snapshot(&a, Form::Rows).unwrap(), Form::Rows);
         t.alternate_saved = None;
         t.alternate_saved_layout = None;
         let mut b = term_from_snapshot(&t, PATCH_STACK).expect("an older writer's snapshot");

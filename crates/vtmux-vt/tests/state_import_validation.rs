@@ -65,7 +65,7 @@ fn rich_page(state: &mut TermState) -> &mut PageRows {
 /// Import `state` after `change`: it must be refused. Should it import
 /// anyway, the pane is used, which is where the unchecked import crashed.
 fn refused(name: &str, change: impl FnOnce(&mut TermState)) -> StateError {
-    let mut state = source(false).export_state();
+    let mut state = source(false).export_state().unwrap();
     change(&mut state);
     match PaneTerm::import_state(&state) {
         Ok(mut t) => {
@@ -180,7 +180,7 @@ fn a_link_open_on_the_inactive_screen_is_refused() {
     on_primary.feed(b"\x1b[?1049l");
     let switch = b"\x1b[?1049h\x1b[?1049l\x1b[?1049h\x1b[?1049l";
     for (t, alternate_active) in [(&mut on_alt, true), (&mut on_primary, false)] {
-        let mut s = t.export_state();
+        let mut s = t.export_state().unwrap();
         assert_eq!(s.alternate_active, alternate_active);
         let screen = |s: &mut TermState, active: bool| {
             if active == s.alternate_active {
@@ -207,7 +207,7 @@ fn a_link_open_on_the_inactive_screen_is_refused() {
 #[test]
 fn corrupt_blobs_are_refused() {
     let mut a = source(false);
-    let state = a.export_state_with(CompressedPages::Blob);
+    let state = a.export_state_with(CompressedPages::Blob).unwrap();
     let blobs: Vec<usize> = state
         .primary
         .pages
@@ -265,7 +265,7 @@ fn corrupt_blobs_are_refused() {
 /// The export, with what two exports of one terminal differ in (the
 /// time left on a sync hold) zeroed.
 fn exported(t: &PaneTerm, form: CompressedPages) -> TermState {
-    let mut s = t.export_state_with(form);
+    let mut s = t.export_state_with(form).unwrap();
     if let Some((_, left)) = s.pane.sync.as_mut() {
         *left = std::time::Duration::ZERO;
     }
@@ -275,7 +275,7 @@ fn exported(t: &PaneTerm, form: CompressedPages) -> TermState {
 /// Stream `a` into a new pane: the head, then each page as it is
 /// exported, one at a time.
 fn streamed(a: &PaneTerm, form: CompressedPages, check: ImportCheck) -> PaneTerm {
-    let head = a.export_state_head();
+    let head = a.export_state_head().unwrap();
     assert!(head.primary.pages.is_empty(), "the head has no pages");
     let mut import = StateImport::new(&head, check).expect("head");
     a.export_pages(form, |screen, page| import.page(screen, &page))
@@ -289,19 +289,21 @@ fn streamed_state_is_the_whole_state() {
         let a = source(alternate);
         for form in [CompressedPages::Rows, CompressedPages::Blob] {
             // The head and the pages are the whole export, in its order.
-            let mut whole = a.export_state_head();
+            let mut whole = a.export_state_head().unwrap();
             a.export_pages(form, |screen, page| {
                 match (screen, whole.alternate.as_mut()) {
                     (ScreenKind::Alternate, Some(alt)) => alt.pages.push(page),
                     (ScreenKind::Primary, _) => whole.primary.pages.push(page),
-                    (ScreenKind::Alternate, None) => return Err("alternate page, no screen"),
+                    (ScreenKind::Alternate, None) => {
+                        return Err(StateError::Invalid("alternate page, no screen"));
+                    }
                 }
                 Ok(())
             })
             .expect("pages");
             assert_eq!(
                 whole,
-                a.export_state_with(form),
+                a.export_state_with(form).unwrap(),
                 "alternate {alternate} {form:?}"
             );
             for check in [ImportCheck::Lazy, ImportCheck::Full] {
@@ -319,7 +321,7 @@ fn streamed_state_is_the_whole_state() {
 #[test]
 fn a_refused_page_leaves_the_import_as_it_was() {
     let a = source(false);
-    let state = a.export_state();
+    let state = a.export_state().unwrap();
     let mut import = StateImport::new(&state, ImportCheck::Lazy).expect("head");
     let mut bad = state.primary.pages[0].clone();
     if let PageState::Rows(r) = &mut bad {
@@ -346,7 +348,7 @@ fn undersized_capacity_hints_fill_the_page_again() {
     // page is filled again sized from its content, the others keep
     // theirs.
     let mut a = source(false);
-    let mut state = a.export_state();
+    let mut state = a.export_state().unwrap();
     let p = rich_page(&mut state);
     p.capacity.styles = 1;
     p.capacity.string_bytes = 1;
@@ -410,7 +412,7 @@ fn bound(
     let mut s = base.clone();
     at(&mut s);
     let mut t = PaneTerm::import_state(&s).unwrap_or_else(|e| panic!("{name}: at the bound: {e}"));
-    let back = t.export_state();
+    let back = t.export_state().unwrap();
     use_pane(&mut t);
     t.feed(b"\x1b[?1049hx\x1b[?1049ly\x1b[?1049h\x1b[?1049l");
     for check in [ImportCheck::Lazy, ImportCheck::Full] {
@@ -421,7 +423,7 @@ fn bound(
 }
 
 fn links_of(t: &PaneTerm) -> Vec<LinkState> {
-    let s = t.export_state();
+    let s = t.export_state().unwrap();
     s.primary
         .pages
         .iter()
@@ -445,7 +447,7 @@ const STYLES: usize = 53_247;
 
 #[test]
 fn hyperlinks_at_and_past_their_bounds() {
-    let base = source(false).export_state();
+    let base = source(false).export_state().unwrap();
     let uri = |n: usize| {
         move |s: &mut TermState| rich_page(s).links[1].as_mut().unwrap().uri = vec![b'h'; n]
     };
@@ -517,7 +519,7 @@ fn hyperlinks_at_and_past_their_bounds() {
 
 #[test]
 fn page_tables_at_and_past_their_bounds() {
-    let base = source(false).export_state();
+    let base = source(false).export_state().unwrap();
     // page.zig `grapheme_max_len`: codepoints after a cell's first.
     let t = bound(
         &base,
@@ -525,7 +527,7 @@ fn page_tables_at_and_past_their_bounds() {
         |s| set_first_grapheme(rich_page(s), 64),
         |s| set_first_grapheme(rich_page(s), 65),
     );
-    assert_eq!(rich_page(&mut t.export_state()).graphemes[1], 64);
+    assert_eq!(rich_page(&mut t.export_state().unwrap()).graphemes[1], 64);
     let styles = |n: usize| {
         move |s: &mut TermState| {
             let p = rich_page(s);
@@ -570,7 +572,7 @@ fn page_tables_at_and_past_their_bounds() {
 fn hyperlinks_past_a_page_s_capacity_are_an_error() {
     // Ghostty sizes a page's hyperlink set from 16-bit bytes; more links
     // than it holds are refused, not a crash.
-    let base = source(false).export_state();
+    let base = source(false).export_state().unwrap();
     let mut s = base.clone();
     let p = rich_page(&mut s);
     for i in 0..5000 {
@@ -595,7 +597,7 @@ fn hyperlinks_past_a_page_s_capacity_are_an_error() {
     for i in 0..3000 {
         t.feed(format!("\x1b]8;;http://x/{i}\x07a\x1b]8;;\x07\r\n").as_bytes());
     }
-    let mut b = PaneTerm::import_state(&t.export_state()).expect("a page full of links");
+    let mut b = PaneTerm::import_state(&t.export_state().unwrap()).expect("a page full of links");
     assert_eq!(use_pane(&mut b), use_pane(&mut t));
 }
 
@@ -609,7 +611,7 @@ fn every_width_s_pages_import() {
         for _ in 0..(400_000 / usize::from(cols)).clamp(10, 3000) {
             t.feed(line.as_bytes());
         }
-        let s = t.export_state();
+        let s = t.export_state().unwrap();
         PaneTerm::import_state(&s).unwrap_or_else(|e| panic!("{cols} columns: {e}"));
     }
 }
@@ -629,7 +631,7 @@ fn the_osc8_bound_is_the_parser_s() {
         assert!(links.len() <= 2, "{links:?}");
         let found = links.iter().any(|l| l.uri.len() == uri);
         if found {
-            PaneTerm::import_state(&t.export_state()).expect("the parser's longest link");
+            PaneTerm::import_state(&t.export_state().unwrap()).expect("the parser's longest link");
         }
         found
     };
@@ -649,7 +651,7 @@ const KIND_RGB: u16 = 3;
 fn with_background_cells() -> TermState {
     let mut t = source(false);
     t.feed(b"\x1b[41m\x1b[K\r\n\x1b[48;2;1;2;3m\x1b[K\r\n\x1b[m");
-    t.export_state()
+    t.export_state().unwrap()
 }
 
 /// The screen's page and the index of its first cell of `kind`.
@@ -730,7 +732,7 @@ fn background_cells_round_trip_wherever_ghostty_makes_them() {
     a.feed(b"\x1b(0\x1b[44m\x1b[Kq\tq\r\n\x1b(B");
     a.feed(b"\x1b]133;A\x07\x1b[45;1m\x1b[K$ \x1b]133;B\x07\x1b[48;5;200m\x1b[Kls\r\n");
     a.feed(b"\x1b[48;2;9;8;7m\x1b[2K\t\tx\x1b[1;1H\x1bM\x1b[L\x1b[3@\x1b[m\r\n");
-    let s = a.export_state();
+    let s = a.export_state().unwrap();
     let kinds: Vec<(u16, u8)> = s
         .primary
         .pages
@@ -762,7 +764,7 @@ fn cursor_semantic_content_is_as_ghostty_sets_it() {
     // pane's first LF reached `unreachable` (the import re-review).
     // vtmux keeps OSC 133 from Ghostty, so its own exports have output
     // and no flag; the rest is what Ghostty's OSC 133 sets.
-    let base = source(false).export_state();
+    let base = source(false).export_state().unwrap();
     let c = &base.primary.cursor;
     assert_eq!((c.semantic_content, c.semantic_clear_eol), (0, false));
     for (content, eol) in [(1, true), (1, false), (2, false)] {
@@ -791,7 +793,7 @@ fn capacity_hints_are_bounded_by_the_page_s_content() {
     // one-row page asking for a gigabyte of grapheme and string bytes took
     // gigabytes (the import re-review). Past a fresh page's capacity or a
     // few times what the page holds, a hint is refused.
-    let base = source(false).export_state();
+    let base = source(false).export_state().unwrap();
     for (name, set) in [
         (
             "grapheme bytes",
@@ -828,14 +830,14 @@ fn a_capacity_grown_for_what_was_erased_exports_within_its_bound() {
     for _ in 0..8 {
         a.feed(cell.repeat(40).as_bytes());
     }
-    let grown = a.export_state();
+    let grown = a.export_state().unwrap();
     let PageState::Rows(p) = grown.primary.pages.last().unwrap() else {
         panic!("rows")
     };
     assert!(p.capacity.grapheme_bytes > 8192, "{:?}", p.capacity);
     // EL on each row: an ED from the top would scroll it into history.
     a.feed("\x1b[2K\x1bM".repeat(8).as_bytes());
-    let s = a.export_state();
+    let s = a.export_state().unwrap();
     let PageState::Rows(p) = s.primary.pages.last().unwrap() else {
         panic!("rows")
     };
