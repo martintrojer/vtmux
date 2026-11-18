@@ -1641,13 +1641,14 @@ pub fn encode_mouse(modes: MouseModes, m: &MouseInput, x: u32, y: u32) -> Option
         }
         return Some(out);
     }
-    // input_key_get_mouse (input-keys.c): `b + MOUSE_PARAM_BTN_OFF >
-    // MOUSE_PARAM_MAX` drops the event (the sum is checked without wrapping).
-    if m.b > PARAM_MAX - PARAM_BUTTON_OFFSET {
+    // input_key_get_mouse (input-keys.c): `b + MOUSE_PARAM_BTN_OFF` wraps in
+    // u_int, then a sum over MOUSE_PARAM_MAX drops the event.
+    let button = m.b.wrapping_add(PARAM_BUTTON_OFFSET);
+    if button > PARAM_MAX {
         return None;
     }
     for v in [
-        m.b + PARAM_BUTTON_OFFSET,
+        button,
         x.saturating_add(PARAM_POSITION_OFFSET).min(PARAM_MAX),
         y.saturating_add(PARAM_POSITION_OFFSET).min(PARAM_MAX),
     ] {
@@ -1700,14 +1701,32 @@ mod tests {
     #[test]
     fn huge_button_or_position_never_overflows() {
         for b in [4_294_967_264, u32::MAX, 224, 223] {
-            for (utf8, sgr_mode) in [(false, false), (true, false)] {
-                let m = modes(MouseTracking::All, utf8, sgr_mode);
-                let got = encode_mouse(m, &x10(b, 0), u32::MAX - 1, u32::MAX - 1);
-                assert_eq!(got.is_some(), !utf8 && b == 223, "b={b}");
-            }
+            let m = modes(MouseTracking::All, true, false);
+            assert_eq!(
+                encode_mouse(m, &x10(b, 0), u32::MAX - 1, u32::MAX - 1),
+                None
+            );
+            let m = modes(MouseTracking::All, false, false);
+            assert_eq!(
+                encode_mouse(m, &x10(b, 0), u32::MAX - 1, u32::MAX - 1).is_some(),
+                b != 224,
+                "b={b}"
+            );
         }
         let m = modes(MouseTracking::All, false, true);
         assert!(encode_mouse(m, &sgr(u32::MAX, false), u32::MAX, u32::MAX).is_some());
+    }
+
+    /// Bytes from a tmux 3.8 probe (button 4294967264 / `u32::MAX` / 224 / 223
+    /// at 3,3 in 1003 mode, no UTF-8, no SGR).
+    #[test]
+    fn legacy_button_wraps_like_tmux() {
+        let m = modes(MouseTracking::All, false, false);
+        let at = |b| encode_mouse(m, &x10(b, 0), 2, 2);
+        assert_eq!(at(4_294_967_264).unwrap(), b"\x1b[M\x00##");
+        assert_eq!(at(u32::MAX).unwrap(), b"\x1b[M\x1f##");
+        assert_eq!(at(223).unwrap(), b"\x1b[M\xff##");
+        assert_eq!(at(224), None);
     }
 
     #[test]
