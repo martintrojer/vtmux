@@ -81,6 +81,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-075](#d-075) | ICH reaching the end of the line clears the rest of it, as xterm does; tmux's grid keeps it | Ghostty grid | open |
 | [D-076](#d-076) | ECH that ends on the first column of a wide character clears all of it; tmux leaves its second column a padding cell | Ghostty grid | open |
 | [D-077](#d-077) | A terminal of more than 2048x2048 cells is drawn in its top-left 2048x2048 | tmux bug | open |
+| [D-078](#d-078) | After `respawn-window -k`, no modal pane or mark is left on a pane it destroyed; tmux 3.8 keeps them | tmux bug | open |
 
 Closed (vtmux matches tmux):
 
@@ -1282,6 +1283,15 @@ Closed (vtmux matches tmux):
 - **tmux:** `tty_set_size` (tty.c) keeps the size the terminal reports; `redraw_build_cells` (screen-redraw.c) allocates and fills `tty.sx * tty.sy` cells on every redraw.
 - **vtmux:** a terminal of more than 2^22 cells (`FRAME_CELLS`, resize.rs) is drawn in frames of at most 2048 columns and 2048 rows, the terminal's top-left corner; the rest is not written. A smaller one is drawn whole, however wide. `#{client_width}`, `#{client_height}` and `client-resized` keep the reported size, as in tmux.
 - **Evidence:** macOS, debug build, `window-size manual`, a client in a PTY: tmux 3.8 takes 318 MB at 2000x2000 and 1257 MB at 4000x4000 (about 80 bytes a cell, so 340 GB at 65535x65535); vtmux uncapped 785 MB and 3090 MB (190 bytes a cell), and at 65535x65535 passed 12 GB and stopped answering. Capped: 818 MB at 65535x65535, answering, `list-clients -F '#{client_width}x#{client_height}'` `65535x65535`. At 20000x5 and 30000x4 both draw the same screen (the window, its border at column 10001, `·` fill to the last column, the status line), and both report and hook `20000x5`, `30000x4`.
+
+<a id="d-078"></a>
+### D-078: respawn-window -k forgets the panes it destroys
+
+- **Category:** Do not copy tmux bug: tmux 3.8 keeps a destroyed pane as the window's modal pane, so the window has no current target.
+- **Test:** `crates/vtmux/tests/cli.rs` `respawn_window_forgets_the_destroyed_panes` (vtmux only: the reference fails).
+- **tmux:** `spawn_window` (spawn.c) with `SPAWN_RESPAWN` frees every pane but the first (`window_destroy_panes`, window.c) without forgetting them: `w->modal`, `w->modal_last`, `w->was_zoomed` and the marked pane keep the freed pane, and the cached redraw scene is not invalidated. tmux master (98691297, `window_forget_pane`) clears them and invalidates the scene.
+- **vtmux:** as tmux master, the modal pane, the pane before it, `was_zoomed`, the mark and the pending redraw of a destroyed pane are cleared (`Model::reset_window_panes`). An open menu is left as it is, as in tmux master: an item whose target pane is gone runs against the client's current pane (menu.c `menu_key`), as `display-menu` without a target does.
+- **Evidence:** reference tmux 3.8, isolated: `new -d -s a cat; new-pane -O -t a cat; respawnw -k -t a cat; display -p -t a:0 '#{pane_id}'` and `new-pane -O -t a:0` give `no current target`. With a client attached, `splitw -d; display-menu -t %1 Kill k kill-pane; respawnw -k` succeeds, and the next redraw (`refresh-client`) gives `server exited unexpectedly` (also with the menu on `%0`). vtmux before the fix: `#{window_modal_pane}` `%1` after the respawn.
 
 ## Adding an entry
 

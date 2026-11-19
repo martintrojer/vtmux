@@ -2062,6 +2062,10 @@ impl Model {
     /// their PTYs to close), the first fills the window as the only,
     /// active pane in a fresh layout. An existing zoom is dropped first;
     /// tmux frees the layout under it and crashes on the next read (D-008).
+    /// Nothing keeps naming a destroyed pane: the modal pane, the pane
+    /// active before it, `was_zoomed` and the mark go with it (upstream
+    /// 98691297, `window_destroy_panes` calling `window_forget_pane`;
+    /// tmux 3.8 keeps a dead `w->modal`; D-078).
     pub fn reset_window_panes(&mut self, w: WindowId) -> Option<(PaneId, Vec<Pane>)> {
         self.unzoom(w);
         let window = self.windows.get_mut(&w)?;
@@ -2070,11 +2074,17 @@ impl Model {
         window.panes.last.clear();
         window.panes.z_order = vec![first];
         window.panes.active = Some(first);
+        let kept = |p: &PaneId| *p == first;
+        window.panes.modal = window.panes.modal.filter(kept);
+        window.panes.modal_last = window.panes.modal_last.filter(kept);
+        window.was_zoomed = window.was_zoomed.filter(kept);
         let mut layout = Layout::new(window.layout.sx, window.layout.sy, first);
         layout.opts = window.layout.opts;
         window.layout = layout;
         let mut removed = Vec::new();
         for p in gone {
+            self.clear_mark_of(p);
+            self.redraw_panes.remove(&p);
             self.options.remove_pane(p);
             removed.extend(self.panes.remove(&p));
         }

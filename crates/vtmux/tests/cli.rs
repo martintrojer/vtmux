@@ -1203,6 +1203,38 @@ fn own_name() {
     assert_eq!(d.code, 1);
 }
 
+/// `respawn-window -k` leaves nothing naming a pane it destroyed: the modal
+/// pane and the mark go with it, so `new-pane -O` and focus changes work
+/// after (upstream 98691297, window.c `window_destroy_panes` calling
+/// `window_forget_pane`). vtmux only: tmux 3.8 keeps a dead `w->modal`,
+/// and its window then has no active pane (`no current target`).
+#[test]
+fn respawn_window_forgets_the_destroyed_panes() {
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"]);
+    let r = w.run(&["new-pane", "-O", "-t", "a", "cat", "-"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    w.run(&["select-pane", "-m", "-t", "a:0.1"]);
+    let state = [
+        "display",
+        "-p",
+        "-t",
+        "a:0",
+        "#{window_panes} #{pane_id} [#{window_modal_pane}] [#{pane_marked_set}]",
+    ];
+    assert_eq!(w.run(&state).stdout, "2 %1 [%1] [1]\n");
+    let r = w.run(&["respawn-window", "-k", "-t", "a:0", "cat", "-"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(w.run(&state).stdout, "1 %0 [] [0]\n");
+    let r = w.run(&["new-pane", "-O", "-t", "a:0", "cat", "-"]);
+    assert_eq!((r.code, r.stderr.as_str()), (0, ""));
+    assert_eq!(w.run(&state).stdout, "2 %2 [%2] [0]\n");
+    w.run(&["kill-pane", "-t", "%2"]);
+    w.run(&["split-window", "-d", "-t", "a:0", "cat", "-"]);
+    w.run(&["select-pane", "-t", "a:0.1"]);
+    assert_eq!(w.run(&state).stdout, "2 %3 [] [0]\n");
+}
+
 /// D25: `#{version}` stays tmux's bare `3.8` for plugin gates;
 /// `#{vtmux_version}` is the display version. It must also be true for
 /// `if-shell -F`, which treats a result starting with `0` as false

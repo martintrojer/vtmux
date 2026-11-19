@@ -15,6 +15,7 @@ vtmux's version is the tmux release it is tested against: `3.8-rc1` is the first
 - A mouse report with a huge button number no longer crashes a debug-built server; the legacy mouse encodings send the bytes tmux sends for it.
 - Live upgrade: a snapshot with a pane or popup pid of 0 or less, or with its next session, window or pane id at the maximum, is refused, as any inconsistent snapshot is, instead of crashing the new server later.
 - A client that reports a huge terminal (`stty rows 65535 cols 65535`) gets frames of at most 2^22 cells (D-077); the server took over 12 GB for it. `#{client_width}` and `#{client_height}` are as tmux reports them.
+- `respawn-window -k` of a window with a modal pane (`new-pane -O`) clears it, as upstream tmux does: `#{window_modal_pane}` no longer names the destroyed pane, and `new-pane -O` and pane selection work in that window again.
 
 ## 3.8-rc1
 
