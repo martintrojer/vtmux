@@ -583,6 +583,7 @@ impl Server {
             key: None,
             mouse: None,
             tree: Some(crate::menu::TreeMenu {
+                opener: c,
                 pane: p,
                 serial,
                 line,

@@ -1,0 +1,31 @@
+# mode_tree_menu_callback passes mtm->c to the mode (mode-tree.c:1372): an
+# item chosen from a tree mode's right-click menu acts for the client that
+# opened the menu, not the one that chose it. Client a right-clicks session
+# bbb in choose-tree -s, client b picks Select (Down, Enter): a moves to bbb,
+# b stays on aaa. (A dead opener: the callback does nothing, upstream f42b171f;
+# 3.8 itself crashes there, so no scenario.)
+name = "tree_menu_opener"
+size = [60, 24]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "23", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "23", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { attach = { session = "aaa" } },
+  { attach = { session = "aaa", id = "b" } },
+  { settle = { quiet_ms = 500 } },
+  { run = ["choose-tree", "-t", "aaa:0.0", "-s", "-F", "#{session_name}"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<2;10;2M" },
+  { screen = {} },
+  { screen = { id = "b" } },
+  { keys_to = { id = "b", keys = "\u001b[B" } },
+  { settle = {} },
+  { keys_to = { id = "b", keys = "\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { screen = { id = "b" } },
+]

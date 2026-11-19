@@ -153,6 +153,8 @@ pub struct Menu {
 /// Whose tree-mode menu it is (`struct mode_tree_menu`).
 #[derive(Clone, Copy, Debug)]
 pub struct TreeMenu {
+    /// The client that opened the menu (`mtm->c`): the item acts for it.
+    pub opener: ClientId,
     pub pane: vtmux_core::ids::PaneId,
     /// The mode's [`crate::mode::tree_mode::Common::serial`].
     pub serial: u64,
@@ -495,7 +497,11 @@ impl Server {
                     // menu_key: `md->cb` with the item's key.
                     Some(t) => {
                         if let Some(k) = item_key {
-                            self.tree_menu_choose(c, t, k);
+                            // mode_tree_menu_callback passes mtm->c; upstream
+                            // f42b171f skips a dead opener: so do we.
+                            if self.clients.contains_key(&t.opener) {
+                                self.tree_menu_choose(t.opener, t, k);
+                            }
                         }
                     }
                     None => self.menu_run(c, &command, found, key, mouse),
