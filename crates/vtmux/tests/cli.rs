@@ -1174,6 +1174,35 @@ fn server_access_list() {
     });
 }
 
+/// Upstream 50f751b1: a v1 layout with a one-child node and more cells than
+/// panes (2 panes, 4 cells, the one-child node last) crashes tmux 3.8 (NULL
+/// in `layout_find_bottomright`). vtmux applies it as tmux master does and the server lives. Not an oracle trace: the
+/// reference dies.
+#[test]
+fn select_layout_one_child_node_keeps_the_server() {
+    let w = World::new(&vtmux_bin());
+    assert_eq!(
+        w.run(&["new-session", "-d", "-x", "80", "-y", "24"]).code,
+        0
+    );
+    assert_eq!(w.run(&["split-window"]).code, 0);
+    let sel = w.run(&[
+        "select-layout",
+        "8a8f,43x10,0,0{10x10,0,0,10x10,11,0,10x10,22,0,10x10,33,0[10x10,33,0]}",
+    ]);
+    assert_eq!((sel.code, sel.stderr.as_str()), (0, ""));
+    let ls = w.run(&[
+        "list-panes",
+        "-F",
+        "#{pane_width}x#{pane_height},#{pane_left},#{pane_top}",
+    ]);
+    assert_eq!(
+        (ls.code, ls.stdout.as_str()),
+        (0, "10x10,0,0\n32x10,11,0\n")
+    );
+    w.run(&["kill-server"]);
+}
+
 /// Under its own name (D20, D21): `vtmux-UID` socket directory, `vtmux`
 /// in getopt messages and usage, and `-V` printing the D25 version.
 #[test]

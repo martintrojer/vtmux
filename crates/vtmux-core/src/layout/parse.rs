@@ -325,7 +325,10 @@ fn bottom_right<L>(root: &Cell<L>) -> Vec<usize> {
     let mut path = Vec::new();
     let mut c = root;
     while let Cell::Node(n) = c {
-        let i = n.children.len() - 1;
+        // An empty node ends the walk (upstream 50f751b1: tmux 3.8 crashes).
+        let Some(i) = n.children.len().checked_sub(1) else {
+            break;
+        };
         path.push(i);
         c = &n.children[i];
     }
@@ -530,5 +533,93 @@ impl super::Layout {
             state.apply(win, &self.root);
         }
         Ok(v1)
+    }
+}
+
+#[cfg(test)]
+mod one_child_tests {
+    use super::*;
+
+    fn panes(n: u32) -> Vec<WindowPane> {
+        (0..n)
+            .map(|i| WindowPane {
+                id: PaneId(i),
+                floating: None,
+            })
+            .collect()
+    }
+
+    fn run(input: &str, n: u32) -> Result<String, String> {
+        parse(WindowId(0), input, &panes(n)).map(|p| super::super::emit::dump_v1(&p.root))
+    }
+
+    /// Upstream 50f751b1: an empty node ends `layout_find_bottomright`;
+    /// tmux 3.8 dereferences NULL, vtmux 0.x panicked on the subtraction.
+    /// Each fixture has a valid checksum, so it reaches the cell walk; the
+    /// expectation is the result per pane count 1..=4.
+    #[test]
+    fn one_child_nodes_do_not_panic() {
+        let cases: [(&str, [Result<&str, &str>; 4]); 6] = [
+            (
+                "e5b9,32x10,0,0{10x10,0,0,10x10,11,0,10x10,22,0[10x10,22,0{10x10,22,0}]}",
+                [
+                    Ok("a01d,32x10,0,0,0"),
+                    Ok("e562,32x10,0,0{10x10,0,0,0,21x10,11,0,1}"),
+                    Ok("074c,32x10,0,0{10x10,0,0,0,10x10,11,0,1,10x10,22,0,2}"),
+                    Err("have 4 panes but need 3"),
+                ],
+            ),
+            (
+                "36d3,32x10,0,0{10x10,0,0,10x10,11,0,10x10,22,0{10x10,22,0}}",
+                [
+                    Ok("a01d,32x10,0,0,0"),
+                    Ok("e562,32x10,0,0{10x10,0,0,0,21x10,11,0,1}"),
+                    Ok("074c,32x10,0,0{10x10,0,0,0,10x10,11,0,1,10x10,22,0,2}"),
+                    Err("have 4 panes but need 3"),
+                ],
+            ),
+            (
+                "7f9b,10x10,0,0[10x10,0,0]",
+                [
+                    Ok("9e9d,10x10,0,0,0"),
+                    Err("have 2 panes but need 1"),
+                    Err("have 3 panes but need 1"),
+                    Err("have 4 panes but need 1"),
+                ],
+            ),
+            (
+                "1213,10x10,0,0[10x10,0,0[10x10,0,0]]",
+                [
+                    Ok("9e9d,10x10,0,0,0"),
+                    Err("have 2 panes but need 1"),
+                    Err("have 3 panes but need 1"),
+                    Err("have 4 panes but need 1"),
+                ],
+            ),
+            (
+                "ea56,21x10,0,0{10x10,0,0,10x10,11,0[10x10,11,0]}",
+                [
+                    Ok("9f5d,21x10,0,0,0"),
+                    Ok("2532,21x10,0,0{10x10,0,0,0,10x10,11,0,1}"),
+                    Err("have 3 panes but need 2"),
+                    Err("have 4 panes but need 2"),
+                ],
+            ),
+            (
+                "34c3,32x10,0,0{10x10,0,0,10x10,11,0,10x10,22,0[10x10,22,0]}",
+                [
+                    Ok("a01d,32x10,0,0,0"),
+                    Ok("e562,32x10,0,0{10x10,0,0,0,21x10,11,0,1}"),
+                    Ok("074c,32x10,0,0{10x10,0,0,0,10x10,11,0,1,10x10,22,0,2}"),
+                    Err("have 4 panes but need 3"),
+                ],
+            ),
+        ];
+        for (input, want) in cases {
+            for (n, want) in (1..).zip(want) {
+                let want = want.map(str::to_owned).map_err(str::to_owned);
+                assert_eq!(run(input, n), want, "{input} on {n}");
+            }
+        }
     }
 }
