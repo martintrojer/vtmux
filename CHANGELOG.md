@@ -2,7 +2,7 @@
 
 vtmux's version is the tmux release it is tested against: `3.8-rc1` is the first release candidate of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
-## Unreleased
+## 3.8-rc2
 
 ### Fixed
 

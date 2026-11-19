@@ -101,7 +101,7 @@ ln -sf "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux (again afte
 
 On a Linux with glibc older than 2.35 (EL9, Debian 11), take the static build: `mise use -g "github:martintrojer/vtmux[matching=musl]"`. Tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases).
 
-With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-rc.1`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
+With cargo (needs Zig 0.17): `cargo install --locked vtmux@3.8.0-rc.2`. More in [RELEASING.md](https://github.com/martintrojer/vtmux/blob/main/docs/RELEASING.md).
 
 vtmux goes by the name it is started under. As `vtmux`, it sits next to your tmux with its own sockets. As `tmux` (the link above), it is tmux: `tmux -V` prints `tmux 3.8` and it uses tmux's sockets. A simple alias (`alias tmux=vtmux`) runs it as `vtmux`, which is probably not what you want: use a symlink (as above) or a shell function that sets the name, `tmux() { (exec -a tmux vtmux "$@"); }` (bash, zsh). Inside a vtmux pane, `tmux` reaches its server either way.
 
@@ -111,7 +111,7 @@ vtmux goes by the name it is started under. As `vtmux`, it sits next to your tmu
 - **Opt-in, never surprising.** Paper-cut fixes and new terminal features are opt-in (a `vtmux-*` option) or invisible to scripts. Real tmux bugs (data loss, hangs) are fixed by default and listed in [compat/DIVERGENCES.md](https://github.com/martintrojer/vtmux/blob/main/compat/DIVERGENCES.md).
 - **Just the core.** No agent integration, no extra TUI, no session save and restore of its own: only what tmux and its plugins can't do.
 
-**Status:** release candidate ([3.8-rc1](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md). [Known issues](https://github.com/martintrojer/vtmux/blob/main/docs/KNOWN-ISSUES.md).
+**Status:** release candidate ([3.8-rc2](https://github.com/martintrojer/vtmux/blob/main/CHANGELOG.md)), used as the author's tmux every day. [How it works](https://github.com/martintrojer/vtmux/blob/main/docs/ARCHITECTURE.md). [Known issues](https://github.com/martintrojer/vtmux/blob/main/docs/KNOWN-ISSUES.md).
 
 [How it was built](https://github.com/martintrojer/vtmux/blob/main/docs/HOW-IT-WAS-BUILT.md): agents, tmux 3.8 as the spec, and the checks.
 
