@@ -1286,7 +1286,10 @@ fn version_formats() {
 }
 
 fn uid() -> String {
-    let out = Command::new("id").arg("-u").output().expect("id -u");
+    let out = Command::new(common::program("id"))
+        .arg("-u")
+        .output()
+        .expect("id -u");
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
@@ -2457,7 +2460,7 @@ fn signals_follow_tmux() {
         let sock = w.dir().join(format!("tmux-{}/{}", uid(), w.label));
         let kill = |sig: &str| {
             assert!(
-                Command::new("kill")
+                Command::new(common::program("kill"))
                     .args([sig, &pid])
                     .status()
                     .unwrap()
@@ -5228,7 +5231,10 @@ fn save_buffer_to_a_slow_fifo_does_not_stall_the_server() {
             let fifo = w.dir().join("fifo");
             let big = w.dir().join("big");
             std::fs::write(&big, vec![b'z'; 100_000]).unwrap();
-            let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+            let status = Command::new(common::program("mkfifo"))
+                .arg(&fifo)
+                .status()
+                .unwrap();
             assert!(status.success());
             let mut out = vec![
                 w.run(&["new", "-d", "-s", "a", "cat"]),
@@ -5292,7 +5298,7 @@ fn load_buffer_of_a_fifo_waits_for_the_writer() {
     compare("load_buffer_of_a_fifo_waits_for_the_writer", |w| {
         let fifo = w.dir().join("ff");
         assert!(
-            Command::new("mkfifo")
+            Command::new(common::program("mkfifo"))
                 .arg(&fifo)
                 .status()
                 .unwrap()
@@ -6371,7 +6377,7 @@ fn count_procs(mut pgrep: Command, pattern: &str) -> usize {
 fn procs_with(pattern: &str, want: usize) -> usize {
     let start = Instant::now();
     loop {
-        let n = count_procs(Command::new("pgrep"), pattern);
+        let n = count_procs(Command::new(common::program("pgrep")), pattern);
         if n == want || start.elapsed() > Duration::from_secs(5) {
             return n;
         }
@@ -6383,7 +6389,7 @@ fn procs_with(pattern: &str, want: usize) -> usize {
 fn count_procs_counts_matches() {
     let pid = std::process::id();
     let pattern = format!("^sleep 600[.]{pid}7");
-    let mut job = Command::new("sh")
+    let mut job = Command::new(common::program("sh"))
         .args(["-c", &format!("exec sleep 600.{pid}7")])
         .spawn()
         .unwrap();
@@ -6396,7 +6402,7 @@ fn count_procs_counts_matches() {
 #[test]
 #[should_panic(expected = "pgrep failed")]
 fn count_procs_does_not_read_a_failure_as_zero() {
-    let mut pgrep = Command::new("sh");
+    let mut pgrep = Command::new(common::program("sh"));
     pgrep.args(["-c", "echo 'illegal option -- c' >&2; exit 2", "sh"]);
     count_procs(pgrep, "x");
 }
@@ -7386,13 +7392,8 @@ fn wait_file(path: &Path, done: impl Fn(&str) -> bool) -> String {
 /// exited and its parent has reaped it.
 fn wait_reaped(pid: &str) {
     let start = Instant::now();
-    while Command::new("kill")
-        .args(["-0", pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-        && start.elapsed() < common::HANG
-    {
+    let pid = common::parse_pid(pid).expect("a pid");
+    while rustix::process::test_kill_process(pid).is_ok() && start.elapsed() < common::HANG {
         std::thread::sleep(Duration::from_millis(20));
     }
 }

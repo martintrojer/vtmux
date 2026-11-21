@@ -1208,7 +1208,10 @@ fn an_escape_and_a_key_read_late_are_meta_the_key() {
         let fifo = w.home.path().join("fifo");
         // The utility, as cli.rs makes its FIFOs: rustix has no `mkfifoat`
         // on Apple targets.
-        let made = Command::new("mkfifo").arg(&fifo).status().unwrap();
+        let made = Command::new(common::program("mkfifo"))
+            .arg(&fifo)
+            .status()
+            .unwrap();
         assert!(made.success(), "mkfifo {}", fifo.display());
         let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
         ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
@@ -1539,7 +1542,7 @@ fn flood(w: &World) -> Attached {
 
 fn rss_kb(w: &World) -> u64 {
     let pid = String::from_utf8(w.cli(&["display", "-p", "#{pid}"]).stdout).unwrap();
-    let out = Command::new("ps")
+    let out = Command::new(common::program("ps"))
         .args(["-o", "rss=", "-p", pid.trim()])
         .output()
         .unwrap();
@@ -2596,7 +2599,7 @@ fn terminal_features_apply_at_attach() {
 /// `rxvt-unicode-256color`), so a row that attaches under it can't be
 /// compared there. Assumed present when `infocmp` is not.
 fn host_has_terminfo(term: &str) -> bool {
-    std::process::Command::new("infocmp")
+    std::process::Command::new(common::program("infocmp"))
         .arg(term)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -7838,7 +7841,7 @@ fn proc_state(pid: u32) -> char {
             .map(|(_, rest)| rest.to_owned())
             .unwrap_or_default()
     } else {
-        let out = Command::new("ps")
+        let out = Command::new(common::program("ps"))
             .args(["-o", "stat=", "-p", &pid.to_string()])
             .output()
             .unwrap();
@@ -9087,7 +9090,7 @@ fn kitty_keys_grant_ends_when_the_pushing_program_is_killed() {
     a.wait(|_| pane_line(&w) == "P");
     cli_ok(&w, &["send-keys", "-t", "a", "C-c"]);
     let program = std::fs::read_to_string(&pid).unwrap();
-    let killed = std::process::Command::new("kill")
+    let killed = std::process::Command::new(common::program("kill"))
         .args(["-9", program.trim()])
         .status()
         .unwrap();
@@ -9762,7 +9765,7 @@ fn link_lines() -> String {
 
 /// `ls --hyperlink=always` is GNU's (macOS's `ls` has no such flag).
 fn ls_has_hyperlink() -> bool {
-    Command::new("ls")
+    Command::new(common::program("ls"))
         .args(["--hyperlink=always", "/"])
         .output()
         .is_ok_and(|o| o.status.success())

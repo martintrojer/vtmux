@@ -1318,7 +1318,7 @@ mod tests {
             .iter()
             .copied()
             .filter(|pid| {
-                let out = Command::new("ps")
+                let out = Command::new(crate::progs::path("ps"))
                     .args(["-p", &pid.to_string(), "-o", "stat="])
                     .output()
                     .unwrap();
@@ -1328,7 +1328,7 @@ mod tests {
             .collect();
         // Cleanup is unconditional, including when testing the broken Drop.
         for pid in &pids {
-            let _ = Command::new("kill")
+            let _ = Command::new(crate::progs::path("kill"))
                 .args(["-KILL", &pid.to_string()])
                 .stderr(Stdio::null())
                 .status();

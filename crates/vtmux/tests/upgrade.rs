@@ -292,7 +292,7 @@ impl World {
     /// The server's command line, from `ps` (portable to macOS).
     fn server_args(&self) -> String {
         let pid = self.pid();
-        let out = Command::new("ps")
+        let out = Command::new(common::program("ps"))
             .args(["-o", "args=", "-p", &pid])
             .output()
             .unwrap();
@@ -422,7 +422,7 @@ impl Attached {
 
     /// The client's command line, from `ps` (portable to macOS).
     fn args(&self) -> String {
-        let out = Command::new("ps")
+        let out = Command::new(common::program("ps"))
             .args(["-o", "args=", "-p", &self.pid()])
             .output()
             .unwrap();
@@ -2336,7 +2336,7 @@ fn assert_gone(file: &Path) {
     let pid = Pid::from_raw(pid).unwrap();
     let zombie_or_gone = || {
         test_kill_process(pid).is_err()
-            || Command::new("ps")
+            || Command::new(common::program("ps"))
                 .args(["-o", "stat=", "-p", &pid.as_raw_nonzero().to_string()])
                 .output()
                 .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim().starts_with('Z'))

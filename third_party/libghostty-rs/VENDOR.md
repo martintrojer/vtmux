@@ -1580,6 +1580,12 @@ over 2.5 min, so it is not kept). vtmux's own
   (name order, `git apply`) to the fetched ghostty; the source stamp
   records the commit and the patch contents. Not applied to a
   `GHOSTTY_SOURCE_DIR` tree.
+- `libghostty-vt-sys/build.rs`: the patches go in with one `git apply`
+  of the whole stack (one at a time only when that fails, to name the
+  patch that does not apply), where upstream ran one per patch, and on
+  macOS with the developer tools' `git` (`xcrun -f git`, `real_git`): a
+  site wrapper earlier on `PATH` started a few hundred telemetry processes
+  per call, over 8,000 for the stack.
 - `libghostty-vt-sys/build.rs`: `rerun-if-changed=build.rs`, not
   upstream's `crates/libghostty-vt-sys/build.rs` (a path of its repo
   layout): cargo counts a missing file as changed, so every cargo

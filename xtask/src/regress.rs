@@ -344,7 +344,7 @@ fn prepare_work_from(suite: &Path, patches_dir: &Path, work: &Path) -> Result<Pa
 /// above the listed directory). "Skipped patch" is still treated as a failure.
 /// `git apply` is used because `patch(1)` is not installed everywhere.
 fn apply_patch(patch: &Path, work: &Path) -> Result<()> {
-    let out = Command::new("git")
+    let out = Command::new(crate::progs::git())
         .arg("--git-dir")
         .arg(work.join(".vtmux-no-git-dir"))
         .args(["apply", "--verbose", "-p1"])
@@ -365,11 +365,12 @@ fn apply_patch(patch: &Path, work: &Path) -> Result<()> {
 }
 
 fn kill_group(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-KILL", "--"])
-        .arg(format!("-{pid}"))
-        .stderr(Stdio::null())
-        .status();
+    if let Some(pgid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+    }
 }
 
 /// Pids of `tmux` processes in `ps` output (`pid args...` per line) whose
@@ -553,15 +554,18 @@ fn pty_census() -> Option<(usize, usize)> {
         })
     };
     if cfg!(target_os = "macos") {
-        let used = count("/dev", &is_macos_pty_slave)?;
-        let out = Command::new("/usr/sbin/sysctl")
-            .args(["-n", "kern.tty.ptmx_max"])
-            .output()
-            .ok()?;
-        Some((
-            used,
-            String::from_utf8_lossy(&out.stdout).trim().parse().ok()?,
-        ))
+        // The most is read once: the census runs every 100 ms over a run,
+        // and a `sysctl` each time was most of the processes regress made
+        // besides the scripts'.
+        static MAX: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+        let max = *MAX.get_or_init(|| {
+            let out = Command::new("/usr/sbin/sysctl")
+                .args(["-n", "kern.tty.ptmx_max"])
+                .output()
+                .ok()?;
+            String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+        });
+        Some((count("/dev", &is_macos_pty_slave)?, max?))
     } else {
         // This devpts instance's own `max=` mount option (the last mount
         // on /dev/pts is the one in use), under the
@@ -622,7 +626,7 @@ fn log_pty_holders(logs: &Path, name: &str) {
         return;
     }
     let mut note = format!("\n--- regress: PTYs in use (in use, most): {census:?}\n");
-    let ps = Command::new("ps")
+    let ps = Command::new(crate::progs::path("ps"))
         .args(["-axww", "-o", "pid=,ppid=,tty=,etime=,args="])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -638,7 +642,7 @@ fn log_pty_holders(logs: &Path, name: &str) {
     // A server holds its panes' masters with no controlling terminal, so ps
     // shows it on `??`; lsof names every process holding masters.
     if let Some((_, out)) = reap::output_within(
-        Command::new("lsof")
+        Command::new(crate::progs::path("lsof"))
             .args(["-nP", "-w", "-F", "pc", "/dev/ptmx"])
             .stderr(std::process::Stdio::null()),
         reap::LSOF_LIMIT,
@@ -1097,14 +1101,14 @@ mod tests {
         ).unwrap();
         let ran = run_one(&tmux, &base, &base, "leak.sh");
         let pid = fs::read_to_string(base.join("pane")).unwrap();
-        let out = Command::new("ps")
+        let out = Command::new(crate::progs::path("ps"))
             .args(["-p", pid.trim(), "-o", "stat="])
             .output()
             .unwrap();
         let state = String::from_utf8_lossy(&out.stdout);
         let alive = !state.trim().is_empty() && !state.trim().starts_with('Z');
         // The test also cleans up after the broken implementation.
-        let _ = Command::new("kill")
+        let _ = Command::new(crate::progs::path("kill"))
             .args(["-KILL", "--", &format!("-{}", pid.trim())])
             .stderr(Stdio::null())
             .status();

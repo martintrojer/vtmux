@@ -611,18 +611,46 @@ fn fetch_ghostty(out_dir: &Path) -> (PathBuf, PathBuf) {
 
     // Its own repository, so `git apply` takes the patches' paths from
     // here, not from a repository OUT_DIR is inside (a checkout's target/).
-    let mut init = Command::new("git");
+    let git = real_git();
+    let mut init = Command::new(&git);
     init.arg("init").arg("-q").current_dir(&src_dir);
     run_tool(init, "git", "apply vtmux's patches to Ghostty");
-    for (path, _) in &patches {
-        let mut apply = Command::new("git");
-        apply.arg("apply").arg(path).current_dir(&src_dir);
-        run(apply, &format!("git apply {}", path.display()));
+    // vtmux: one `git apply` for the whole stack (it applies them in order,
+    // later ones over earlier ones); only when that fails, one at a time to
+    // name the patch that does not apply.
+    let mut all = Command::new(&git);
+    all.arg("apply")
+        .args(patches.iter().map(|(path, _)| path))
+        .current_dir(&src_dir);
+    if !all.status().is_ok_and(|s| s.success()) {
+        for (path, _) in &patches {
+            let mut apply = Command::new(&git);
+            apply.arg("apply").arg(path).current_dir(&src_dir);
+            run(apply, &format!("git apply {}", path.display()));
+        }
     }
 
     std::fs::write(&stamp, want).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     (src_dir, deps_dir)
+}
+
+/// vtmux: the `git` to apply the patches with. On macOS `xcrun -f git`, the
+/// developer tools' own, past a wrapper earlier on `PATH` (a site's `git`
+/// that starts telemetry processes on every call); elsewhere, or when
+/// xcrun names none, `git` on `PATH`.
+fn real_git() -> PathBuf {
+    if cfg!(target_os = "macos")
+        && let Ok(out) = Command::new("/usr/bin/xcrun").args(["-f", "git"]).output()
+        && out.status.success()
+        && let Ok(found) = String::from_utf8(out.stdout)
+    {
+        let found = PathBuf::from(found.trim());
+        if found.is_absolute() && found.is_file() {
+            return found;
+        }
+    }
+    PathBuf::from("git")
 }
 
 /// vtmux: download release file `file` into OUT_DIR with curl.

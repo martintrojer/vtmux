@@ -277,7 +277,7 @@ impl Side {
         // where `/bin/sh` execs the shell, a grandchild where it does not.
         let mut parents = vec![self.t(&["display", "-p", "-t", target, "#{pane_pid}"])];
         while let Some(parent) = parents.pop() {
-            let children = Command::new("pgrep")
+            let children = Command::new(common::program("pgrep"))
                 .args(["-P", parent.trim()])
                 .output()
                 .unwrap();
@@ -367,7 +367,7 @@ impl Side {
         let pc = self.root.join("pc");
         let _ = std::fs::remove_dir_all(&pc);
         std::fs::create_dir(&pc).unwrap();
-        let tar = Command::new("tar")
+        let tar = Command::new(common::program("tar"))
             .arg("xzf")
             .arg(res.join("pane_contents.tar.gz"))
             .arg("-C")

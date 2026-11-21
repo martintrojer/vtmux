@@ -33,17 +33,20 @@ use std::time::{Duration, Instant};
 
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, connect, socket};
 
-fn signal(sig: &str, pids: &[u32]) {
-    let _ = Command::new("kill")
-        .arg(sig)
-        .args(pids.iter().map(u32::to_string))
-        .stderr(Stdio::null())
-        .status();
+fn signal(sig: rustix::process::Signal, pids: &[u32]) {
+    for pid in pids {
+        if let Some(pid) = i32::try_from(*pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process(pid, sig);
+        }
+    }
 }
 
 /// `pid args...` for every process (`ps -axww`: works on Linux and macOS).
 pub fn ps() -> String {
-    Command::new("ps")
+    Command::new(crate::progs::path("ps"))
         .args(["-axww", "-o", "pid=,args="])
         .stderr(Stdio::null())
         .output()
@@ -58,7 +61,7 @@ pub fn kill_matching(select: impl Fn(&str) -> Vec<u32>) {
     if pids.is_empty() {
         return;
     }
-    signal("-TERM", &pids);
+    signal(rustix::process::Signal::TERM, &pids);
     for _ in 0..20 {
         thread::sleep(Duration::from_millis(100));
         pids = select(&ps());
@@ -66,7 +69,7 @@ pub fn kill_matching(select: impl Fn(&str) -> Vec<u32>) {
             return;
         }
     }
-    signal("-KILL", &pids);
+    signal(rustix::process::Signal::KILL, &pids);
 }
 
 /// Pids in the listing whose arguments satisfy `keep`, never `own`.
@@ -134,7 +137,7 @@ struct Proc {
 }
 
 fn ps_full() -> String {
-    Command::new("ps")
+    Command::new(crate::progs::path("ps"))
         .args(["-axww", "-o", "pid=,ppid=,etime=,args="])
         .stderr(Stdio::null())
         .output()
@@ -229,7 +232,7 @@ pub fn held_sockets() -> Option<Vec<Held>> {
 pub fn held_sockets() -> Option<Vec<Held>> {
     let lsof = |args: &[&str]| {
         let (status, out) = output_within(
-            Command::new("lsof")
+            Command::new(crate::progs::path("lsof"))
                 .args(["-n", "-w", "-F", "pftn"])
                 .args(args)
                 .stderr(Stdio::null()),
@@ -774,7 +777,10 @@ mod tests {
     fn a_hung_command_is_killed_at_its_limit() {
         let start = Instant::now();
         assert_eq!(
-            output_within(Command::new("sleep").arg("30"), Duration::from_millis(200)),
+            output_within(
+                Command::new(crate::progs::path("sleep")).arg("30"),
+                Duration::from_millis(200)
+            ),
             None
         );
         assert!(
@@ -782,8 +788,11 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
-        let (status, out) =
-            output_within(Command::new("echo").arg("p1"), Duration::from_secs(30)).unwrap();
+        let (status, out) = output_within(
+            Command::new(crate::progs::path("echo")).arg("p1"),
+            Duration::from_secs(30),
+        )
+        .unwrap();
         assert!(status.success());
         assert_eq!(out, b"p1\n");
         assert_eq!(

@@ -12,6 +12,37 @@ use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 
+/// `name` by absolute path, from the first `PATH` entry that holds it as an
+/// executable file, looked up once per name (`name` itself when none does,
+/// so the spawn fails as it would have). `Command::new("ps")` is
+/// `posix_spawnp`, and macOS's tries the name in every `PATH` entry with a
+/// `posix_spawn` of its own: under `mise exec` (about 70 entries,
+/// `/usr/bin` after 53) one `ps` made 54 processes, each past the host's
+/// endpoint-security agents.
+#[allow(dead_code, reason = "not every test binary that includes this uses it")]
+pub fn program(name: &str) -> std::path::PathBuf {
+    use std::collections::HashMap;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::sync::{Mutex, OnceLock};
+    static FOUND: OnceLock<Mutex<HashMap<String, std::path::PathBuf>>> = OnceLock::new();
+    let mut found = FOUND.get_or_init(Mutex::default).lock().unwrap();
+    found
+        .entry(name.to_owned())
+        .or_insert_with(|| {
+            std::env::var_os("PATH")
+                .iter()
+                .flat_map(std::env::split_paths)
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .map(|dir| dir.join(name))
+                .find(|p| {
+                    p.metadata()
+                        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                })
+                .unwrap_or_else(|| name.into())
+        })
+        .clone()
+}
+
 /// The server pid out of `display -p '#{pid}'` output.
 pub fn parse_pid(stdout: &str) -> Option<Pid> {
     Pid::from_raw(stdout.trim().parse().ok()?)
@@ -97,7 +128,7 @@ pub const TEARDOWN_LIMIT: Duration = Duration::from_secs(3);
 /// stopped server answers nothing, and its socket does not name its pid.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn world_pids(tmux_tmpdir: &Path, label: &str) -> Vec<Pid> {
-    let Ok(ps) = Command::new("ps")
+    let Ok(ps) = Command::new(program("ps"))
         .args(["axeww", "-o", "pid=,command="])
         .output()
     else {
@@ -151,7 +182,7 @@ pub fn teardown(
 /// starts has it, and the servers pass it on to their panes and jobs.
 #[allow(dead_code, reason = "not every test binary that includes this uses it")]
 pub fn tmpdir_processes(tmux_tmpdir: &Path) -> Vec<(Pid, String)> {
-    let Ok(ps) = Command::new("ps")
+    let Ok(ps) = Command::new(program("ps"))
         .args(["axeww", "-o", "pid=,command="])
         .output()
     else {
@@ -197,7 +228,7 @@ fn sweep(tmux_tmpdir: &Path) -> Vec<(Pid, String)> {
 pub fn reap_dead_owners(prefix: &str) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let Ok(ps) = Command::new("ps")
+        let Ok(ps) = Command::new(program("ps"))
             .args(["axeww", "-o", "pid=,command="])
             .output()
         else {

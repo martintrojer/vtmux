@@ -1158,7 +1158,7 @@ fn slow_reader_detached_in_a_flood_exits_cleanly() {
 
 /// The server's resident set in KB (`ps -o rss=`: no /proc on macOS).
 fn rss_kb(pid: rustix::process::Pid) -> u64 {
-    let out = Command::new("ps")
+    let out = Command::new(common::program("ps"))
         .args(["-o", "rss=", "-p", &pid.as_raw_nonzero().to_string()])
         .output()
         .expect("ps");

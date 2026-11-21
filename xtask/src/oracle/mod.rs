@@ -401,11 +401,14 @@ fn run_inner() -> Result<ExitCode> {
 /// What a new trace stores as `recorded_host`: never the recording machine's name.
 const RECORDED_HOST: &str = "<HOST>";
 
+/// The host name, as `hostname` prints it (`gethostname`, the node name
+/// `uname` gives), read in process: a replay asks for every scenario.
 fn current_host() -> String {
-    std::process::Command::new("hostname")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+    rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .trim()
+        .to_string()
 }
 
 /// The trace's and vtmux's observations with hostnames made comparable.

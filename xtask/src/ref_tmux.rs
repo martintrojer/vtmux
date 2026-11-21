@@ -167,7 +167,7 @@ fn system_ncurses_free(bin: &Path) -> Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
-    let libs = Command::new("otool")
+    let libs = Command::new(crate::progs::path("otool"))
         .arg("-L")
         .arg(bin)
         .output()
@@ -198,7 +198,7 @@ fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
         return Ok(given);
     }
     let has_ncurses6 = |path: Option<&std::ffi::OsString>| {
-        let mut cmd = Command::new("pkg-config");
+        let mut cmd = Command::new(crate::progs::path("pkg-config"));
         cmd.args(["--atleast-version=6", "--variable=libdir", "ncursesw"]);
         if let Some(p) = path {
             cmd.env("PKG_CONFIG_PATH", p);
@@ -210,7 +210,7 @@ fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
     if has_ncurses6(given.as_ref()) {
         return Ok(given);
     }
-    let brew = Command::new("brew")
+    let brew = Command::new(crate::progs::path("brew"))
         .args(["--prefix", "ncurses"])
         .output()
         .ok()
@@ -261,7 +261,7 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     let tarball = fetch(&dl, url)?;
     eprintln!("ref-tmux: extracting into {}", build.display());
     run_cmd(
-        Command::new("tar")
+        Command::new(crate::progs::path("tar"))
             .arg("-xzf")
             .arg(&tarball)
             .arg("-C")
@@ -282,14 +282,14 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     }
     let jobs = std::thread::available_parallelism().map_or(1, usize::from);
     run_cmd(
-        Command::new("make")
+        Command::new(crate::progs::path("make"))
             .arg(format!("-j{jobs}"))
             .current_dir(&src),
         "make",
     )?;
     let stage = build.join("stage");
     run_cmd(
-        Command::new("make")
+        Command::new(crate::progs::path("make"))
             .arg("install")
             .arg(format!("DESTDIR={}", stage.display()))
             .current_dir(&src),
@@ -336,7 +336,7 @@ fn fetch(dl: &Path, url: &str) -> Result<PathBuf> {
 
 fn download(url: &str, part: &Path, dest: &Path) -> Result<()> {
     run_cmd(
-        Command::new("curl")
+        Command::new(crate::progs::path("curl"))
             .args([
                 "--fail",
                 "--silent",

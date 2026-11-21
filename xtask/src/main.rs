@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod ci;
 mod oracle;
+mod progs;
 #[cfg(test)]
 mod publish;
 mod reap;
@@ -78,7 +79,7 @@ mod tests {
             "echo '{{\"reason\":\"compiler-artifact\",\"target\":{{\"name\":\"vtmux\",\"kind\":[\"bin\"]}},\"executable\":\"{}\"}}'",
             exe.display()
         );
-        let mut cmd = Command::new("sh");
+        let mut cmd = Command::new(crate::progs::path("sh"));
         cmd.args(["-c", &script, "sh"]);
         let got = build_vtmux_via(cmd, &dir);
         let _ = std::fs::remove_dir_all(&dir);
@@ -87,7 +88,7 @@ mod tests {
 
     #[test]
     fn build_vtmux_fails_without_a_reported_executable() {
-        let mut cmd = Command::new("sh");
+        let mut cmd = Command::new(crate::progs::path("sh"));
         cmd.args(["-c", "echo '{\"reason\":\"build-finished\"}'", "sh"]);
         assert!(build_vtmux_via(cmd, Path::new("/")).is_err());
     }

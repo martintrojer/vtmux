@@ -43,23 +43,23 @@ fn scan_text_flags_a_listed_term_case_insensitively() {
 #[test]
 fn tracked_text_files_carry_no_listed_term() {
     let terms = local_terms();
-    let Ok(top) = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-    else {
-        return; // no git: nothing to guard
-    };
-    let root = PathBuf::from(String::from_utf8_lossy(&top.stdout).trim());
-    let Ok(out) = Command::new("git")
+    if terms.is_empty() {
+        return; // no term list: nothing to guard
+    }
+    // The repository is xtask's parent; one `git`, the real one.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask has a parent")
+        .to_path_buf();
+    let Ok(out) = Command::new(real_git())
         .args(["ls-files", "-z"])
         .current_dir(&root)
         .output()
     else {
         return; // no git: nothing to guard
     };
-    if terms.is_empty() || !out.status.success() {
-        return; // no term list, or not a git checkout (a crate tarball)
+    if !out.status.success() {
+        return; // not a git checkout (a crate tarball)
     }
     let mut failures = Vec::new();
     for file in String::from_utf8_lossy(&out.stdout)
@@ -77,4 +77,19 @@ fn tracked_text_files_carry_no_listed_term() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// `git`, on macOS the developer tools' own (`xcrun -f git`), past a site
+/// wrapper earlier on `PATH` that starts telemetry processes on every call.
+fn real_git() -> PathBuf {
+    if cfg!(target_os = "macos")
+        && let Ok(out) = Command::new("/usr/bin/xcrun").args(["-f", "git"]).output()
+        && out.status.success()
+    {
+        let git = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        if git.is_absolute() && git.is_file() {
+            return git;
+        }
+    }
+    PathBuf::from("git")
 }
