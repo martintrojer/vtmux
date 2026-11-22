@@ -59,6 +59,7 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   reference, 1/40 and 3/80 on vtmux; `cursor-test2` 2/40 on vtmux. The patch
   polls `display` (max 10 s) until it prints the result file's first line;
   patched, 40/40 each on both. Seen once in CI (GitHub run 42048753774).
+  tmux master has the same wait (faac4f18).
 - `copy-mode-test-vi.sh`, `copy-mode-test-emacs.sh`
   (`0004-copy-mode-tests-wait-for-pane-output.patch`): each runs `copy-mode`
   right after `new -d "cat …"`, and copy mode copies the screen when it starts
@@ -70,6 +71,7 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   reference. The patch polls `display` (max 10 s) for the printf's cursor
   position before `copy-mode`; patched, 96/96 vi and 48/48 emacs on vtmux,
   48/48 vi on the reference. Seen once in CI (GitHub run 42157716129, macOS).
+  tmux master waits too (91e62ea9 for vi, faac4f18 for emacs).
 - `screen-redraw-scrollbars.sh`
   (`0005-screen-redraw-scrollbars-wait-before-copy-mode.patch`): scene
   `scrollbar-copy-mode` runs `copy-mode -H` right after `neww -d "sh -c 'seq
@@ -78,7 +80,8 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   or empty copy. Failed once in a loaded local `cargo xtask regress` (8 busy
   loops); with `sleep 0.5` before `seq` it fails every run on both vtmux and
   the reference. The patch polls `capturep` (max 10 s) for seq's `40` before
-  `copy-mode`; with the delay it then passes on both.
+  `copy-mode`; with the delay it then passes on both. tmux master has the
+  same wait (faac4f18).
 - `terminal-feature-utf8.sh`
   (`0006-terminal-feature-utf8-keeps-the-socket-dir.patch`): the script runs the
   nested client as `env -i PATH=… $TEST_TMUX -T utf8 … attach-session`, which

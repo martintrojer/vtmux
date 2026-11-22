@@ -10,7 +10,7 @@ Where vtmux behaves differently from tmux 3.8, and why; everything not listed ma
 | Spec decision | A design decision chose this for drop-in use (plugins, version checks). |
 | Extension | A terminal protocol tmux drops, behind a `vtmux-*` option that is off by default (decision D28). |
 
-Status: **open** means it differs and will stay that way; **deferred** means not done yet; **extension** means opt-in; **closed** means vtmux does what tmux does.
+Status: **open** means it differs and will stay that way; **fixed upstream** means a tmux bug that tmux master has fixed since 3.8, so vtmux differs from 3.8 only (the entry names the commit); **deferred** means not done yet; **extension** means opt-in; **closed** means vtmux does what tmux does.
 
 ## Summary
 
@@ -20,22 +20,22 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-002](#d-002) | Pathological regexes stop at a limit instead of running for seconds | Deferred | deferred |
 | [D-003](#d-003) | `^` inside a repeated regex group follows POSIX, not a glibc bug | tmux bug | open |
 | [D-004](#d-004) | Time formats use the C locale; odd `TZ` values and over-long output differ | Deferred, tmux bug | deferred |
-| [D-005](#d-005) | A format loop nested in one of the same kind does not skip or repeat items | tmux bug | open |
+| [D-005](#d-005) | A format loop nested in one of the same kind does not skip or repeat items | tmux bug | fixed upstream |
 | [D-006](#d-006) | A pane with `history-limit 0` keeps nothing a narrowing pushes off the top | Deferred | deferred |
 | [D-007](#d-007) | Terminals come from a built-in table of 2,663 names (ncurses 6.6's database), not terminfo | Deferred | deferred |
-| [D-008](#d-008) | `respawn-window -k` on a zoomed window works; tmux crashes | tmux bug | open |
+| [D-008](#d-008) | `respawn-window -k` on a zoomed window works; tmux crashes | tmux bug | fixed upstream |
 | [D-009](#d-009) | A tab or `\001` in a config error shown at attach is dropped | Deferred | deferred |
 | [D-010](#d-010) | Copy mode redraws its whole screen, so no stale selection is left on screen | Deferred | deferred |
 | [D-012](#d-012) | A new window or pane is named after its command, never `tmux` by chance | tmux bug | open |
 | [D-013](#d-013) | Byte sequences that glibc decodes but that are not UTF-8 count as separate bytes | Deferred | deferred |
 | [D-015](#d-015) | The cell after a pane prompt's input is always styled (tmux: depends on width) | tmux bug | open |
-| [D-016](#d-016) | With `status off` and `status-position top`, the prompt's cursor is on the prompt | tmux bug | open |
+| [D-016](#d-016) | With `status off` and `status-position top`, the prompt's cursor is on the prompt | tmux bug | fixed upstream |
 | [D-017](#d-017) | `show-messages -T` lists features, not every terminfo capability | Deferred | deferred |
 | [D-019](#d-019) | Bytes that are not UTF-8 follow glibc's rules on macOS too | Deferred | deferred |
-| [D-020](#d-020) | Keys sent with `send-keys -K` reach the pane; tmux loses most of them | tmux bug | open |
+| [D-020](#d-020) | Keys sent with `send-keys -K` reach the pane; tmux loses most of them | tmux bug | fixed upstream |
 | [D-022](#d-022) | `tmux` called from a pane, job or plugin reaches this server | Spec decision | open |
 | [D-023](#d-023) | A dead pane's last line may stay apart from the remain-on-exit text | Ghostty grid | open |
-| [D-024](#d-024) | A nested `source -` inside `source-file -` fails at once; tmux hangs | tmux bug | open |
+| [D-024](#d-024) | A nested `source -` inside `source-file -` fails at once; tmux hangs | tmux bug | fixed upstream |
 | [D-026](#d-026) | `vtmux -V` prints vtmux's version; `#{version}` stays `3.8` | Spec decision | open |
 | [D-027](#d-027) | `capture-pane -R`, `-N` and `-e` estimate line allocation; a few lines differ | Ghostty grid | open |
 | [D-029](#d-029) | A control client stalled after its exit is dropped 10 s sooner | Deferred | deferred |
@@ -46,21 +46,21 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-039](#d-039) | A blank cell left of a vertical border is written as a space | Ghostty grid | open |
 | [D-041](#d-041) | A resize keeps a line's soft wrap where tmux loses it | tmux bug | open |
 | [D-042](#d-042) | A character tmux hides behind a wide one after a resize stays visible | tmux bug | open |
-| [D-043](#d-043) | `capture-pane -e` keeps a link that runs on from the line above | tmux bug | open |
+| [D-043](#d-043) | `capture-pane -e` keeps a link that runs on from the line above | tmux bug | fixed upstream |
 | [D-044](#d-044) | Emoji joined in the last column don't scroll the screen or cover borders | tmux bug | open |
-| [D-045](#d-045) | Nine emoji such as ☝ and ✌ are one column, as programs and terminals count them | tmux bug | open |
+| [D-045](#d-045) | Nine emoji such as ☝ and ✌ are one column, as programs and terminals count them | tmux bug | fixed upstream |
 | [D-046](#d-046) | The history counters are empty; `display -v` shows only the result | Deferred | deferred |
-| [D-047](#d-047) | Text partly under a floating pane keeps its visible end | tmux bug | open |
-| [D-048](#d-048) | A control client closing stdin with output queued can't crash the server | tmux bug | open |
+| [D-047](#d-047) | Text partly under a floating pane keeps its visible end | tmux bug | fixed upstream |
+| [D-048](#d-048) | A control client closing stdin with output queued can't crash the server | tmux bug | fixed upstream |
 | [D-049](#d-049) | Copying a line wrapped before a wide character has no extra space | Deferred | deferred |
 | [D-050](#d-050) | A narrowed popup reflows its lines; tmux cuts them | Deferred | deferred |
-| [D-051](#d-051) | `destroy-unattached` checks every session; tmux skips some | tmux bug | open |
+| [D-051](#d-051) | `destroy-unattached` checks every session; tmux skips some | tmux bug | fixed upstream |
 | [D-052](#d-052) | The format time limit counts CPU time, so a busy host doesn't truncate formats | tmux bug | open |
 | [D-053](#d-053) | Spaces in a no-autowrap popup get another (invisible) foreground colour | Deferred | deferred |
 | [D-054](#d-054) | A pane title over 2047 bytes is ignored | Deferred | deferred |
 | [D-055](#d-055) | Passthrough is written after the frame of the same turn | Deferred | deferred |
 | [D-056](#d-056) | On a full redraw each cell keeps its own underline colour | Deferred | deferred |
-| [D-057](#d-057) | `suspend-client` leaves control clients alone; tmux cuts their output for good | tmux bug | open |
+| [D-057](#d-057) | `suspend-client` leaves control clients alone; tmux cuts their output for good | tmux bug | fixed upstream |
 | [D-058](#d-058) | Curly and other styled underlines fall back to a plain underline; tmux drops them | tmux bug | open |
 | [D-059](#d-059) | Two pane-palette corners: theme colours in mode styles, open popups | Deferred | deferred |
 | [D-060](#d-060) | A client that is not UTF-8 still gets UTF-8 frames | Deferred | deferred |
@@ -81,7 +81,7 @@ Status: **open** means it differs and will stay that way; **deferred** means not
 | [D-075](#d-075) | ICH reaching the end of the line clears the rest of it, as xterm does; tmux's grid keeps it | Ghostty grid | open |
 | [D-076](#d-076) | ECH that ends on the first column of a wide character clears all of it; tmux leaves its second column a padding cell | Ghostty grid | open |
 | [D-077](#d-077) | A terminal of more than 2048x2048 cells is drawn in its top-left 2048x2048 | tmux bug | open |
-| [D-078](#d-078) | After `respawn-window -k`, no modal pane or mark is left on a pane it destroyed; tmux 3.8 keeps them | tmux bug | open |
+| [D-078](#d-078) | After `respawn-window -k`, no modal pane or mark is left on a pane it destroyed; tmux 3.8 keeps them | tmux bug | fixed upstream |
 
 Closed (vtmux matches tmux):
 
@@ -183,7 +183,7 @@ Closed (vtmux matches tmux):
 - **tmux:** calls `setlocale(LC_TIME, "")` and glibc `strftime`/`localtime_r` (format.c:4694-4700, 6728-6741).
   1. A non-C `LANG` changes `%c %x %r %p %a %b`. `LANG=en_GB.UTF-8` gives `Fri 30 Oct 2026 14:32:28 GMT` for `%c`; `LANG=de_DE.UTF-8` gives `Do Okt` for `%a %b`.
   2. Years past 9999 format in full: `@big=999999999999` gives `33658 Fri`.
-  3. `t/f` output longer than 511 bytes makes `strftime` fail, and tmux prints its half-written stack buffer: `#{t/f/%H<600 y>:@n}` gives `16yyyy...`, as far as the buffer got.
+  3. `t/f` output longer than 511 bytes makes `strftime` fail, and tmux prints its half-written stack buffer: `#{t/f/%H<600 y>:@n}` gives `16yyyy...`, as far as the buffer got. tmux master prints nothing there (43462428, `format_find`).
   4. A `TZ` that is neither a zoneinfo file nor a POSIX rule keeps its leading letters as the abbreviation (`__tzset_parse_tz`, time/tzset.c).
      - `TZ=Invalid/Zone` gives `%Z` = `Invalid` with offset `+0000`; `TZ=AB/x` an empty `%Z`; `TZ=<+03>/x` gives `+03`.
      - When a valid name and offset come first and garbage after, glibc keeps part of the rule: `EST5/x` is empty with `+0000`, `EST5EDT/x` is `EDT -0400`, `EST25` is `EST -2400`, `ABC-3abc,x` is `abc +0400`.
@@ -208,6 +208,7 @@ Closed (vtmux matches tmux):
   - `sort_get_sessions`, `sort_get_winlinks_session`, `sort_get_panes_window` and `sort_get_clients` (sort.c:461-600) return one static array per kind, which every call refills and sorts in place.
   - A nested loop of the same kind re-sorts the array the outer loop is walking, and the outer loop reads the inner order from then on.
   - With sessions zeta, alpha, mike (IDs 0, 1, 2), the outer loop visits zeta, then reads index 1 and 2 of the name-sorted array: `alphamikezeta-zeta alphamikezeta-mike alphamikezeta-zeta`. mike is visited once, zeta twice, alpha never.
+  - tmux master gives each call its own array (d296a6ea), so the outer order holds, as in vtmux.
 - **vtmux:** each loop sorts its own list, so the outer loop visits each session once in its own order: `alphamikezeta-zeta alphamikezeta-alpha alphamikezeta-mike`.
 - **Evidence:** reference tmux 3.8 on the `loop_cases.sh` topology (the reference value is in the row's comment).
 
@@ -303,6 +304,7 @@ Closed (vtmux matches tmux):
 - **Category:** Do not copy tmux bug.
 - **Test:** `crates/vtmux/tests/cli.rs` `windows_respawn_zoomed` (vtmux only: the reference dies).
 - **tmux:** `spawn_window` (spawn.c:106-128) with `SPAWN_RESPAWN` frees the layout (`layout_free`) and the other panes, but leaves `WINDOW_ZOOMED` set with the saved layout pointing at freed cells. The next command that reads the window's layout (`display -p '#{window_layout}'`, `splitw`) kills the server (`server exited unexpectedly`).
+  - tmux master no longer crashes there (98691297, `window_forget_pane`).
 - **vtmux:** the window is unzoomed first, then respawned: one pane, full size, `window_zoomed_flag` 0.
 - **Evidence:** reference tmux 3.8, isolated: `new -d -s a cat; new -d -s k cat; splitw -d -t a cat; resizep -Z -t a:0.1; respawnw -k -t a; display -p -t a '#{window_layout}'` gives `server exited unexpectedly`, exit 1, and every later command says `no server running`.
 
@@ -429,6 +431,7 @@ Closed (vtmux matches tmux):
 - **Category:** Do not copy tmux bug: the cursor is away from the text being edited.
 - **Test:** none; reviewer-57's oracle live scenario (review_pane_prompt).
 - **tmux:** the prompt row follows `status-position` (screen-redraw.c:1616-1617, 1641), but the cursor is placed using `status_at_line(c) == 0` (server-client.c:2141-2144), which is -1 with status off (status.c:90-91, 106). With `status off` and `status-position top`, the prompt is drawn on row 0 and the cursor is put on the last row.
+  - tmux master puts the cursor on the prompt (df21e4de), as vtmux does.
 - **vtmux:** the cursor is placed on the prompt's row.
 - **Evidence:** 40x8, `set -g status off; set -g status-position top`, copy-mode, `g`: tmux puts the cursor at 13,7 with the prompt on row 0; vtmux at 13,0.
 
@@ -483,6 +486,7 @@ Closed (vtmux matches tmux):
   - `cmd_send_keys_inject_key` (cmd-send-keys.c:79) hands the key to the client as `key|KEYC_SENT`. Nothing strips the flag when the key reaches a pane (`server_client_key_callback` -> `window_pane_key` -> `input_key`).
   - So `input_key` misses the trivial case (input-keys.c:628-646) and the tree lookup (655-662). Named keys then hit the `KEYC_IS_SPECIAL` ignore (input-keys.c:681-685), and in modes 1 and 2 `input_key_extended`'s modifier switch hits `default` and returns -1.
   - Most keys sent with `-K` to a pane are lost; in mode 1 even `a` and `Tab`.
+  - tmux master strips `KEYC_SENT` at the top of `input_key` (71fd946a), so they arrive, as in vtmux.
 - **vtmux:** the key is handled like a typed one. The pane gets the same bytes as from `send-keys` without `-K` (and as from the attached client's own keystroke). Bindings and prompts see the key as in tmux.
 - **Evidence:** reference tmux 3.8, attached client under a PTY, `send-keys -K -c <client> KEY` for `C-F3 BTab Escape F3 C-Up a Tab`, each followed by `send-keys -H 7c`, the pane copying its input to a file:
   - standard mode `||\e|||a|\t` (keys 1, 2, 4, 5 lost);
@@ -544,6 +548,7 @@ Closed (vtmux matches tmux):
   - A `source -` or `load-buffer -` among the commands read from stdin by `source-file -` (`printf 'display -p x\nsource -\n' | tmux source -`) waits for ever when the client's stdout is a pipe. The inner `file_read` of `-` needs the client's stdin, which the outer read already has, and the client never answers.
   - With stdout redirected to a file it ends with `Input/output error: -`. When the inner `source -` is the first command it fails at once with `Bad file descriptor: -`.
   - `tmux source - </dev/null` (stdin empty) returns 0 at once.
+  - tmux master fails a second read of stdin with `Bad file descriptor` (76183990, file.c `file_read_open`), as vtmux does.
 - **vtmux:** the inner read fails at once with `Bad file descriptor: -` (exit 1), after printing the output of the commands before it, however stdout is connected. `source - </dev/null` returns 0 at once, as in tmux.
 - **Evidence:** reference tmux 3.8 under `timeout -k 5 6`, six runs each:
   - `printf 'display -p x\nsource -\n' | tmux source -` and the `load-buffer -` form time out every time with stdout a pipe; `>file` gives `x` and `Input/output error: -`, exit 1.
@@ -833,6 +838,7 @@ Closed (vtmux matches tmux):
 - **Category:** Do not copy tmux bug: a link is lost from the output.
 - **Test:** oracle `reflow_wide_padding_history` scene `link` (annotated, `capture-pane -p -e -S -`).
 - **tmux:** `grid_string_cells` closes a link still open at the end of each line (`has_link` is per call), but `cmd_capture_pane_history` hands it the last cell of the line before (`lastgc`). So a line whose first cell is in the same link as the last cell of the line before writes no OSC 8 for it, and its text comes out unlinked. With `-J` the two are one line and nothing is lost.
+  - tmux master clears the saved cell's link when it closes one at the end of a line (50893828), so the next line opens it again, as in vtmux.
 - **vtmux:** such a line opens the link again, as a line that starts in any other link does.
 - **Evidence:** reference tmux 3.8, two lines of twelve `ESC]8;id=lIJ;http://e.x/I/J ESC\ LJ字 ESC]8;; ESC\` links and a space on 80 columns, narrowed to 33. tmux's second row starts `字 ESC]8;id=l06;…`, the `字` of link `l05` unlinked; vtmux's starts `ESC]8;id=l05;http://e.x/0/5 ESC\ 字 ESC]8;; ESC\ ESC]8;id=l06;…`.
 
@@ -879,6 +885,7 @@ Closed (vtmux matches tmux):
     - `refresh-client` draws every such row with the split's border a column left per character;
     - the status line draws its end a column left per character over what it showed before (a status-right `✌🏿⛹‍♂☝️|` after `🇯R✌Q` is followed by `R✌Q`).
   - With U+FE0F, or after a ZWJ, these are two columns in tmux and on such terminals alike.
+  - tmux master makes all nine one column (a1fd084d, 853977c7), as vtmux does.
   - tmux joins a skin-tone modifier to U+1F575 and U+1F590 (`utf8_should_combine`) but not to the other seven, which Ghostty joins as it prints.
 - **vtmux:**
   - The nine are one column (`vtmux_core::width::TEXT_PRESENTATION`): in `char_width`, so in the status line, prompts, menus and `#{w:}`, and in the pane grid, which keeps Ghostty's width for them.
@@ -913,6 +920,7 @@ Closed (vtmux matches tmux):
   - `screen_write_fast_copy` (screen-write.c:667-717), which `format_draw` writes through, sets each cell in the pane's screen, then `break`s at the first one a floating pane hides (`window_position_is_visible`). So the cells after it are never written, the visible ones included.
   - Copy mode's position indicator (`copy-mode-position-format`, drawn with `format_draw` on line 0, window-copy.c `window_copy_write_line`), right-aligned in a 30-column pane under a floating pane whose border ends at column 27, loses its last two cells. tmux shows blanks where `0]` belongs, and a full redraw (`refresh-client`) still does.
   - Text the program printed there shows (`screen_write_cell` writes every cell).
+  - tmux master goes on past the hidden cells (d82f3007, which also crops wide characters), as vtmux does.
 - **vtmux:** the mode's screen holds the whole indicator, and the compositor draws what the floating pane leaves visible: `0]`.
 - **Evidence:** reference tmux 3.8, panes 30x15 and 29x15 side by side, a floating pane 30x3 at -3,1 (border columns 0-27, rows 0-4), `copy-mode` in the left pane: row 0 ends `┐` then two blanks; with `abcdefghijklmnopqrstuvwxyz0123` printed instead it ends `┐23`. A mouse run reaches that layout: `M-MouseDrag1` moves the floating pane off the left edge, then a drag enters copy mode.
 
@@ -925,6 +933,7 @@ Closed (vtmux matches tmux):
   - stdin's EOF sets `CLIENT_EXIT` (control.c `control_error_callback`), but the pane's queued blocks are discarded only later in the loop (server-client.c `server_client_check_exit`, `control_discard`).
   - If the pane is read in the same loop turn, `control_write_output` takes the `CLIENT_EXIT` branch to `ignore` and moves the client's offset to the end of the pane's buffer, with the blocks still queued.
   - The write callback in that turn then asks for a block's bytes past the end, and `control_append_data` calls `fatalx("not enough data: 0 < N")`. The server exits 1, every client gets `%exit server exited unexpectedly` (status 1), and every session is lost.
+  - tmux master discards the pane's blocks at `ignore` (608f3078), so the server survives, as vtmux does.
 - **vtmux:** the client exits 0 with `%exit`; the server, its sessions and the other clients stay.
 - **Evidence:**
   - `pause_after_pauses_a_pane_the_client_is_behind_on` without the pane turned off: tmux exits 1, vtmux 0.
@@ -958,6 +967,7 @@ Closed (vtmux matches tmux):
 - **Category:** Do not copy tmux bug: iteration over a tree being removed from. Copying it means modelling tmux's red-black tree.
 - **Test:** oracle `destroy_unattached`, the two steps annotated D-051 (`ls` and the `session-closed` log after `set -g destroy-unattached keep-last` with a group of three).
 - **tmux:** `server_check_unattached` (server-fn.c:529-560) walks the session tree with `RB_FOREACH` while `session_destroy` (session.c:206) does `RB_REMOVE` on the session it is at, so the next session comes from the removed node's stale links. Which session that skips depends on the tree's shape. With sessions base, solo, x, y, z, and x, y, z in one group, keep-last destroys x, skips y and destroys z, keeping y and leaving `base solo y`.
+  - tmux master walks the tree with `RB_FOREACH_SAFE` (9e596989), so no session is skipped, as in vtmux.
 - **vtmux:** the sessions are visited in name order, each judged once the ones before it are gone: x and y go, and z, the last of the group, stays (`base solo z`).
 - **Evidence:** reference tmux 3.8, the scenario's trace (`base\nsolo\ny\n`, log `[a][x][z]`).
 
@@ -1026,6 +1036,7 @@ Closed (vtmux matches tmux):
   - A control client reads that message only once attached (client.c `client_dispatch_attached`), and it is never sent the `MSG_READY` that gets it there. So it never stops, and never answers with the `MSG_WAKEUP` that clears the flag.
   - It stays suspended for good: `list-clients` leaves it out, its session's `#{session_attached}` does not count it, and its stream gets no more `%output`, while it goes on answering commands.
   - `suspend-client` without `-t` takes the current client. That is a control client whenever it is the best one attached (a script run from outside, a control-mode front end such as iTerm2's `-CC`).
+  - tmux master leaves control clients alone (5fdad439), as vtmux does.
 - **vtmux:** a control client is not suspended (it has no terminal to give back), as `lock-client` leaves it (`server_lock_client` returns early for `CLIENT_CONTROL`). It stays listed, attached and fed with pane output.
 - **Evidence:** reference tmux 3.8, `new -d -s a`, a control client `attach -t a`, then `suspend-client` from the shell: `lsc` prints nothing, `#{session_attached}` is `0`, and after `send-keys x Enter` the control client gets no `%output` but still answers `display -p still`. vtmux lists it, counts it and sends it the output (audit_nested_misc).
 
