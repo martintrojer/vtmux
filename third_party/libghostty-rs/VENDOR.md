@@ -1608,7 +1608,15 @@ over 2.5 min, so it is not kept). vtmux's own
   `set_kitty_image_from_temp_file_allowed(bool)` passed a `bool` where
   `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE` reads a
   `GhosttyString` (the directory); replaced by `set_kitty_image_temp_dir(
-  Option<&str>)`, which passes the string or NULL. Upstream candidate.
+  Option<&str>)`, which passes the string or NULL.
+
+Re-vendoring `libghostty-rs` from upstream master (`483ea3d` or later) drops
+most of this section: the `alloc`, `osc`, `build.rs` rerun-path and kitty
+temp-dir fixes and the `scrollback_max_lines`, `memory_usage` and
+`on_desktop_notification` wrappers are already upstream. `key.rs`/`mouse.rs`
+`encode_to_vec` stays until upstream PR #120 merges; `row_cells`,
+`Cell::bits`, the `vtmux.rs` / patch bindings and the tarball/patch build
+script stay as vtmux-only changes.
 
 ## Bumping libghostty-vt
 Track releases by tag, never a commit (owner policy, 2026-11-11).
