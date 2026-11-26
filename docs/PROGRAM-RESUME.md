@@ -74,7 +74,7 @@ tmux-resurrect saves `#{pane_current_command}`. To restore the reported command 
 # save
 f=${XDG_STATE_HOME:-$HOME/.local/state}/vtmux-resume.jsonl
 mkdir -p "$(dirname "$f")"
-( set -e; umask 077; rm -f "$f"; : > "$f" )
+( set -e; umask 077; rm -f "$f"; : > "$f" ) || exit 1
 vtmux list-panes -a -F '#{pane_id}' |
 while IFS= read -r pane; do
   cmd=$(vtmux display-message -p -t "$pane" '#{pane_resume_command}')
@@ -89,10 +89,11 @@ python3 - "$f" <<'PY'
 import json, subprocess, sys
 for line in open(sys.argv[1]):
     r = json.loads(line)
-    args = ["vtmux", "new-window"]
     if r["cwd"]:
-        args += ["-c", r["cwd"].replace("#", "##")]
-    subprocess.run(args + ["--", "sh", "-c", r["cmd"]], check=True)
+        args = ["vtmux", "new-window", "--", "sh", "-c", 'cd -- "$1" && exec sh -c "$2"', "_", r["cwd"], r["cmd"]]
+    else:
+        args = ["vtmux", "new-window", "--", "sh", "-c", r["cmd"]]
+    subprocess.run(args, check=True)
 PY
 ```
 
