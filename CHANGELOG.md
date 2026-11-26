@@ -2,6 +2,17 @@
 
 vtmux's version is the tmux release it is tested against: `3.8-rc1` is the first release candidate of vtmux for tmux 3.8. `tmux -V` still prints `tmux 3.8`, so plugins' version checks see tmux; `vtmux -V` prints vtmux's own version.
 
+## Unreleased
+
+### Added
+
+- **Program status (OSC 7501).** `set -s vtmux-program-status on`: a program's status reports (working, blocked, done, error) are recorded per pane, its `OSC 7501 ; ?` query is answered, and `#{pane_program_state}`, `#{pane_program_kind}`, `#{pane_program_progress}`, `#{pane_program_app}`, `#{pane_program_title}` and `#{pane_program_message}` show the most urgent record. The `vtmux-pane-program-status` hook runs on a change. Nothing goes to the outer terminal. A grant outlives the option until respawn or close; a live upgrade keeps it.
+- **Program resume (OSC 7577).** `set -s vtmux-program-resume on`: a pane started while on gets a fresh `OSC7577_TOKEN`; a program reporting through OSC 7577 with a valid MAC is recorded, and `#{pane_resume_command}`, `#{pane_resume_cwd}` and `#{pane_resume_pid}` show it. The `vtmux-pane-program-resume` hook runs on a change. vtmux never relaunches anything. A live upgrade keeps token and records.
+
+### Changed
+
+- An inherited `OSC7577_TOKEN` is removed from every pane and popup environment, whatever `vtmux-program-resume` says, and `update-environment` does not import it.
+
 ## 3.8-rc2
 
 ### Fixed
