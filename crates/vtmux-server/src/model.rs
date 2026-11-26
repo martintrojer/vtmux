@@ -1709,6 +1709,14 @@ impl Model {
         self.pop_zoom(wid, was_zoomed);
         // server-fn.c:435 / 567: server_redraw_window.
         self.redraw(Redraw::Window(wid));
+        // D34: its program state leaves #{window_program_state} and
+        // #{session_program_state} of every session holding the window.
+        if pane
+            .as_ref()
+            .is_some_and(|p| p.program_status.summary().is_some())
+        {
+            self.redraw(Redraw::WindowStatus(wid));
+        }
         pane.into_iter().collect()
     }
 

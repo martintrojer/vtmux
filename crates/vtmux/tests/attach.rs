@@ -10654,6 +10654,40 @@ fn osc_7501_rollups_time_id_and_root_state() {
     assert_eq!(fmt(&w, "%0", roll), "|blocked");
 }
 
+/// D34 rollups: killing a `blocked` pane in a window that is not current
+/// redraws `#{session_program_state}` at once; the time format never reads
+/// the environment; a same-state winner `id` change is no redraw bug.
+#[test]
+fn osc_7501_pane_removal_redraws_and_time_ignores_environment() {
+    let (w, a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    w.cli(&["set", "-g", "status-right", "S=#{session_program_state}"]);
+    w.cli(&["set", "-g", "status-interval", "0"]);
+    w.cli(&["set-environment", "-g", "pane_program_state_time", "leak"]);
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state_time}"), "");
+    let program = osc_loop(&token_prelude(&w.home.path().join("tok-split")));
+    let split = out(
+        &w,
+        &[
+            "splitw",
+            "-d",
+            "-t",
+            "%0",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "sh",
+            "-c",
+            &program,
+        ],
+    );
+    osc_emit(&w, &split, b"\x1b]7501;id=x:state=blocked\x07");
+    a.wait(|a| status_row(a).ends_with("S=blocked"));
+    w.cli(&["kill-pane", "-t", &split]);
+    // Well under any timer redraw.
+    a.wait_for(Duration::from_secs(2), |a| status_row(a).ends_with("S="));
+}
+
 /// D35: an inherited `OSC7577_TOKEN` never reaches a pane (server,
 /// global environment and `new-window -e` alike), and no token is minted
 /// while the option is off.

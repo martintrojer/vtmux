@@ -838,7 +838,10 @@ impl<'a> Ctx<'a> {
             "pane_program_state" => p.program_status.summary().map_or_else(String::new, |s| {
                 crate::program_status::state_name(s.state).to_owned()
             }),
-            "pane_program_state_time" => p.program_status.state_time()?.to_string(),
+            "pane_program_state_time" => p
+                .program_status
+                .state_time()
+                .map_or_else(String::new, |t| t.to_string()),
             "pane_program_id" => p.program_status.id().unwrap_or_default().to_owned(),
             "pane_program_root_state" => {
                 p.program_status.root_state().map_or_else(String::new, |s| {

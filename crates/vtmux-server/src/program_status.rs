@@ -268,12 +268,13 @@ impl ProgramStatus {
     }
 
     fn change(&mut self, f: impl FnOnce(&mut Self)) -> Changed {
-        let before = self.summary();
+        let key = |s: &Self| (s.summary(), s.id().map(str::to_owned), s.root_state());
+        let before = key(self);
         f(self);
-        let after = self.summary();
+        let after = key(self);
         Changed {
             any: before != after,
-            state: before.as_ref().map(|s| s.state) != after.as_ref().map(|s| s.state),
+            state: before.0.as_ref().map(|s| s.state) != after.0.as_ref().map(|s| s.state),
         }
     }
 
@@ -446,6 +447,18 @@ mod tests {
             Some(ProgramState::Blocked)
         );
         assert_eq!(rollup([]), None);
+    }
+
+    #[test]
+    fn winner_id_or_root_state_change_is_a_change() {
+        let mut s = ProgramStatus::default();
+        s.apply(&ev("alice", ProgramState::Working));
+        assert!(s.apply(&ev("zebra", ProgramState::Working)).any);
+        let mut s = ProgramStatus::default();
+        s.apply(&ev("", ProgramState::Idle));
+        s.apply(&ev("c", ProgramState::Blocked));
+        let c = s.apply(&ev("", ProgramState::Done));
+        assert!(c.any && !c.state);
     }
 
     #[test]
