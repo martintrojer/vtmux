@@ -1,0 +1,18 @@
+name = "il_wide_spacer_rgb"
+size = [40, 10]
+# An emoji that does not fit in the last column of a 5-column pane wraps and
+# leaves that cell unwritten. IL at the top under an RGB background moves the
+# wrapped "BBBB" row down and unwraps it, its continuation pushed off the
+# screen (grid.c grid_move_lines, grid_clear). tmux never wrote the cell the
+# emoji skipped, so the pen's background does not reach it: capture-pane -e
+# shows "BBBB" with no RGB escape and -R does not mark the row EXTENDED.
+# vtmux's Ghostty keeps a spacer head there, which the unwrap clears to a
+# default blank cell (patch 0011, Screen.unwrapRow), not the pen's.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "5", "-y", "5", "sh", "-c", "printf 'AAAA\\015\\012AAAA\\015\\012BBBB\\360\\237\\230\\200CCC\\033[48;2;9;8;7m\\033[1;1H\\033[L\\033[m'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pe", "-t", "a:"] },
+  { run = ["capturep", "-pR", "-t", "a:"] },
+]

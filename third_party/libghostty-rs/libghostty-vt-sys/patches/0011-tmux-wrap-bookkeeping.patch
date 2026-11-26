@@ -9,9 +9,9 @@ index a6f846938..57af8ab7b 100644
 +/// vtmux: unset the soft wrap of the row at `p` (and the continuation
 +/// flag of the row below), as tmux's grid_clear_lines and grid_move_lines
 +/// clear GRID_LINE_WRAPPED on the line above the lines they touch. A
-+/// spacer head left at the end of the row is cleared, as in
-+/// `cursorResetWrap`.
-+pub fn unwrapRow(self: *Screen, p: Pin) void {
++/// spacer head left at the end of the row becomes a default blank cell:
++/// tmux never wrote that cell, so the current pen's background is not in it.
++pub fn unwrapRow(_: *const Screen, p: Pin) void {
 +    const row = p.rowAndCell().row;
 +    if (!row.wrap) return;
 +    row.wrap = false;
@@ -19,7 +19,7 @@ index a6f846938..57af8ab7b 100644
 +    const cells = p.cells(.all);
 +    const last = p.node.cols() - 1;
 +    if (cells[last].wide == .spacer_head) {
-+        self.clearCells(p.node.page(), row, cells[last..][0..1]);
++        p.node.page().clearCells(row, last, last + 1, .{});
 +    }
 +    p.markDirty();
 +}

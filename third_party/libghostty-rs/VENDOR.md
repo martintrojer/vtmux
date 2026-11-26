@@ -245,7 +245,10 @@ the changes outside them. Each patch has its note under its theme.
   an erased continuation under an unwrapped line). The blank row a
   scroll adds keeps its unset flag: patch 0012 reads that as tmux's
   empty line. The alternate screen does not reflow, so its LF skips
-  this. Upstream tests that assert the xterm behaviour, or 1.0.2's, now
+  this. An unwrap that leaves a spacer head at the row's end makes it a
+  default blank cell (`unwrapRow`), not one in the pen's background:
+  tmux never wrote that cell (oracle `il_wide_spacer_rgb`). Upstream
+  tests that assert the xterm behaviour, or 1.0.2's, now
   assert tmux's ("insertLines resets wrap", "deleteLines resets wrap",
   "eraseLine resets pending wrap", and 1.0.2's "insertLines and
   deleteLines soft wrap state", "insertLines preserves wrap of rows
