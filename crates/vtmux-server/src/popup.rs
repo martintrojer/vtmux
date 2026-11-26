@@ -283,12 +283,7 @@ impl Server {
         let (jx, jy) = inner(lines, open.sx, open.sy);
         let shell = self.default_shell(tree);
         let mut env = self.job_environ(Some(open.session));
-        for e in &open.env {
-            if let Some((k, v)) = e.split_once('=') {
-                env.retain(|(name, _)| name != k);
-                env.push((k.to_owned(), v.to_owned()));
-            }
-        }
+        merge_popup_env(&mut env, &open.env);
         // `-e PATH=...` still gets the D5 shim first, as a pane's does.
         if let Some(i) = env.iter().position(|(k, _)| k == "PATH")
             && let Some(path) = self.shim_path(Some(&env[i].1))
@@ -860,5 +855,38 @@ impl Server {
                 ..CellStyle::default()
             },
         ))
+    }
+}
+
+/// A popup's environment: the `-e NAME=value` pairs over `env`, and no
+/// `OSC7577_TOKEN` whichever way it came (D35: a popup is never granted).
+fn merge_popup_env(env: &mut Vec<(String, String)>, extra: &[String]) {
+    for e in extra {
+        if let Some((k, v)) = e.split_once('=') {
+            env.retain(|(name, _)| name != k);
+            env.push((k.to_owned(), v.to_owned()));
+        }
+    }
+    env.retain(|(k, _)| k != crate::environ::TOKEN_VAR);
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::merge_popup_env;
+
+    #[test]
+    fn a_popup_environment_never_holds_a_resume_token() {
+        let mut env = vec![
+            ("OSC7577_TOKEN".to_owned(), "inherited".to_owned()),
+            ("A".to_owned(), "1".to_owned()),
+        ];
+        merge_popup_env(&mut env, &["OSC7577_TOKEN=viaE".into(), "B=2".into()]);
+        assert_eq!(
+            env,
+            [
+                ("A".to_owned(), "1".to_owned()),
+                ("B".to_owned(), "2".to_owned())
+            ]
+        );
     }
 }

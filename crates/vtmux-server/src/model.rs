@@ -329,6 +329,9 @@ pub struct Pane {
     pub shell_commands: ShellCommands,
     /// D34: what its programs reported through OSC 7501.
     pub program_status: crate::program_status::ProgramStatus,
+    /// D35: the token and records of its OSC 7577 reports; `Some` once the
+    /// pane was granted a token (kept when the option goes off).
+    pub program_resume: Option<crate::program_resume::ResumeStore>,
     /// D29: the process group that was granted the kitty keyboard protocol
     /// on each screen (primary, alternate), whose end ends the grant
     /// ([`crate::pane_kitty`]).

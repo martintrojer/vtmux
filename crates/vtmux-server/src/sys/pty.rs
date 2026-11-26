@@ -736,6 +736,13 @@ fn parse_linux_stat(stat: &[u8]) -> Option<(u32, u64)> {
     Some((parent_pid, start_time))
 }
 
+/// The effective user ID of this process.
+#[must_use]
+pub fn euid() -> u32 {
+    // SAFETY: geteuid cannot fail.
+    unsafe { libc::geteuid() }
+}
+
 /// Look up process `pid`; `None` when it does not exist (or is a zombie).
 #[must_use]
 pub fn process_info(pid: u32) -> Option<ProcessInfo> {

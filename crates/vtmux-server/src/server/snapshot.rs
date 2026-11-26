@@ -82,7 +82,10 @@ use crate::environ::Environ;
 use crate::format_ctx::ServerInfo;
 use crate::model::{Pane, Session, Window, Zoom};
 use crate::pane_io::PaneIo;
-use crate::snapshot_term::{Form, ghostty_pages_requirement, term_from_snapshot, term_to_snapshot};
+use crate::snapshot_term::{
+    Form, ghostty_pages_requirement, term_from_snapshot, term_from_snapshot_resuming,
+    term_to_snapshot,
+};
 
 /// A reply of a client terminal that changed its features, kept so the
 /// terminal opened again after a restore has them too.
@@ -512,8 +515,13 @@ pub(crate) fn restore_term(
     let cols = u16::try_from(p.geometry.sx).unwrap_or(u16::MAX).max(1);
     let rows = u16::try_from(p.geometry.sy).unwrap_or(u16::MAX).max(1);
     if let Some(t) = &p.term {
-        let mut term = term_from_snapshot(t, ghostty_patches)
-            .map_err(|e| invalid(format!("%{}: {e}", p.id)))?;
+        let mut term = term_from_snapshot_resuming(
+            t,
+            ghostty_patches,
+            vtmux_vt::ImportCheck::Lazy,
+            p.program_resume.is_some(),
+        )
+        .map_err(|e| invalid(format!("%{}: {e}", p.id)))?;
         if (term.cols(), term.rows()) != (cols, rows) {
             return Err(invalid(format!("%{}: terminal not the pane's size", p.id)));
         }
@@ -540,6 +548,7 @@ fn fresh_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
     term.number_links_from(&server.link_numbers);
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
+    term.set_program_resume_enabled(p.program_resume.is_some());
     if p.empty {
         empty_pane_modes(&mut term);
     }
@@ -1289,7 +1298,7 @@ impl Server {
                     restored_from: None,
                     restart_from: None,
                     program_status: program_status_out(p),
-                    program_resume: None,
+                    program_resume: program_resume_out(p),
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,
@@ -2037,6 +2046,7 @@ impl Server {
                 x.graphics_owner_alternate,
             ]),
             program_status: program_status_in(x.program_status.as_ref()),
+            program_resume: x.program_resume.as_ref().map(program_resume_in),
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,
@@ -2368,6 +2378,57 @@ fn program_status_out(p: &Pane) -> Option<snap::ProgramStatusState> {
             })
             .collect(),
     })
+}
+
+/// D35: a pane's token, records and replay times, or nothing for one never
+/// granted.
+fn program_resume_out(p: &Pane) -> Option<snap::ProgramResumeState> {
+    let r = p.program_resume.as_ref()?;
+    let time_of = |pid| {
+        r.last_times()
+            .iter()
+            .find(|&&(q, _)| q == pid)
+            .map_or(0, |&(_, t)| t)
+    };
+    Some(snap::ProgramResumeState {
+        token: r.token().to_owned(),
+        next_seq: r.records().iter().map(|x| x.seq + 1).max().unwrap_or(0),
+        records: r
+            .records()
+            .iter()
+            .map(|x| snap::ProgramResumeRecord {
+                pid: x.pid,
+                start_time: x.start_time,
+                time: time_of(x.pid),
+                argv: x.argv.clone(),
+                cwd: x.cwd.clone(),
+                cwd_from_report: false,
+                seq: x.seq,
+            })
+            .collect(),
+        last_times: r
+            .last_times()
+            .iter()
+            .map(|&(pid, time)| snap::ProgramResumeTime { pid, time })
+            .collect(),
+    })
+}
+
+fn program_resume_in(s: &snap::ProgramResumeState) -> crate::program_resume::ResumeStore {
+    crate::program_resume::ResumeStore::from_parts(
+        s.token.clone(),
+        s.records
+            .iter()
+            .map(|r| crate::program_resume::Record {
+                pid: r.pid,
+                start_time: r.start_time,
+                argv: r.argv.clone(),
+                cwd: r.cwd.clone(),
+                seq: r.seq,
+            })
+            .collect(),
+        s.last_times.iter().map(|t| (t.pid, t.time)).collect(),
+    )
 }
 
 fn program_status_in(s: Option<&snap::ProgramStatusState>) -> crate::program_status::ProgramStatus {

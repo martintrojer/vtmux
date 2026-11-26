@@ -1863,11 +1863,26 @@ pub fn term_from_snapshot(
 ///
 /// # Errors
 /// As [`term_from_snapshot`].
-#[expect(clippy::too_many_lines, reason = "one line per field carried")]
 pub fn term_from_snapshot_with(
     t: &snap::TermState,
     ghostty_patches: &str,
     check: ImportCheck,
+) -> Result<PaneTerm, TermError> {
+    term_from_snapshot_resuming(t, ghostty_patches, check, false)
+}
+
+/// [`term_from_snapshot_with`] with OSC 7577 scanning on from the start of
+/// the continuation replay when `resume` (D35): a report cut by the
+/// export is completed by the bytes after it.
+///
+/// # Errors
+/// As [`term_from_snapshot`].
+#[expect(clippy::too_many_lines, reason = "one line per field carried")]
+pub fn term_from_snapshot_resuming(
+    t: &snap::TermState,
+    ghostty_patches: &str,
+    check: ImportCheck,
+    resume: bool,
 ) -> Result<PaneTerm, TermError> {
     let cols = narrow::<u16>(t.cols, "terminal width")?;
     let rows = narrow::<u16>(t.rows, "terminal height")?;
@@ -2105,6 +2120,7 @@ pub fn term_from_snapshot_with(
         pane,
     };
     let mut import = StateImport::new(&state, check)?;
+    import.set_program_resume_enabled(resume);
     pages_of(primary_screen, primary_cols, ghostty_patches, &mut |page| {
         Ok(import.page(ScreenKind::Primary, page)?)
     })?;

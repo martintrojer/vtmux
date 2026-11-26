@@ -1861,6 +1861,37 @@ fn an_ordinary_attached_client_requires_no_feature() {
             .as_ref()
             .is_some_and(|p| p.granted && p.records.len() == 1)
     );
+    // So is a program's OSC 7577 grant (D35): a pane spawned with the
+    // option on has its token and records in the same ignorable way.
+    assert!(s.panes[0].program_resume.is_none());
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(
+        &mut a,
+        &dir,
+        &["split-window", "-d", "-t", "s:0", "cat", "-"],
+    );
+    let granted = a.model.panes.keys().copied().max().unwrap();
+    let token = a.model.panes[&granted]
+        .program_resume
+        .as_ref()
+        .unwrap()
+        .token()
+        .to_owned();
+    let s = a
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        })
+        .unwrap();
+    assert_eq!(s.meta.requires, Vec::<String>::new());
+    let state = s
+        .panes
+        .iter()
+        .find(|p| p.id == granted.0)
+        .and_then(|p| p.program_resume.as_ref())
+        .expect("the granted pane carries its token");
+    assert_eq!(state.token, token);
+    assert_eq!(s.panes[0].input_queued, b"typed ahead");
     assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
     assert!(s.clients[0].stopped);
     assert!(s.clients[0].keeps_raw);
@@ -3435,4 +3466,290 @@ fn a_view_mode_resize_libghostty_fails_keeps_copy_and_backing_together() {
     assert!(v.resize(10, 6));
     assert_eq!(v.backing_size(), (10, 6));
     assert_eq!(v.copy.size(), (10, 6));
+}
+
+/// An OSC 7577 report for this very process (alive, ours), signed with
+/// `token` and ended with BEL, unpadded base64 as rev 0.5 allows.
+fn resume_report(token: &str, argv: &[&str]) -> Vec<u8> {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let b64 = |s: &str| {
+        let mut out = String::new();
+        for c in s.as_bytes().chunks(3) {
+            let n = (u32::from(c[0]) << 16)
+                | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+                | u32::from(*c.get(2).unwrap_or(&0));
+            for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+                if i <= c.len() {
+                    out.push(char::from(A[((n >> shift) & 63) as usize]));
+                }
+            }
+        }
+        out
+    };
+    let argv: Vec<String> = argv.iter().map(|a| b64(a)).collect();
+    let prefix = format!(
+        "pid={}:time={}:argv={}",
+        std::process::id(),
+        crate::model::now_epoch(),
+        argv.join(",")
+    );
+    let mac = crate::program_resume::hex(&crate::program_resume::sha256(&[
+        prefix.as_bytes(),
+        b":",
+        token.as_bytes(),
+    ]));
+    format!("\x1b]7577;{prefix}:mac={mac}\x07").into_bytes()
+}
+
+fn resume_records(s: &Server, p: vtmux_core::ids::PaneId) -> usize {
+    s.model.panes[&p]
+        .program_resume
+        .as_ref()
+        .unwrap()
+        .records()
+        .len()
+}
+
+fn resume_token(s: &Server, p: vtmux_core::ids::PaneId) -> Option<String> {
+    Some(
+        s.model.panes[&p]
+            .program_resume
+            .as_ref()?
+            .token()
+            .to_owned(),
+    )
+}
+
+/// The environment a pane's shell saw, once it wrote it.
+fn pane_token_seen(dir: &Path, name: &str) -> String {
+    let file = dir.join(name);
+    for _ in 0..200 {
+        if let Ok(s) = std::fs::read_to_string(&file) {
+            return s;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    panic!("the pane wrote nothing");
+}
+
+fn token_script(dir: &Path, name: &str) -> String {
+    let f = dir.join(name);
+    format!(
+        "printf '%s' \"$OSC7577_TOKEN\" > {f}.tmp; mv {f}.tmp {f}; cat -",
+        f = f.display()
+    )
+}
+
+/// D35: an inherited `OSC7577_TOKEN` never reaches a pane, from the global
+/// environment, the session's or `-e`, with the option off; with it on the
+/// pane gets its own 32-character token and the store holds the same.
+#[test]
+fn a_pane_never_inherits_a_resume_token() {
+    let dir = temp_dir("rtoken");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &["set-environment", "-g", "OSC7577_TOKEN", "global"],
+    );
+    let off = token_script(&dir, "off");
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-e",
+            "OSC7577_TOKEN=viae",
+            &off,
+        ],
+    );
+    ok(
+        &mut a,
+        &dir,
+        &["set-environment", "-t", "s", "OSC7577_TOKEN", "sess"],
+    );
+    assert_eq!(pane_token_seen(&dir, "off"), "");
+    let p0 = vtmux_core::ids::PaneId(0);
+    assert!(a.model.panes[&p0].program_resume.is_none());
+    assert!(!a.model.panes[&p0].term.program_resume_enabled());
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    let on = token_script(&dir, "on");
+    ok(&mut a, &dir, &["split-window", "-d", "-t", "s:0", &on]);
+    let p1 = vtmux_core::ids::PaneId(1);
+    let minted = resume_token(&a, p1).expect("granted");
+    assert_eq!(minted.len(), 32);
+    assert_eq!(pane_token_seen(&dir, "on"), minted);
+    // Rule 5: turning the option on grants no running pane.
+    assert!(resume_token(&a, p0).is_none());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a client inside a granted pane does not copy its token into the
+/// session environment through `update-environment`.
+#[test]
+fn update_environment_never_imports_the_resume_token() {
+    let dir = temp_dir("rtoken-env");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(
+        &mut a,
+        &dir,
+        &["set", "-g", "update-environment", "OSC7577_TOKEN"],
+    );
+    let src = crate::environ::Environ::from_pairs([("OSC7577_TOKEN".into(), "minted".into())]);
+    let patterns = a.array_option(
+        vtmux_core::options::TreeId::GlobalSession,
+        "update-environment",
+    );
+    let mut dst = crate::environ::Environ::default();
+    crate::environ::update(&patterns, &src, &mut dst);
+    assert_eq!(dst.get("OSC7577_TOKEN"), None);
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: rule 5 and respawn. The grant outlives the option; a respawn mints
+/// a fresh token while the option is on and none when it is off.
+#[test]
+fn a_resume_grant_outlives_the_option_and_a_respawn_renews_it() {
+    let dir = temp_dir("rgrant");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let p = vtmux_core::ids::PaneId(0);
+    let first = resume_token(&a, p).expect("granted");
+    assert!(a.model.panes[&p].term.program_resume_enabled());
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "off"]);
+    assert_eq!(resume_token(&a, p).as_deref(), Some(first.as_str()));
+    assert!(a.model.panes[&p].term.program_resume_enabled());
+    a.pane_input(p, &resume_report(&first, &["nvim"]), false);
+    assert_eq!(
+        a.model.panes[&p]
+            .program_resume
+            .as_ref()
+            .unwrap()
+            .records()
+            .len(),
+        1
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    let second = resume_token(&a, p).expect("granted again");
+    assert_ne!(first, second);
+    assert_eq!(resume_records(&a, p), 0);
+    // The old token no longer verifies.
+    a.pane_input(p, &resume_report(&first, &["nvim"]), false);
+    assert_eq!(resume_records(&a, p), 0);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "off"]);
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    assert!(resume_token(&a, p).is_none());
+    assert!(!a.model.panes[&p].term.program_resume_enabled());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a signed report shows in the formats and fires the hook; a
+/// respawn clears them and fires it again.
+#[test]
+fn a_resume_report_reaches_the_formats_and_hook_and_respawn_clears_it() {
+    let dir = temp_dir("rreport");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "set-hook",
+            "-g",
+            "vtmux-pane-program-resume",
+            "set -g @fired yes",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    let fmt = "#{pane_resume_command}|#{pane_resume_pid}";
+    let none = run(&mut a, &dir, &["display-message", "-p", "-t", "%0", fmt]);
+    assert!(none.contains("\n|\n"), "{none}");
+    // A report with a wrong token is ignored: no change, no hook.
+    a.pane_input(p, &resume_report("wrong", &["nvim"]), false);
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let quiet = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(!quiet.contains("yes"), "{quiet}");
+    let token = resume_token(&a, p).unwrap();
+    a.pane_input(p, &resume_report(&token, &["nvim", "a b"]), false);
+    let shown = run(&mut a, &dir, &["display-message", "-p", "-t", "%0", fmt]);
+    let want = format!("nvim 'a b'|{}", std::process::id());
+    assert!(shown.contains(&format!("\n{want}\n")), "{shown}");
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let fired = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(fired.contains("\nyes\n"), "{fired}");
+    ok(&mut a, &dir, &["set", "-g", "@fired", "no"]);
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let pre = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(pre.contains("\nno\n"), "{pre}");
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let after = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(after.contains("\nyes\n"), "{after}");
+    let gone = run(&mut a, &dir, &["display-message", "-p", "-t", "%0", fmt]);
+    assert!(gone.contains("\n|\n"), "{gone}");
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: the token, records and replay times cross a rebuild, and a report
+/// cut by the export (between its ESC and `\`) is completed after it.
+#[test]
+fn resume_records_and_a_split_report_survive_a_rebuild() {
+    let dir = temp_dir("rsnap");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let p = vtmux_core::ids::PaneId(0);
+    let token = resume_token(&a, p).unwrap();
+    a.pane_input(p, &resume_report(&token, &["nvim"]), false);
+    let mut second = resume_report(&token, &["emacs"]);
+    // End with ESC \ and cut between the two.
+    second.pop();
+    second.extend_from_slice(b"\x1b");
+    a.pane_input(p, &second, false);
+    assert_eq!(
+        a.model.panes[&p]
+            .program_resume
+            .as_ref()
+            .unwrap()
+            .records()
+            .len(),
+        1
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "off"]);
+    let mut b = rebuild(&a, &dir, "b");
+    let before = a.model.panes[&p].program_resume.clone().unwrap();
+    let got = b.model.panes[&p].program_resume.clone().unwrap();
+    assert_eq!(got, before);
+    assert!(b.model.panes[&p].term.program_resume_enabled());
+    b.pane_input(p, b"\\", false);
+    let store = b.model.panes[&p].program_resume.as_ref().unwrap();
+    assert_eq!(store.token(), token);
+    // Both reports are from this pid: the later replaces the earlier.
+    assert_eq!(store.records().len(), 1);
+    assert_eq!(store.records()[0].argv, ["emacs"]);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -11,6 +11,9 @@ pub struct Entry {
     pub hidden: bool,
 }
 
+/// D35: the variable that carries a pane's OSC 7577 token.
+pub const TOKEN_VAR: &str = "OSC7577_TOKEN";
+
 #[derive(Clone, Debug, Default)]
 pub struct Environ(BTreeMap<String, Entry>);
 
@@ -105,6 +108,10 @@ pub fn update(patterns: &[String], src: &Environ, dst: &mut Environ) {
             // environ_set with the source value; a removed source entry has
             // none, and tmux would format a NULL string.
             let Some(value) = &entry.value else { continue };
+            // D35: a client inside a granted pane must not hand its token on.
+            if name == TOKEN_VAR {
+                continue;
+            }
             if vtmux_core::fnmatch::matches(pattern, name, false) {
                 dst.set(name, value, false);
                 found = true;
@@ -119,6 +126,19 @@ pub fn update(patterns: &[String], src: &Environ, dst: &mut Environ) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_never_copies_the_resume_token() {
+        let src = Environ::from_pairs([
+            (TOKEN_VAR.into(), "secret".into()),
+            ("OTHER".into(), "o".into()),
+        ]);
+        let mut dst = Environ::default();
+        let pats: Vec<String> = ["*", TOKEN_VAR].map(Into::into).into();
+        update(&pats, &src, &mut dst);
+        assert_eq!(dst.get("OTHER"), Some("o"));
+        assert_eq!(dst.get(TOKEN_VAR), None);
+    }
 
     #[test]
     fn update_copies_matches_and_clears_misses() {

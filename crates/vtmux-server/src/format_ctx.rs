@@ -843,6 +843,15 @@ impl<'a> Ctx<'a> {
                 .summary()
                 .map(|s| s.message)
                 .unwrap_or_default(),
+            // D35: the program to resume, among those still running (a
+            // dead or reused pid's record is pruned first).
+            "pane_resume_command" => resume_of(p)
+                .and_then(|r| r.command(&LOOK))
+                .unwrap_or_default(),
+            "pane_resume_cwd" => resume_of(p).and_then(|r| r.cwd(&LOOK)).unwrap_or_default(),
+            "pane_resume_pid" => resume_of(p)
+                .and_then(|r| r.pid(&LOOK))
+                .map_or_else(String::new, |n| n.to_string()),
             "pane_last_output_time" => p.last_output_time?.to_string(),
             "pane_last_prompt_time" => p.shell_commands.last_prompt?.to_string(),
             "pane_command_start_time" => p.shell_commands.started?.to_string(),
@@ -1830,6 +1839,16 @@ const COPY_FORMATS: &[&str] = &[
     "copy_cursor_line",
     "copy_cursor_hyperlink",
 ];
+
+/// D35: how the resume formats look a process up.
+const LOOK: fn(u32) -> Option<crate::sys::pty::ProcessInfo> = crate::sys::pty::process_info;
+
+/// Pane `p`'s resume records without the dead ones.
+fn resume_of(p: &crate::model::Pane) -> Option<crate::program_resume::ResumeStore> {
+    let mut store = p.program_resume.clone()?;
+    store.prune(&LOOK);
+    Some(store)
+}
 
 #[cfg(test)]
 mod table_tests {

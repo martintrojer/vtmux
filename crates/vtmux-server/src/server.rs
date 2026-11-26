@@ -5731,7 +5731,29 @@ impl Server {
             child.set("PATH", path, false);
         }
         child.set("PATH", &self.pane_path(child.get("PATH")), false);
+        // D35: whatever token came in is not this pane's, option or not.
+        child.unset(crate::environ::TOKEN_VAR);
         child
+    }
+
+    /// D35: a fresh token for a pane with a program, while the option is on;
+    /// it goes into the pane's environment `child`.
+    fn mint_resume(
+        &self,
+        ps: &PaneSpawn<'_>,
+        child: &mut Environ,
+    ) -> Option<crate::program_resume::ResumeStore> {
+        if ps.empty
+            || self
+                .model
+                .number_option(TreeId::Server, "vtmux-program-resume")
+                == 0
+        {
+            return None;
+        }
+        let token = crate::program_resume::generate_token().ok()?;
+        child.set(crate::environ::TOKEN_VAR, &token, false);
+        Some(crate::program_resume::ResumeStore::new(token))
     }
 
     /// A new pane's terminal (`window_pane_create`, `screen_init`), or
@@ -5815,13 +5837,15 @@ impl Server {
             argv.extend(self.default_command(session_tree));
         }
         child.set("SHELL", &shell.to_string_lossy(), false);
+        let program_resume = self.mint_resume(ps, &mut child);
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
         // The terminal before the fork: no child is left behind when
         // there is no memory for it.
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
-        let term = self.new_pane_term(ps, (cols, rows), history_limit)?;
+        let mut term = self.new_pane_term(ps, (cols, rows), history_limit)?;
+        term.set_program_resume_enabled(program_resume.is_some());
         // spawn.c:458-464: an empty pane forks nothing.
         let spawned = if ps.empty {
             None
@@ -5902,6 +5926,7 @@ impl Server {
             last_output_time: None,
             shell_commands: crate::model::ShellCommands::default(),
             program_status: crate::program_status::ProgramStatus::default(),
+            program_resume,
             kitty_owner: [None; 2],
             graphics: crate::model::PaneGraphics::default(),
         })
@@ -6119,6 +6144,14 @@ impl Server {
         pane.term.end_inband_resize();
         // D34: and its program status, grant and records.
         pane.term.set_program_status_granted(false);
+        // D35: and its resume token and records; the bodies still queued
+        // went with the scanner switched off.
+        let resume_had = pane
+            .program_resume
+            .as_ref()
+            .is_some_and(|r| r.best(&sys::pty::process_info).is_some());
+        pane.program_resume = None;
+        pane.term.set_program_resume_enabled(false);
         // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM
         // home it too, so they come before), then screen_alternate_off(s,
         // NULL, 0): no cursor restored, but its resize back to the pane's
@@ -6164,9 +6197,15 @@ impl Server {
                     pane.argv.clone_from(&ps.argv);
                 }
                 pane.cwd.clone_from(&ps.cwd);
+                if resume_had {
+                    self.model.fire_pane("vtmux-pane-program-resume", p);
+                }
                 return Err(e);
             }
         };
+        pane.program_resume = fresh.program_resume;
+        pane.term
+            .set_program_resume_enabled(pane.program_resume.is_some());
         pane.io = fresh.io;
         pane.empty = fresh.empty;
         pane.last_rename = fresh.last_rename;
@@ -6180,6 +6219,9 @@ impl Server {
         pane.argv = fresh.argv;
         pane.shell = fresh.shell;
         pane.cwd = fresh.cwd;
+        if resume_had {
+            self.model.fire_pane("vtmux-pane-program-resume", p);
+        }
         Ok(())
     }
 
@@ -6270,6 +6312,7 @@ impl Server {
     /// program, or written to an empty pane (`display-message -I`), into
     /// its terminal, with what that sets off. `flooding`: more of a flood
     /// rather than the start of a burst.
+    #[expect(clippy::too_many_lines, reason = "one step per thing a read does")]
     pub(crate) fn pane_input(&mut self, p: PaneId, bytes: &[u8], flooding: bool) {
         if bytes.is_empty() {
             return;
@@ -6376,6 +6419,7 @@ impl Server {
         for event in events {
             self.pane_term_event(p, window, event);
         }
+        self.program_resume_drain(p);
         for name in renames {
             self.pane_rename(p, window, &name);
         }
@@ -6450,6 +6494,30 @@ impl Server {
             TermEvent::Notification(n) => self.pane_notification(window, &n),
             // D34: in order with the prompts around it.
             TermEvent::ProgramStatus(ev) => self.program_status_change(p, |s| s.apply(&ev)),
+        }
+    }
+
+    /// D35: verify the OSC 7577 reports pane `p`'s output held; the hook
+    /// fires when the resume state they leave differs. A report that is
+    /// ignored looks up no process.
+    fn program_resume_drain(&mut self, p: PaneId) {
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        let bodies = pane.term.drain_program_resume();
+        let Some(store) = pane.program_resume.as_mut().filter(|_| !bodies.is_empty()) else {
+            return;
+        };
+        let now = u64::try_from(crate::model::now_epoch()).unwrap_or(0);
+        let euid = sys::pty::euid();
+        let mut changed = false;
+        for body in &bodies {
+            changed |= store
+                .report(body, now, euid, &sys::pty::process_info)
+                .changed();
+        }
+        if changed {
+            self.model.fire_pane("vtmux-pane-program-resume", p);
         }
     }
 
