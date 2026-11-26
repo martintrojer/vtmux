@@ -2107,7 +2107,12 @@ impl Server {
             pid: x.pid,
             argv: x.argv.clone(),
             cwd: path_in(&x.cwd, x.cwd_bytes.as_deref()),
-            env: x.environment.clone(),
+            env: x
+                .environment
+                .iter()
+                .filter(|(k, _)| k != crate::environ::TOKEN_VAR)
+                .cloned()
+                .collect(),
             tty: x.has_tty.then(|| TtyInfo {
                 name: x.tty.clone(),
                 term: x.term_name.clone(),
@@ -2143,12 +2148,7 @@ impl Server {
             c.speaks = vtmux_core::protocol::Speaks::Frozen;
         }
         // D35: and a client's, from an older image.
-        c.environ = hello
-            .env
-            .iter()
-            .filter(|(k, _)| k != crate::environ::TOKEN_VAR)
-            .cloned()
-            .collect();
+        c.environ = hello.env.iter().cloned().collect();
         c.attached = x.session.map(SessionId);
         c.activity_secs = x.activity_secs;
         c.cell_pixels = x.pixel_size;

@@ -3889,6 +3889,16 @@ fn an_imported_image_drops_a_retained_resume_token() {
     let env = &b.clients[&id].environ;
     assert!(env.iter().all(|(k, _)| k != "OSC7577_TOKEN"));
     assert!(env.iter().any(|(k, v)| k == "KEEP" && v == "k"));
+    let hello_env = &b.clients[&id].hello.as_ref().unwrap().env;
+    assert!(hello_env.iter().all(|(k, _)| k != "OSC7577_TOKEN"));
+    assert!(hello_env.iter().any(|(k, v)| k == "KEEP" && v == "k"));
+    let again = b.to_snapshot(snap::Meta::default()).unwrap();
+    assert!(
+        again
+            .clients
+            .iter()
+            .all(|c| c.environment.iter().all(|(k, _)| k != "OSC7577_TOKEN"))
+    );
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
