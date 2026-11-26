@@ -544,6 +544,9 @@ impl ResumeStore {
     /// Handle one report `body` (what follows `7577;`) at clock `now`
     /// (seconds since the epoch) for a terminal run by user `euid`.
     pub fn report(&mut self, body: &[u8], now: u64, euid: u32, lookup: Lookup<'_>) -> Outcome {
+        let Some((prefix, time, owner)) = self.screen(body, now) else {
+            return Outcome::Ignored;
+        };
         let sel = |s: &Self| {
             s.best(lookup).map(|r| Record {
                 seq: 0,
@@ -551,7 +554,7 @@ impl ResumeStore {
             })
         };
         let before = sel(self);
-        let out = self.report_inner(body, now, euid, lookup);
+        let out = self.report_inner(prefix, time, owner, euid, lookup);
         let moved = sel(self) != before;
         match out {
             Outcome::Ignored => out,
@@ -567,42 +570,51 @@ impl ResumeStore {
         }
     }
 
-    fn report_inner(&mut self, body: &[u8], now: u64, euid: u32, lookup: Lookup<'_>) -> Outcome {
+    /// The checks that need no process lookup: size, `?`, mac, time window
+    /// and monotonic time. `None` means the report is ignored. Yields the
+    /// signed prefix, its time and its owner.
+    fn screen<'b>(&self, body: &'b [u8], now: u64) -> Option<(&'b [u8], u64, Option<u32>)> {
         if body.len() > MAX_BODY || body == b"?" || self.token.is_empty() {
-            return Outcome::Ignored;
+            return None;
         }
         // mac: last key, 64 lowercase hex, over prefix ":" token.
-        let Some(at) = body
+        let at = body
             .len()
             .checked_sub(5 + 64)
-            .filter(|&i| &body[i..i + 5] == b":mac=")
-        else {
-            return Outcome::Ignored;
-        };
+            .filter(|&i| &body[i..i + 5] == b":mac=")?;
         let (prefix, mac) = (&body[..at], &body[at + 5..]);
         if !mac
             .iter()
             .all(|&c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         {
-            return Outcome::Ignored;
+            return None;
         }
         let want = hex(&sha256(&[prefix, b":", self.token.as_bytes()]));
         if !ct_eq(want.as_bytes(), mac) {
-            return Outcome::Ignored;
+            return None;
         }
         // time: window and monotonic per pid.
-        let Some(time) = first_time(prefix) else {
-            return Outcome::Ignored;
-        };
+        let time = first_time(prefix)?;
         if now.abs_diff(time) > TIME_WINDOW {
-            return Outcome::Ignored;
+            return None;
         }
         let owner = owner_pid(prefix);
         if let Some(pid) = owner
             && self.last_times.iter().any(|&(p, t)| p == pid && time < t)
         {
-            return Outcome::Ignored;
+            return None;
         }
+        Some((prefix, time, owner))
+    }
+
+    fn report_inner(
+        &mut self,
+        prefix: &[u8],
+        time: u64,
+        owner: Option<u32>,
+        euid: u32,
+        lookup: Lookup<'_>,
+    ) -> Outcome {
         let reject = |s: &mut Self| Outcome::Rejected {
             changed: owner.is_some_and(|p| s.remove_pid(p)),
         };
@@ -942,6 +954,49 @@ mod tests {
             );
             assert_eq!(s, before);
         }
+    }
+
+    #[test]
+    fn ignored_reports_do_no_lookups() {
+        use std::cell::Cell;
+        let p = procs();
+        let mut s = store();
+        for pid in 1000..1064 {
+            let b = sign(&argv_prefix(pid, NOW, &["x"]));
+            let seen = Cell::new(0);
+            let l = |q: u32| {
+                seen.set(seen.get() + 1);
+                Some(info(1, u64::from(q)))
+            };
+            assert!(matches!(
+                s.report(&b, NOW, UID, &l),
+                Outcome::Accepted { .. }
+            ));
+        }
+        assert_eq!(s.records().len(), 64);
+        let fresh = sign(&argv_prefix(100, NOW, &["nvim"]));
+        assert!(matches!(
+            p.run(&mut s, &fresh, NOW),
+            Outcome::Accepted { .. }
+        ));
+        let mut bad_mac = fresh.clone();
+        *bad_mac.last_mut().unwrap() ^= 1;
+        let cases = [
+            b"?".to_vec(),
+            bad_mac,
+            sign(&argv_prefix(100, NOW - 61, &["nvim"])),
+            sign(&argv_prefix(100, NOW + 61, &["nvim"])),
+            sign(&argv_prefix(100, NOW - 1, &["nvim"])),
+        ];
+        let lookups = Cell::new(0);
+        let l = |q: u32| {
+            lookups.set(lookups.get() + 1);
+            p.0.get(&q).cloned()
+        };
+        for c in &cases {
+            assert_eq!(s.report(c, NOW, UID, &l), Outcome::Ignored);
+        }
+        assert_eq!(lookups.get(), 0);
     }
 
     #[test]
