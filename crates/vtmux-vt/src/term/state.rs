@@ -1088,13 +1088,14 @@ impl PaneTerm {
         if !state.forget_hyperlinks() {
             return false;
         }
-        match Self::import_state(&state) {
+        match Self::import_state_resuming(&state, self.program_resume_enabled()) {
             Ok(mut term) => {
                 term.number_links_from(&self.link_numbers());
                 // The option and the grant live outside the exported
                 // state; the callback is registered again with them.
                 term.set_program_status_enabled(self.status_enabled.get());
                 term.set_program_status_granted(self.status_granted.get());
+                debug_assert_eq!(term.program_resume_enabled(), self.program_resume_enabled());
                 *self = term;
                 true
             }
@@ -1367,7 +1368,19 @@ impl PaneTerm {
     /// The bytes that put a fresh parser where this one is.
     fn continuation(&self) -> Vec<u8> {
         let mut out = self.pending.clone();
-        if self.scan.state == ScanState::Rename {
+        if let Some(body) = self
+            .scan
+            .resume
+            .as_ref()
+            .filter(|_| self.scan.state == ScanState::Str)
+        {
+            out.extend_from_slice(b"\x1b]7577;");
+            out.extend_from_slice(body);
+        } else if self.scan.resume_esc && self.scan.state == ScanState::Esc {
+            out.extend_from_slice(b"\x1b]7577;");
+            out.extend_from_slice(self.scan.resume.as_deref().unwrap_or_default());
+            out.push(0x1b);
+        } else if self.scan.state == ScanState::Rename {
             out.extend_from_slice(&self.rename.buf);
         } else if self.scan.state == ScanState::Ground && self.scan.utf8.started() {
             out.extend_from_slice(&self.scan.utf8.buf[..self.scan.utf8.have]);
@@ -1390,7 +1403,30 @@ impl PaneTerm {
     /// # Errors
     /// As [`PaneTerm::import_state`].
     pub fn import_state_with(state: &TermState, check: ImportCheck) -> Result<Self, StateError> {
+        Self::import_state_resuming_with(state, check, false)
+    }
+
+    /// [`PaneTerm::import_state`] with OSC 7577 scanning on before the
+    /// continuation is replayed, so a report split by the export (even
+    /// between its ESC and `\`) is kept.
+    ///
+    /// # Errors
+    /// As [`PaneTerm::import_state`].
+    pub fn import_state_resuming(state: &TermState, resume: bool) -> Result<Self, StateError> {
+        Self::import_state_resuming_with(state, ImportCheck::Lazy, resume)
+    }
+
+    /// [`PaneTerm::import_state_resuming`], checking blobs as `check` says.
+    ///
+    /// # Errors
+    /// As [`PaneTerm::import_state`].
+    pub fn import_state_resuming_with(
+        state: &TermState,
+        check: ImportCheck,
+        resume: bool,
+    ) -> Result<Self, StateError> {
         let mut import = StateImport::new(state, check)?;
+        import.set_program_resume_enabled(resume);
         for page in &state.primary.pages {
             import.page(ScreenKind::Primary, page)?;
         }
@@ -1585,6 +1621,11 @@ impl StateImport {
             continuation: p.continuation.clone(),
             scratch: gv::Page::default(),
         })
+    }
+
+    /// Scan OSC 7577 from the start of the continuation replay at `finish`.
+    pub fn set_program_resume_enabled(&mut self, enabled: bool) {
+        self.pane.set_program_resume_enabled(enabled);
     }
 
     /// Add a screen's next page (oldest first).

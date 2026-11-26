@@ -2592,6 +2592,30 @@ impl PaneTerm {
         self.cell_px
     }
 
+    /// `vtmux-program-resume` (D35): collect OSC 7577 bodies (off drops them
+    /// and frees what was kept).
+    pub fn set_program_resume_enabled(&mut self, enabled: bool) {
+        self.scan.resume_enabled = enabled;
+        if !enabled {
+            self.scan.resume = None;
+            self.scan.resume_esc = false;
+            self.scan.resume_done = Vec::new();
+        }
+    }
+
+    /// Whether OSC 7577 bodies are collected.
+    #[must_use]
+    pub fn program_resume_enabled(&self) -> bool {
+        self.scan.resume_enabled
+    }
+
+    /// The OSC 7577 bodies (raw bytes after `7577;`, as `ESC \` or BEL
+    /// ended them) since the last call. A drain, not a [`TermEvent`]: the
+    /// server verifies and orders them against nothing else.
+    pub fn drain_program_resume(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.scan.resume_done)
+    }
+
     /// `vtmux-program-status` (D34): with it on, or the pane granted, OSC
     /// 7501 reports become [`TermEvent::ProgramStatus`] and `OSC 7501 ; ?`
     /// is answered; with neither, libghostty's callback is unset, so
@@ -3514,6 +3538,16 @@ struct AltModeScanner {
     /// `INPUT_DISCARD`: the string does nothing).
     osc_len: usize,
     osc_over: bool,
+    /// `vtmux-program-resume` (D35): collect OSC 7577 bodies, exact bytes.
+    resume_enabled: bool,
+    /// The body of the OSC 7577 in progress (after `7577;`), `None` when
+    /// none is, or it was discarded; only ever allocated while enabled.
+    resume: Option<Vec<u8>>,
+    /// The body was followed by an ESC: `\` ends it, anything else
+    /// discards it.
+    resume_esc: bool,
+    /// Bodies that ended cleanly, for [`PaneTerm::drain_program_resume`].
+    resume_done: Vec<Vec<u8>>,
     /// tmux's palette, to tell which palette OSCs redraw the pane and to
     /// answer the colour queries.
     palette: Palette,
@@ -4281,6 +4315,9 @@ struct Rename {
 impl AltModeScanner {
     /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
+        if self.resume_enabled {
+            self.push_resume(b);
+        }
         if self.state == ScanState::Str {
             self.push_palette_osc(b);
         }
@@ -4303,6 +4340,46 @@ impl AltModeScanner {
             return Some(ScanEvent::Answer);
         }
         event
+    }
+
+    /// OSC 7577 (D35), before the parser sees `b`: the raw bytes after
+    /// `7577;`, to 4096. Only a BEL or `ESC \` hands the body over; CAN,
+    /// SUB, an ESC and anything but `\`, or a longer body drop it.
+    fn push_resume(&mut self, b: u8) {
+        const MAX: usize = 4096;
+        if self.resume_esc {
+            self.resume_esc = false;
+            if let Some(body) = self.resume.take()
+                && b == b'\\'
+                && self.state == ScanState::Esc
+            {
+                self.resume_done.push(body);
+            }
+            self.resume = None;
+            return;
+        }
+        match (&mut self.resume, self.state) {
+            (Some(body), ScanState::Str) => match b {
+                0x07 => self.resume_done.push(std::mem::take(body)),
+                0x1b => {
+                    self.resume_esc = true;
+                    return;
+                }
+                0x18 | 0x1a => {}
+                _ if body.len() < MAX => {
+                    body.push(b);
+                    return;
+                }
+                _ => {}
+            },
+            (None, ScanState::Str) if b == b';' && self.osc.as_deref() == Some(b"7577") => {
+                self.resume = Some(Vec::new());
+                return;
+            }
+            (Some(_), _) => {}
+            _ => return,
+        }
+        self.resume = None;
     }
 
     /// tmux's view of an OSC (`input_state_osc_string_table`): collected
@@ -5509,6 +5586,108 @@ mod tests {
             .into_iter()
             .filter(|e| matches!(e, TermEvent::ProgramStatus(_) | TermEvent::Prompt))
             .collect()
+    }
+
+    fn resume_term() -> PaneTerm {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_resume_enabled(true);
+        t
+    }
+
+    #[test]
+    fn program_resume_off_ignores_7577() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"\x1b]7577;abc\x07\x1b]7577;def\x1b\\");
+        assert_eq!(t.drain_program_resume().len(), 0);
+        assert!(t.scan.resume.is_none());
+        assert!(!t.program_resume_enabled());
+    }
+
+    #[test]
+    fn program_resume_captures_bel_and_st_exactly() {
+        let mut t = resume_term();
+        t.feed(b"hi\x1b]7577;a;b=c:mac=00\x07\x1b]7577;\x01\xff;x\x1b\\\x1b]7577;\x07");
+        assert_eq!(
+            t.drain_program_resume(),
+            vec![b"a;b=c:mac=00".to_vec(), b"\x01\xff;x".to_vec(), Vec::new()]
+        );
+        assert_eq!(t.drain_program_resume().len(), 0);
+        assert_eq!(t.title(), "");
+    }
+
+    #[test]
+    fn program_resume_chunked_feeds_including_esc_split() {
+        let mut t = resume_term();
+        let msg = b"\x1b]7577;k=v\x1b\\";
+        for b in msg {
+            t.feed(std::slice::from_ref(b));
+        }
+        assert_eq!(t.drain_program_resume(), vec![b"k=v".to_vec()]);
+        t.feed(b"\x1b]7577;ab");
+        assert_eq!(t.drain_program_resume().len(), 0);
+        t.feed(b"c\x1b");
+        assert_eq!(t.drain_program_resume().len(), 0);
+        t.feed(b"\\");
+        assert_eq!(t.drain_program_resume(), vec![b"abc".to_vec()]);
+    }
+
+    #[test]
+    fn program_resume_discards_oversized_and_interrupted() {
+        let mut t = resume_term();
+        let mut long = b"\x1b]7577;".to_vec();
+        long.extend(std::iter::repeat_n(b'a', 4097));
+        long.push(0x07);
+        t.feed(&long);
+        assert_eq!(t.drain_program_resume().len(), 0);
+        let mut exact = b"\x1b]7577;".to_vec();
+        exact.extend(std::iter::repeat_n(b'a', 4096));
+        exact.push(0x07);
+        t.feed(&exact);
+        assert_eq!(t.drain_program_resume().len(), 1);
+        for end in [&b"\x18"[..], b"\x1a", b"\x1bX"] {
+            let mut m = b"\x1b]7577;abc".to_vec();
+            m.extend_from_slice(end);
+            m.extend_from_slice(b"\x07\\");
+            t.feed(&m);
+            assert_eq!(t.drain_program_resume().len(), 0, "{end:?}");
+        }
+        t.feed(b"\x1b]7577;ok\x07");
+        assert_eq!(t.drain_program_resume(), vec![b"ok".to_vec()]);
+    }
+
+    #[test]
+    fn program_resume_leaves_screen_untouched() {
+        let mut a = resume_term();
+        let mut b = PaneTerm::new(20, 5, 100);
+        a.feed(b"x\x1b]7577;abc\x07y\x1b]7577;d\x1b\\z");
+        b.feed(b"xyz");
+        assert_eq!(a.title(), b.title());
+        assert_eq!(snapshot(&a), snapshot(&b));
+    }
+
+    #[test]
+    fn program_resume_survives_reset_hyperlinks_and_import_split() {
+        let mut t = resume_term();
+        t.feed(b"\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\\x1b]7577;ab\x1b");
+        assert!(t.reset_hyperlinks());
+        assert!(t.program_resume_enabled());
+        t.feed(b"\\");
+        assert_eq!(t.drain_program_resume(), vec![b"ab".to_vec()]);
+
+        t.feed(b"\x1b]7577;cd");
+        let st = t.export_state().unwrap();
+        let mut u = PaneTerm::import_state_resuming(&st, true).unwrap();
+        u.feed(b"\x07");
+        assert_eq!(u.drain_program_resume(), vec![b"cd".to_vec()]);
+
+        t.feed(b"\x1b");
+        let st = t.export_state().unwrap();
+        let mut u = PaneTerm::import_state_resuming(&st, true).unwrap();
+        u.feed(b"\\");
+        assert_eq!(u.drain_program_resume(), vec![b"cd".to_vec()]);
+        let mut off = PaneTerm::import_state(&st).unwrap();
+        off.feed(b"\\");
+        assert_eq!(off.drain_program_resume().len(), 0);
     }
 
     #[test]
