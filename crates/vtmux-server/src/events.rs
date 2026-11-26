@@ -572,7 +572,7 @@ impl Server {
             return;
         }
         let hook = ev.name.starts_with('@') && self.model.options.is_hook_event(&ev.name)
-            || vtmux_core::options::find(&ev.name).is_some_and(|d| d.hook);
+            || vtmux_core::options::def_of(&ev.name).is_some_and(|d| d.hook);
         if !hook {
             return;
         }

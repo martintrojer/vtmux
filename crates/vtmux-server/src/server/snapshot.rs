@@ -1288,7 +1288,7 @@ impl Server {
                     graphics_owner_alternate: p.graphics.owner[1],
                     restored_from: None,
                     restart_from: None,
-                    program_status: None,
+                    program_status: program_status_out(p),
                     program_resume: None,
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
@@ -2035,6 +2035,7 @@ impl Server {
                 x.graphics_owner_primary,
                 x.graphics_owner_alternate,
             ]),
+            program_status: program_status_in(x.program_status.as_ref()),
             shell_commands: crate::model::ShellCommands {
                 last_prompt: x.last_prompt_time,
                 started: x.command_start_time,
@@ -2043,6 +2044,9 @@ impl Server {
                 status: x.command_status,
             },
         };
+        if x.program_status.as_ref().is_some_and(|s| s.granted) {
+            pane.term.set_program_status_granted(true);
+        }
         // History imported as rows is resident: due for the compressor at
         // once (decision 23).
         if x.term.is_some() && !salvaged.is_some_and(|s| s.contains(&snap::Part::PaneTerm(x.id))) {
@@ -2336,4 +2340,55 @@ fn carried_input(c: &Client, now: Instant) -> Carried {
         held,
         held_ago_ms: since(now, held_since),
     }
+}
+
+/// D34: a pane's grant and records, or nothing for a pane with neither.
+fn program_status_out(p: &Pane) -> Option<snap::ProgramStatusState> {
+    use crate::program_status as ps;
+    let granted = p.term.program_status_granted();
+    if !granted && p.program_status.is_empty() {
+        return None;
+    }
+    Some(snap::ProgramStatusState {
+        granted,
+        next_seq: p.program_status.next_seq(),
+        records: p
+            .program_status
+            .records()
+            .map(|(id, r)| snap::ProgramStatusRecord {
+                id: id.clone(),
+                state: ps::state_code(r.state),
+                kind: ps::kind_code(r.kind),
+                progress: r.progress,
+                app: r.app.clone(),
+                title: r.title.clone(),
+                message: r.message.clone(),
+                seq: r.seq,
+            })
+            .collect(),
+    })
+}
+
+fn program_status_in(s: Option<&snap::ProgramStatusState>) -> crate::program_status::ProgramStatus {
+    use crate::program_status as ps;
+    let Some(s) = s else {
+        return ps::ProgramStatus::default();
+    };
+    ps::ProgramStatus::restored(
+        s.next_seq,
+        s.records.iter().filter_map(|r| {
+            Some((
+                r.id.clone(),
+                ps::Record {
+                    state: ps::state_from_code(r.state)?,
+                    kind: ps::kind_from_code(r.kind),
+                    progress: r.progress,
+                    app: r.app.clone(),
+                    title: r.title.clone(),
+                    message: r.message.clone(),
+                    seq: r.seq,
+                },
+            ))
+        }),
+    )
 }

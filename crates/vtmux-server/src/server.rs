@@ -139,6 +139,7 @@ struct PaneInputOptions {
     scroll_on_clear: bool,
     allow_set_title: bool,
     inband_resize: bool,
+    program_status: bool,
 }
 
 /// [`PaneInputOptions`] per pane, read again once any option changed
@@ -167,6 +168,7 @@ impl PaneInputCache {
                 scroll_on_clear: model.number_option(pane, "scroll-on-clear") != 0,
                 allow_set_title: model.number_option(pane, "allow-set-title") != 0,
                 inband_resize: model.number_option(TreeId::Server, "vtmux-inband-resize") != 0,
+                program_status: model.number_option(TreeId::Server, "vtmux-program-status") != 0,
             }
         })
     }
@@ -3303,6 +3305,7 @@ impl Server {
     /// `window_update_focus` for the windows they change when `focus-events`
     /// is on; looking at every window after a command finds the same changes.
     pub(crate) fn update_focus_all(&mut self) {
+        self.program_status_focus_scan();
         if self.model.number_option(TreeId::Server, "focus-events") == 0 {
             return;
         }
@@ -3326,6 +3329,7 @@ impl Server {
 
     /// `window_update_focus` (window.c:707-713): the window's active pane.
     pub(crate) fn update_focus(&mut self, w: Option<WindowId>) {
+        self.program_status_focus_scan();
         let Some(p) = w
             .and_then(|w| self.model.windows.get(&w))
             .map(Window::active)
@@ -5894,6 +5898,7 @@ impl Server {
             output_generation: 0,
             last_output_time: None,
             shell_commands: crate::model::ShellCommands::default(),
+            program_status: crate::program_status::ProgramStatus::default(),
             kitty_owner: [None; 2],
             graphics: crate::model::PaneGraphics::default(),
         })
@@ -6107,6 +6112,9 @@ impl Server {
         // mode 2048 (D31) with it.
         pane.requests.clear();
         pane.term.end_inband_resize();
+        // D34: and its program status, grant and records.
+        pane.program_status.reset();
+        pane.term.set_program_status_granted(false);
         // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM
         // home it too, so they come before), then screen_alternate_off(s,
         // NULL, 0): no cursor restored, but its resize back to the pane's
@@ -6271,6 +6279,7 @@ impl Server {
             scroll_on_clear,
             allow_set_title,
             inband_resize,
+            program_status,
         } = self.pane_input_options.get(&self.model, p);
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let cell = self.model.cell_pixels_of(p);
@@ -6284,6 +6293,7 @@ impl Server {
         pane.term.set_scroll_on_clear(scroll_on_clear);
         pane.term.set_allow_set_title(allow_set_title);
         pane.term.set_inband_resize(inband_resize);
+        pane.term.set_program_status_enabled(program_status);
         let before = (pane.term.title(), pane.term.pwd());
         let alternate = pane.term.alternate_on();
         pane.term
@@ -6407,6 +6417,10 @@ impl Server {
                     c.last_prompt = Some(now);
                 }
                 self.model.fire_pane("pane-shell-prompt", p);
+                self.program_status_change(
+                    p,
+                    crate::program_status::ProgramStatus::on_prompt_start,
+                );
             }
             TermEvent::CommandStarted => {
                 if let Some(c) = commands {
@@ -6430,9 +6444,70 @@ impl Server {
                     .redraw(crate::model::Redraw::WindowStatus(window));
             }
             TermEvent::Notification(n) => self.pane_notification(window, &n),
-            // D34: the server's records come with srv_7501; the option is
-            // never turned on until then, so none arrive.
-            TermEvent::ProgramStatus(_) => {}
+            // D34: in order with the prompts around it.
+            TermEvent::ProgramStatus(ev) => self.program_status_change(p, |s| s.apply(&ev)),
+        }
+    }
+
+    /// D34: change pane `p`'s program status records; the hook fires when
+    /// the summary state changed, the pane's borders and status are drawn
+    /// again when anything they show did.
+    pub(crate) fn program_status_change(
+        &mut self,
+        p: PaneId,
+        f: impl FnOnce(&mut crate::program_status::ProgramStatus) -> crate::program_status::Changed,
+    ) {
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        let window = pane.window;
+        let changed = f(&mut pane.program_status);
+        if changed.any {
+            self.model
+                .redraw(crate::model::Redraw::WindowBorders(window));
+            self.model
+                .redraw(crate::model::Redraw::WindowStatus(window));
+        }
+        if changed.state {
+            self.model.fire_pane("vtmux-pane-program-status", p);
+        }
+    }
+
+    /// D34: `done` and `error` are seen once their pane is focused: its
+    /// window's active pane with a focused client looking at the window,
+    /// whatever `focus-events` says, and a pane whose program is gone
+    /// included. Acts on the gain only.
+    pub(crate) fn program_status_focus_scan(&mut self) {
+        let focused: Vec<(PaneId, bool)> = self
+            .model
+            .panes
+            .values()
+            .map(|pane| {
+                let w = pane.window;
+                let window = self.model.windows.get(&w);
+                let on = window.map(Window::active) == Some(pane.id)
+                    && window.is_some_and(|x| x.menu.is_none())
+                    && self.clients.values().any(|c| {
+                        c.focused
+                            && c.popup.is_none()
+                            && c.attached
+                                .and_then(|s| self.model.current_of(s))
+                                .is_some_and(|(_, cw, _)| cw == w)
+                    });
+                (pane.id, on)
+            })
+            .collect();
+        for (p, on) in focused {
+            let Some(pane) = self.model.panes.get_mut(&p) else {
+                continue;
+            };
+            if pane.program_status.focused == on {
+                continue;
+            }
+            pane.program_status.focused = on;
+            if on {
+                self.program_status_change(p, crate::program_status::ProgramStatus::on_focus);
+            }
         }
     }
 
@@ -6764,6 +6839,7 @@ impl Server {
             // does once it is drained.
             let flooding = self.backlog.contains(&p);
             self.pane_readable(p, flooding);
+            self.program_status_change(p, crate::program_status::ProgramStatus::on_process_exit);
             if self.pane_destroy_ready(p) {
                 self.pane_exited(p);
             }

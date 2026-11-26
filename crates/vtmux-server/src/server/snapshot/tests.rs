@@ -1153,6 +1153,78 @@ fn a_mode_2048_grant_and_a_queued_report_survive_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D34: a pane's OSC 7501 records and its grant cross a rebuild, the grant
+/// outliving the option; a respawn then ends both.
+#[test]
+fn program_status_records_and_grant_survive_a_rebuild() {
+    let dir = temp_dir("pstatus");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "set-hook",
+            "-g",
+            "vtmux-pane-program-status",
+            "set -g @fired yes",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    a.pane_input(
+        p,
+        b"\x1b]7501;state=blocked:kind=auth:progress=7:id=a:app=x:title=VGl0bGU\x07\
+          \x1b]7501;state=done:id=b\x07",
+        false,
+    );
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "off"]);
+    let shown = run(
+        &mut a,
+        &dir,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            "%0",
+            "#{pane_program_state}/#{pane_program_app}/#{pane_program_progress}/#{pane_program_title}",
+        ],
+    );
+    assert!(shown.contains("\nblocked/x/7/Title\n"), "{shown}");
+    let fired = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(
+        fired.contains("\nyes\n"),
+        "the extension hook fired: {fired}"
+    );
+    let s = a
+        .to_snapshot(snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            ..snap::Meta::default()
+        })
+        .unwrap();
+    assert_eq!(s.panes[0].program_status.as_ref().unwrap().records.len(), 2);
+    assert_eq!(s.meta.requires, Vec::<String>::new());
+    let mut b = rebuild(&a, &dir, "b");
+    let pane = &b.model.panes[&p];
+    assert!(pane.term.program_status_granted());
+    let sum = pane.program_status.summary().unwrap();
+    assert_eq!(sum.state, vtmux_vt::ProgramState::Blocked);
+    assert_eq!((sum.app.as_str(), sum.progress), ("x", Some(7)));
+    assert_eq!(pane.program_status, a.model.panes[&p].program_status);
+    // The grant outlives the option: a report still lands.
+    b.pane_input(p, b"\x1b]7501;state=working:id=c\x07", false);
+    assert_eq!(b.model.panes[&p].program_status.records().count(), 3);
+    ok(
+        &mut b,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    let pane = &b.model.panes[&p];
+    assert!(pane.program_status.is_empty() && !pane.term.program_status_granted());
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The kernel sends SIGWINCH for a size that differs in pixels alone
 /// (`tty_do_resize` compares the whole `winsize`), so a program granted
 /// mode 2048 is reported such a size too (a client terminal whose cells
@@ -1644,6 +1716,14 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .unwrap()
         .ext
         .keeps_raw = true;
+    // A program's OSC 7501 status (D34) and its grant are ordinary too:
+    // the field is ignorable.
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    a.pane_input(
+        vtmux_core::ids::PaneId(0),
+        b"\x1b]7501;state=working:id=a\x07",
+        false,
+    );
     let s = a
         .to_snapshot(snap::Meta {
             purpose: snap::Purpose::Upgrade,
@@ -1651,6 +1731,12 @@ fn an_ordinary_attached_client_requires_no_feature() {
         })
         .unwrap();
     assert_eq!(s.panes[0].input_queued, b"typed ahead");
+    assert!(
+        s.panes[0]
+            .program_status
+            .as_ref()
+            .is_some_and(|p| p.granted && p.records.len() == 1)
+    );
     assert_eq!(s.clients[0].inbuf, [0x03, 0x00]);
     assert!(s.clients[0].stopped);
     assert!(s.clients[0].keeps_raw);

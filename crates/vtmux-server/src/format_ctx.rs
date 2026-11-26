@@ -815,6 +815,34 @@ impl<'a> Ctx<'a> {
             "pane_output_generation" => p.output_generation.to_string(),
             // format_cb_pane_last_prompt_time and the pane_command_*
             // callbacks (format.c:2342-2426): nothing until OSC 133 says.
+            // D34: the summary of what its programs reported over OSC
+            // 7501; empty without one.
+            "pane_program_state" => p.program_status.summary().map_or_else(String::new, |s| {
+                crate::program_status::state_name(s.state).to_owned()
+            }),
+            "pane_program_kind" => p.program_status.summary().map_or_else(String::new, |s| {
+                crate::program_status::kind_name(s.kind).to_owned()
+            }),
+            "pane_program_progress" => p
+                .program_status
+                .summary()
+                .and_then(|s| s.progress)
+                .map_or_else(String::new, |n| n.to_string()),
+            "pane_program_app" => p
+                .program_status
+                .summary()
+                .map(|s| s.app)
+                .unwrap_or_default(),
+            "pane_program_title" => p
+                .program_status
+                .summary()
+                .map(|s| s.title)
+                .unwrap_or_default(),
+            "pane_program_message" => p
+                .program_status
+                .summary()
+                .map(|s| s.message)
+                .unwrap_or_default(),
             "pane_last_output_time" => p.last_output_time?.to_string(),
             "pane_last_prompt_time" => p.shell_commands.last_prompt?.to_string(),
             "pane_command_start_time" => p.shell_commands.started?.to_string(),

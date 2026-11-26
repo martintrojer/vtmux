@@ -327,6 +327,8 @@ pub struct Pane {
     pub last_output_time: Option<i64>,
     /// What its shell said of its prompts and commands through OSC 133.
     pub shell_commands: ShellCommands,
+    /// D34: what its programs reported through OSC 7501.
+    pub program_status: crate::program_status::ProgramStatus,
     /// D29: the process group that was granted the kitty keyboard protocol
     /// on each screen (primary, alternate), whose end ends the grant
     /// ([`crate::pane_kitty`]).
