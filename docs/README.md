@@ -1,6 +1,6 @@
 # vtmux docs
 
-For users: the [README](../README.md), [PAPERCUTS.md](PAPERCUTS.md) (every `vtmux-*` option), [PERFORMANCE.md](PERFORMANCE.md), the [changelog](../CHANGELOG.md) and [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) (where vtmux differs from tmux 3.8, and why).
+For users: the [README](../README.md), [PAPERCUTS.md](PAPERCUTS.md) (every `vtmux-*` option), [PROGRAM-RESUME.md](PROGRAM-RESUME.md) (OSC 7577 with vtmux), [PERFORMANCE.md](PERFORMANCE.md), the [changelog](../CHANGELOG.md) and [compat/DIVERGENCES.md](../compat/DIVERGENCES.md) (where vtmux differs from tmux 3.8, and why).
 
 For contributors: [AGENTS.md](../AGENTS.md) (gates and rules), [ARCHITECTURE.md](ARCHITECTURE.md), [oracle/README.md](../oracle/README.md) (writing scenarios), [test-health/](test-health/) (benchmark and test-suite records, and how they are made), and the specs below.
 
