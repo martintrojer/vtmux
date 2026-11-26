@@ -6585,6 +6585,7 @@ impl Server {
                     && self.clients.values().any(|c| {
                         c.focused
                             && c.popup.is_none()
+                            && c.control.is_none()
                             && c.attached
                                 .and_then(|s| self.model.current_of(s))
                                 .is_some_and(|(_, cw, _)| cw == w)

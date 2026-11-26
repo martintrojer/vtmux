@@ -78,12 +78,12 @@ set -s vtmux-graphics on
 %endif
 ```
 
-Program status: a program's OSC 7501 state (idle, working, done, blocked, error) shows in formats and a hook; nothing goes to the outer terminal.
+Program status: a program's OSC 7501 state (idle, working, done, blocked, error) shows in formats and a hook; nothing goes to the outer terminal. `#{pane_program_title}` and the message are untrusted text: do not put them raw in a status format, where `#[` is parsed as a style (escape with `#{s/#\[/##[/:pane_program_title}`).
 
 ```tmux
 %if "#{vtmux_version}"
 set -s vtmux-program-status on
-set -g status-right '#{pane_program_state} #{pane_program_title}'
+set -g status-right '#{pane_program_app} #{pane_program_state}'
 set-hook -g vtmux-pane-program-status 'refresh-client -S'
 %endif
 ```

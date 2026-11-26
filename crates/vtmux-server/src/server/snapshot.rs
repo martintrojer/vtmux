@@ -1193,7 +1193,11 @@ impl Server {
                         .collect(),
                     current: s.current,
                     last: s.last.clone(),
-                    environment: env_out(&s.env),
+                    environment: env_out(&{
+                        let mut e = s.env.clone();
+                        e.unset(crate::environ::TOKEN_VAR);
+                        e
+                    }),
                     last_attached: s.last_attached,
                     options: tree((3, s.id.0)),
                     group: self.model.groups.name_of(s.id).map(str::to_owned),
@@ -1805,7 +1809,12 @@ impl Server {
                     .collect(),
                 current: x.current,
                 last: x.last.clone(),
-                env: env_in(&x.environment),
+                env: {
+                    // D35: an image may still hold the token.
+                    let mut e = env_in(&x.environment);
+                    e.unset(crate::environ::TOKEN_VAR);
+                    e
+                },
                 link_alerts: x
                     .windows
                     .iter()

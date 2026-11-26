@@ -632,6 +632,11 @@ impl ResumeStore {
         match verdict {
             None => reject(self),
             Some(Verdict::Clear) => {
+                // D35: a dead or foreign owner is rejected as for accept; its
+                // record, if any, still goes and its time is not noted.
+                if lookup(pid).is_none_or(|i| i.uid != euid) {
+                    return reject(self);
+                }
                 self.note_time(pid, time);
                 Outcome::Cleared {
                     changed: self.remove_pid(pid),
@@ -1124,12 +1129,21 @@ mod tests {
             p.run(&mut s, &sign(&format!("pid=100:time={NOW}:clear=1")), NOW),
             Outcome::Cleared { changed: false }
         );
-        // clear does not need a live owner.
+        // A dead owner's clear drops its record but is rejected.
         let gone = Procs(HashMap::new());
         assert_eq!(
             gone.run(&mut s, &sign(&format!("pid=300:time={NOW}:clear=1")), NOW),
-            Outcome::Cleared { changed: true }
+            Outcome::Rejected { changed: true }
         );
+    }
+
+    #[test]
+    fn clear_of_a_dead_owner_does_not_advance_the_time() {
+        let gone = Procs(HashMap::new());
+        let mut s = store();
+        let late = NOW + 5;
+        gone.run(&mut s, &sign(&format!("pid=100:time={late}:clear=1")), late);
+        assert_eq!(s.last_times(), []);
     }
 
     fn assert_rejected(prefix: &str) {
@@ -1438,8 +1452,9 @@ mod tests {
         let p = procs();
         let mut s = store();
         p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW);
+        let many = Procs((1000..1000 + 266).map(|pid| (pid, info(1, 10))).collect());
         for pid in 1000..1000 + 266 {
-            p.run(&mut s, &sign(&format!("pid={pid}:time={NOW}:clear=1")), NOW);
+            many.run(&mut s, &sign(&format!("pid={pid}:time={NOW}:clear=1")), NOW);
         }
         assert!(s.last_times().iter().any(|&(p, _)| p == 100));
         assert_eq!(s.last_times().len(), MAX_LAST_TIMES);

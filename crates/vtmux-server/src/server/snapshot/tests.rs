@@ -1292,6 +1292,27 @@ fn a_dropped_client_loses_program_status_focus() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D34: a terminal-less control client focuses nothing, so attaching one
+/// does not acknowledge a pending `done`.
+#[test]
+fn a_control_client_does_not_acknowledge_program_status() {
+    let dir = temp_dir("pstatus-ctl");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    let p = vtmux_core::ids::PaneId(0);
+    a.pane_input(p, b"\x1b]7501;state=done:id=a\x07", false);
+    let (_c, _peer) = connect(
+        &mut a,
+        hello(&["attach", "-t", "s"], &dir, None, ControlMode::Control),
+    );
+    a.update_focus_all();
+    assert!(!a.model.panes[&p].program_status.focused);
+    assert!(!a.model.panes[&p].program_status.is_empty());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// D34: a pane focused before an upgrade is not focused afresh by it: its
 /// `error` stays until a real focus gain.
 #[test]
@@ -3935,5 +3956,46 @@ fn respawn_of_a_pane_whose_own_process_reported_fires_the_resume_hook() {
     let out = run(&mut a, &dir, &["show", "-gv", "@fired"]);
     assert!(out.contains("\nyes\n"), "{out}");
     drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a session `OSC7577_TOKEN` in an image does not survive an import
+/// or the next export.
+#[test]
+fn an_imported_image_drops_a_session_resume_token() {
+    let dir = temp_dir("rimport-sess");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let var = |n: &str, v: &str| snap::EnvVar {
+        name: n.into(),
+        value: Some(v.into()),
+        hidden: false,
+    };
+    let b = rebuild_with(&a, &dir, |s| {
+        for x in &mut s.sessions {
+            x.environment.push(var("OSC7577_TOKEN", "old"));
+            x.environment.push(var("KEEP", "k"));
+        }
+    });
+    let sid = *b.model.sessions.keys().next().unwrap();
+    let env = &b.model.sessions[&sid].env;
+    assert_eq!(env.get("OSC7577_TOKEN"), None);
+    assert_eq!(env.get("KEEP"), Some("k"));
+    // Export strips too, whatever a session holds.
+    let mut b = b;
+    b.model
+        .sessions
+        .get_mut(&sid)
+        .unwrap()
+        .env
+        .set("OSC7577_TOKEN", "x", false);
+    let again = b.to_snapshot(snap::Meta::default()).unwrap();
+    assert!(
+        again
+            .sessions
+            .iter()
+            .all(|x| x.environment.iter().all(|v| v.name != "OSC7577_TOKEN"))
+    );
+    drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
