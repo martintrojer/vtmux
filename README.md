@@ -78,7 +78,7 @@ set -s vtmux-graphics on
 %endif
 ```
 
-Program status: a program's OSC 7501 state (working, blocked, done, error) shows in formats and a hook; nothing goes to the outer terminal.
+Program status: a program's OSC 7501 state (idle, working, done, blocked, error) shows in formats and a hook; nothing goes to the outer terminal.
 
 ```tmux
 %if "#{vtmux_version}"
@@ -88,7 +88,7 @@ set-hook -g vtmux-pane-program-status 'refresh-client -S'
 %endif
 ```
 
-Program resume: with `vtmux-program-resume on`, new panes get an `OSC7577_TOKEN` and a program that reports through OSC 7577 with it shows how to relaunch it in `#{pane_resume_command}`, `#{pane_resume_cwd}` and `#{pane_resume_pid}`; the `vtmux-pane-program-resume` hook runs on a change. vtmux never relaunches anything. An inherited `OSC7577_TOKEN` is always removed from panes and popups. See [docs/PROGRAM-RESUME.md](docs/PROGRAM-RESUME.md).
+Program resume: with `vtmux-program-resume on`, new non-empty panes (spawn or respawn) get an `OSC7577_TOKEN` and a program that reports through OSC 7577 with it shows how to relaunch it in `#{pane_resume_command}`, `#{pane_resume_cwd}` and `#{pane_resume_pid}`; the `vtmux-pane-program-resume` hook runs on a change. vtmux never relaunches anything. An inherited `OSC7577_TOKEN` is always removed from panes and popups. See [docs/PROGRAM-RESUME.md](docs/PROGRAM-RESUME.md).
 
 ```tmux
 %if "#{vtmux_version}"
