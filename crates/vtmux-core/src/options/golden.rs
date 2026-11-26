@@ -548,16 +548,24 @@ fn program_protocol_options_are_hidden_until_set() {
             &["show", "-sv", name][..],
             &["set", "-s", name, "on"],
             &["show", "-s", name],
-            &["set", "-s", name, "maybe"],
+        ] {
+            sim.argv(c);
+        }
+        sim.argv(&["show", "-s"]);
+        let out = sim.take();
+        assert!(out.starts_with(&format!("off\n{name} on\n")), "{out}");
+        assert!(
+            out.lines().skip(2).any(|l| l == format!("{name} on")),
+            "{out}"
+        );
+        for c in [
+            &["set", "-s", name, "maybe"][..],
             &["set", "-su", name],
             &["show", "-s", name],
         ] {
             sim.argv(c);
         }
-        assert_eq!(
-            sim.take(),
-            format!("off\n{name} on\nbad value: maybe\n{name} off\n")
-        );
+        assert_eq!(sim.take(), format!("bad value: maybe\n{name} off\n"));
     }
     for name in HOOKS {
         sim.argv(&["set-hook", "-gp", name, "display-message x"]);

@@ -47,7 +47,7 @@ From the main spec's *Key decisions*. The spec has the reasons; a change that co
 | D25 | The version is the tmux release it is tested against: `3.8-beta1`, then `3.8` |
 | D26 | Pane blend: `vtmux-pane-active-blend` and `vtmux-pane-inactive-blend` |
 | D27 | Live upgrade by `execve` in place; its opt-in persistence (`vtmux-persist`) removed 2026-11-12: restoring is tmux-resurrect's job |
-| D28 | Protocol extensions: a protocol tmux drops, only where libghostty and Ghostty implement it, behind a `vtmux-*` option, tmux when off |
+| D28 | Protocol extensions: a protocol tmux drops, where libghostty and Ghostty implement it (pane-side: no outer Ghostty needed; server/PTY-level: no libghostty needed), behind a `vtmux-*` option, tmux when off |
 | D29 | Kitty keyboard protocol, pane side: `vtmux-kitty-keys` |
 | D30 | Desktop notifications, OSC 9 and 777, to Ghostty clients: `vtmux-notifications` |
 | D31 | In-band resize, mode 2048: `vtmux-inband-resize` |
