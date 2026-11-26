@@ -68,19 +68,32 @@ done
 
 ### tmux-resurrect
 
-tmux-resurrect saves `#{pane_current_command}`. To restore the reported command instead, a restore step can query each live pane and feed the line back with `send-keys -l`, which sends the text literally:
+tmux-resurrect saves `#{pane_current_command}`. To restore the reported command instead, save one JSON record per pane to a private file, then start each command in a new window. `cmd` is shell-quoted, so `sh -c` runs it as reported; nothing is typed into a shell prompt:
 
 ```sh
-quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+# save
+f=${XDG_STATE_HOME:-$HOME/.local/state}/vtmux-resume.jsonl
+mkdir -p "$(dirname "$f")"
+( umask 077; : > "$f" )
 vtmux list-panes -a -F '#{pane_id}' |
 while IFS= read -r pane; do
   cmd=$(vtmux display-message -p -t "$pane" '#{pane_resume_command}')
   [ -n "$cmd" ] || continue
   cwd=$(vtmux display-message -p -t "$pane" '#{pane_resume_cwd}')
-  line=$cmd
-  [ -n "$cwd" ] && line="cd $(quote "$cwd") && $cmd"
-  vtmux send-keys -t "$pane" -l "$line" && vtmux send-keys -t "$pane" Enter
+  python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "cmd": sys.argv[2]}))' \
+    "$cwd" "$cmd" >> "$f"
 done
+
+# restore
+python3 - "$f" <<'PY'
+import json, subprocess, sys
+for line in open(sys.argv[1]):
+    r = json.loads(line)
+    args = ["vtmux", "new-window"]
+    if r["cwd"]:
+        args += ["-c", r["cwd"]]
+    subprocess.run(args + ["--", "sh", "-c", r["cmd"]], check=True)
+PY
 ```
 
 ## Security and lifetime
