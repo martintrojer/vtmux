@@ -8,6 +8,7 @@
 
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use std::collections::HashSet;
 use std::io::Read;
 
 use crate::sys::pty::ProcessInfo;
@@ -271,8 +272,19 @@ pub fn shell_quote(s: &str) -> String {
 /// An argument list as one shell command line.
 #[must_use]
 pub fn shell_command(argv: &[String]) -> String {
+    const RESERVED: [&str; 22] = [
+        "if", "then", "else", "elif", "fi", "do", "done", "case", "esac", "while", "until", "for",
+        "in", "{", "}", "!", "function", "select", "time", "[[", "]]", "coproc",
+    ];
     argv.iter()
-        .map(|a| shell_quote(a))
+        .enumerate()
+        .map(|(i, a)| {
+            if i == 0 && RESERVED.contains(&a.as_str()) {
+                format!("'{a}'")
+            } else {
+                shell_quote(a)
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -435,27 +447,33 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// The owner of a report that may be malformed: the `pid` all its `pid`
-/// pairs agree on, if valid.
-fn owner_pid(prefix: &str) -> Option<u32> {
-    let mut found: Option<&str> = None;
-    for pair in prefix.split(':') {
-        if let Some(("pid", v)) = pair.split_once('=') {
+/// pairs agree on, if valid. Read from raw bytes, so a non-UTF-8 byte in
+/// another pair does not hide it.
+fn owner_pid(prefix: &[u8]) -> Option<u32> {
+    let mut found: Option<&[u8]> = None;
+    for pair in prefix.split(|&c| c == b':') {
+        if let Some(v) = pair.strip_prefix(b"pid=") {
             match found {
                 Some(f) if f != v => return None,
                 _ => found = Some(v),
             }
         }
     }
-    let pid = u32::try_from(parse_uint(found?)?).ok()?;
+    let pid = u32::try_from(parse_uint(std::str::from_utf8(found?).ok()?)?).ok()?;
     i32::try_from(pid).ok()?;
     Some(pid)
 }
 
-fn first_time(prefix: &str) -> Option<u64> {
+fn first_time(prefix: &[u8]) -> Option<u64> {
     prefix
-        .split(':')
-        .find_map(|p| p.strip_prefix("time="))
-        .and_then(parse_uint)
+        .split(|&c| c == b':')
+        .find_map(|p| p.strip_prefix(b"time="))
+        .and_then(|v| parse_uint(std::str::from_utf8(v).ok()?))
+}
+
+/// Whether a `mac` key precedes the final one.
+fn has_early_mac(prefix: &[u8]) -> bool {
+    prefix.split(|&c| c == b':').any(|p| p.starts_with(b"mac="))
 }
 
 impl ResumeStore {
@@ -512,7 +530,13 @@ impl ResumeStore {
     fn note_time(&mut self, pid: u32, time: u64) {
         self.last_times.retain(|&(p, _)| p != pid);
         if self.last_times.len() >= MAX_LAST_TIMES {
-            self.last_times.remove(0);
+            // Never forget a pid that still has a record (replay guard).
+            let at = self
+                .last_times
+                .iter()
+                .position(|&(p, _)| !self.records.iter().any(|r| r.pid == p))
+                .unwrap_or(0);
+            self.last_times.remove(at);
         }
         self.last_times.push((pid, time));
     }
@@ -520,6 +544,30 @@ impl ResumeStore {
     /// Handle one report `body` (what follows `7577;`) at clock `now`
     /// (seconds since the epoch) for a terminal run by user `euid`.
     pub fn report(&mut self, body: &[u8], now: u64, euid: u32, lookup: Lookup<'_>) -> Outcome {
+        let sel = |s: &Self| {
+            s.best(lookup).map(|r| Record {
+                seq: 0,
+                ..r.clone()
+            })
+        };
+        let before = sel(self);
+        let out = self.report_inner(body, now, euid, lookup);
+        let moved = sel(self) != before;
+        match out {
+            Outcome::Ignored => out,
+            Outcome::Accepted { changed } => Outcome::Accepted {
+                changed: changed || moved,
+            },
+            Outcome::Cleared { changed } => Outcome::Cleared {
+                changed: changed || moved,
+            },
+            Outcome::Rejected { changed } => Outcome::Rejected {
+                changed: changed || moved,
+            },
+        }
+    }
+
+    fn report_inner(&mut self, body: &[u8], now: u64, euid: u32, lookup: Lookup<'_>) -> Outcome {
         if body.len() > MAX_BODY || body == b"?" || self.token.is_empty() {
             return Outcome::Ignored;
         }
@@ -543,9 +591,6 @@ impl ResumeStore {
             return Outcome::Ignored;
         }
         // time: window and monotonic per pid.
-        let Ok(prefix) = std::str::from_utf8(prefix) else {
-            return Outcome::Ignored; // mac matched, so the sender is ours, but there is no time to read
-        };
         let Some(time) = first_time(prefix) else {
             return Outcome::Ignored;
         };
@@ -553,11 +598,10 @@ impl ResumeStore {
             return Outcome::Ignored;
         }
         let owner = owner_pid(prefix);
-        if let Some(pid) = owner {
-            if self.last_times.iter().any(|&(p, t)| p == pid && time < t) {
-                return Outcome::Ignored;
-            }
-            self.note_time(pid, time);
+        if let Some(pid) = owner
+            && self.last_times.iter().any(|&(p, t)| p == pid && time < t)
+        {
+            return Outcome::Ignored;
         }
         let reject = |s: &mut Self| Outcome::Rejected {
             changed: owner.is_some_and(|p| s.remove_pid(p)),
@@ -565,16 +609,27 @@ impl ResumeStore {
         let Some(pid) = owner else {
             return Outcome::Rejected { changed: false };
         };
-        let verdict = parse_pairs(prefix).and_then(|p| validate(&p));
+        let verdict = if has_early_mac(prefix) {
+            None
+        } else {
+            std::str::from_utf8(prefix)
+                .ok()
+                .and_then(parse_pairs)
+                .and_then(|p| validate(&p))
+        };
         match verdict {
             None => reject(self),
-            Some(Verdict::Clear) => Outcome::Cleared {
-                changed: self.remove_pid(pid),
-            },
+            Some(Verdict::Clear) => {
+                self.note_time(pid, time);
+                Outcome::Cleared {
+                    changed: self.remove_pid(pid),
+                }
+            }
             Some(Verdict::Accept(argv, cwd)) => {
                 let Some(info) = lookup(pid).filter(|i| i.uid == euid) else {
                     return reject(self);
                 };
+                self.note_time(pid, time);
                 let rec = Record {
                     pid,
                     start_time: info.start_time,
@@ -611,19 +666,19 @@ impl ResumeStore {
     pub fn best(&self, lookup: Lookup<'_>) -> Option<&Record> {
         let descends = |r: &Record| {
             let mut pid = r.pid;
-            for _ in 0..64 {
+            let mut seen = HashSet::from([pid]);
+            loop {
                 let Some(info) = lookup(pid) else {
                     return false;
                 };
                 pid = info.ppid;
-                if pid == 0 || pid == r.pid {
+                if pid == 0 || !seen.insert(pid) {
                     return false;
                 }
                 if self.records.iter().any(|o| o.pid == pid) {
                     return true;
                 }
             }
-            false
         };
         self.records
             .iter()
@@ -1276,6 +1331,111 @@ mod tests {
             p.run(&mut t, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW),
             Outcome::Ignored
         );
+    }
+
+    fn sign_bytes(prefix: &[u8]) -> Vec<u8> {
+        let mac = hex(&sha256(&[prefix, b":", TOKEN.as_bytes()]));
+        let mut v = prefix.to_vec();
+        v.extend_from_slice(format!(":mac={mac}").as_bytes());
+        v
+    }
+
+    #[test]
+    fn early_mac_key_rejects() {
+        let p = procs();
+        let mut s = store();
+        p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW);
+        let pre = format!("{}:mac=abc", argv_prefix(100, NOW, &["x"]));
+        assert_eq!(
+            p.run(&mut s, &sign(&pre), NOW),
+            Outcome::Rejected { changed: true }
+        );
+        assert_eq!(s.records(), []);
+    }
+
+    #[test]
+    fn signed_non_utf8_pair_rejects() {
+        let p = procs();
+        let mut s = store();
+        p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW);
+        let mut pre = format!("pid=100:time={NOW}:argv=bnZpbQ==:cwd=").into_bytes();
+        pre.push(0xff);
+        assert_eq!(
+            p.run(&mut s, &sign_bytes(&pre), NOW),
+            Outcome::Rejected { changed: true }
+        );
+        assert_eq!(s.records(), []);
+    }
+
+    #[test]
+    fn rejected_report_does_not_advance_time() {
+        let p = procs();
+        let mut s = store();
+        let bad = sign(&format!("pid=100:time={}:argv=!!", NOW + 10));
+        assert!(matches!(p.run(&mut s, &bad, NOW), Outcome::Rejected { .. }));
+        assert_eq!(s.last_times(), []);
+        let ok = sign(&argv_prefix(100, NOW, &["nvim"]));
+        assert_eq!(p.run(&mut s, &ok, NOW), Outcome::Accepted { changed: true });
+    }
+
+    #[test]
+    fn eviction_keeps_pids_with_records() {
+        let p = procs();
+        let mut s = store();
+        p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW);
+        for pid in 1000..1000 + 266 {
+            p.run(&mut s, &sign(&format!("pid={pid}:time={NOW}:clear=1")), NOW);
+        }
+        assert!(s.last_times().iter().any(|&(p, _)| p == 100));
+        assert_eq!(s.last_times().len(), MAX_LAST_TIMES);
+        assert_eq!(
+            p.run(&mut s, &sign(&argv_prefix(100, NOW - 1, &["x"])), NOW),
+            Outcome::Ignored
+        );
+    }
+
+    #[test]
+    fn promotion_to_winner_is_a_change() {
+        let p = procs();
+        let mut s = store();
+        p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW);
+        p.run(&mut s, &sign(&argv_prefix(300, NOW, &["vim"])), NOW);
+        assert_eq!(
+            p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW),
+            Outcome::Accepted { changed: true }
+        );
+        assert_eq!(
+            p.run(&mut s, &sign(&argv_prefix(100, NOW, &["nvim"])), NOW),
+            Outcome::Accepted { changed: false }
+        );
+    }
+
+    #[test]
+    fn deep_ancestry_and_cycles() {
+        let mut m = HashMap::new();
+        for i in 1..=200u32 {
+            m.insert(i, info(i + 1, 5));
+        }
+        m.insert(201, info(0, 5));
+        let p = Procs(m);
+        let mut s = store();
+        p.run(&mut s, &sign(&argv_prefix(201, NOW, &["top"])), NOW);
+        p.run(&mut s, &sign(&argv_prefix(1, NOW, &["leaf"])), NOW);
+        assert_eq!(s.pid(&|q| p.0.get(&q).cloned()), Some(201));
+        // A cycle terminates.
+        let c = Procs([(1, info(2, 5)), (2, info(1, 5))].into());
+        assert!(s.pid(&|q| c.0.get(&q).cloned()).is_some());
+    }
+
+    #[test]
+    fn reserved_word_argv0_is_quoted() {
+        for w in [
+            "if", "then", "done", "time", "{", "}", "!", "[[", "function",
+        ] {
+            let c = shell_command(&[w.to_string(), "x".into()]);
+            assert_eq!(c, format!("'{w}' x"));
+        }
+        assert_eq!(shell_command(&["ls".into(), "if".into()]), "ls if");
     }
 
     #[test]

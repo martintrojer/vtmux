@@ -704,7 +704,8 @@ pub fn tty_name(master: &OwnedFd) -> Option<String> {
 /// What the OS tells about one process (OSC 7577 owner checks).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessInfo {
-    /// The real user ID the process runs as.
+    /// The effective user ID the process runs as (`euid`, on macOS and
+    /// Linux alike).
     pub uid: u32,
     /// The parent process.
     pub ppid: u32,
@@ -714,6 +715,25 @@ pub struct ProcessInfo {
     pub start_time: u64,
     /// Its working directory, when readable and UTF-8.
     pub cwd: Option<String>,
+}
+
+/// `(ppid, starttime)` of a `/proc/<pid>/stat` line, `None` for a zombie
+/// or a malformed line. `comm` may hold spaces, parens and non-UTF-8
+/// bytes, so the fields start after the last `)`: state is field 0, ppid
+/// 1, starttime 19.
+#[cfg(any(test, not(target_os = "macos")))]
+fn parse_linux_stat(stat: &[u8]) -> Option<(u32, u64)> {
+    let rest = &stat[stat.iter().rposition(|&c| c == b')')? + 1..];
+    let mut f = rest
+        .split(u8::is_ascii_whitespace)
+        .filter(|w| !w.is_empty())
+        .map(|w| std::str::from_utf8(w).ok());
+    if f.next()?? == "Z" {
+        return None;
+    }
+    let parent_pid = f.next()??.parse().ok()?;
+    let start_time = f.nth(17)??.parse().ok()?;
+    Some((parent_pid, start_time))
 }
 
 /// Look up process `pid`; `None` when it does not exist (or is a zombie).
@@ -782,22 +802,16 @@ pub fn process_info(pid: u32) -> Option<ProcessInfo> {
         use std::os::unix::fs::MetadataExt;
         let dir = format!("/proc/{pid}");
         let uid = std::fs::metadata(&dir).ok()?.uid();
-        let stat = std::fs::read_to_string(format!("{dir}/stat")).ok()?;
+        let stat = std::fs::read(format!("{dir}/stat")).ok()?;
         // `pid (comm) state ppid ...`; comm may hold spaces and parens.
         // After the ')': state is field 0, ppid 1, starttime 19.
-        let rest = &stat[stat.rfind(')')? + 1..];
-        let mut f = rest.split_whitespace();
-        if f.next()? == "Z" {
-            return None;
-        }
-        let ppid = f.next()?.parse().ok()?;
-        let start_time = f.nth(17)?.parse().ok()?;
+        let (parent_pid, start_time) = parse_linux_stat(&stat)?;
         let cwd = std::fs::read_link(format!("{dir}/cwd"))
             .ok()
             .and_then(|p| p.into_os_string().into_string().ok());
         Some(ProcessInfo {
             uid,
-            ppid,
+            ppid: parent_pid,
             start_time,
             cwd,
         })
@@ -811,8 +825,8 @@ mod tests {
     #[test]
     fn process_info_of_self() {
         let me = process_info(std::process::id()).expect("own process");
-        // SAFETY: getuid cannot fail.
-        assert_eq!(me.uid, unsafe { libc::getuid() });
+        // SAFETY: geteuid cannot fail.
+        assert_eq!(me.uid, unsafe { libc::geteuid() });
         assert_eq!(me.ppid, std::os::unix::process::parent_id());
         assert!(me.start_time > 0);
         let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
@@ -822,6 +836,13 @@ mod tests {
             process_info(std::process::id()).unwrap().start_time,
             me.start_time
         );
+    }
+
+    #[test]
+    fn linux_stat_non_utf8_comm() {
+        let line = b"42 (a \xff) b) S 7 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 999 0 0".as_slice();
+        assert_eq!(parse_linux_stat(line), Some((7, 999)));
+        assert_eq!(parse_linux_stat(b"1 (x) Z 7 1"), None);
     }
 
     #[test]
