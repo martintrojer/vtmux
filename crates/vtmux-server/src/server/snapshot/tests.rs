@@ -1249,6 +1249,49 @@ fn an_automatically_selected_pane_acknowledges_error() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D34: the window selected when the active one's last pane exits has its
+/// pane focused at once with `focus-events` off too.
+#[test]
+fn a_replacement_window_acknowledges_error_with_focus_events_off() {
+    let dir = temp_dir("pstatus-win");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    ok(&mut a, &dir, &["set", "-s", "focus-events", "off"]);
+    ok(&mut a, &dir, &["new-window", "-d", "-t", "s:1", "cat", "-"]);
+    let (_client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let (p0, p1) = (vtmux_core::ids::PaneId(0), vtmux_core::ids::PaneId(1));
+    a.pane_input(p1, b"\x1b]7501;state=error:id=a\x07", false);
+    assert!(!a.model.panes[&p1].program_status.is_empty());
+    a.destroy_pane(p0);
+    a.drain_events();
+    assert!(a.model.panes[&p1].program_status.is_empty());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D34: a client that went away no longer focuses its pane, so the next
+/// one to attach is a focus gain.
+#[test]
+fn a_dropped_client_loses_program_status_focus() {
+    let dir = temp_dir("pstatus-drop");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let p = vtmux_core::ids::PaneId(0);
+    assert!(a.model.panes[&p].program_status.focused);
+    a.drop_client(client);
+    assert!(!a.model.panes[&p].program_status.focused);
+    a.pane_input(p, b"\x1b]7501;state=error:id=a\x07", false);
+    assert!(!a.model.panes[&p].program_status.is_empty());
+    let (_c2, _peer2) = attach(&mut a, &dir, "s", &[]);
+    a.update_focus_all();
+    assert!(a.model.panes[&p].program_status.is_empty());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// D34: a pane focused before an upgrade is not focused afresh by it: its
 /// `error` stays until a real focus gain.
 #[test]

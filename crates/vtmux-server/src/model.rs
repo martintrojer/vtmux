@@ -1415,6 +1415,8 @@ impl Model {
             for p in actives {
                 self.push_focus_check(p);
             }
+        } else {
+            self.push_program_focus();
         }
         self.alerts_clear_window(w);
         self.alerts_queue(w, crate::alerts::ACTIVITY);

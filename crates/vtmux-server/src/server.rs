@@ -1860,6 +1860,8 @@ impl Server {
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
+        // D34: the panes this client focused are not focused any more.
+        self.program_status_focus_scan();
         // server-client.c:548.
         self.format_jobs_lost_client(id);
         self.waits.client_lost(id);

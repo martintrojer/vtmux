@@ -246,6 +246,12 @@ impl Model {
         self.events.push(Queued::Focus(p));
     }
 
+    /// Queue the program-status focus scan (D34), which `focus-events`
+    /// does not gate.
+    pub fn push_program_focus(&mut self) {
+        self.events.push(Queued::ProgramFocus);
+    }
+
     /// Queue `tty_update_window_offset` for window `w`: the views of the
     /// clients showing it are worked out again
     /// ([`crate::server::Server::update_window_offset`]).
@@ -355,6 +361,9 @@ impl Model {
 pub enum Queued {
     Event(Event),
     Focus(PaneId),
+    /// D34: program-status focus acknowledgement only, whatever
+    /// `focus-events` says.
+    ProgramFocus,
     /// `tty_update_window_offset` for a window.
     Offset(WindowId),
     /// A session went: its clients move on before its `session-closed`
@@ -429,6 +438,7 @@ impl Server {
                             self.fire_event(&ev);
                         }
                     }
+                    Queued::ProgramFocus => self.program_status_focus_scan(),
                     Queued::Offset(w) => self.update_window_offset(w),
                     Queued::Destroyed(d) => {
                         // The client-session-changed events this fires
