@@ -1,0 +1,19 @@
+# D34 off (spec, *Protocol extensions (D28)*): with `vtmux-program-status` at
+# its default, OSC 7501 is an OSC tmux 3.8 does not know (input.c
+# `input_dispatch_osc` ignores it). The program sends a query, a report and a
+# clear, then DSR 5, and prints what it reads back through `cat -v`: only the
+# 4 bytes of the DSR's answer, where an answer to the query would come first.
+# The `pane_program_*` formats are empty, the title is untouched, and the
+# screen shows the text around the sequences as it was.
+name = "osc_7501_off"
+size = [60, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "sh", "-c", "stty raw -echo opost onlcr; printf 'a\\033]7501;?\\033\\\\b\\033]7501;id=x:state=working:kind=build:progress=50:app=app:title=T:message=M\\007c\\033]7501;id=x:state=clear\\033\\\\d\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; exec cat"] },
+  { wait_for = "rdy" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_program_state}][#{pane_program_kind}][#{pane_program_progress}][#{pane_program_app}][#{pane_program_title}][#{pane_program_message}][#{pane_title}]"] },
+  { run = ["set", "-s", "-q", "vtmux-pane-program-status", "display -p x"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

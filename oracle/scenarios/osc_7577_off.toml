@@ -1,0 +1,18 @@
+# D35 off (spec, *Protocol extensions (D28)*): with `vtmux-program-resume` at
+# its default, OSC 7577 is an OSC tmux 3.8 does not know (input.c
+# `input_dispatch_osc` ignores it) and the pane has no `OSC7577_TOKEN`. The
+# program prints its token (empty), sends a query and a report, then DSR 5,
+# and prints what it reads back through `cat -v`: only the 4 bytes of the
+# DSR's answer. The `pane_resume_*` formats are empty and the screen shows
+# the text around the sequences as it was.
+name = "osc_7577_off"
+size = [60, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "sh", "-c", "stty raw -echo opost onlcr; printf 'tok[%s]a\\033]7577;?\\033\\\\b\\033]7577;pid=1:argv=L2Jpbi9zaA:cwd=/:time=1:mac=00\\007c\\033[5n' \"$OSC7577_TOKEN\"; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; exec cat"] },
+  { wait_for = "rdy" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["display", "-p", "-t", "%0", "[#{pane_resume_command}][#{pane_resume_cwd}][#{pane_resume_pid}][#{pane_title}]"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

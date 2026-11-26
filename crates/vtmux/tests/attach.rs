@@ -10144,3 +10144,629 @@ fn graphics_range_is_freed_and_uploaded_again_after_an_upgrade() {
         "{title:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// D34 (OSC 7501 program status) and D35 (OSC 7577 program resume), the
+// options on. The options off are the oracle's `osc_7501_off` and
+// `osc_7577_off`.
+// ---------------------------------------------------------------------
+
+/// The pane program of these tests: it writes each file named on a line
+/// of its input (as [`notify_world`]'s), after an optional `prelude`.
+fn osc_loop(prelude: &str) -> String {
+    format!("{prelude}while read -r f; do cat \"$f\"; done")
+}
+
+/// A world for the D34 and D35 tests: session `a` whose window 0 (`w`,
+/// pane `%0`) runs [`osc_loop`] and is not current (window 1 is), the
+/// status line pinned. `extra` is the environment of the client that
+/// starts the server.
+fn osc_world(extra: &[(&str, &str)]) -> (World, Attached) {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let program = osc_loop("");
+    let a = w.attach_env(
+        &["new", "-s", "a", "-n", "w", "sh", "-c", &program],
+        40,
+        10,
+        extra,
+    );
+    a.wait(|a| status_row(a).starts_with("[a]"));
+    w.cli(&["set", "-g", "status-right", ""]);
+    w.cli(&["set", "-g", "automatic-rename", "off"]);
+    w.cli(&["neww", "-n", "other", "cat", "-"]);
+    a.wait(|a| status_row(a).contains("1:other*"));
+    (w, a)
+}
+
+fn out(w: &World, args: &[&str]) -> String {
+    let o = w.cli(args);
+    assert!(o.status.success(), "{args:?}: {o:?}");
+    String::from_utf8_lossy(&o.stdout)
+        .trim_end_matches('\n')
+        .to_owned()
+}
+
+/// `format` of `pane`.
+fn fmt(w: &World, pane: &str, format: &str) -> String {
+    out(w, &["display", "-p", "-t", pane, format])
+}
+
+fn wait_fmt(w: &World, pane: &str, format: &str, want: &str) {
+    let got = common::wait_for(
+        &format!("{format} of {pane} to be {want:?}"),
+        || fmt(w, pane, format),
+        |g| g == want,
+    );
+    assert_eq!(got, want);
+}
+
+/// `pane` (a [`osc_loop`] pane) writes `bytes`, then sets its title to a
+/// marker: once the title shows it, the server has handled every byte
+/// before it.
+fn osc_emit(w: &World, pane: &str, bytes: &[u8]) {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mark = format!("mark{n}");
+    let mut payload = bytes.to_vec();
+    payload.extend_from_slice(format!("\x1b]2;{mark}\x07").as_bytes());
+    let file = w.home.path().join(format!("emit{n}"));
+    std::fs::write(&file, payload).unwrap();
+    out(
+        w,
+        &["send-keys", "-t", pane, "-l", &file.display().to_string()],
+    );
+    out(w, &["send-keys", "-t", pane, "Enter"]);
+    wait_fmt(w, pane, "#{pane_title}", &mark);
+}
+
+fn b64(s: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut o = String::new();
+    for c in s.as_bytes().chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            o.push(if i <= c.len() {
+                char::from(T[((n >> shift) & 63) as usize])
+            } else {
+                '='
+            });
+        }
+    }
+    o
+}
+
+const SHA_K: [u32; 64] = [
+    0x428a_2f98,
+    0x7137_4491,
+    0xb5c0_fbcf,
+    0xe9b5_dba5,
+    0x3956_c25b,
+    0x59f1_11f1,
+    0x923f_82a4,
+    0xab1c_5ed5,
+    0xd807_aa98,
+    0x1283_5b01,
+    0x2431_85be,
+    0x550c_7dc3,
+    0x72be_5d74,
+    0x80de_b1fe,
+    0x9bdc_06a7,
+    0xc19b_f174,
+    0xe49b_69c1,
+    0xefbe_4786,
+    0x0fc1_9dc6,
+    0x240c_a1cc,
+    0x2de9_2c6f,
+    0x4a74_84aa,
+    0x5cb0_a9dc,
+    0x76f9_88da,
+    0x983e_5152,
+    0xa831_c66d,
+    0xb003_27c8,
+    0xbf59_7fc7,
+    0xc6e0_0bf3,
+    0xd5a7_9147,
+    0x06ca_6351,
+    0x1429_2967,
+    0x27b7_0a85,
+    0x2e1b_2138,
+    0x4d2c_6dfc,
+    0x5338_0d13,
+    0x650a_7354,
+    0x766a_0abb,
+    0x81c2_c92e,
+    0x9272_2c85,
+    0xa2bf_e8a1,
+    0xa81a_664b,
+    0xc24b_8b70,
+    0xc76c_51a3,
+    0xd192_e819,
+    0xd699_0624,
+    0xf40e_3585,
+    0x106a_a070,
+    0x19a4_c116,
+    0x1e37_6c08,
+    0x2748_774c,
+    0x34b0_bcb5,
+    0x391c_0cb3,
+    0x4ed8_aa4a,
+    0x5b9c_ca4f,
+    0x682e_6ff3,
+    0x748f_82ee,
+    0x78a5_636f,
+    0x84c8_7814,
+    0x8cc7_0208,
+    0x90be_fffa,
+    0xa450_6ceb,
+    0xbef9_a3f7,
+    0xc671_78f2,
+];
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut h: [u32; 8] = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
+    for block in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for (i, c) in block.chunks(4).enumerate() {
+            w[i] = u32::from_be_bytes([c[0], c[1], c[2], c[3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let mut v = h;
+        for i in 0..64 {
+            let s1 = v[4].rotate_right(6) ^ v[4].rotate_right(11) ^ v[4].rotate_right(25);
+            let ch = (v[4] & v[5]) ^ (!v[4] & v[6]);
+            let t1 = v[7]
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(SHA_K[i])
+                .wrapping_add(w[i]);
+            let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
+            let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+            let t2 = s0.wrapping_add(maj);
+            v = [
+                t1.wrapping_add(t2),
+                v[0],
+                v[1],
+                v[2],
+                v[3].wrapping_add(t1),
+                v[4],
+                v[5],
+                v[6],
+            ];
+        }
+        for (x, y) in h.iter_mut().zip(v) {
+            *x = x.wrapping_add(y);
+        }
+    }
+    h.iter().fold(String::new(), |mut o, x| {
+        let _ = write!(o, "{x:08x}");
+        o
+    })
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// An OSC 7577 report of `prefix`, signed with `token` (SHA-256 of the
+/// prefix, `:` and the token).
+fn signed(prefix: &str, token: &str) -> Vec<u8> {
+    let mac = sha256_hex(format!("{prefix}:{token}").as_bytes());
+    format!("\x1b]7577;{prefix}:mac={mac}\x07").into_bytes()
+}
+
+fn argv_field(argv: &[&str]) -> String {
+    argv.iter().map(|a| b64(a)).collect::<Vec<_>>().join(",")
+}
+
+/// A report that `argv` runs under `pid`, at `time`.
+fn resume_prefix(pid: &str, time: u64, argv: &[&str]) -> String {
+    format!("pid={pid}:time={time}:argv={}", argv_field(argv))
+}
+
+/// A D35 pane: a new background window `name` running [`osc_loop`] after
+/// it wrote its `OSC7577_TOKEN` to a file. Its id, token (possibly empty)
+/// and pid.
+fn resume_pane(w: &World, name: &str) -> (String, String, String) {
+    let file = w.home.path().join(format!("tok-{name}"));
+    let program = osc_loop(&format!(
+        "printf %s \"$OSC7577_TOKEN\" > {}; ",
+        file.display()
+    ));
+    let id = out(
+        w,
+        &[
+            "neww",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-n",
+            name,
+            "sh",
+            "-c",
+            &program,
+        ],
+    );
+    common::wait("the token file", || file.exists());
+    let token = common::wait_for(
+        "the token",
+        || std::fs::read_to_string(&file).unwrap_or_default(),
+        |_| true,
+    );
+    let pid = fmt(w, &id, "#{pane_pid}");
+    (id, token, pid)
+}
+
+const STATUS_FORMATS: &str = "#{pane_program_state}|#{pane_program_kind}|#{pane_program_progress}|#{pane_program_app}|#{pane_program_title}|#{pane_program_message}";
+
+/// D34: a pane's `OSC 7501 ; ?` is answered (a pane that reads its own
+/// input sees the reply), granted by the query alone.
+#[test]
+fn osc_7501_query_is_answered_when_on() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    let file = w.home.path().join("reply");
+    let program = format!(
+        "stty raw -echo; printf '\\033]7501;?\\007'; exec cat > {}",
+        file.display()
+    );
+    out(&w, &["neww", "-d", "-n", "q", "sh", "-c", &program]);
+    let got = common::wait_for(
+        "the reply",
+        || std::fs::read(&file).unwrap_or_default(),
+        |s| s.ends_with(b"\x07"),
+    );
+    assert!(got.starts_with(b"\x1b]7501;?:"), "{got:?}");
+}
+
+/// D34: reports fill the six formats, a child record inherits its
+/// ancestor's `app`, the hook fires on a state change, and clearing the
+/// parent removes the subtree.
+#[test]
+fn osc_7501_reports_fill_formats_hierarchy_and_hook() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    w.cli(&[
+        "set-hook",
+        "-g",
+        "vtmux-pane-program-status",
+        "set -agF @log '|#{pane_id}:#{pane_program_state}'",
+    ]);
+    // Parent: working, with an app. Child: blocked, no app.
+    osc_emit(&w, "%0", b"\x1b]7501;id=job:state=working:app=builder\x07");
+    assert_eq!(fmt(&w, "%0", STATUS_FORMATS), "working|none||builder||");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_app}"), "builder");
+    osc_emit(
+        &w,
+        "%0",
+        format!(
+            "\x1b]7501;id=job/step:state=blocked:kind=permission:progress=40:title={}:msg={}\x07",
+            b64("Title"),
+            b64("Msg")
+        )
+        .as_bytes(),
+    );
+    assert_eq!(
+        fmt(&w, "%0", STATUS_FORMATS),
+        "blocked|permission|40|builder|Title|Msg"
+    );
+    common::wait("the hook", || {
+        out(&w, &["show", "-gqv", "@log"]) == "|%0:working|%0:blocked"
+    });
+    // Clearing the parent takes the child with it.
+    osc_emit(&w, "%0", b"\x1b]7501;id=job:state=clear\x07");
+    assert_eq!(fmt(&w, "%0", STATUS_FORMATS), "|||||");
+    common::wait("the hook", || {
+        out(&w, &["show", "-gqv", "@log"]) == "|%0:working|%0:blocked|%0:"
+    });
+}
+
+/// D34: RIS clears every record; `OSC 133;A` clears `working` but not
+/// `done`; focus clears `done` and `error`.
+#[test]
+fn osc_7501_ris_prompt_and_focus_clear() {
+    let (w, a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=working\x07\x1bc");
+    assert_eq!(fmt(&w, "%0", STATUS_FORMATS), "|||||");
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=working\x07\x1b]133;A\x07");
+    assert_eq!(fmt(&w, "%0", STATUS_FORMATS), "|||||");
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=done\x07\x1b]133;A\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "done");
+    // The pane is in the background window: seen once it is focused.
+    w.cli(&["select-window", "-t", "a:0"]);
+    a.wait(|a| status_row(a).contains("0:w*"));
+    wait_fmt(&w, "%0", "#{pane_program_state}", "");
+    // Error likewise, now that the pane is in view: seen at once? No: the
+    // gain is the edge, so leave and come back.
+    w.cli(&["select-window", "-t", "a:1"]);
+    a.wait(|a| status_row(a).contains("1:other*"));
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=error\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "error");
+    w.cli(&["select-window", "-t", "a:0"]);
+    wait_fmt(&w, "%0", "#{pane_program_state}", "");
+}
+
+/// D34 rule 5: the grant a first report made outlives the option going
+/// off, and ends with a respawn.
+#[test]
+fn osc_7501_grant_outlives_the_option_and_a_respawn_ends_it() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=idle\x07");
+    w.cli(&["set", "-s", "vtmux-program-status", "off"]);
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=working\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "working");
+    out(&w, &["respawn-pane", "-k", "-t", "%0"]);
+    wait_fmt(&w, "%0", "#{pane_program_state}", "");
+    osc_emit(&w, "%0", b"\x1b]7501;id=a:state=working\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "");
+}
+
+/// D34 across a live upgrade: the records and the grant (the option off
+/// by then) come over.
+#[test]
+fn osc_7501_records_and_grant_survive_an_upgrade() {
+    let (w, a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    osc_emit(
+        &w,
+        "%0",
+        format!("\x1b]7501;id=j:state=working:app=x:title={}\x07", b64("T")).as_bytes(),
+    );
+    w.cli(&["set", "-s", "vtmux-program-status", "off"]);
+    let before = fmt(&w, "%0", STATUS_FORMATS);
+    assert_eq!(before, "working|none||x|T|");
+    let up = w.cli(&["vtmux-upgrade"]);
+    assert!(up.status.success(), "{up:?}");
+    a.wait(|a| status_row(a).contains("1:other*"));
+    assert_eq!(fmt(&w, "%0", STATUS_FORMATS), before);
+    // Still granted with the option off.
+    osc_emit(&w, "%0", b"\x1b]7501;id=j:state=blocked\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "blocked");
+}
+
+/// D35: an inherited `OSC7577_TOKEN` never reaches a pane (server,
+/// global environment and `new-window -e` alike), and no token is minted
+/// while the option is off.
+#[test]
+fn osc_7577_strips_the_outer_token_with_the_option_off() {
+    let (w, _a) = osc_world(&[("OSC7577_TOKEN", "outer-client")]);
+    w.cli(&["set-environment", "-g", "OSC7577_TOKEN", "outer-global"]);
+    let (_, token, _) = resume_pane(&w, "t1");
+    assert_eq!(token, "");
+    let file = w.home.path().join("tok-e");
+    let program = format!(
+        "printf %s \"$OSC7577_TOKEN\" > {}; exec cat -",
+        file.display()
+    );
+    out(
+        &w,
+        &[
+            "neww",
+            "-d",
+            "-e",
+            "OSC7577_TOKEN=outer-e",
+            "sh",
+            "-c",
+            &program,
+        ],
+    );
+    common::wait("the file", || file.exists());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+    // The first pane's own environment too.
+    let (_, token, _) = resume_pane(&w, "t2");
+    assert_eq!(token, "");
+}
+
+/// D35: with the option on every pane spawned gets its own token (32
+/// characters of `[A-Za-z0-9_-]`, never the inherited one), a respawn
+/// a new one; a pane already running gets none, and the option going off
+/// takes none back.
+#[test]
+fn osc_7577_mints_unique_tokens_on_spawn_and_respawn() {
+    let (w, _a) = osc_world(&[("OSC7577_TOKEN", "outer-client")]);
+    let (_, before, _) = resume_pane(&w, "early");
+    assert_eq!(before, "");
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    let (p1, t1, _) = resume_pane(&w, "p1");
+    let (_, t2, _) = resume_pane(&w, "p2");
+    for t in [&t1, &t2] {
+        assert_eq!(t.len(), 32, "{t}");
+        assert!(
+            t.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'),
+            "{t}"
+        );
+        assert_ne!(t, "outer-client");
+    }
+    assert_ne!(t1, t2);
+    // Respawn: a fresh token.
+    let file = w.home.path().join("tok-p1");
+    std::fs::remove_file(&file).unwrap();
+    out(&w, &["respawn-pane", "-k", "-t", &p1]);
+    common::wait("the new token", || file.exists());
+    let t3 = common::wait_for(
+        "the token",
+        || std::fs::read_to_string(&file).unwrap_or_default(),
+        |s| !s.is_empty(),
+    );
+    assert_eq!(t3.len(), 32);
+    assert_ne!(t3, t1);
+    // Option off: no token for a new pane.
+    w.cli(&["set", "-s", "vtmux-program-resume", "off"]);
+    let (_, t4, _) = resume_pane(&w, "p3");
+    assert_eq!(t4, "");
+}
+
+/// D35: real signed reports from a pane's own process fill the formats
+/// and fire the hook; a bad MAC, a stale time and an unknown pid are
+/// ignored or rejected as the protocol says; `clear=1` removes the
+/// record; RIS and the alternate screen do not.
+#[test]
+fn osc_7577_signed_reports_fill_formats_and_fire_the_hook() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    w.cli(&[
+        "set-hook",
+        "-g",
+        "vtmux-pane-program-resume",
+        "set -agF @log '|#{pane_resume_pid}'",
+    ]);
+    let (p, token, pid) = resume_pane(&w, "r");
+    assert_eq!(token.len(), 32);
+    let formats = "#{pane_resume_command}|#{pane_resume_cwd}|#{pane_resume_pid}";
+    assert_eq!(fmt(&w, &p, formats), "||");
+    let now = unix_now();
+    let argv = ["nvim", "-S", "/tmp/my session.vim"];
+    let mut good = resume_prefix(&pid, now, &argv);
+    let _ = write!(good, ":cwd={}", b64("/tmp"));
+    osc_emit(&w, &p, &signed(&good, &token));
+    let want = format!("nvim -S '/tmp/my session.vim'|/tmp|{pid}");
+    assert_eq!(fmt(&w, &p, formats), want);
+    common::wait("the hook", || {
+        out(&w, &["show", "-gqv", "@log"]) == format!("|{pid}")
+    });
+    // Bad MAC: one hex digit changed. Ignored, the record stays.
+    let mut bad = signed(&resume_prefix(&pid, now + 1, &["vim"]), &token);
+    let at = bad.len() - 2;
+    bad[at] = if bad[at] == b'0' { b'1' } else { b'0' };
+    osc_emit(&w, &p, &bad);
+    assert_eq!(fmt(&w, &p, formats), want);
+    // The wrong token: ignored too.
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now + 1, &["vim"]), "not-the-token"),
+    );
+    assert_eq!(fmt(&w, &p, formats), want);
+    // Stale time (an hour old): ignored.
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now - 3600, &["vim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, formats), want);
+    // RIS and the alternate screen leave it.
+    osc_emit(&w, &p, b"\x1bc\x1b[?1049h\x1b[?1049l");
+    assert_eq!(fmt(&w, &p, formats), want);
+    // A newer report replaces it.
+    osc_emit(
+        &w,
+        &p,
+        &signed(
+            &resume_prefix(&pid, now + 2, &["/usr/bin/vim", "a"]),
+            &token,
+        ),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "/usr/bin/vim a",);
+    // Strict reject (relative argv[0] with a good MAC and time): the
+    // owner's record goes.
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now + 3, &["./vim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, formats), "||");
+    // Report again, then clear=1.
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now + 4, &["nvim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+    osc_emit(
+        &w,
+        &p,
+        &signed(&format!("pid={pid}:time={}:clear=1", now + 5), &token),
+    );
+    assert_eq!(fmt(&w, &p, formats), "||");
+}
+
+/// D35 rule 5: the token outlives the option going off, so the pane's
+/// reports are still accepted; a respawn ends it.
+#[test]
+fn osc_7577_grant_outlives_the_option() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    let (p, token, pid) = resume_pane(&w, "g");
+    w.cli(&["set", "-s", "vtmux-program-resume", "off"]);
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, unix_now(), &["nvim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+    // A respawn with the option off: no token, so nothing is accepted.
+    out(&w, &["respawn-pane", "-k", "-t", &p]);
+    wait_fmt(&w, &p, "#{pane_resume_command}", "");
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, unix_now(), &["nvim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "");
+}
+
+/// D35 across a live upgrade: the token and the records come over, and a
+/// new report is verified with the same token.
+#[test]
+fn osc_7577_token_and_records_survive_an_upgrade() {
+    let (w, a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    let (p, token, pid) = resume_pane(&w, "u");
+    let now = unix_now();
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now, &["nvim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+    w.cli(&["set", "-s", "vtmux-program-resume", "off"]);
+    let up = w.cli(&["vtmux-upgrade"]);
+    assert!(up.status.success(), "{up:?}");
+    a.wait(|a| status_row(a).contains("1:other*"));
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+    assert_eq!(fmt(&w, &p, "#{pane_resume_pid}"), pid);
+    // The same token still verifies; an older time than the last one
+    // accepted does not (last_times came over).
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now - 10, &["stale"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&pid, now + 1, &["vim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "vim");
+}
