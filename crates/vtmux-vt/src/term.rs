@@ -813,6 +813,7 @@ impl PaneTerm {
             let mut j = i;
             let mut event = None;
             let mut plain_char = None;
+            let mut progress = false;
             while j < bytes.len() && j - i < step {
                 if self.scan.state == ScanState::Ground && !self.scan.utf8.started() {
                     // Printable ASCII changes nothing the scanner keeps.
@@ -848,8 +849,15 @@ impl PaneTerm {
                 // A palette OSC ended: tmux redraws the pane at once, ahead
                 // of whatever follows in this input.
                 self.redraw |= std::mem::take(&mut self.scan.palette_redraw);
+                // Ghostty has not seen the piece yet: its OSC 7501 reports
+                // must reach the events ahead of this progress, so the
+                // piece ends here and the event follows its write.
                 if std::mem::take(&mut self.scan.progress_set) {
-                    self.events.borrow_mut().push(TermEvent::Progress);
+                    progress = true;
+                    if e.is_none() {
+                        j += 1;
+                        break;
+                    }
                 }
                 if let Some(e) = e {
                     event = Some(e);
@@ -858,6 +866,9 @@ impl PaneTerm {
                 j += 1;
             }
             self.feed_piece(&bytes[i..j]);
+            if progress {
+                self.events.borrow_mut().push(TermEvent::Progress);
+            }
             i = j;
             if let Some(n) = plain_char {
                 self.feed_plain_char(&bytes[i..i + n]);
@@ -5594,6 +5605,26 @@ mod tests {
         assert_eq!(statuses(&mut u).len(), 1);
     }
 
+    #[test]
+    fn progress_does_not_overtake_an_earlier_program_status() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_status_enabled(true);
+        t.feed(b"\x1b]7501;state=working\x07\x1b]9;4;1;50\x07\x1b]7501;state=idle\x07");
+        let ev: Vec<_> = t
+            .take_events()
+            .into_iter()
+            .filter(|e| matches!(e, TermEvent::ProgramStatus(_) | TermEvent::Progress))
+            .collect();
+        assert!(matches!(
+            ev.as_slice(),
+            [
+                TermEvent::ProgramStatus(_),
+                TermEvent::Progress,
+                TermEvent::ProgramStatus(_)
+            ]
+        ));
+    }
+
     fn replies_to(cols: u16, rows: u16, bytes: &[u8]) -> Vec<u8> {
         let mut t = PaneTerm::new(cols, rows, 100);
         t.feed(bytes);
@@ -7773,6 +7804,26 @@ mod tests {
     /// the one open at the cursor, whatever else it holds stays, and a
     /// link written afterwards is read as ever. A screen without links is
     /// left as it is.
+    #[test]
+    fn reset_hyperlinks_keeps_the_program_status_grant() {
+        let mut t = PaneTerm::new(20, 4, 100);
+        t.set_program_status_enabled(true);
+        t.feed(b"\x1b]7501;state=idle\x07\x1b]8;;http://a\x07ab\x1b]8;;\x07");
+        assert!(t.program_status_granted());
+        let _ = t.take_events();
+        assert!(t.reset_hyperlinks());
+        assert!(t.program_status_granted());
+        t.set_program_status_enabled(false);
+        t.feed(b"\x1b]7501;state=working\x07");
+        assert_eq!(
+            t.take_events()
+                .iter()
+                .filter(|e| matches!(e, TermEvent::ProgramStatus(_)))
+                .count(),
+            1
+        );
+    }
+
     #[test]
     fn reset_hyperlinks_forgets_the_links_of_the_screen_in_use() {
         let mut t = PaneTerm::new(20, 4, 100);

@@ -1091,6 +1091,10 @@ impl PaneTerm {
         match Self::import_state(&state) {
             Ok(mut term) => {
                 term.number_links_from(&self.link_numbers());
+                // The option and the grant live outside the exported
+                // state; the callback is registered again with them.
+                term.set_program_status_enabled(self.status_enabled.get());
+                term.set_program_status_granted(self.status_granted.get());
                 *self = term;
                 true
             }

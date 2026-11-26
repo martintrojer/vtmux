@@ -2001,7 +2001,8 @@ impl Terminal<'_, '_> {
     /// Stop receiving program status reports (set the callback to NULL):
     /// libghostty then drops them and does not answer `OSC 7501 ; ?`.
     pub fn clear_program_status(&mut self) -> Result<&mut Self> {
-        self.vtable.on_program_status = None;
+        // Unset the C callback first, so a panic in the closure's destructor
+        // cannot leave it registered.
         // SAFETY: a null pointer is how an option is unset.
         let result = unsafe {
             ffi::ghostty_terminal_set(
@@ -2010,6 +2011,7 @@ impl Terminal<'_, '_> {
                 std::ptr::null(),
             )
         };
+        self.vtable.on_program_status = None;
         from_result(result)?;
         Ok(self)
     }
