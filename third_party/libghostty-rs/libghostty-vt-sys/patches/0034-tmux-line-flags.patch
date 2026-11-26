@@ -33,7 +33,7 @@ index 46cf8be97..c7fdfc83b 100644
  /**
   * One row. Its cells are `cells[cell_start .. cell_start + cell_count]`
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index a248daa70..2a444e2a5 100644
+index d713a0980..84a4a853f 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -2149,6 +2149,15 @@ const ReflowCursor = struct {
@@ -96,7 +96,7 @@ index a248daa70..2a444e2a5 100644
      // We only set the new minimums if we're not reflowing. If we are
      // reflowing, then the outer resize call handles this for us.
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index 136fa5ebb..efdb3ff00 100644
+index 7783e5ac4..473d71263 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
 @@ -1005,7 +1005,7 @@ pub fn cursorDownScroll(self: *Screen) !void {
@@ -108,17 +108,7 @@ index 136fa5ebb..efdb3ff00 100644
  
              self.cursorMarkDirty();
          } else {
-@@ -1231,6 +1231,9 @@ pub fn cursorScrollAbove(self: *Screen) !void {
-             const cells = cell_current - self.cursor.x;
-             self.cursor.page_row.blank = false;
-             @memset(cells[0..self.pages.cols], blank_cell);
-+            // vtmux: tmux clears the new line in an RGB background with
-+            // extended cells (grid_empty_line).
-+            if (blank_cell.content_tag == .bg_color_rgb) self.cursor.page_row.tmuxMarkExtended(false);
-         }
-     }
- }
-@@ -1310,7 +1313,7 @@ fn cursorScrollAboveRotate(
+@@ -1281,7 +1281,7 @@ fn cursorScrollAboveRotate(
      // The recycled storage becomes the new blank cursor row and must
      // not retain metadata (wrap state, semantic prompt) from the row
      // whose content was moved to the next page.
@@ -127,7 +117,7 @@ index 136fa5ebb..efdb3ff00 100644
  
      // Mark the whole page as dirty.
      //
-@@ -1391,7 +1394,11 @@ pub fn cursorScrollRegionUp(self: *Screen, limit: usize) !void {
+@@ -1362,7 +1362,11 @@ pub fn cursorScrollRegionUp(self: *Screen, limit: usize) !void {
          // below and must not retain metadata (wrap state, semantic
          // prompt) from the discarded content. This is Row.reset.
          assert(!row.managedMemory());
@@ -140,7 +130,17 @@ index 136fa5ebb..efdb3ff00 100644
      };
  
      // Rotate the region rows so the now-blank top row moves to the
-@@ -1927,6 +1934,9 @@ pub fn clearRows(
+@@ -1465,6 +1469,9 @@ fn cursorRowFillBackground(self: *Screen) void {
+     if (blank.isZero()) return;
+     const page: *Page = self.cursor.page_pin.node.page();
+     page.clearCells(self.cursor.page_row, 0, page.size.cols, blank);
++    // vtmux: tmux clears the new line in an RGB background with extended
++    // cells (grid_empty_line).
++    if (blank.content_tag == .bg_color_rgb) self.cursor.page_row.tmuxMarkExtended(false);
+ }
+ 
+ /// Move the cursor down if we're not at the bottom of the screen. Otherwise
+@@ -1900,6 +1907,9 @@ pub fn clearRows(
                      .blank = row.blank,
                      .dirty = true,
                  };
@@ -150,17 +150,20 @@ index 136fa5ebb..efdb3ff00 100644
              }
          }
      }
-@@ -2050,6 +2060,9 @@ pub fn clearCells(
-     } else if (!blank.isZero()) {
-         row.blank = false;
+@@ -1920,7 +1930,11 @@ pub fn clearCells(
+         assert(@intFromPtr(&cells[0]) >= @intFromPtr(&row_cells[0]));
      }
+     const left = (@intFromPtr(cells.ptr) - @intFromPtr(row_cells.ptr)) / @sizeOf(Cell);
+-    page.clearCells(row, left, left + cells.len, self.blankCell());
++    const blank = self.blankCell();
++    page.clearCells(row, left, left + cells.len, blank);
 +    // vtmux: tmux clears a cell to an RGB background with an extended
 +    // cell (grid_clear_cell), which sets GRID_LINE_EXTENDED (Row.tmux_extended).
 +    if (blank.content_tag == .bg_color_rgb) row.tmuxMarkExtended(false);
  }
  
  /// Clear cells but only if they are not protected.
-@@ -2212,6 +2225,14 @@ pub fn splitCellBoundary(
+@@ -2083,6 +2097,14 @@ pub fn splitCellBoundary(
      }
  }
  
@@ -176,7 +179,7 @@ index 136fa5ebb..efdb3ff00 100644
  /// require preserving the bg color.
  pub inline fn blankCell(self: *const Screen) Cell {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index d7d741e7b..5abdb7ab5 100644
+index bbf03f15f..62ccc4ad7 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -1039,6 +1039,12 @@ const PrintSliceSimpleMask = pagepkg.Mask(Cell, &.{
@@ -367,7 +370,7 @@ index d7d741e7b..5abdb7ab5 100644
          const rac = p.rowAndCell();
          screen.cursor.page_row = rac.row;
          screen.cursor.page_cell = rac.cell;
-@@ -4437,7 +4510,7 @@ fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bo
+@@ -4474,7 +4547,7 @@ fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bo
              // storage it recycles. With left/right margins the row
              // keeps content outside the margins so the metadata is
              // preserved, matching the shift case above.
@@ -376,7 +379,7 @@ index d7d741e7b..5abdb7ab5 100644
          }
  
          // Mark the row as dirty
-@@ -4690,7 +4763,7 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4727,7 +4800,7 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
              // storage it recycles. With left/right margins the row
              // keeps content outside the margins so the metadata is
              // preserved, matching the shift case above.
@@ -385,7 +388,7 @@ index d7d741e7b..5abdb7ab5 100644
          }
  
          // Mark the row as dirty
-@@ -5014,7 +5087,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -5051,7 +5124,7 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
      // is emptied (cellused 0) and the line above unwrapped.
      if (self.screens.active.cursor.x == 0 and count >= self.cols) {
@@ -394,7 +397,7 @@ index d7d741e7b..5abdb7ab5 100644
          self.tmuxUnwrapAbove(self.screens.active.cursor.y);
      }
  
-@@ -5084,7 +5157,7 @@ pub fn eraseLine(
+@@ -5121,7 +5194,7 @@ pub fn eraseLine(
              if (x == 0) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -403,7 +406,7 @@ index d7d741e7b..5abdb7ab5 100644
              }
  
              // If our X is a wide spacer tail then we need to erase the
-@@ -5104,7 +5177,7 @@ pub fn eraseLine(
+@@ -5141,7 +5214,7 @@ pub fn eraseLine(
              if (x >= self.cols - 1) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -412,7 +415,7 @@ index d7d741e7b..5abdb7ab5 100644
              }
  
              // If our x is a wide char we need to delete the tail too.
-@@ -5124,7 +5197,7 @@ pub fn eraseLine(
+@@ -5161,7 +5234,7 @@ pub fn eraseLine(
              // vtmux: tmux's grid_clear_lines also unwraps the line above,
              // and empties the line (cellused 0).
              self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -421,7 +424,7 @@ index d7d741e7b..5abdb7ab5 100644
  
              break :complete .{ 0, self.cols };
          },
-@@ -7458,9 +7531,11 @@ test "Terminal: print over wide char at 0,0" {
+@@ -7495,9 +7568,11 @@ test "Terminal: print over wide char at 0,0" {
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
@@ -434,7 +437,7 @@ index d7d741e7b..5abdb7ab5 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
  
-@@ -7516,9 +7591,10 @@ test "Terminal: print over wide spacer tail" {
+@@ -7553,9 +7628,10 @@ test "Terminal: print over wide spacer tail" {
      try t.print('X');
  
      {
@@ -446,7 +449,7 @@ index d7d741e7b..5abdb7ab5 100644
          try testing.expectEqual(Cell.Wide.narrow, cell.wide);
      }
      {
-@@ -9031,9 +9107,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
+@@ -9161,9 +9237,11 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
      try testing.expectEqual(@as(usize, 0), page.graphemeCount());
  
      {
@@ -459,7 +462,7 @@ index d7d741e7b..5abdb7ab5 100644
      }
  }
  
-@@ -17475,6 +17553,141 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+@@ -17603,6 +17681,141 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
      try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
  }
  
@@ -676,20 +679,21 @@ index 59997047a..b989b243f 100644
  
  test "vtmux state: malformed pages and states are refused" {
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index bfae3bd31..28783515d 100644
+index 47483bef3..165eae15b 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -942,6 +942,9 @@ pub const Page = struct {
-                 // Empty only if both the copied and kept parts were.
-                 copy.blank = dst_row.blank and src_row.blank;
-                 copy.dirty |= dst_row.dirty;
+@@ -952,6 +952,10 @@ pub const Page = struct {
+                 copy.semantic_prompt = dst_row.semantic_prompt.combine(
+                     src_row.semantic_prompt,
+                 );
++
 +                // vtmux: the row holds cells of both (Row.tmux_extended).
 +                copy.tmux_extended = copy.tmux_extended or dst_row.tmux_extended;
 +                copy.tmux_hyperlink = copy.tmux_hyperlink or dst_row.tmux_hyperlink;
              }
  
              // Our cell offset remains the same
-@@ -1153,6 +1156,10 @@ pub const Page = struct {
+@@ -1163,6 +1167,10 @@ pub const Page = struct {
  
          // The source cells may have content.
          dst_row.blank = false;
@@ -698,9 +702,9 @@ index bfae3bd31..28783515d 100644
 +        if (src_row.tmux_extended) dst_row.tmux_extended = true;
 +        if (src_row.tmux_hyperlink) dst_row.tmux_hyperlink = true;
  
-         // If src has no managed memory, this is very fast.
-         if (!src_row.managedMemory()) {
-@@ -2315,7 +2322,21 @@ pub const Row = packed struct(u64) {
+         // A partial move keeps the destination's other cells, so the row
+         // needs a mark that covers both.
+@@ -2371,7 +2379,21 @@ pub const Row = packed struct(u64) {
      /// from somewhere that does not keep it measures by its text.
      tmux_used: size.CellCountInt = 0,
  
@@ -723,7 +727,7 @@ index bfae3bd31..28783515d 100644
  
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {
-@@ -2401,6 +2422,21 @@ pub const Row = packed struct(u64) {
+@@ -2480,6 +2502,21 @@ pub const Row = packed struct(u64) {
  
      /// vtmux: cells up to `end` (exclusive) have been written
      /// (grid_set_cell's `cellused` update).

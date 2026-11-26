@@ -74,7 +74,7 @@ index 440031a2e..8a462a1f8 100644
          @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
          @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 5bc8fb3f2..226de7081 100644
+index 01c1e0313..b79246164 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1145,6 +1145,33 @@ pub fn clone(
@@ -158,7 +158,7 @@ index 5bc8fb3f2..226de7081 100644
  /// Resize options
  pub const Resize = struct {
      /// The new cols/cells of the screen.
-@@ -10406,17 +10473,72 @@ test "PageList compression restores through page access" {
+@@ -10417,17 +10484,72 @@ test "PageList compression restores through page access" {
      try testing.expect(!node.isCompressed());
      try testing.expectEqualSlices(u8, expected, node.page().memory);
  
@@ -285,7 +285,7 @@ index 3c32b58b1..57fca67e5 100644
  pub const grid_ref_style = grid_ref.grid_ref_style;
  pub const tracked_grid_ref_free = grid_ref_tracked.tracked_grid_ref_free;
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
-index a5f6a3184..1b5a4248c 100644
+index 035b0cfa8..53d666e31 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
 @@ -1063,6 +1063,40 @@ fn new_(

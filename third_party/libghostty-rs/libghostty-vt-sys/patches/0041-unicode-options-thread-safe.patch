@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
-index bc0d02b13..b9ea29e2f 100644
+index 56e6785f4..e3f04f345 100644
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
-@@ -163,8 +163,9 @@ typedef struct {
+@@ -171,8 +171,9 @@ typedef struct {
   * `codepoint-widths`): text printed from now on, and
   * ghostty_unicode_codepoint_width(), take these widths over the table's.
   * Ranges must be sorted by first and not overlap, widths 0 to 2; len 0
@@ -14,7 +14,7 @@ index bc0d02b13..b9ea29e2f 100644
   *
   * @return GHOSTTY_SUCCESS, GHOSTTY_INVALID_VALUE for bad ranges, or
   *         GHOSTTY_OUT_OF_MEMORY
-@@ -182,8 +183,8 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
+@@ -190,8 +191,8 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
   * with U+200D; two lone regional indicators, and an emoji skin-tone
   * modifier with one of tmux's bases (either order), join into two
   * columns; Hangul jamo join as tmux's do and U+3164 is dropped.
@@ -26,7 +26,7 @@ index bc0d02b13..b9ea29e2f 100644
  GHOSTTY_API void ghostty_unicode_set_tmux_clusters(bool enabled, bool vs16_wide);
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 38a156495..f476c259a 100644
+index 8ada53651..7dd175a93 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -798,13 +798,17 @@ fn printSliceFast(

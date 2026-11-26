@@ -32,7 +32,7 @@ index e538f9095..13d91bb1c 100644
          try loading.data.ensureTotalCapacityPrecise(alloc, cmd.data.len);
          try loading.addData(alloc, cmd.data);
 diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
-index 7b7208040..8783d10c1 100644
+index baca9d56d..31afc62a6 100644
 --- a/src/terminal/kitty/graphics_image.zig
 +++ b/src/terminal/kitty/graphics_image.zig
 @@ -48,6 +48,12 @@ pub const LoadingImage = struct {
@@ -48,7 +48,7 @@ index 7b7208040..8783d10c1 100644
      /// Quiet is the quiet settings for the initial load command. This is
      /// used if q isn't set on subsequent chunks.
      quiet: command.Command.Quiet,
-@@ -667,14 +673,20 @@ pub const LoadingImage = struct {
+@@ -661,14 +667,20 @@ pub const LoadingImage = struct {
              ) catch break :hint null;
              break :hint if (bytes <= max_size) bytes else null;
          };
@@ -72,7 +72,7 @@ index 7b7208040..8783d10c1 100644
          };
  
          self.data.deinit(alloc);
-@@ -691,30 +703,35 @@ pub const LoadingImage = struct {
+@@ -685,30 +697,35 @@ pub const LoadingImage = struct {
          const decode_png_fn = sys.decode_png orelse
              return error.UnsupportedFormat;
  

@@ -233,7 +233,7 @@ index ef1c40457..e538f9095 100644
  
      // We only want to deinit on error. If we're chunking, then we don't
 diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
-index 281bb02e0..7b7208040 100644
+index 6d515c339..baca9d56d 100644
 --- a/src/terminal/kitty/graphics_image.zig
 +++ b/src/terminal/kitty/graphics_image.zig
 @@ -44,6 +44,10 @@ pub const LoadingImage = struct {

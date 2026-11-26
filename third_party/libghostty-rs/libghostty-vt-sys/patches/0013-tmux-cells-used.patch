@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 5754cff64..779e05335 100644
+index 4867dfa72..bc0500b2a 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1834,6 +1834,21 @@ const ReflowCursor = struct {
@@ -162,10 +162,10 @@ index 5754cff64..779e05335 100644
                  .success => x += 1,
  
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index feab8bf7e..61e8033bc 100644
+index 57af8ab7b..a18c39c01 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -9303,8 +9303,11 @@ test "Screen: resize less cols reflows cursor after empty cells" {
+@@ -9174,8 +9174,11 @@ test "Screen: resize less cols reflows cursor after empty cells" {
  
      try s.resize(.{ .cols = 5, .rows = 3 });
  
@@ -180,7 +180,7 @@ index feab8bf7e..61e8033bc 100644
  
  test "Screen: resize more cols with wide spacer head" {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index f3a20b1f9..f1d4970a6 100644
+index ffbe13abc..2f7d9fa86 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -1396,6 +1396,8 @@ fn printSliceFill(
@@ -227,7 +227,7 @@ index f3a20b1f9..f1d4970a6 100644
      self.screens.active.cursorMarkDirty();
  }
  
-@@ -4358,6 +4374,10 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+@@ -4395,6 +4411,10 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
              const dst: *Cell = @ptrCast(x + adjusted_count);
              page.swapCells(src, dst);
          }
@@ -238,7 +238,7 @@ index f3a20b1f9..f1d4970a6 100644
      }
  
      // Insert blanks. The blanks preserve the background color.
-@@ -4413,6 +4433,12 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+@@ -4450,6 +4470,12 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
              const dst: *Cell = @ptrCast(x);
              page.swapCells(src, dst);
          }
@@ -251,7 +251,7 @@ index f3a20b1f9..f1d4970a6 100644
      }
  
      // Insert blanks. The blanks preserve the background color.
-@@ -4543,6 +4569,13 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -4580,6 +4606,13 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // Reset our row's soft-wrap.
      self.screens.active.cursorResetWrap();
  
@@ -265,7 +265,7 @@ index f3a20b1f9..f1d4970a6 100644
      // Mark our cursor row as dirty
      self.screens.active.cursorMarkDirty();
  
-@@ -4589,6 +4622,7 @@ pub fn eraseLine(
+@@ -4626,6 +4659,7 @@ pub fn eraseLine(
              if (x == 0) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -273,7 +273,7 @@ index f3a20b1f9..f1d4970a6 100644
              }
  
              // If our X is a wide spacer tail then we need to erase the
-@@ -4608,6 +4642,7 @@ pub fn eraseLine(
+@@ -4645,6 +4679,7 @@ pub fn eraseLine(
              if (x >= self.cols - 1) {
                  self.screens.active.cursorResetWrap();
                  self.tmuxUnwrapAbove(self.screens.active.cursor.y);
@@ -281,7 +281,7 @@ index f3a20b1f9..f1d4970a6 100644
              }
  
              // If our x is a wide char we need to delete the tail too.
-@@ -4624,8 +4659,10 @@ pub fn eraseLine(
+@@ -4661,8 +4696,10 @@ pub fn eraseLine(
              // continue onto the next row.
              self.screens.active.cursorResetWrap();
  
@@ -293,7 +293,7 @@ index f3a20b1f9..f1d4970a6 100644
  
              break :complete .{ 0, self.cols };
          },
-@@ -15879,6 +15916,140 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+@@ -16005,6 +16042,140 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
      try testing.expect(!r1.wrap_continuation);
  }
  
@@ -435,10 +435,10 @@ index f3a20b1f9..f1d4970a6 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 2ef863ee7..bfae3bd31 100644
+index 11b88ac8c..47483bef3 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2304,7 +2304,18 @@ pub const Row = packed struct(u64) {
+@@ -2360,7 +2360,18 @@ pub const Row = packed struct(u64) {
      /// `PageList.trimTrailingBlankRows` don't read them.
      blank: bool = false,
  
@@ -458,7 +458,7 @@ index 2ef863ee7..bfae3bd31 100644
  
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {
-@@ -2387,6 +2398,27 @@ pub const Row = packed struct(u64) {
+@@ -2466,6 +2477,27 @@ pub const Row = packed struct(u64) {
          assert(!self.managedMemory());
          self.* = .{ .cells = self.cells, .dirty = true };
      }

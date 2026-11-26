@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 226de7081..5754cff64 100644
+index b79246164..4867dfa72 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1757,6 +1757,11 @@ const ReflowCursor = struct {
@@ -79,10 +79,10 @@ index 226de7081..5754cff64 100644
          }
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 286024bb2..f3a20b1f9 100644
+index 55a8d39dc..ffbe13abc 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15834,6 +15834,51 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -15960,6 +15960,51 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  }
  

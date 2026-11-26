@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index e274dc0fd..2755b0792 100644
+index 4f5f7ebf6..abb7c60cf 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1768,10 +1768,18 @@ const ReflowCursor = struct {
@@ -288,7 +288,7 @@ index e274dc0fd..2755b0792 100644
      }
  
      /// Performs `cursorScroll` or `cursorNewPage` as necessary
-@@ -20194,7 +20286,9 @@ test "PageList resize reflow less cols to wrap a wide char" {
+@@ -20234,7 +20326,9 @@ test "PageList resize reflow less cols to wrap a wide char" {
      // Resize
      try s.resize(.{ .cols = 2, .reflow = true });
      try testing.expectEqual(@as(usize, 2), s.cols);
@@ -299,7 +299,7 @@ index e274dc0fd..2755b0792 100644
  
      {
          try testing.expect(s.pages.first == s.pages.last);
-@@ -20220,6 +20314,13 @@ test "PageList resize reflow less cols to wrap a wide char" {
+@@ -20260,6 +20354,13 @@ test "PageList resize reflow less cols to wrap a wide char" {
              const rac = page.getRowAndCell(1, 1);
              try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
              try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
@@ -313,7 +313,7 @@ index e274dc0fd..2755b0792 100644
          }
      }
  }
-@@ -20256,19 +20357,19 @@ test "PageList resize reflow less cols wide char bulk run" {
+@@ -20296,19 +20397,19 @@ test "PageList resize reflow less cols wide char bulk run" {
          }
      }
  
@@ -338,7 +338,7 @@ index e274dc0fd..2755b0792 100644
              {
                  const rac = page.getRowAndCell(x, y);
                  try testing.expectEqual(
-@@ -20290,7 +20391,7 @@ test "PageList resize reflow less cols wide char bulk run" {
+@@ -20330,7 +20431,7 @@ test "PageList resize reflow less cols wide char bulk run" {
              try testing.expect(!rac.row.wrap_continuation);
          }
          {
@@ -347,7 +347,7 @@ index e274dc0fd..2755b0792 100644
              try testing.expect(!rac.row.wrap);
              try testing.expect(rac.row.wrap_continuation);
          }
-@@ -20327,20 +20428,22 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+@@ -20367,20 +20468,22 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
          }
      }
  
@@ -376,7 +376,7 @@ index e274dc0fd..2755b0792 100644
              {
                  const rac = page.getRowAndCell(x, y);
                  try testing.expectEqual(
-@@ -20359,13 +20462,14 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
+@@ -20399,13 +20502,14 @@ test "PageList resize reflow less cols wide char bulk run odd cols spacer head"
          {
              const rac = page.getRowAndCell(4, 0);
              try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
@@ -394,7 +394,7 @@ index e274dc0fd..2755b0792 100644
          }
      }
  }
-@@ -20404,8 +20508,9 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20444,8 +20548,9 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
          }
      }
  
@@ -406,7 +406,7 @@ index e274dc0fd..2755b0792 100644
      try s.resize(.{ .cols = 6, .reflow = true });
      try testing.expectEqual(@as(usize, 6), s.cols);
      try testing.expectEqual(@as(usize, 2), s.totalRows());
-@@ -20413,12 +20518,13 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20453,12 +20558,13 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
      {
          try testing.expect(s.pages.first == s.pages.last);
          const page = s.pages.first.?.page();
@@ -422,7 +422,7 @@ index e274dc0fd..2755b0792 100644
              const rac = page.getRowAndCell(x, 1);
              try testing.expectEqual(c.cp, rac.cell.content.codepoint.data);
              try testing.expectEqual(c.wide, rac.cell.wide);
-@@ -20427,21 +20533,28 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
+@@ -20467,21 +20573,28 @@ test "PageList resize reflow less cols wide char bulk run mixed narrow round tri
          try testing.expect(page.getRowAndCell(0, 1).row.wrap_continuation);
      }
  
@@ -456,7 +456,7 @@ index e274dc0fd..2755b0792 100644
      }
  }
  
-@@ -20489,16 +20602,17 @@ test "PageList resize reflow less cols wide char bulk run styled" {
+@@ -20529,16 +20642,17 @@ test "PageList resize reflow less cols wide char bulk run styled" {
      }
  
      // Resize
@@ -477,7 +477,7 @@ index e274dc0fd..2755b0792 100644
                  const rac = page.getRowAndCell(x, y);
                  const style_id = rac.cell.style_id;
                  try testing.expect(style_id != 0);
-@@ -20559,9 +20673,10 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+@@ -20599,9 +20713,10 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
      }
  
      // Resize
@@ -489,7 +489,7 @@ index e274dc0fd..2755b0792 100644
  
      {
          try testing.expect(s.pages.first == s.pages.last);
-@@ -20581,7 +20696,7 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
+@@ -20621,7 +20736,7 @@ test "PageList resize reflow less cols wide char bulk run degenerate spacer tail
              try testing.expectEqual(stylepkg.default_id, rac.cell.style_id);
          }
          {
@@ -498,7 +498,7 @@ index e274dc0fd..2755b0792 100644
              try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint.data);
              try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
          }
-@@ -20680,9 +20795,11 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
+@@ -20720,9 +20835,11 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
              try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
          }
          {
@@ -512,10 +512,10 @@ index e274dc0fd..2755b0792 100644
  
          {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 2ca6d7fcf..2a24164ca 100644
+index ae0a024a2..032f0dece 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -16190,6 +16190,73 @@ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
+@@ -16318,6 +16318,73 @@ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      }
  }
  

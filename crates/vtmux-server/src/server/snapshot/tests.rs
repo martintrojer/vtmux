@@ -1987,9 +1987,11 @@ fn an_ordinary_attached_client_requires_no_feature() {
         "{copied}"
     );
     assert_eq!(rows.meta.requires, Vec::<String>::new());
-    // A row lacking a line flag its cells say (`snap::Row::lacks`): a
-    // scroll in an RGB background with no history, in a second pane (the
-    // first keeps its history for the editor above).
+    // A scroll in an RGB background with no history, in a second pane (the
+    // first keeps its history for the editor above): the new row is
+    // EXTENDED, as tmux's grid_empty_line makes it, so no row lacks a line
+    // flag its cells say (`snap::Row::lacks`, which libghostty-vt 1.0.1
+    // builds wrote for it).
     ok(&mut a, &dir, &["set", "-g", "history-limit", "0"]);
     ok(&mut a, &dir, &["split-window", "-d", "-t", "s", "cat", "-"]);
     let second = *a.model.panes.keys().max().unwrap();
@@ -2004,7 +2006,7 @@ fn an_ordinary_attached_client_requires_no_feature() {
         .unwrap()
         .primary
         .rows;
-    assert!(rows.iter().any(|r| r.lacks.extended));
+    assert!(rows.iter().all(|r| !r.lacks.any()));
     assert_eq!(scrolled.meta.requires, Vec::<String>::new());
     let rebuilt = rebuild(&a, &dir, "b");
     assert_eq!(

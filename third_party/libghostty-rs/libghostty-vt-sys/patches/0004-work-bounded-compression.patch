@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index e758da131..5bc8fb3f2 100644
+index 0476f28fa..01c1e0313 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -439,6 +439,7 @@ page_size: usize,
@@ -26,7 +26,7 @@ index e758da131..5bc8fb3f2 100644
      // Reset discards all scrollback, so there is nothing left to compress.
      self.page_compression.reset();
  
-@@ -5632,6 +5635,7 @@ pub fn compress(
+@@ -5643,6 +5646,7 @@ pub fn compress(
              .unsupported => break .unsupported,
          },
          .full => full: {
@@ -34,7 +34,7 @@ index e758da131..5bc8fb3f2 100644
              // Match incremental mode's unsupported result. Full compression
              // has no useful work to perform without strict reclamation.
              if (!terminal_mem.canReclaim(.strict)) {
-@@ -5654,6 +5658,25 @@ pub fn compress(
+@@ -5665,6 +5669,25 @@ pub fn compress(
  fn compressIncremental(self: *PageList) IncrementalCompressionResult {
      const state = &self.page_compression;
  
@@ -60,7 +60,7 @@ index e758da131..5bc8fb3f2 100644
      // If we can't reclaim virtual memory, compression is unsupported.
      if (!terminal_mem.canReclaim(.strict)) {
          state.reset();
-@@ -5697,12 +5720,18 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
+@@ -5708,12 +5731,18 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
          // If this page is already compressed, ignore it.
          if (node.isCompressed()) continue;
  
@@ -82,7 +82,7 @@ index e758da131..5bc8fb3f2 100644
      // If we didn't reach our active node, then we still have work to do.
      if (!it.done()) return .pending;
  
-@@ -5724,6 +5753,64 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
+@@ -5735,6 +5764,64 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
      return .complete;
  }
  
@@ -147,7 +147,7 @@ index e758da131..5bc8fb3f2 100644
  /// Compress every fully historical resident page which is currently cold.
  fn compressFull(self: *PageList) void {
      var it: CompressionIterator = .init(self);
-@@ -5747,6 +5834,10 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
+@@ -5758,6 +5845,10 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
      // decision, so this primitive only accepts resident nodes.
      if (node.isCompressed()) return false;
  
@@ -158,7 +158,7 @@ index e758da131..5bc8fb3f2 100644
      const page = node.page();
  
      // The scratch size is capped just below the representation's break-even
-@@ -5781,7 +5872,7 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
+@@ -5792,7 +5883,7 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
  
          var table: compression.lz4.HashTable = undefined;
          const result = compression.Page.init(
@@ -167,7 +167,7 @@ index e758da131..5bc8fb3f2 100644
              page,
              scratch.bytes()[0..required],
              &table,
-@@ -9484,7 +9575,11 @@ test "PageList incremental compression restarts after replacement" {
+@@ -9495,7 +9586,11 @@ test "PageList incremental compression restarts after replacement" {
      // restarts at the first page and considers the oversized replacement.
      const restarted = s.compress(.incremental);
      try testing.expectEqual(IncrementalCompressionResult.pending, restarted);
@@ -180,7 +180,7 @@ index e758da131..5bc8fb3f2 100644
  }
  
  test "PageList incremental compression restarts after reset" {
-@@ -9767,7 +9862,11 @@ test "PageList incremental compression restarts after earlier replacement" {
+@@ -9778,7 +9873,11 @@ test "PageList incremental compression restarts after earlier replacement" {
      try testing.expect(!replacement.isCompressed());
  
      _ = s.compress(.incremental);

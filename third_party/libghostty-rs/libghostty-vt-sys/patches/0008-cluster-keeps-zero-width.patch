@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 598ecd1ef..30fd97879 100644
+index f66449c4c..53b5f6c04 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -2150,10 +2150,10 @@ pub fn print(self: *Terminal, c: u21) !void {

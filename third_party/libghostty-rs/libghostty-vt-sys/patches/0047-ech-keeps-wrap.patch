@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 4dc85db..84a1f8c 100644
+index 24bd4f942..87fc97cf2 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -5148,6 +5148,12 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -5185,6 +5185,12 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      // vtmux: and ECH (screen_write_clearcharacter).
      if (self.screens.active.cursor.pending_wrap) return;
  
@@ -15,7 +15,7 @@ index 4dc85db..84a1f8c 100644
      const count = end: {
          const remaining = self.cols - self.screens.active.cursor.x;
          var end = @min(remaining, @max(count_req, 1));
-@@ -5170,12 +5176,12 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+@@ -5207,12 +5213,12 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
      self.screens.active.splitCellBoundary(self.screens.active.cursor.x);
      self.screens.active.splitCellBoundary(self.screens.active.cursor.x + count);
  
@@ -33,7 +33,7 @@ index 4dc85db..84a1f8c 100644
          self.screens.active.cursor.page_row.tmuxEmptied();
          self.tmuxUnwrapAbove(self.screens.active.cursor.y);
      }
-@@ -12476,9 +12482,11 @@ test "Terminal: eraseChars resets wrap" {
+@@ -12606,9 +12612,11 @@ test "Terminal: eraseChars resets wrap" {
      t.eraseChars(1);
  
      {
@@ -46,7 +46,7 @@ index 4dc85db..84a1f8c 100644
      }
  
      try t.print('X');
-@@ -12488,6 +12496,37 @@ test "Terminal: eraseChars resets wrap" {
+@@ -12618,6 +12626,37 @@ test "Terminal: eraseChars resets wrap" {
          defer testing.allocator.free(str);
          try testing.expectEqualStrings("XBCDE\n123", str);
      }
@@ -84,7 +84,7 @@ index 4dc85db..84a1f8c 100644
  }
  
  test "Terminal: eraseChars preserves background sgr" {
-@@ -12690,9 +12729,11 @@ test "Terminal: eraseChars wide char wrap boundary conditions" {
+@@ -12820,9 +12859,11 @@ test "Terminal: eraseChars wide char wrap boundary conditions" {
          defer testing.allocator.free(str);
          try testing.expectEqualStrings(".......\n    cde\n😀......", str);
  
@@ -97,7 +97,7 @@ index 4dc85db..84a1f8c 100644
      }
  }
  
-@@ -20088,7 +20129,8 @@ test "Terminal: eraseChars on a blank row keeps it blank" {
+@@ -20216,7 +20257,8 @@ test "Terminal: eraseChars on a blank row keeps it blank" {
      t.eraseChars(2);
      try testing.expect(testActiveRow(&t, 1).blank);
      try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 1 } }));

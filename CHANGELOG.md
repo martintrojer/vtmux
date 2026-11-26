@@ -12,6 +12,12 @@ vtmux's version is the tmux release it is tested against: `3.8-rc1` is the first
 ### Changed
 
 - An inherited `OSC7577_TOKEN` is removed from every pane and popup environment, whatever `vtmux-program-resume` says, and `update-environment` does not import it.
+- The engine is the libghostty-vt 1.0.2 release (tag `vt-1.0.2`); the 43 vtmux patches carry over, none dropped. Pane widths, wrapping (`capture-pane -J`, reflow after `IL`/`DL`) and links are as with 1.0.1. Live upgrade onto it from 3.8-rc2 and back keeps the server, the screen and the history.
+
+### Fixed
+
+- A line that `CSI S` scrolls in under an RGB background in a pane without history is `EXTENDED` in `capture-pane -R`, as in tmux.
+- A pane ignores kitty's drag-and-drop protocol (OSC 72), as tmux does; it answered `OSC 72 ; t=q`.
 
 ## 3.8-rc2
 

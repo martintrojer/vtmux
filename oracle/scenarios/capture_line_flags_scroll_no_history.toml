@@ -1,0 +1,16 @@
+name = "capture_line_flags_scroll_no_history"
+size = [40, 10]
+# A scroll up (CSI S) in an RGB background in a pane without history: tmux
+# moves the lines up and empties the new bottom line in that background
+# (grid.c grid_move_lines, grid_empty_line), whose cells are extended, so
+# the line is EXTENDED (grid_extended_cell) and capture-pane -R says so.
+# vtmux's Ghostty fills that row through Screen.cursorRowFillBackground
+# (libghostty-vt 1.0.2), which sets the flag (patch 0034).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "history-limit", "0"] },
+  { run = ["new", "-d", "-s", "a", "-x", "10", "-y", "4", "sh", "-c", "printf 'x\\033[48;2;9;8;7m\\033[S\\033[m'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pR", "-t", "a:"] },
+  { run = ["capturep", "-pF", "-t", "a:"] },
+]

@@ -1,8 +1,8 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 3474ae290..e758da131 100644
+index 122a3e6dc..0476f28fa 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -3405,6 +3405,14 @@ fn trailingBlankLines(
+@@ -3416,6 +3416,14 @@ fn trailingBlankLines(
  /// IMPORTANT: This function does NOT update `total_rows`. It returns the
  /// number of rows trimmed, and the caller is responsible for decrementing
  /// `total_rows` by this amount.
@@ -17,7 +17,7 @@ index 3474ae290..e758da131 100644
  fn trimTrailingBlankRows(
      self: *PageList,
      max: size.CellCountInt,
-@@ -3444,7 +3452,18 @@ fn trimTrailingBlankRows(
+@@ -3455,7 +3463,18 @@ fn trimTrailingBlankRows(
          // cells. The retired storage is re-exposed by the grow()
          // fast path without any clearing, so it must be left in the
          // default state.

@@ -1,8 +1,8 @@
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index 61e8033bc..136fa5ebb 100644
+index a18c39c01..7783e5ac4 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -2340,6 +2340,31 @@ pub inline fn resize(
+@@ -2211,6 +2211,31 @@ pub inline fn resize(
          self.cursor.hyperlink = null;
      }
  
@@ -35,10 +35,10 @@ index 61e8033bc..136fa5ebb 100644
      try tw.check(.pages);
      try self.pages.resize(.{
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index a2e1e6dd1..2ca6d7fcf 100644
+index 69363b68c..ae0a024a2 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -16190,6 +16190,50 @@ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
+@@ -16318,6 +16318,50 @@ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      }
  }
  

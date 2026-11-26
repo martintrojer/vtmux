@@ -77,9 +77,9 @@
 //!   reader skips it: tmux's line flags a row keeps where its cells no
 //!   longer say so ([`Row::kept`], [`KeptRows`]: `echo café` and two
 //!   backspaces in bash), and those a row lacks though its cells say so
-//!   ([`Row::lacks`]: Ghostty's scroll in an RGB background with no
-//!   history). The older reader derives them from the cells, as its own
-//!   build held them. So do the cells a row keeps past the width
+//!   ([`Row::lacks`]: a scroll in an RGB background with no history on
+//!   libghostty-vt 1.0.1). The older reader derives them from the cells,
+//!   as its own build held them. So do the cells a row keeps past the width
 //!   ([`Row::past`], [`PastRows`]: a line erased with a background, then
 //!   the pane narrowed), which the older reader drops, as its own build
 //!   did.

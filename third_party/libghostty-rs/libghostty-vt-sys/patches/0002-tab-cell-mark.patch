@@ -19,7 +19,7 @@ index 6dffd7444..f31c1985d 100644
  } GhosttyCellData;
  
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 30424fc2e..bb1fe1bca 100644
+index 286227347..305361d13 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -985,6 +985,7 @@ const PrintSliceSimpleMask = pagepkg.Mask(Cell, &.{
@@ -138,7 +138,7 @@ index 30424fc2e..bb1fe1bca 100644
  }
  
  // Same as horizontalTab but moves to the previous tabstop instead of the next.
-@@ -15888,6 +15964,10 @@ test "Terminal: tabClear single" {
+@@ -16039,6 +16115,10 @@ test "Terminal: tabClear single" {
      defer t.deinit(alloc);
  
      t.horizontalTab();
@@ -182,10 +182,10 @@ index 3d2618099..eba7b5af0 100644
      }
  
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 2a66d5b1e..87f13d366 100644
+index f72606e19..4cdaa2497 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2439,7 +2439,15 @@ pub const Cell = packed struct(u64) {
+@@ -2518,7 +2518,15 @@ pub const Cell = packed struct(u64) {
      /// boundary points for content.
      semantic_content: SemanticContent = .output,
  
@@ -202,7 +202,7 @@ index 2a66d5b1e..87f13d366 100644
  
      pub const ContentTag = enum(u2) {
          /// A single codepoint, could be zero to be empty cell.
-@@ -2478,6 +2486,12 @@ pub const Cell = packed struct(u64) {
+@@ -2557,6 +2565,12 @@ pub const Cell = packed struct(u64) {
          spacer_head = 3,
      };
  
@@ -215,7 +215,7 @@ index 2a66d5b1e..87f13d366 100644
      pub const SemanticContent = enum(u2) {
          /// Regular output content, such as command output.
          output = 0,
-@@ -2533,6 +2547,7 @@ pub const Cell = packed struct(u64) {
+@@ -2612,6 +2626,7 @@ pub const Cell = packed struct(u64) {
          .style_id = .{ .type_name = "GhosttyStyleId" },
          .wide = .{ .type_name = "GhosttyCellWide" },
          .semantic_content = .{ .type_name = "GhosttyCellSemanticContent" },

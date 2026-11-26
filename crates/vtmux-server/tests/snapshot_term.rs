@@ -494,20 +494,26 @@ fn kept_line_flags_cross_a_snapshot() {
     }
 }
 
-/// A row lacking a line flag its cells say crosses a snapshot as it was
-/// (Ghostty's `CSI S` with no history fills the new rows in an RGB
-/// background without the flag, where tmux's `grid_empty_line` sets it):
+/// A row lacking a line flag its cells say crosses a snapshot as it was:
 /// output that then overwrites the cells finds the same flags, so a live
 /// upgrade or a restore doesn't change what `capture-pane -R` says later.
+/// Builds on libghostty-vt 1.0.1 wrote such rows (their `CSI S` with no
+/// history filled the new row in an RGB background without the flag, where
+/// tmux's `grid_empty_line` sets it); this build sets it, so the test marks
+/// the row lacking by hand.
 #[test]
 fn a_line_flag_a_row_lacks_crosses_a_snapshot() {
     let scrolled = b"x\x1b[48;2;9;8;7m\x1b[S\x1b[m";
     for form in [Form::Rows, Form::SamePin] {
-        let mut a = pane(10, 6, 0, scrolled);
-        let t = term_to_snapshot(&a, form).unwrap();
-        assert!(t.primary.rows[5].lacks.extended, "{form:?}");
-        assert!(!t.primary.rows[4].lacks.any(), "{form:?}");
-        round_trip(&mut a, form, b"\x1b[6Habcdefghij", &format!("{form:?}"));
+        let a = pane(10, 6, 0, scrolled);
+        let mut t = term_to_snapshot(&a, form).unwrap();
+        assert!(!t.primary.rows[5].lacks.any(), "{form:?}: flagged as tmux");
+        t.primary.rows[5].lacks.extended = true;
+        let mut b = term_from_snapshot(&t, PATCH_STACK).unwrap();
+        let again = term_to_snapshot(&b, form).unwrap();
+        assert!(again.primary.rows[5].lacks.extended, "{form:?}");
+        assert!(!again.primary.rows[4].lacks.any(), "{form:?}");
+        round_trip(&mut b, form, b"\x1b[6Habcdefghij", &format!("{form:?}"));
     }
 }
 

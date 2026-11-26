@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// vtmux: the libghostty-vt release this crate builds (a `vt-<version>`
 /// tag of Ghostty; VENDOR.md says how to move to the next one).
-const GHOSTTY_VERSION: &str = "1.0.1";
+const GHOSTTY_VERSION: &str = "1.0.2";
 
 /// vtmux: where the release files are downloaded from, unless
 /// `GHOSTTY_RELEASE_URL` names a mirror of the directory, or
@@ -16,13 +16,13 @@ const GHOSTTY_RELEASES: &str = "https://release.files.ghostty.org/libghostty-vt"
 /// `SHA256SUMS`, which its minisign key signs), checked before anything is
 /// extracted. Bump with `GHOSTTY_VERSION`.
 const GHOSTTY_SOURCE_SHA256: &str =
-    "333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa";
+    "1dcafa8a3357f3a6bbf4f2696e61de611400c5469518716793dfffd35f008b3e";
 
 /// vtmux: SHA-256 of `libghostty-vt-<version>-deps.tar.gz`, every Zig
 /// package the library needs, unpacked by package hash: `zig build
 /// --system` reads it, so Zig fetches nothing.
 const GHOSTTY_DEPS_SHA256: &str =
-    "91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d";
+    "c56156dbea82fdf71f13bf0d704cdf4393b6a04208d7f9691e0d7f60c7f9ca4d";
 
 /// vtmux: the Zig the release's `build.zig.zon` asks for
 /// (`minimum_zig_version`; Zig breaks its build API between minor versions,

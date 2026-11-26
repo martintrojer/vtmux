@@ -73,7 +73,7 @@ index a2e056e25..0561edf61 100644
  pub const terminal_resize = terminal.resize;
  pub const terminal_set = terminal.set;
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
-index 1b5a4248c..bc716b729 100644
+index 53d666e31..f58307de9 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
 @@ -1083,10 +1083,48 @@ pub fn clone_screen(

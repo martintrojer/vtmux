@@ -1,0 +1,16 @@
+# Kitty's drag and drop protocol (OSC 72) is an OSC tmux 3.8 does not know
+# (input.c `input_exit_osc` ignores it). The program sends a query and a
+# registration, then DSR 5, and prints what it reads back through `cat -v`:
+# only the 4 bytes of the DSR's answer, where an answer to the query would
+# come first. libghostty-vt 1.0.2 ignores OSC 72 when its embedder takes no
+# drops (stream_terminal.zig `drop` effect null), as vtmux's panes do; 1.0.1
+# answered the query.
+name = "osc_72_ignored"
+size = [60, 6]
+steps = [
+  { run = ["set", "-g", "status-right", "", ";", "new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "sh", "-c", "stty raw -echo opost onlcr; tmux wait-for go; printf 'a\\033]72;t=q\\033\\\\b\\033]72;t=a;text/plain\\033\\\\c\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

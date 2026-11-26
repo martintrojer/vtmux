@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 779e05335..9d643a589 100644
+index bc0500b2a..8130ba35a 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1762,6 +1762,16 @@ const ReflowCursor = struct {
@@ -179,10 +179,10 @@ index 779e05335..9d643a589 100644
  
      /// Create a new page in the provided list with the provided
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 1ed9e6f1b..e7fbe3d81 100644
+index 0fc467453..d1264e0ec 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -16021,6 +16021,60 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+@@ -16147,6 +16147,60 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
      try testing.expect(!r1.wrap_continuation);
  }
  

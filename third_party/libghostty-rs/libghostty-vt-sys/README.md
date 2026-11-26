@@ -3,7 +3,7 @@
 Raw FFI bindings for libghostty-vt: [vtmux](https://github.com/martintrojer/vtmux)'s
 fork of [libghostty-rs](https://github.com/uzaaft/libghostty-rs)'s
 `libghostty-vt-sys`, on a pinned libghostty-vt release of
-[Ghostty](https://github.com/ghostty-org/ghostty) (1.0.1) with vtmux's
+[Ghostty](https://github.com/ghostty-org/ghostty) (1.0.2) with vtmux's
 patches (`VENDOR.md` in vtmux's repository lists every one). The library is
 still `libghostty_vt_sys`. Built for vtmux: no API is promised to anyone
 else.

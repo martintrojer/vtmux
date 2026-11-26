@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index f1d4970a6..1ed9e6f1b 100644
+index 2f7d9fa86..0fc467453 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -570,6 +570,17 @@ pub fn printRepeat(self: *Terminal, count_req: usize) !void {
@@ -130,7 +130,7 @@ index f1d4970a6..1ed9e6f1b 100644
  }
  
  /// Move the cursor to the given column (1-indexed), keeping its row (CHA
-@@ -3873,6 +3930,17 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3910,6 +3967,17 @@ pub fn insertLines(self: *Terminal, count: usize) void {
      self.insertLinesRows(count, false);
  }
  
@@ -148,7 +148,7 @@ index f1d4970a6..1ed9e6f1b 100644
  /// `insertLines`; `sd` for SD and RI, which tmux does as single-line
  /// grid_view_scroll_region_down steps (screen_write_scrolldown).
  fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
-@@ -4097,7 +4165,13 @@ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
+@@ -4134,7 +4202,13 @@ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
          self.screens.active.cursor.x >= self.scrolling_region.left and
          self.screens.active.cursor.x <= self.scrolling_region.right;
      const rem = if (applies) self.scrolling_region.bottom - y + 1 else 0;
@@ -162,7 +162,7 @@ index f1d4970a6..1ed9e6f1b 100644
      if (!applies) return;
      const moved = rem - @min(count, rem);
      self.tmuxUnwrapAbove(y);
-@@ -4291,6 +4365,11 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -4328,6 +4402,11 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
  ///
  /// The inserted cells are colored according to the current SGR state.
  pub fn insertBlanks(self: *Terminal, count: usize) void {
@@ -174,7 +174,7 @@ index f1d4970a6..1ed9e6f1b 100644
      // Unset pending wrap state without wrapping. Note: this purposely
      // happens BEFORE the scroll region check below, because that's what
      // xterm does.
-@@ -4398,6 +4477,9 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+@@ -4435,6 +4514,9 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
  pub fn deleteChars(self: *Terminal, count_req: usize) void {
      if (count_req == 0) return;
  
@@ -184,7 +184,7 @@ index f1d4970a6..1ed9e6f1b 100644
      // If our cursor is outside the margins then do nothing. We DO reset
      // wrap state still so this must remain below the above logic.
      if (self.screens.active.cursor.x < self.scrolling_region.left or
-@@ -4544,6 +4626,9 @@ fn cursorInScrollingRegion(self: *const Terminal) bool {
+@@ -4581,6 +4663,9 @@ fn cursorInScrollingRegion(self: *const Terminal) bool {
  }
  
  pub fn eraseChars(self: *Terminal, count_req: usize) void {
@@ -194,7 +194,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const count = end: {
          const remaining = self.cols - self.screens.active.cursor.x;
          var end = @min(remaining, @max(count_req, 1));
-@@ -4607,6 +4692,12 @@ pub fn eraseLine(
+@@ -4644,6 +4729,12 @@ pub fn eraseLine(
      mode: csi.EraseLine,
      protected_req: bool,
  ) void {
@@ -207,7 +207,7 @@ index f1d4970a6..1ed9e6f1b 100644
      // Get our start/end positions depending on mode.
      const start, const end = switch (mode) {
          .right => right: {
-@@ -4673,10 +4764,6 @@ pub fn eraseLine(
+@@ -4710,10 +4801,6 @@ pub fn eraseLine(
          },
      };
  
@@ -218,7 +218,7 @@ index f1d4970a6..1ed9e6f1b 100644
      // We always mark our row as dirty
      self.screens.active.cursorMarkDirty();
  
-@@ -4830,8 +4917,8 @@ pub fn eraseDisplay(
+@@ -4867,8 +4954,8 @@ pub fn eraseDisplay(
              // the last history line.
              self.tmuxUnwrapAbove(0);
  
@@ -229,7 +229,7 @@ index f1d4970a6..1ed9e6f1b 100644
  
              if (comptime build_options.kitty_graphics) {
                  // ED2 clears visible placements but preserves graphics that
-@@ -4886,8 +4973,8 @@ pub fn eraseDisplay(
+@@ -4923,8 +5010,8 @@ pub fn eraseDisplay(
                  self.tmuxUnwrapAbove(0);
              }
  
@@ -240,7 +240,7 @@ index f1d4970a6..1ed9e6f1b 100644
          },
  
          .scrollback => self.screens.active.eraseHistory(null),
-@@ -7547,9 +7634,11 @@ test "Terminal: VS15 narrows wide cell under restored pending cursor" {
+@@ -7675,9 +7762,11 @@ test "Terminal: VS15 narrows wide cell under restored pending cursor" {
      try t.print(0x2614);
  
      // Restoring also restores pending_wrap, so grapheme lookup selects the
@@ -254,7 +254,7 @@ index f1d4970a6..1ed9e6f1b 100644
      try t.print(0xFE0E);
  
      try testing.expectEqual(@as(usize, 4), t.screens.active.cursor.x);
-@@ -8754,9 +8843,10 @@ test "Terminal: print with wraparound disabled clears pending wrap after CBT" {
+@@ -8882,9 +8971,10 @@ test "Terminal: print with wraparound disabled clears pending wrap after CBT" {
          t.modes.set(.wraparound, wrap_on_fill);
          try t.printString("abcdef");
          t.modes.set(.wraparound, false);
@@ -267,7 +267,7 @@ index f1d4970a6..1ed9e6f1b 100644
          try t.print('x');
          try testing.expect(!t.screens.active.cursor.pending_wrap);
  
-@@ -9306,7 +9396,7 @@ test "Terminal: linefeed and carriage return" {
+@@ -9434,7 +9524,7 @@ test "Terminal: linefeed and carriage return" {
      }
  }
  
@@ -276,7 +276,7 @@ index f1d4970a6..1ed9e6f1b 100644
      var t = try init(testing.io, testing.allocator, .{ .cols = 5, .rows = 80 });
      defer t.deinit(testing.allocator);
  
-@@ -9317,7 +9407,9 @@ test "Terminal: linefeed unsets pending wrap" {
+@@ -9445,7 +9535,9 @@ test "Terminal: linefeed unsets pending wrap" {
      try t.linefeed();
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
@@ -287,7 +287,7 @@ index f1d4970a6..1ed9e6f1b 100644
  }
  
  test "Terminal: linefeed mode automatic carriage return" {
-@@ -11431,7 +11523,7 @@ test "Terminal: eraseChars wide character" {
+@@ -11559,7 +11651,7 @@ test "Terminal: eraseChars wide character" {
      }
  }
  
@@ -296,7 +296,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -11439,14 +11531,15 @@ test "Terminal: eraseChars resets pending wrap" {
+@@ -11567,14 +11659,15 @@ test "Terminal: eraseChars resets pending wrap" {
  
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
@@ -314,7 +314,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -12751,7 +12844,7 @@ test "Terminal: backspace at left margin" {
+@@ -12879,7 +12972,7 @@ test "Terminal: backspace at left margin" {
      }
  }
  
@@ -323,7 +323,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -12763,14 +12856,16 @@ test "Terminal: cursorLeft unsets pending wrap state" {
+@@ -12891,14 +12984,16 @@ test "Terminal: cursorLeft unsets pending wrap state" {
      try testing.expect(!t.screens.active.cursor.pending_wrap);
      try t.print('X');
  
@@ -342,7 +342,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -12785,7 +12880,8 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
+@@ -12913,7 +13008,8 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
      {
          const str = try t.plainString(testing.allocator);
          defer testing.allocator.free(str);
@@ -352,7 +352,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -12828,7 +12924,10 @@ test "Terminal: cursorLeft reverse wrap with pending wrap above top margin" {
+@@ -12956,7 +13052,10 @@ test "Terminal: cursorLeft reverse wrap with pending wrap above top margin" {
      t.setLeftAndRightMargin(2, 5);
      t.setTopAndBottomMargin(3, 5);
      t.restoreCursor();
@@ -364,7 +364,7 @@ index f1d4970a6..1ed9e6f1b 100644
  
      t.cursorLeft(1);
      try testing.expect(!t.screens.active.cursor.pending_wrap);
-@@ -14393,7 +14492,9 @@ test "Terminal: insertBlanks outside left/right scroll region" {
+@@ -14519,7 +14618,9 @@ test "Terminal: insertBlanks outside left/right scroll region" {
      t.clearDirty();
      t.insertBlanks(2);
      try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
@@ -375,7 +375,7 @@ index f1d4970a6..1ed9e6f1b 100644
      try t.print('X');
  
      {
-@@ -14877,7 +14978,7 @@ test "Terminal: deleteChars should shift left" {
+@@ -15003,7 +15104,7 @@ test "Terminal: deleteChars should shift left" {
      }
  }
  
@@ -384,7 +384,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -14885,14 +14986,16 @@ test "Terminal: deleteChars resets pending wrap" {
+@@ -15011,14 +15112,16 @@ test "Terminal: deleteChars resets pending wrap" {
  
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
@@ -403,7 +403,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -15552,7 +15655,7 @@ test "Terminal: saveCursor position" {
+@@ -15678,7 +15781,7 @@ test "Terminal: saveCursor position" {
      }
  }
  
@@ -412,7 +412,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -15566,10 +15669,12 @@ test "Terminal: saveCursor pending wrap state" {
+@@ -15692,10 +15795,12 @@ test "Terminal: saveCursor pending wrap state" {
      t.restoreCursor();
      try t.print('X');
  
@@ -426,7 +426,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -16050,6 +16155,109 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+@@ -16176,6 +16281,109 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
      try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
  }
  
@@ -536,7 +536,7 @@ index f1d4970a6..1ed9e6f1b 100644
  test "Terminal: eraseLine resets wrap" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -16264,7 +16472,7 @@ test "Terminal: eraseLine simple erase left" {
+@@ -16390,7 +16598,7 @@ test "Terminal: eraseLine simple erase left" {
      }
  }
  
@@ -545,7 +545,7 @@ index f1d4970a6..1ed9e6f1b 100644
      const alloc = testing.allocator;
      const io_impl = testing.io;
      var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
-@@ -16275,13 +16483,15 @@ test "Terminal: eraseLine left resets wrap" {
+@@ -16401,13 +16609,15 @@ test "Terminal: eraseLine left resets wrap" {
      t.clearDirty();
      t.eraseLine(.left, false);
      try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
@@ -563,7 +563,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -16634,20 +16844,30 @@ test "Terminal: printRepeat simple" {
+@@ -16764,20 +16974,30 @@ test "Terminal: printRepeat simple" {
      }
  }
  
@@ -596,7 +596,7 @@ index f1d4970a6..1ed9e6f1b 100644
      }
  }
  
-@@ -19770,6 +19990,12 @@ test "Terminal: resize pending wrap live and saved cursors" {
+@@ -19900,6 +20120,12 @@ test "Terminal: resize pending wrap live and saved cursors" {
  
              try t.resize(alloc, .{ .cols = case.cols, .rows = 6 });
              if (restore) t.restoreCursor();
@@ -626,10 +626,10 @@ index 8376f6c02..dd60da5f2 100644
      const alloc = testing.allocator;
      const io = testing.io;
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
-index f36546cd5..7e77d18f3 100644
+index 634ab0716..d8be48cba 100644
 --- a/src/terminal/stream_terminal.zig
 +++ b/src/terminal/stream_terminal.zig
-@@ -673,7 +673,7 @@ pub const Handler = struct {
+@@ -687,7 +687,7 @@ pub const Handler = struct {
              .erase_line_right_unless_pending_wrap => self.terminal.eraseLine(.right_unless_pending_wrap, value),
              .delete_chars => self.terminal.deleteChars(value),
              .erase_chars => self.terminal.eraseChars(value),

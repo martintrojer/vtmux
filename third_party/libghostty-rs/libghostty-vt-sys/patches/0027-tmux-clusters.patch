@@ -1,5 +1,5 @@
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
-index 9ccf03bab..bc0d02b13 100644
+index 2b0ebcdc6..56e6785f4 100644
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
 @@ -30,6 +30,7 @@
@@ -10,7 +10,7 @@ index 9ccf03bab..bc0d02b13 100644
  #include <stddef.h>
  #include <stdint.h>
  #include <ghostty/vt/types.h>
-@@ -172,6 +173,20 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
+@@ -180,6 +181,20 @@ GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
      const GhosttyUnicodeWidthRange *ranges,
      size_t len);
  
@@ -44,7 +44,7 @@ index 21950ba6d..347f2d5ef 100644
          @export(&c.style_default, .{ .name = "ghostty_style_default" });
          @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index b1ae52852..bf58aac99 100644
+index efc284117..c4b86fbfc 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -793,6 +793,20 @@ fn printSliceFast(
@@ -216,7 +216,7 @@ index b1ae52852..bf58aac99 100644
                  .ignore => return,
                  .wide => wide: {
                      if (prev.cell.wide == .wide) break :wide;
-@@ -6905,6 +7014,84 @@ test "Terminal: width overrides (vtmux)" {
+@@ -6942,6 +7051,84 @@ test "Terminal: width overrides (vtmux)" {
      try testing.expectEqual(@as(usize, 9), t.screens.active.cursor.x);
  }
  

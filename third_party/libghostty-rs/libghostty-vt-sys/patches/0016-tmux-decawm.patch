@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index e7fbe3d81..2503cf3bb 100644
+index d1264e0ec..291db522a 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -2229,8 +2229,13 @@ pub fn print(self: *Terminal, c: u21) !void {
@@ -31,7 +31,7 @@ index e7fbe3d81..2503cf3bb 100644
          return;
      }
  
-@@ -5374,7 +5383,10 @@ pub fn resize(
+@@ -5411,7 +5420,10 @@ pub fn resize(
      try primary.resize(.{
          .cols = opts.cols,
          .rows = opts.rows,
@@ -43,7 +43,18 @@ index e7fbe3d81..2503cf3bb 100644
          .prompt_redraw = self.flags.shell_redraws_prompt,
          .pull_scrollback = self.flags.resize_pull_scrollback,
      });
-@@ -16021,6 +16033,63 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+@@ -7389,7 +7401,9 @@ test "Terminal: Fitzpatrick skin tone widens a narrow base like VS16" {
+         // Last column: the cluster moves to the next line.
+         .{ .x = 2, .wraparound = true, .base_x = 0, .base_y = 1, .wide = true, .cursor_x = 2, .cursor_y = 1, .pending_wrap = false },
+         // Last column without wraparound: the second code point is dropped.
+-        .{ .x = 2, .wraparound = false, .base_x = 2, .base_y = 0, .wide = false, .cursor_x = 2, .cursor_y = 0, .pending_wrap = true },
++        // vtmux: with autowrap reset, tmux's cursor stays on the last
++        // column (screen_write_cell), so no wrap is pending.
++        .{ .x = 2, .wraparound = false, .base_x = 2, .base_y = 0, .wide = false, .cursor_x = 2, .cursor_y = 0, .pending_wrap = false },
+     };
+ 
+     const seconds = [_]u21{ 0xFE0F, 0x1F3FB, 0x1F3FC, 0x1F3FD, 0x1F3FE, 0x1F3FF };
+@@ -16147,6 +16161,63 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
      try testing.expect(!r1.wrap_continuation);
  }
  
@@ -107,7 +118,7 @@ index e7fbe3d81..2503cf3bb 100644
  test "Terminal: reflow measures a tab as tmux does (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -19645,9 +19714,11 @@ test "Terminal: resize less cols without reflow cutting wide char tail" {
+@@ -19775,9 +19846,11 @@ test "Terminal: resize less cols without reflow cutting wide char tail" {
      var t = try init(io_impl, alloc, .{ .cols = 3, .rows = 1 });
      defer t.deinit(alloc);
  
@@ -120,7 +131,7 @@ index e7fbe3d81..2503cf3bb 100644
      try t.resize(alloc, .{ .cols = 2, .rows = 1 });
  
      try testing.expect(t.screens.active.pages.getCell(.{ .active = .{ .x = 1 } }).?.cell.isEmpty());
-@@ -19842,9 +19913,10 @@ test "Terminal: resize with wraparound off" {
+@@ -19972,9 +20045,10 @@ test "Terminal: resize with wraparound off" {
      const new_cols = 2;
      try t.resize(alloc, .{ .cols = new_cols, .rows = rows });
  

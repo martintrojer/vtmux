@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 9d643a589..713168677 100644
+index 8130ba35a..c29748539 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -2157,6 +2157,15 @@ const ReflowCursor = struct {
@@ -13,12 +13,12 @@ index 9d643a589..713168677 100644
 +                    // the cell whole: writing over it would store the
 +                    // graphemes a second time (setGraphemes asserts the
 +                    // cell has none) and leak the rest.
-+                    self.page.clearCells(self.page_row, self.x, self.x + 1);
++                    self.page.clearCells(self.page_row, self.x, self.x + 1, .{});
 +
                      // Do NOT increment x so that we retry writing
                      // the same existing cell.
                  },
-@@ -21037,6 +21046,99 @@ test "PageList resize reflow grapheme map capacity exceeded" {
+@@ -21077,6 +21086,99 @@ test "PageList resize reflow grapheme map capacity exceeded" {
      try testing.expectEqual(@as(usize, 2), s.cols);
  }
  

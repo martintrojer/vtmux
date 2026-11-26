@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 62b3b52f1..a248daa70 100644
+index f9dba1506..d713a0980 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1840,6 +1840,27 @@ const ReflowCursor = struct {
@@ -312,7 +312,7 @@ index 62b3b52f1..a248daa70 100644
      }
  
      /// Performs `cursorScroll` or `cursorNewPage` as necessary
-@@ -4228,16 +4444,17 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
+@@ -4239,16 +4455,17 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
                  const rev_i = page.rows() - i - 1;
                  const row = rows[rev_i];
  
@@ -339,7 +339,7 @@ index 62b3b52f1..a248daa70 100644
  
                  n += 1;
                  if (n > self.rows) break :non_empty 0;
-@@ -16968,11 +17185,13 @@ test "PageList scrollClear skips blank rows and stops at a spacer" {
+@@ -17008,11 +17225,13 @@ test "PageList scrollClear skips blank rows and stops at a spacer" {
      page.getRow(5).blank = true;
      try page.verifyIntegrity(alloc);
  
@@ -357,7 +357,7 @@ index 62b3b52f1..a248daa70 100644
  
  test "PageList resize (no reflow) less rows trims blank lines" {
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 64f08de4c..7930ab17a 100644
+index 601bc2ac2..a445a80b8 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -3359,6 +3359,14 @@ pub fn index(self: *Terminal) !void {
@@ -442,7 +442,7 @@ index 64f08de4c..7930ab17a 100644
      const bottom = screen.cursor.page_pin.*;
      if (bottom.up(self.scrolling_region.bottom - self.scrolling_region.top)) |top| {
          tmuxFixContinuationAt(top);
-@@ -4216,17 +4242,52 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -4253,17 +4279,52 @@ pub fn insertLines(self: *Terminal, count: usize) void {
  /// vtmux: CSI L as tmux does it: `insertLines`, and the cursor stays where
  /// it was, a pending wrap included (screen_write_insertline does not move
  /// it; Ghostty's goes to the left margin, as xterm's does).
@@ -497,7 +497,7 @@ index 64f08de4c..7930ab17a 100644
      // Rare, but happens
      if (count == 0) return;
  
-@@ -4395,7 +4456,7 @@ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
+@@ -4432,7 +4493,7 @@ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
      // cursor, even when ny - ny2 underflows (the u_int count wraps so
      // grid_check_y passes and no line is cleared).
      if (!left_right) {
@@ -506,7 +506,7 @@ index 64f08de4c..7930ab17a 100644
              self.tmuxUnwrapRow(start_y + (rem - adjusted_count) - 1);
          }
          self.tmuxUnwrapAbove(start_y);
-@@ -4438,7 +4499,20 @@ fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
+@@ -4475,7 +4536,20 @@ fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
  /// above the cursor is unwrapped by grid_move_lines, and the last moved
  /// line by the grid_clear of the freed lines. SU, which Ghostty also does
  /// with deleteLines, unwraps neither in tmux.
@@ -527,7 +527,7 @@ index 64f08de4c..7930ab17a 100644
      const y = self.screens.active.cursor.y;
      const left_right = self.scrolling_region.left > 0 or
          self.scrolling_region.right < self.cols - 1;
-@@ -4981,6 +5055,20 @@ pub fn eraseLine(
+@@ -5018,6 +5092,20 @@ pub fn eraseLine(
      const pending_wrap = self.screens.active.cursor.pending_wrap;
      defer self.screens.active.cursor.pending_wrap = pending_wrap;
  
@@ -548,7 +548,7 @@ index 64f08de4c..7930ab17a 100644
      // Get our start/end positions depending on mode.
      const start, const end = switch (mode) {
          .right => right: {
-@@ -5079,6 +5167,21 @@ pub fn eraseLine(
+@@ -5116,6 +5204,21 @@ pub fn eraseLine(
      );
  }
  
@@ -570,7 +570,7 @@ index 64f08de4c..7930ab17a 100644
  /// Erase the display (ED, `CSI Ps J`). The mode picks what is erased:
  ///
  ///   - `below`: from the cursor to the end of the screen.
-@@ -16806,6 +16909,200 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+@@ -16934,6 +17037,200 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
      }
  }
  
@@ -771,7 +771,7 @@ index 64f08de4c..7930ab17a 100644
  test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -19136,19 +19433,23 @@ test "Terminal: blank bit moves with rows" {
+@@ -19268,19 +19565,23 @@ test "Terminal: blank bit moves with rows" {
  test "Terminal: eraseLine on a blank row keeps it blank" {
      const alloc = testing.allocator;
  
@@ -802,7 +802,7 @@ index 64f08de4c..7930ab17a 100644
  
          var t = try init(testing.io, alloc, .{ .rows = 3, .cols = 5 });
          defer t.deinit(alloc);
-@@ -19161,9 +19462,9 @@ test "Terminal: eraseLine on a blank row keeps it blank" {
+@@ -19293,9 +19594,9 @@ test "Terminal: eraseLine on a blank row keeps it blank" {
  
          t.eraseLine(mode, false);
          try testing.expect(testActiveRow(&t, 1).blank);

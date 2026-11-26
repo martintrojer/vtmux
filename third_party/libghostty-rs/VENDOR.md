@@ -22,15 +22,15 @@ per-file diff against upstream this file keeps.
 
 ## Where the Ghostty source comes from
 
-A libghostty-vt release, by tag (`vt-<version>`), never a commit: 1.0.1
-(tag `vt-1.0.1`, 2026-11-11). The sys crate's build script downloads, with
+A libghostty-vt release, by tag (`vt-<version>`), never a commit: 1.0.2
+(tag `vt-1.0.2`, 2026-11-24). The sys crate's build script downloads, with
 curl, the release's two files from
 `https://release.files.ghostty.org/libghostty-vt/<version>/`:
 
 | file | SHA-256 (`GHOSTTY_SOURCE_SHA256`, `GHOSTTY_DEPS_SHA256` in `build.rs`) |
 |---|---|
-| `libghostty-vt-1.0.1.tar.gz` (the library's source, `LIB_VERSION` 1.0.1) | `333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa` |
-| `libghostty-vt-1.0.1-deps.tar.gz` (every Zig package it needs, unpacked by package hash) | `91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d` |
+| `libghostty-vt-1.0.2.tar.gz` (the library's source, `LIB_VERSION` 1.0.2) | `1dcafa8a3357f3a6bbf4f2696e61de611400c5469518716793dfffd35f008b3e` |
+| `libghostty-vt-1.0.2-deps.tar.gz` (every Zig package it needs, unpacked by package hash) | `c56156dbea82fdf71f13bf0d704cdf4393b6a04208d7f9691e0d7f60c7f9ca4d` |
 
 The checksums are the release's `SHA256SUMS` (signed with Ghostty's
 minisign key `RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV`);
@@ -57,7 +57,7 @@ the checked-in bindings are enough for rustdoc.
 
 The published libghostty-rs 0.2.2 pins ghostty `a887df42c`, which predates
 the fix for GHSA-w9q4-5jvv-mcv4 (ghostty `e257bb45`, PR #14857), and none
-of vtmux's patches. 1.0.1 contains `e257bb45`.
+of vtmux's patches. 1.0.1 and later contain `e257bb45`.
 
 ### Why not a distro `libghostty-vt.so.1`
 
@@ -74,9 +74,9 @@ Ghostty's grid behave as tmux's (wrap, cells used, reflow, tabs, clusters,
 the alternate screen), which a stock library does not. Live upgrade also
 reads its pages raw (`PATCH_STACK`), so it must be exactly this build.
 
-## The patches on libghostty-vt 1.0.1
+## The patches on libghostty-vt 1.0.2
 
-1.0.1 has two things vtmux needs, so no patch does them:
+Since 1.0.1 the release has two things vtmux needs, so no patch does them:
 
 - A page the line limit prunes is zeroed in place, not decommitted
   (`DestroyMode.retain`, `Limits.enforce(.lines, .retain)` in `grow`), and
@@ -88,7 +88,51 @@ reads its pages raw (`PATCH_STACK`), so it must be exactly this build.
   (`Capacity.hyperlink_cells`), so one `increaseCapacity(.hyperlink_cells)`
   always makes room for a reflowed cell's link.
 
-How the patches fit 1.0.1's code:
+What 1.0.2 changed under the patches (task bump_ghostty_102):
+
+- IL and DL (`Terminal.insertLines`, `deleteLines`): 1.0.2 keeps the
+  soft wrap of rows that move together and clears it only where a row's
+  neighbour changed (`rowClearWrap`, `rowClearWrapContinuation`); 0011
+  replaces those blocks with tmux's `grid_move_lines` bookkeeping, as it
+  replaced 1.0.1's unconditional unwrap. A full-width move now keeps a
+  wrapped row's spacer head (`rowWillBeShifted`), so the upstream test
+  "deleteLines wide character spacer head" needs no vtmux change. Three
+  new upstream tests assert 1.0.2's wraps and now assert tmux's, each
+  checked against tmux 3.8's `capture-pane -J` ("insertLines and
+  deleteLines soft wrap state", "insertLines preserves wrap of rows
+  shifted together", "insertLines and deleteLines keep soft wraps across a
+  page boundary"); vtmux's binary and tmux 3.8 give the same `capture-pane
+  -p` and `-pJ` for all 19 cases of the first.
+- A skin-tone modifier after one of the nine text-presentation emoji
+  (U+261D U+1F3FB) makes the cluster two columns under mode 2027
+  (`props_uucode.zig`, `graphemeWidthEffect`). vtmux's server prints with
+  patch 0027's tmux clusters, which join a modifier only to tmux's bases,
+  so a pane's grid does not change: `#{cursor_x}` after `☝🏻|` is 4 and
+  after `🕵🏻|` 3 in vtmux, 5 and 3 in tmux (D-045). The new upstream test
+  "Fitzpatrick skin tone widens a narrow base like VS16" expects no
+  pending wrap at the last column without autowrap (0016).
+- `Page.clearCells` takes the blank cell and does what `Screen.clearCells`
+  did, which now calls it; a row scrolled in is filled through
+  `Screen.cursorRowFillBackground` (`cursorDownScroll`,
+  `cursorScrollAbove`, `cursorScrollRegionUpSlow`). 0034 marks an RGB
+  background there, so `CSI S` with no history now flags its new row
+  EXTENDED as tmux's `grid_empty_line` does (1.0.1 left it unflagged;
+  oracle `capture_line_flags_scroll_no_history`). 0019 passes the zero
+  cell.
+- `resizeWithoutReflow` pauses the integrity checks while it grows; 0025's
+  `hscrolled` block runs after the pause.
+- OSC 72 (kitty drag and drop) is ignored entirely while the embedder
+  sets no `drop` effect, which the C API never does: a pane no longer
+  answers `OSC 72 ; t=q`, as tmux does not (oracle `osc_72_ignored`).
+- Hyperlink hashing (`hyperlink.zig` `hashBytes`), the snapshot codec
+  (a pending wrap kept at any column; vtmux does not use the codec), the
+  mouse encoder's last-cell rule (vtmux does not use the encoder),
+  `PageList.clone` of a page narrower than the list, and the kitty
+  temporary-file test, now skipped when the tree is under `/tmp`. The C
+  headers changed only in comments and the version macros, so
+  `bindings.rs` is unchanged (`tests/abi.rs` passes).
+
+How the patches fit the release's code (since 1.0.1):
 
 - 0002: `tab` is in `PrintSliceSimpleMask`, a top-level constant.
 - 0003: a trailing blank row (one `Row.blank` marks, or all-zero cells)
@@ -122,16 +166,18 @@ with the patch that changes the behaviour: "eraseLine on a blank row keeps
 it blank" and "scrollClear skips blank rows and stops at a spacer" (0029),
 "manifest describes the frozen style layout" (0010), "Terminal: tabClear
 single" (0002: the tab's mark makes the row dirty, the clear itself does
-not), three "eraseChars" tests (0047: a partial ECH keeps the wrap); "C header types are all in the type registry" skips `GhosttyVtmux*`
-and `GhosttyUnicodeWidthRange` (0007). `check.sh`'s `ghostty-zig` stage
+not), three "eraseChars" tests (0047: a partial ECH keeps the wrap),
+the IL/DL wrap tests above (0011) and "Fitzpatrick skin tone widens a
+narrow base like VS16" (0016); "C header types are all in the type
+registry" skips `GhosttyVtmux*` and `GhosttyUnicodeWidthRange` (0007). `check.sh`'s `ghostty-zig` stage
 (`scripts/ghostty-zig-tests.sh`) runs the suite's tests of the modules the
 patches change on the patched tree (the terminal core, its styles,
 snapshot and compression, the C API, kitty graphics, Unicode), in Debug:
-4779 of 4807 pass and 28 skip, 102 s with Zig's global cache warm. The whole suite (`zig build test-lib-vt -Demit-lib-vt=true
--Dapp-runtime=none --system <deps>`) passes too, but for "image load:
-temporary file outside directory prefix is rejected" when the tree is
-under `/tmp`, which Ghostty trusts as a temporary directory (it fails so on
-the unpatched release as well).
+4835 of 4861 pass and 26 skip on 1.0.2, 286 s on an M-series laptop
+with Zig's global cache warm. The whole suite (`zig build test-lib-vt
+-Demit-lib-vt=true -Dapp-runtime=none --system <deps>`) passes too; under
+`/tmp`, which Ghostty trusts as a temporary directory, "image load:
+temporary file outside directory prefix is rejected" skips.
 
 `bindings.rs` is edited by hand from a diff of `zig translate-c` of the old
 and new headers when the host has no libclang: enum values (1.0 numbers
@@ -199,10 +245,12 @@ the changes outside them. Each patch has its note under its theme.
   an erased continuation under an unwrapped line). The blank row a
   scroll adds keeps its unset flag: patch 0012 reads that as tmux's
   empty line. The alternate screen does not reflow, so its LF skips
-  this. Four upstream tests that assert the xterm behaviour now assert
-  tmux's ("insertLines resets wrap", "deleteLines resets wrap",
-  "deleteLines wide character spacer head", "eraseLine resets pending
-  wrap"), and "deleteLines count over region blanks row metadata" runs
+  this. Upstream tests that assert the xterm behaviour, or 1.0.2's, now
+  assert tmux's ("insertLines resets wrap", "deleteLines resets wrap",
+  "eraseLine resets pending wrap", and 1.0.2's "insertLines and
+  deleteLines soft wrap state", "insertLines preserves wrap of rows
+  shifted together", "insertLines and deleteLines keep soft wraps across
+  a page boundary"), and "deleteLines count over region blanks row metadata" runs
   CSI M (`deleteLinesTmux`); new tests `Terminal: tmux wrap bookkeeping
   (vtmux)` and `Terminal: tmux wrap continuations follow moved rows
   (vtmux)`. Not an upstream candidate (it is tmux's model, not a
@@ -590,7 +638,8 @@ the changes outside them. Each patch has its note under its theme.
     though its cells imply them (a path that misses the bit: `CSI S` in
     an RGB background with no history), beside the rows under their own
     tags (`vtmux_snapshot::KeptRows`, `Row::lacks`), which a build before
-    them skips.
+    them skips. On 1.0.2 that path sets the bit (`cursorRowFillBackground`),
+    so `Row::lacks` comes only from snapshots of 1.0.1 builds.
     Readers OR them with what the cells say now (vtmux `capture.rs`
     `LineKept`).
   - A narrow character over half of a wide one: tmux writes the other
@@ -1500,10 +1549,10 @@ the changes outside them. Each patch has its note under its theme.
   or without (vtmux)` (fails without the change). Not an upstream
   candidate.
 
-### In libghostty-vt 1.0.1 itself
+### In libghostty-vt itself
 
-Two changes vtmux needs are 1.0.1's own (*The patches on libghostty-vt
-1.0.1*): a pruned page zeroed in place (`DestroyMode.retain`) and the
+Two changes vtmux needs are the release's own since 1.0.1 (*The patches
+on libghostty-vt 1.0.2*): a pruned page zeroed in place (`DestroyMode.retain`) and the
 hyperlink map's own capacity (`Capacity.hyperlink_cells`). The reflow test
 for the second, "reflow keeps the links of a page full of them", passes on
 1.0.1's code (ReleaseSafe; in Debug its per-print integrity checks take
@@ -1533,12 +1582,14 @@ over 2.5 min, so it is not kept). vtmux's own
   are the libghostty-vt release's two tarballs, checked by SHA-256 and
   built with `zig build --system` (above), where upstream cloned a commit
   with git and let Zig fetch; the Zig version is checked first.
-- `libghostty-vt-sys/build.rs`: `GHOSTTY_VERSION` = `1.0.1` (tag
-  `vt-1.0.1`, 2026-11-11), which contains `e257bb45`. Before it,
-  `GHOSTTY_COMMIT` `3bd54e025cc3` (ghostty main, 2026-10-31).
+- `libghostty-vt-sys/build.rs`: `GHOSTTY_VERSION` = `1.0.2` (tag
+  `vt-1.0.2`, 2026-11-24), which contains `e257bb45`. Before it, 1.0.1
+  (2026-11-11) and `GHOSTTY_COMMIT` `3bd54e025cc3` (ghostty main,
+  2026-10-31).
 - `libghostty-vt-sys/src/bindings.rs`: generated from `3bd54e025`'s
   headers with `gen-bindings`, then updated by hand for 1.0.1 (above,
-  *libghostty-vt 1.0.1*).
+  *The patches on libghostty-vt 1.0.2*); 1.0.2's headers change no
+  declaration.
 - `libghostty-vt/src`: the 1.0 C API, kept behind the same Rust API:
   `Style` from `GhosttyStyleFlags`; `Formatter` sets its options with
   `ghostty_formatter_set` (`FormatterOptions` is a Rust struct now, its

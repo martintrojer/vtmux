@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 30fd97879..566aff4e9 100644
+index 53b5f6c04..510f2024a 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -777,8 +777,10 @@ fn printSliceFast(
@@ -50,7 +50,7 @@ index 30fd97879..566aff4e9 100644
  
      // Note: it is possible to have a width of "3" and a width of "-1" from
      // uucode.x's wcwidth. We should look into those cases and handle them
-@@ -6265,6 +6274,36 @@ test "Terminal: input glitch text" {
+@@ -6325,6 +6334,36 @@ test "Terminal: input glitch text" {
      try testing.expect(page.capacity().grapheme_bytes > grapheme_cap);
  }
  

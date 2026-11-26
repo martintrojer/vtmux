@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 5abdb7ab5..dd9013d36 100644
+index 62ccc4ad7..5d15720d8 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -1222,10 +1222,20 @@ fn printSliceFill(
@@ -92,7 +92,7 @@ index 5abdb7ab5..dd9013d36 100644
                  } else {
                      self.writeCell(0, .narrow);
                  }
-@@ -7482,6 +7533,110 @@ test "Terminal: print wide char at edge creates spacer head" {
+@@ -7519,6 +7570,110 @@ test "Terminal: print wide char at edge creates spacer head" {
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
  }
  
@@ -203,7 +203,7 @@ index 5abdb7ab5..dd9013d36 100644
  test "Terminal: print wide char with 1-column width" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -9983,11 +10138,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
+@@ -10113,11 +10268,11 @@ test "Terminal: print wide char at right edge with hyperlink" {
      try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
      try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
  

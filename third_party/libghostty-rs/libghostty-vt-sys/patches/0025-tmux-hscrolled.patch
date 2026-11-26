@@ -40,7 +40,7 @@ index ba32443b2..21950ba6d 100644
          @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
          @export(&c.snapshot_encode_alloc, .{ .name = "ghostty_snapshot_encode_alloc" });
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 2755b0792..62b3b52f1 100644
+index abb7c60cf..f9dba1506 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -466,6 +466,12 @@ grow_hint_next: usize = 0,
@@ -177,10 +177,10 @@ index 2755b0792..62b3b52f1 100644
                  // If we didn't trim enough, just modify our row count and this
                  // will create additional history.
                  self.rows = rows;
-@@ -3392,6 +3484,24 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
-             // Making rows larger we adjust our row count, and then grow
-             // to the row count.
-             .gt => gt: {
+@@ -3403,6 +3495,24 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+                 self.pauseIntegrityChecks(true);
+                 defer self.pauseIntegrityChecks(false);
+ 
 +                // vtmux: tmux pulls back at most `hscrolled` rows, wherever
 +                // the cursor is, and adds the rest blank at the bottom
 +                // (screen_resize_y). The cursor stays on its row.
@@ -203,10 +203,10 @@ index 2755b0792..62b3b52f1 100644
                  // we want to try to preserve the y value of the old cursor.
                  // In other words, we don't want to "pull down" scrollback.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 2a24164ca..ffa5e5ed5 100644
+index 032f0dece..ffe991801 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -16257,6 +16257,87 @@ test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
+@@ -16385,6 +16385,87 @@ test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
      }
  }
  

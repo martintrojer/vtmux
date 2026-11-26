@@ -1,4 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 2a7569eb5..d804cfc0d 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1675,14 +1675,16 @@ fn resizeCols(
@@ -179,7 +180,7 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
  /// vtmux: whether tmux holds a cell in its extended form
  /// (grid_need_extended_cell; Row.tmux_extended): a wide character or its
  /// padding, a non-ASCII character, more than one codepoint, a tab, a link,
-@@ -3916,6 +3983,14 @@ fn resizeWithoutReflowGrowCols(
+@@ -3927,6 +3994,14 @@ fn resizeWithoutReflowGrowCols(
              if (cells[old_cols - 1].wide == .spacer_head) break :fast;
          }
  
@@ -195,9 +196,10 @@ diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
          return;
      }
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 7dd175a93..24bd4f942 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -5039,6 +5039,15 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+@@ -5076,6 +5076,15 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
      // Our row's soft-wrap is always reset.
      self.screens.active.cursorResetWrap();
  
@@ -213,7 +215,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
      // Our row is always dirty
      self.screens.active.cursorMarkDirty();
  }
-@@ -5542,18 +5551,25 @@ pub fn decaln(self: *Terminal) !void {
+@@ -5579,18 +5588,25 @@ pub fn decaln(self: *Terminal) !void {
      // so origin mode changes nothing here).
      self.setCursorPos(1, 1);
  
@@ -247,7 +249,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
          const cells_multi: [*]Cell = row.cells.ptr(page.memory);
          const cells = cells_multi[0..page.size.cols];
          row.blank = false;
-@@ -17603,6 +17619,144 @@ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
+@@ -17731,6 +17747,144 @@ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
      }
  }
  
@@ -393,6 +395,7 @@ diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
      const alloc = testing.allocator;
      const io_impl = testing.io;
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 88ec0e30a..9b70a5407 100644
 --- a/src/terminal/c/vtmux_state.zig
 +++ b/src/terminal/c/vtmux_state.zig
 @@ -322,6 +322,11 @@ fn rowFlags(row: *const Row) u8 {
@@ -556,9 +559,10 @@ diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
      const testing = std.testing;
      var b: terminal_c.Terminal = null;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index 165eae15b..faf84b67d 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -945,6 +945,8 @@ pub const Page = struct {
+@@ -956,6 +956,8 @@ pub const Page = struct {
                  // vtmux: the row holds cells of both (Row.tmux_extended).
                  copy.tmux_extended = copy.tmux_extended or dst_row.tmux_extended;
                  copy.tmux_hyperlink = copy.tmux_hyperlink or dst_row.tmux_hyperlink;
@@ -567,7 +571,7 @@ diff --git a/src/terminal/page.zig b/src/terminal/page.zig
              }
  
              // Our cell offset remains the same
-@@ -1099,6 +1101,49 @@ pub const Page = struct {
+@@ -1110,6 +1112,49 @@ pub const Page = struct {
                  last.wide = .narrow;
              }
          }
@@ -617,7 +621,7 @@ diff --git a/src/terminal/page.zig b/src/terminal/page.zig
      }
  
      /// Get a single row. y must be valid.
-@@ -2336,7 +2381,17 @@ pub const Row = packed struct(u64) {
+@@ -2393,7 +2438,17 @@ pub const Row = packed struct(u64) {
      tmux_extended: bool = false,
      tmux_hyperlink: bool = false,
  
@@ -636,7 +640,7 @@ diff --git a/src/terminal/page.zig b/src/terminal/page.zig
  
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {
-@@ -2435,6 +2490,7 @@ pub const Row = packed struct(u64) {
+@@ -2515,6 +2570,7 @@ pub const Row = packed struct(u64) {
          self.tmux_used = 0;
          self.tmux_extended = false;
          self.tmux_hyperlink = false;

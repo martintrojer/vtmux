@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index ffa5e5ed5..b1ae52852 100644
+index ffe991801..efc284117 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -11,6 +11,7 @@ const tripwire = @import("../tripwire.zig");
@@ -181,7 +181,7 @@ index ffa5e5ed5..b1ae52852 100644
  /// vtmux: without history (the alternate screen) tmux scrolls a region up
  /// with grid_move_lines (grid_view_scroll_region_up), which unwraps the
  /// line above the region; with history grid_scroll_history_region does
-@@ -15959,8 +16111,9 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -16087,8 +16239,9 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  
      // SU in a region and LF at the bottom of a region that does not start
@@ -193,7 +193,7 @@ index ffa5e5ed5..b1ae52852 100644
      for ([_]bool{ false, true }) |lf| {
          var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
          defer t.deinit(alloc);
-@@ -15992,6 +16145,128 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+@@ -16120,6 +16273,128 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
      }
  }
  
@@ -322,7 +322,7 @@ index ffa5e5ed5..b1ae52852 100644
  test "Terminal: reflow keeps the line break after a blank continuation (vtmux)" {
      const alloc = testing.allocator;
      const io_impl = testing.io;
-@@ -20935,12 +21210,17 @@ test "Terminal: eraseDisplay complete ignores stale prompt on recycled row" {
+@@ -21178,12 +21453,17 @@ test "Terminal: eraseDisplay complete ignores stale prompt on recycled row" {
      try t.linefeed();
      t.setTopAndBottomMargin(0, 0);
  

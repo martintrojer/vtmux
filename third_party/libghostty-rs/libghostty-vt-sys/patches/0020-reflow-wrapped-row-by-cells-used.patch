@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index 713168677..e274dc0fd 100644
+index c29748539..4f5f7ebf6 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -1859,17 +1859,15 @@ const ReflowCursor = struct {
@@ -44,10 +44,10 @@ index 713168677..e274dc0fd 100644
              return;
          }
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 2503cf3bb..1bd68ac4e 100644
+index 291db522a..8c732aad4 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -16144,6 +16144,48 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+@@ -16272,6 +16272,48 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
      }
  }
  

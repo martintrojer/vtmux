@@ -1,8 +1,8 @@
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
-index 7e77d18f3..1f4f98776 100644
+index d8be48cba..1a9020506 100644
 --- a/src/terminal/stream_terminal.zig
 +++ b/src/terminal/stream_terminal.zig
-@@ -2043,10 +2043,12 @@ pub const Handler = struct {
+@@ -2064,10 +2064,12 @@ pub const Handler = struct {
  
              .enable_mode_3 => {},
  
@@ -19,7 +19,7 @@ index 7e77d18f3..1f4f98776 100644
  
              // Handled above
              .synchronized_output => unreachable,
-@@ -2814,6 +2816,23 @@ test "basic print" {
+@@ -2835,6 +2837,23 @@ test "basic print" {
      try testing.expectEqualStrings("Hello", str);
  }
  

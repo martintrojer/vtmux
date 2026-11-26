@@ -65,7 +65,7 @@ index 347f2d5ef..96532f83b 100644
          @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
          @export(&c.snapshot_encode_alloc, .{ .name = "ghostty_snapshot_encode_alloc" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index bf58aac99..64f08de4c 100644
+index c4b86fbfc..601bc2ac2 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -103,6 +103,15 @@ glyph_glossary: glyph.Glossary = .empty,
@@ -84,7 +84,7 @@ index bf58aac99..64f08de4c 100644
  /// These are just a packed set of flags we may set on the terminal.
  flags: packed struct {
      // This supports a Kitty extension where programs using semantic
-@@ -5627,6 +5636,25 @@ pub fn resize(
+@@ -5664,6 +5673,25 @@ pub fn resize(
      // If our cols/rows didn't change, skip grid work but still apply pixels.
      if (self.cols == opts.cols and self.rows == opts.rows) return;
  
@@ -110,7 +110,7 @@ index bf58aac99..64f08de4c 100644
      // Build replacement tabstops without touching the current table. Keep
      // ownership here until every fallible resize operation has succeeded.
      var new_tabstops: ?Tabstops = null;
-@@ -5645,7 +5673,11 @@ pub fn resize(
+@@ -5682,7 +5710,11 @@ pub fn resize(
      // and alt fails than the reverse.
      try tw.check(.primary_screen);
      const primary = self.screens.get(.primary).?;
@@ -123,7 +123,7 @@ index bf58aac99..64f08de4c 100644
          .cols = opts.cols,
          .rows = opts.rows,
          // vtmux: tmux reflows the main screen whatever DECAWM says
-@@ -5717,6 +5749,14 @@ pub fn resize(
+@@ -5754,6 +5786,14 @@ pub fn resize(
                  "alternate screen replacement failed, falling back to primary err={}",
                  .{init_err},
              );
@@ -138,7 +138,7 @@ index bf58aac99..64f08de4c 100644
              break :alt;
          };
  
-@@ -6360,6 +6400,21 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
+@@ -6397,6 +6437,21 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
      if (self.screens.active_key == key) return null;
      const old = self.screens.active;
  
@@ -160,7 +160,7 @@ index bf58aac99..64f08de4c 100644
      // We always end hyperlink state when switching screens.
      // We need to do this on the original screen.
      old.endHyperlink();
-@@ -6444,6 +6499,8 @@ pub fn switchScreenMode(
+@@ -6481,6 +6536,8 @@ pub fn switchScreenMode(
      // We shouldn't touch anything in here without adding a unit
      // test AND verifying the behavior with xterm.
  
@@ -169,7 +169,7 @@ index bf58aac99..64f08de4c 100644
      switch (mode) {
          .@"47" => {},
  
-@@ -6508,6 +6565,133 @@ pub fn switchScreenMode(
+@@ -6545,6 +6602,133 @@ pub fn switchScreenMode(
      }
  }
  
@@ -303,7 +303,7 @@ index bf58aac99..64f08de4c 100644
  /// Modal screen changes. These map to the literal terminal
  /// modes to enable or disable alternate screen modes. They each
  /// have subtle behaviors so we define them as an enum here.
-@@ -6548,6 +6732,18 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
+@@ -6585,6 +6769,18 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
  /// this will reuse the existing memory. In the latter case, memory may
  /// be wasted (since its unused) but it isn't leaked.
  pub fn fullReset(self: *Terminal) void {
@@ -322,9 +322,9 @@ index bf58aac99..64f08de4c 100644
      // Ensure we're back on primary screen
      self.screens.switchTo(.primary);
  
-@@ -21490,3 +21686,112 @@ test "Terminal: eraseDisplay complete at input prompt copied from alt screen scr
- 
-     try testing.expect(t.screens.active.pages.total_rows > t.screens.active.pages.rows);
+@@ -21997,3 +22193,112 @@ test "Terminal: insertLines and deleteLines keep soft wraps across a page bounda
+         try testing.expectEqual(y == 4, row.wrap_continuation);
+     }
  }
 +
 +test "Terminal: tmux alternate screen leaves the primary at its size (vtmux)" {

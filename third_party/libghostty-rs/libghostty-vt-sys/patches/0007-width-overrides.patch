@@ -1,8 +1,8 @@
 diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
-index bef64b826..9ccf03bab 100644
+index 4b9e55d2b..2b0ebcdc6 100644
 --- a/include/ghostty/vt/unicode.h
 +++ b/include/ghostty/vt/unicode.h
-@@ -148,6 +148,30 @@ GHOSTTY_API size_t ghostty_unicode_grapheme_width(const uint32_t *cps,
+@@ -156,6 +156,30 @@ GHOSTTY_API size_t ghostty_unicode_grapheme_width(const uint32_t *cps,
                                                    size_t len,
                                                    uint8_t *width);
  
@@ -46,7 +46,7 @@ index e33c371ef..3705ec601 100644
          @export(&c.style_default, .{ .name = "ghostty_style_default" });
          @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index c0741e985..598ecd1ef 100644
+index 305361d13..f66449c4c 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -742,6 +742,12 @@ fn printSliceFast(
@@ -116,7 +116,7 @@ index c0741e985..598ecd1ef 100644
  
      // Note: it is possible to have a width of "3" and a width of "-1" from
      // uucode.x's wcwidth. We should look into those cases and handle them
-@@ -6345,6 +6353,39 @@ test "Terminal: print wide char" {
+@@ -6405,6 +6413,39 @@ test "Terminal: print wide char" {
      try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
  }
  

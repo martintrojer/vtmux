@@ -1,5 +1,5 @@
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index d1a708b80..e39c8b37f 100644
+index ee0093b92..2a7569eb5 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
 @@ -2965,6 +2965,10 @@ const ReflowCursor = struct {
@@ -35,10 +35,10 @@ index d1a708b80..e39c8b37f 100644
      // We only set the new minimums if we're not reflowing. If we are
      // reflowing, then the outer resize call handles this for us.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index dd9013d36..38a156495 100644
+index 5d15720d8..8ada53651 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -17771,6 +17771,51 @@ test "Terminal: tmux line flags (vtmux)" {
+@@ -17899,6 +17899,51 @@ test "Terminal: tmux line flags (vtmux)" {
      try testing.expect(!row.at(&t, 5).tmux_hyperlink);
  }
  

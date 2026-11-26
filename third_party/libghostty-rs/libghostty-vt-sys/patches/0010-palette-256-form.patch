@@ -49,10 +49,10 @@ index 42fdf567e..e44fdfe52 100644
  /**
   * The lowest bit of the underline style in GhosttyStyleFlags.
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 566aff4e9..675c3172f 100644
+index 510f2024a..3bbe699eb 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -15553,6 +15553,34 @@ test "Terminal: eraseLine resets wrap" {
+@@ -15704,6 +15704,34 @@ test "Terminal: eraseLine resets wrap" {
      }
  }
  
@@ -240,10 +240,10 @@ index 3ba5173c8..8376f6c02 100644
      const testing = std.testing;
      const alloc = testing.allocator;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 87f13d366..2ef863ee7 100644
+index 4cdaa2497..11b88ac8c 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -2411,7 +2411,10 @@ pub const Cell = packed struct(u64) {
+@@ -2490,7 +2490,10 @@ pub const Cell = packed struct(u64) {
          /// The content is an empty cell with a background color.
          color_palette: packed struct(u24) {
              data: u8,

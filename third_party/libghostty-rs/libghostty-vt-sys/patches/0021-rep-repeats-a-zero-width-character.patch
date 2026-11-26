@@ -1,5 +1,5 @@
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 1bd68ac4e..a2e1e6dd1 100644
+index 8c732aad4..69363b68c 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -1932,6 +1932,13 @@ pub fn print(self: *Terminal, c: u21) !void {
@@ -26,7 +26,7 @@ index 1bd68ac4e..a2e1e6dd1 100644
      if (self.screens.active.cursor.pending_wrap) {
          if (self.modes.get(.wraparound)) {
              try self.printWrap();
-@@ -17036,6 +17040,26 @@ test "Terminal: printRepeat stops at the end of the line (vtmux)" {
+@@ -17168,6 +17172,26 @@ test "Terminal: printRepeat stops at the end of the line (vtmux)" {
      }
  }
  
