@@ -38,6 +38,7 @@ pub mod pane_kitty;
 pub mod paste;
 pub mod pipe;
 pub mod popup;
+pub mod program_resume;
 pub mod prompt;
 pub mod prompt_history;
 pub mod remain;

@@ -701,9 +701,133 @@ pub fn tty_name(master: &OwnedFd) -> Option<String> {
     )
 }
 
+/// What the OS tells about one process (OSC 7577 owner checks).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessInfo {
+    /// The real user ID the process runs as.
+    pub uid: u32,
+    /// The parent process.
+    pub ppid: u32,
+    /// When it started, in a unit stable for the life of the process
+    /// (microseconds since the epoch on macOS, clock ticks since boot on
+    /// Linux). Same pid with a different value is a reused pid.
+    pub start_time: u64,
+    /// Its working directory, when readable and UTF-8.
+    pub cwd: Option<String>,
+}
+
+/// Look up process `pid`; `None` when it does not exist (or is a zombie).
+#[must_use]
+pub fn process_info(pid: u32) -> Option<ProcessInfo> {
+    #[cfg(target_os = "macos")]
+    {
+        let ipid = i32::try_from(pid).ok()?;
+        // SAFETY: an all-zero `proc_bsdinfo` is a valid value for
+        // proc_pidinfo to fill in.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+        // SAFETY: the buffer is `size` bytes of a `proc_bsdinfo`, what
+        // PROC_PIDTBSDINFO writes.
+        let n = unsafe {
+            libc::proc_pidinfo(
+                ipid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&raw mut info).cast(),
+                size,
+            )
+        };
+        if n != size || info.pbi_status == 5 {
+            return None;
+        }
+        // SAFETY: as above, for `proc_vnodepathinfo`.
+        let mut vp: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+        let vsize = i32::try_from(std::mem::size_of::<libc::proc_vnodepathinfo>()).ok()?;
+        // SAFETY: the buffer is `vsize` bytes of a `proc_vnodepathinfo`,
+        // what PROC_PIDVNODEPATHINFO writes.
+        let n = unsafe {
+            libc::proc_pidinfo(
+                ipid,
+                libc::PROC_PIDVNODEPATHINFO,
+                0,
+                (&raw mut vp).cast(),
+                vsize,
+            )
+        };
+        let cwd = (n == vsize)
+            .then(|| {
+                let bytes: Vec<u8> = vp
+                    .pvi_cdir
+                    .vip_path
+                    .iter()
+                    .flatten()
+                    .map(|&c| c.cast_unsigned())
+                    .take_while(|&c| c != 0)
+                    .collect();
+                String::from_utf8(bytes).ok().filter(|s| !s.is_empty())
+            })
+            .flatten();
+        Some(ProcessInfo {
+            uid: info.pbi_uid,
+            ppid: info.pbi_ppid,
+            start_time: info
+                .pbi_start_tvsec
+                .saturating_mul(1_000_000)
+                .saturating_add(info.pbi_start_tvusec),
+            cwd,
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let dir = format!("/proc/{pid}");
+        let uid = std::fs::metadata(&dir).ok()?.uid();
+        let stat = std::fs::read_to_string(format!("{dir}/stat")).ok()?;
+        // `pid (comm) state ppid ...`; comm may hold spaces and parens.
+        // After the ')': state is field 0, ppid 1, starttime 19.
+        let rest = &stat[stat.rfind(')')? + 1..];
+        let mut f = rest.split_whitespace();
+        if f.next()? == "Z" {
+            return None;
+        }
+        let ppid = f.next()?.parse().ok()?;
+        let start_time = f.nth(17)?.parse().ok()?;
+        let cwd = std::fs::read_link(format!("{dir}/cwd"))
+            .ok()
+            .and_then(|p| p.into_os_string().into_string().ok());
+        Some(ProcessInfo {
+            uid,
+            ppid,
+            start_time,
+            cwd,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_info_of_self() {
+        let me = process_info(std::process::id()).expect("own process");
+        // SAFETY: getuid cannot fail.
+        assert_eq!(me.uid, unsafe { libc::getuid() });
+        assert_eq!(me.ppid, std::os::unix::process::parent_id());
+        assert!(me.start_time > 0);
+        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let got = std::path::PathBuf::from(me.cwd.expect("cwd"));
+        assert_eq!(got.canonicalize().unwrap(), cwd);
+        assert_eq!(
+            process_info(std::process::id()).unwrap().start_time,
+            me.start_time
+        );
+    }
+
+    #[test]
+    fn process_info_of_missing_pid() {
+        assert!(process_info(0x7fff_fff0).is_none());
+    }
 
     /// With no `PATH`, the search is `execvp`'s own: glibc's `/bin` first,
     /// macOS's and FreeBSD's `/usr/bin` first, musl's `/usr/local/bin`
