@@ -387,6 +387,10 @@ impl<'a> Ctx<'a> {
         let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "session_name" => s.name.clone(),
+            // D34: the highest program state over the session's windows.
+            "session_program_state" => {
+                self.rollup_name(|p| s.windows.values().any(|w| *w == p.window))
+            }
             "session_id" => s.id.to_string(),
             "session_windows" => s.windows.len().to_string(),
             // format_cb_last_window_index: the highest index.
@@ -500,6 +504,18 @@ impl<'a> Ctx<'a> {
     }
 
     #[allow(clippy::too_many_lines)] // one arm per variable
+    fn rollup_name(&self, in_scope: impl Fn(&crate::model::Pane) -> bool) -> String {
+        let states = self
+            .model
+            .panes
+            .values()
+            .filter(|p| in_scope(p))
+            .filter_map(|p| p.program_status.summary_state());
+        crate::program_status::rollup(states).map_or_else(String::new, |s| {
+            crate::program_status::state_name(s).to_owned()
+        })
+    }
+
     fn window_value(&self, name: &str) -> Option<String> {
         let w = self.window()?;
         // The winlink callbacks (format.c format_cb_window_active and
@@ -511,6 +527,8 @@ impl<'a> Ctx<'a> {
             "window_index" => wl?.1.to_string(),
             "window_name" => w.name.clone(),
             "window_activity" => w.activity_secs.to_string(),
+            // D34: the highest-priority program state of the window's panes.
+            "window_program_state" => self.rollup_name(|p| p.window == w.id),
             // format_cb_window_marked_flag: the marked winlink.
             "window_marked_flag" => flag(wl.is_some_and(|(s, i)| self.marked_winlink(s.id, i))),
             // window_count_panes(w, 1).
@@ -820,6 +838,13 @@ impl<'a> Ctx<'a> {
             "pane_program_state" => p.program_status.summary().map_or_else(String::new, |s| {
                 crate::program_status::state_name(s.state).to_owned()
             }),
+            "pane_program_state_time" => p.program_status.state_time()?.to_string(),
+            "pane_program_id" => p.program_status.id().unwrap_or_default().to_owned(),
+            "pane_program_root_state" => {
+                p.program_status.root_state().map_or_else(String::new, |s| {
+                    crate::program_status::state_name(s).to_owned()
+                })
+            }
             "pane_program_kind" => p.program_status.summary().map_or_else(String::new, |s| {
                 crate::program_status::kind_name(s.kind).to_owned()
             }),
@@ -1365,6 +1390,10 @@ impl FormatContext for Ctx<'_> {
             "window_activity" => self.window().map(|w| w.activity_secs),
             "pane_dead_time" => self.pane().and_then(|p| p.dead_time),
             "pane_last_output_time" => self.pane().and_then(|p| p.last_output_time),
+            "pane_program_state_time" => self
+                .pane()
+                .and_then(|p| p.program_status.state_time())
+                .and_then(|t| i64::try_from(t).ok()),
             "pane_last_prompt_time" => self.pane().and_then(|p| p.shell_commands.last_prompt),
             "pane_command_start_time" => self.pane().and_then(|p| p.shell_commands.started),
             "pane_command_end_time" => self.pane().and_then(|p| p.shell_commands.ended),

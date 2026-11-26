@@ -2380,6 +2380,7 @@ fn program_status_out(p: &Pane) -> Option<snap::ProgramStatusState> {
     Some(snap::ProgramStatusState {
         granted,
         next_seq: p.program_status.next_seq(),
+        state_time: p.program_status.state_time(),
         records: p
             .program_status
             .records()
@@ -2455,6 +2456,7 @@ fn program_status_in(s: Option<&snap::ProgramStatusState>) -> crate::program_sta
     };
     ps::ProgramStatus::restored(
         s.next_seq,
+        s.state_time,
         s.records.iter().filter_map(|r| {
             Some((
                 r.id.clone(),

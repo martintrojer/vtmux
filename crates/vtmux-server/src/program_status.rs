@@ -48,6 +48,9 @@ pub struct Changed {
 pub struct ProgramStatus {
     records: BTreeMap<String, Record>,
     next_seq: u64,
+    /// Unix seconds when the summary state last changed; none without a
+    /// summary.
+    state_time: Option<u64>,
     /// The pane was focused at the last look, so a focus gain is an edge.
     pub focused: bool,
 }
@@ -128,6 +131,13 @@ fn priority(s: ProgramState) -> u8 {
     }
 }
 
+/// The state that wins among `states` (`blocked > error > working > done >
+/// idle`), none for no states.
+#[must_use]
+pub fn rollup(states: impl IntoIterator<Item = ProgramState>) -> Option<ProgramState> {
+    states.into_iter().max_by_key(|s| priority(*s))
+}
+
 /// Control and invisible formatting characters (bidi controls, zero-width
 /// and joiners, the BOM) dropped from text that reaches formats.
 fn invisible(c: char) -> bool {
@@ -159,10 +169,15 @@ fn is_under(id: &str, prefix: &str) -> bool {
 impl ProgramStatus {
     /// Rebuilt from a snapshot.
     #[must_use]
-    pub fn restored(next_seq: u64, records: impl IntoIterator<Item = (String, Record)>) -> Self {
+    pub fn restored(
+        next_seq: u64,
+        state_time: Option<u64>,
+        records: impl IntoIterator<Item = (String, Record)>,
+    ) -> Self {
         let records: BTreeMap<_, _> = records.into_iter().collect();
         let next_seq = records.values().map(|r| r.seq).fold(next_seq, u64::max);
         Self {
+            state_time: if records.is_empty() { None } else { state_time },
             records,
             next_seq,
             focused: false,
@@ -182,6 +197,42 @@ impl ProgramStatus {
     /// The records, by id.
     pub fn records(&self) -> impl Iterator<Item = (&String, &Record)> {
         self.records.iter()
+    }
+
+    /// The summary's state alone.
+    #[must_use]
+    pub fn summary_state(&self) -> Option<ProgramState> {
+        self.winner().map(|(_, r)| r.state)
+    }
+
+    /// The winning record's `id`.
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        self.winner().map(|(id, _)| id.as_str())
+    }
+
+    /// The root record's (`id=""`) state alone.
+    #[must_use]
+    pub fn root_state(&self) -> Option<ProgramState> {
+        self.records.get("").map(|r| r.state)
+    }
+
+    /// Unix seconds when the summary state last changed.
+    #[must_use]
+    pub fn state_time(&self) -> Option<u64> {
+        self.state_time
+    }
+
+    /// Note a change of the summary state at `now` (none while there is
+    /// no summary). Call when [`Changed::state`] is set.
+    pub fn stamp(&mut self, now: u64) {
+        self.state_time = (!self.records.is_empty()).then_some(now);
+    }
+
+    fn winner(&self) -> Option<(&String, &Record)> {
+        self.records
+            .iter()
+            .max_by_key(|(_, r)| (priority(r.state), r.seq))
     }
 
     /// The nearest non-empty `app`: the record's own, its ancestors', the
@@ -205,10 +256,7 @@ impl ProgramStatus {
     /// The record the formats show.
     #[must_use]
     pub fn summary(&self) -> Option<Summary> {
-        let (id, r) = self
-            .records
-            .iter()
-            .max_by_key(|(_, r)| (priority(r.state), r.seq))?;
+        let (id, r) = self.winner()?;
         Some(Summary {
             state: r.state,
             kind: r.kind,
@@ -369,6 +417,35 @@ mod tests {
         assert_eq!(s.summary().unwrap().state, ProgramState::Error);
         s.on_focus();
         assert!(s.is_empty());
+    }
+
+    #[test]
+    fn id_root_state_stamp_and_rollup() {
+        let mut s = ProgramStatus::default();
+        assert!(s.id().is_none() && s.root_state().is_none() && s.state_time().is_none());
+        assert!(s.apply(&ev("", ProgramState::Idle)).state);
+        s.stamp(10);
+        assert_eq!(s.state_time(), Some(10));
+        let c = s.apply(&ev("build", ProgramState::Working));
+        assert!(c.state);
+        s.stamp(11);
+        assert_eq!(s.id(), Some("build"));
+        assert_eq!(s.root_state(), Some(ProgramState::Idle));
+        let mut e = ev("build", ProgramState::Working);
+        e.progress = Some(40);
+        assert!(!s.apply(&e).state);
+        s.apply(&ev("", ProgramState::Clear));
+        s.stamp(12);
+        assert_eq!(s.state_time(), None);
+        assert_eq!(
+            rollup([
+                ProgramState::Done,
+                ProgramState::Blocked,
+                ProgramState::Idle
+            ]),
+            Some(ProgramState::Blocked)
+        );
+        assert_eq!(rollup([]), None);
     }
 
     #[test]

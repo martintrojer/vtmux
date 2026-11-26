@@ -1191,6 +1191,18 @@ fn program_status_records_and_grant_survive_a_rebuild() {
         ],
     );
     assert!(shown.contains("\nblocked/x/7/Title\n"), "{shown}");
+    let shown = run(
+        &mut a,
+        &dir,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            "%0",
+            "#{window_program_state}/#{session_program_state}/#{pane_program_id}/#{pane_program_root_state}",
+        ],
+    );
+    assert!(shown.contains("\nblocked/blocked/a/\n"), "{shown}");
     let fired = run(&mut a, &dir, &["show", "-gv", "@fired"]);
     assert!(
         fired.contains("\nyes\n"),
@@ -1211,6 +1223,11 @@ fn program_status_records_and_grant_survive_a_rebuild() {
     assert_eq!(sum.state, vtmux_vt::ProgramState::Blocked);
     assert_eq!((sum.app.as_str(), sum.progress), ("x", Some(7)));
     assert_eq!(pane.program_status, a.model.panes[&p].program_status);
+    assert!(pane.program_status.state_time().is_some());
+    assert_eq!(
+        pane.program_status.state_time(),
+        s.panes[0].program_status.as_ref().unwrap().state_time
+    );
     // The grant outlives the option: a report still lands.
     b.pane_input(p, b"\x1b]7501;state=working:id=c\x07", false);
     assert_eq!(b.model.panes[&p].program_status.records().count(), 3);

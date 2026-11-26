@@ -6542,6 +6542,10 @@ impl Server {
         };
         let window = pane.window;
         let changed = f(&mut pane.program_status);
+        if changed.state {
+            pane.program_status
+                .stamp(u64::try_from(crate::model::now_epoch()).unwrap_or(0));
+        }
         if changed.any {
             self.model
                 .redraw(crate::model::Redraw::WindowBorders(window));

@@ -1301,6 +1301,7 @@ fn program_status_and_resume_round_trip() {
     s.panes[0].program_status = Some(ProgramStatusState {
         granted: true,
         next_seq: 9,
+        state_time: Some(1_700_000_001),
         records: vec![
             ProgramStatusRecord {
                 id: "build/1".into(),

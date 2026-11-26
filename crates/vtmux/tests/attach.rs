@@ -10587,6 +10587,73 @@ fn osc_7501_records_and_grant_survive_an_upgrade() {
     assert_eq!(fmt(&w, "%0", "#{pane_program_state}"), "blocked");
 }
 
+/// D34 rollups: the window and session states take the highest priority
+/// of their panes, `#{pane_program_state_time}` moves only with the state
+/// (and survives an upgrade), `#{pane_program_id}` names the winner and
+/// `#{pane_program_root_state}` the root alone. The status line of another
+/// window redraws with no `refresh-client -S`.
+#[test]
+fn osc_7501_rollups_time_id_and_root_state() {
+    let (w, a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    w.cli(&["set", "-g", "status-right", "S=#{session_program_state}"]);
+    let roll = "#{window_program_state}|#{session_program_state}";
+    assert_eq!(fmt(&w, "%0", roll), "|");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state_time}"), "");
+    osc_emit(&w, "%0", b"\x1b]7501;state=idle\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_root_state}"), "idle");
+    osc_emit(
+        &w,
+        "%0",
+        b"\x1b]7501;id=build:state=working:progress=20\x07",
+    );
+    let t1 = fmt(&w, "%0", "#{pane_program_state_time}");
+    assert!(t1.parse::<u64>().unwrap() > 1_000_000_000, "{t1}");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_id}"), "build");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_root_state}"), "idle");
+    assert_eq!(fmt(&w, "%0", roll), "working|working");
+    // The current window is the other one: its status line shows the
+    // session's state at once.
+    a.wait(|a| status_row(a).ends_with("S=working"));
+    // Progress alone keeps the time.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    osc_emit(
+        &w,
+        "%0",
+        b"\x1b]7501;id=build:state=working:progress=40\x07",
+    );
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state_time}"), t1);
+    // Another window's pane outranks it in the session, not in %0's window.
+    let program = osc_loop(&token_prelude(&w.home.path().join("tok-third")));
+    let third = out(
+        &w,
+        &["neww", "-d", "-P", "-F", "#{pane_id}", "sh", "-c", &program],
+    );
+    osc_emit(&w, &third, b"\x1b]7501;id=x:state=blocked\x07");
+    assert_eq!(fmt(&w, "%0", roll), "working|blocked");
+    assert_eq!(fmt(&w, &third, roll), "blocked|blocked");
+    a.wait(|a| status_row(a).ends_with("S=blocked"));
+    // A state change moves the time.
+    osc_emit(&w, "%0", b"\x1b]7501;id=build:state=error\x07");
+    let t2 = fmt(&w, "%0", "#{pane_program_state_time}");
+    assert!(
+        t2.parse::<u64>().unwrap() > t1.parse::<u64>().unwrap(),
+        "{t2}"
+    );
+    // Upgrade: the time stays.
+    w.cli(&["set", "-s", "vtmux-program-status", "off"]);
+    let up = w.cli(&["vtmux-upgrade"]);
+    assert!(up.status.success(), "{up:?}");
+    a.wait(|a| status_row(a).ends_with("S=blocked"));
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state_time}"), t2);
+    assert_eq!(fmt(&w, "%0", "#{pane_program_root_state}"), "idle");
+    // Clearing every record empties the time and the rollups.
+    osc_emit(&w, "%0", b"\x1b]7501;state=clear\x07");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_state_time}"), "");
+    assert_eq!(fmt(&w, "%0", "#{pane_program_id}"), "");
+    assert_eq!(fmt(&w, "%0", roll), "|blocked");
+}
+
 /// D35: an inherited `OSC7577_TOKEN` never reaches a pane (server,
 /// global environment and `new-window -e` alike), and no token is minted
 /// while the option is off.

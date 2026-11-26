@@ -723,6 +723,9 @@ record! {
         1 => one granted: bool,
         2 => one next_seq: u64,
         3 => many records: Vec<ProgramStatusRecord>,
+        /// Unix seconds when the summary state last changed. Ignorable: a
+        /// reader before shows no time until the next change.
+        4 => opt state_time: Option<u64>,
     }
 }
 
