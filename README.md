@@ -44,55 +44,27 @@ Saving sessions across a reboot is a plugin's job: tmux-resurrect and tmux-conti
 
 ### Terminal features tmux drops
 
-The Ghostty engine in each pane speaks protocols tmux 3.8 drops. vtmux passes them through to programs that ask, and keeps tmux's behaviour for everyone else.
+Protocols tmux 3.8 ignores, each opt-in behind a `vtmux-*` option (matching tmux when off):
 
-Kitty keyboard protocol: Shift+Enter, C-i apart from Tab and Esc apart from Alt reach neovim, helix and agent TUIs that ask for them. Key tables and the prefix work as in tmux.
+- **Kitty keyboard protocol (`vtmux-kitty-keys`):** Shift+Enter, C-i apart from Tab, and Esc apart from Alt reach neovim, helix, and agent TUIs that ask. Key tables and the prefix work as in tmux.
+- **Desktop notifications (`vtmux-notifications`):** OSC 9 and 777 notifications from background windows or popups reach Ghostty without `allow-passthrough`.
+- **In-band resize (`vtmux-inband-resize`):** mode 2048 reports each new pane size in-band to neovim, with no `SIGWINCH` race.
+- **Kitty graphics (`vtmux-graphics`):** `kitten icat` images draw in Ghostty clients, clipped to the pane like text, without `allow-passthrough`.
+- **Program status (`vtmux-program-status`):** OSC 7501 state (`idle`, `working`, `done`, `blocked`, `error`) shows in `#{pane_program_*}` formats and the `vtmux-pane-program-status` hook; nothing goes to the outer terminal. `#{pane_program_title}` and `#{pane_program_message}` are untrusted text: do not put them raw in status formats where `#[` is parsed as style markup.
+- **Program resume (`vtmux-program-resume`):** OSC 7577 lets programs in new non-empty panes (spawn or respawn) report how to relaunch them using a per-pane `OSC7577_TOKEN`, exposed in `#{pane_resume_command}`, `#{pane_resume_cwd}`, `#{pane_resume_pid}` and `vtmux-pane-program-resume`. vtmux never relaunches anything, and always strips an inherited `OSC7577_TOKEN` from panes and popups. See [docs/PROGRAM-RESUME.md](docs/PROGRAM-RESUME.md).
 
 ```tmux
 %if "#{vtmux_version}"
 set -s vtmux-kitty-keys on
-%endif
-```
-
-Desktop notifications: a build finishing in a background window, or an agent in a popup, pops up in Ghostty (OSC 9 and 777). No `allow-passthrough` needed.
-
-```tmux
-%if "#{vtmux_version}"
 set -s vtmux-notifications on
-%endif
-```
-
-In-band resize: neovim gets each new size in-band (mode 2048), with no `SIGWINCH` race.
-
-```tmux
-%if "#{vtmux_version}"
 set -s vtmux-inband-resize on
-%endif
-```
-
-Kitty graphics: `kitten icat` images show in the pane on a Ghostty client, clipped to it like text. No `allow-passthrough` needed.
-
-```tmux
-%if "#{vtmux_version}"
 set -s vtmux-graphics on
-%endif
-```
-
-Program status: a program's OSC 7501 state (idle, working, done, blocked, error) shows in formats and a hook; nothing goes to the outer terminal. `#{pane_program_title}` and `#{pane_program_message}` are untrusted text: do not put them raw in a status format, where `#[` is parsed as style markup.
-
-```tmux
-%if "#{vtmux_version}"
 set -s vtmux-program-status on
+set -s vtmux-program-resume on
+
+# Optional: show OSC 7501 status in the status bar
 set -g status-right '#{pane_program_app} #{pane_program_state}'
 set-hook -g vtmux-pane-program-status 'refresh-client -S'
-%endif
-```
-
-Program resume: with `vtmux-program-resume on`, new non-empty panes (spawn or respawn) get an `OSC7577_TOKEN` and a program that reports through OSC 7577 with it shows how to relaunch it in `#{pane_resume_command}`, `#{pane_resume_cwd}` and `#{pane_resume_pid}`; the `vtmux-pane-program-resume` hook runs on a change. vtmux never relaunches anything. An inherited `OSC7577_TOKEN` is always removed from panes and popups. See [docs/PROGRAM-RESUME.md](docs/PROGRAM-RESUME.md).
-
-```tmux
-%if "#{vtmux_version}"
-set -s vtmux-program-resume on
 %endif
 ```
 
