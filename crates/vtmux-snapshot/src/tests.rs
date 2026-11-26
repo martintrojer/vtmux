@@ -1290,3 +1290,80 @@ fn a_streams_digest_is_its_bodys_hash() {
         None
     );
 }
+
+/// The OSC 7501 and OSC 7577 fields round-trip populated and `None`, and
+/// neither is a required feature.
+#[test]
+fn program_status_and_resume_round_trip() {
+    let mut s = sample();
+    assert!(s.panes[0].program_status.is_none() && s.panes[0].program_resume.is_none());
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    s.panes[0].program_status = Some(ProgramStatusState {
+        granted: true,
+        next_seq: 9,
+        records: vec![
+            ProgramStatusRecord {
+                id: "build/1".into(),
+                state: 2,
+                kind: 1,
+                progress: Some(40),
+                app: "cargo".into(),
+                title: "t".into(),
+                message: "m".into(),
+                seq: 7,
+            },
+            ProgramStatusRecord::default(),
+        ],
+    });
+    s.panes[0].program_resume = Some(ProgramResumeState {
+        token: "abcDEF_-0123".into(),
+        next_seq: 4,
+        records: vec![ProgramResumeRecord {
+            pid: 42,
+            start_time: 1_700_000_000,
+            time: 1_700_000_005,
+            argv: vec!["/usr/bin/nvim".into(), "a b".into()],
+            cwd: Some("/tmp".into()),
+            cwd_from_report: true,
+            seq: 3,
+        }],
+        last_times: vec![ProgramResumeTime {
+            pid: 42,
+            time: 1_700_000_005,
+        }],
+    });
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let mut plain = sample();
+    plain.panes[0].program_status = Some(ProgramStatusState::default());
+    plain.panes[0].program_resume = Some(ProgramResumeState::default());
+    assert_eq!(decode(&encode(&plain)).unwrap(), plain);
+}
+
+/// Many empty status and resume records decode inside the budget (each
+/// is charged `size_of`, under the budget's 64 bytes per input byte), and
+/// the same records nested a level deeper than allowed are refused.
+#[test]
+fn program_records_decode_within_the_budget() {
+    for tag in [52, 53] {
+        let mut state = Vec::new();
+        for _ in 0..100_000 {
+            put_field(&mut state, 3, |_| {});
+        }
+        let mut pane = Vec::new();
+        put_field(&mut pane, tag, |o| o.extend_from_slice(&state));
+        let mut body = Vec::new();
+        put_field(&mut body, 5, |o| o.extend_from_slice(&pane));
+        let s = decode(&frame(&body)).unwrap();
+        let n = match tag {
+            52 => s.panes[0].program_status.as_ref().unwrap().records.len(),
+            _ => s.panes[0].program_resume.as_ref().unwrap().records.len(),
+        };
+        assert_eq!(n, 100_000);
+    }
+    // A count-less lie: a truncated record is an error, not a panic.
+    let mut pane = Vec::new();
+    put_field(&mut pane, 52, |o| o.extend_from_slice(&[3, 200]));
+    let mut body = Vec::new();
+    put_field(&mut body, 5, |o| o.extend_from_slice(&pane));
+    assert!(decode(&frame(&body)).is_err());
+}

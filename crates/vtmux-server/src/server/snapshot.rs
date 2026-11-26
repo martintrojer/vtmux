@@ -1288,6 +1288,8 @@ impl Server {
                     graphics_owner_alternate: p.graphics.owner[1],
                     restored_from: None,
                     restart_from: None,
+                    program_status: None,
+                    program_resume: None,
                     last_prompt_time: p.shell_commands.last_prompt,
                     command_start_time: p.shell_commands.started,
                     command_end_time: p.shell_commands.ended,

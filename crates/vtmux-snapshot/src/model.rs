@@ -706,6 +706,71 @@ record! {
         /// that exit as any. Read and ignored since 2026-11-12, never
         /// written.
         51 => opt restart_from: Option<i64>,
+        /// OSC 7501 program status (D34): the grant and the records.
+        /// Ignorable (not in `Meta::requires`): a reader before drops the
+        /// grant and the records.
+        52 => opt program_status: Option<ProgramStatusState>,
+        /// OSC 7577 program resume (D35): the token, the records and the
+        /// last accepted times. Ignorable, as `program_status`.
+        53 => opt program_resume: Option<ProgramResumeState>,
+    }
+}
+
+record! {
+    /// A pane's OSC 7501 state.
+    pub struct ProgramStatusState {
+        /// The pane asked or reported while the option was on.
+        1 => one granted: bool,
+        2 => one next_seq: u64,
+        3 => many records: Vec<ProgramStatusRecord>,
+    }
+}
+
+record! {
+    /// One OSC 7501 record, keyed by `id`.
+    pub struct ProgramStatusRecord {
+        1 => one id: String,
+        2 => one state: u8,
+        3 => one kind: u8,
+        4 => opt progress: Option<u8>,
+        5 => one app: String,
+        6 => one title: String,
+        7 => one message: String,
+        /// Update order, for the LRU and for ties.
+        8 => one seq: u64,
+    }
+}
+
+record! {
+    /// A pane's OSC 7577 state.
+    pub struct ProgramResumeState {
+        /// The pane's `OSC7577_TOKEN`.
+        1 => one token: String,
+        2 => one next_seq: u64,
+        3 => many records: Vec<ProgramResumeRecord>,
+        4 => many last_times: Vec<ProgramResumeTime>,
+    }
+}
+
+record! {
+    /// One accepted OSC 7577 report.
+    pub struct ProgramResumeRecord {
+        1 => one pid: u32,
+        /// The process's start time, to tell a reused pid.
+        2 => one start_time: u64,
+        3 => one time: u64,
+        4 => many argv: Vec<String>,
+        5 => opt cwd: Option<String>,
+        6 => one cwd_from_report: bool,
+        7 => one seq: u64,
+    }
+}
+
+record! {
+    /// The last accepted report time of a pid.
+    pub struct ProgramResumeTime {
+        1 => one pid: u32,
+        2 => one time: u64,
     }
 }
 
@@ -1497,6 +1562,8 @@ pub(crate) mod tests {
             graphics_owner_alternate: None,
             restored_from: None,
             restart_from: None,
+            program_status: None,
+            program_resume: None,
         }
     }
 
