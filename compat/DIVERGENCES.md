@@ -1313,7 +1313,7 @@ Closed (vtmux matches tmux):
 - **Test:**
   - None fails. Off: oracle `osc_7501_off` pins tmux's behaviour (a query, a report and a clear are ignored, nothing answers, the `pane_program_*` formats are empty).
   - On: `crates/vtmux/tests/attach.rs` `osc_7501_query_is_answered_when_on`, `osc_7501_reports_fill_formats_hierarchy_and_hook`, `osc_7501_ris_prompt_and_focus_clear`, `osc_7501_grant_outlives_the_option_and_a_respawn_ends_it`, `osc_7501_records_and_grant_survive_an_upgrade`; unit tests in vtmux-vt `term` and vtmux-server `program_status`.
-- **tmux:** OSC 7501 is an unknown OSC, dropped (`input_dispatch_osc`, input.c); a query is never answered and there are no program formats or hook.
+- **tmux:** OSC 7501 is an unknown OSC, dropped (`input_exit_osc`, input.c); a query is never answered and there are no program formats or hook.
 - **vtmux:** with `set -s vtmux-program-status on`:
   - `OSC 7501 ; ?` is answered (libghostty-vt's answer), and a pane is granted at its first query or report.
   - A report keeps one record per `id` (at most 256 a pane); `state=clear` removes the `id` and every `id/...` beneath it. RIS clears all; `OSC 133;A` and the program's exit clear `working`, `blocked` and `idle`; `done` and `error` clear when the pane is focused.
@@ -1332,7 +1332,7 @@ Closed (vtmux matches tmux):
   - On: `crates/vtmux/tests/attach.rs` `osc_7577_strips_the_outer_token_with_the_option_off`, `osc_7577_mints_unique_tokens_on_spawn_and_respawn`, `osc_7577_signed_reports_fill_formats_and_fire_the_hook`, `osc_7577_grant_outlives_the_option`, `osc_7577_token_and_records_survive_an_upgrade`; unit tests in vtmux-vt `term` and vtmux-server `program_resume`.
 - **tmux:** OSC 7577 is an unknown OSC, dropped. `OSC7577_TOKEN` is an ordinary variable: one in the server's, the global or a `-e` environment reaches the pane.
 - **vtmux:** always, `OSC7577_TOKEN` is removed from every pane and popup environment, whatever its source. With `set -s vtmux-program-resume on`:
-  - A pane spawned or respawned gets its own 192-bit `OSC7577_TOKEN` (32 characters of `[A-Za-z0-9_-]`, from `/dev/urandom`); a pane already running gets none, a popup none. The token outlives the option and ends at a respawn.
+  - A pane spawned or respawned gets its own 192-bit `OSC7577_TOKEN` (32 characters of `[A-Za-z0-9_-]`, from `/dev/urandom`); a pane already running gets none, a popup none; only a non-empty pane (one with a program; an empty pane has none) is minted a token on spawn or respawn. The token outlives the option and ends at a respawn.
   - A report is verified (`mac` = SHA-256 of the body before it, `:` and the token; `time` within 60 s and not older than the pid's last): one that fails either is ignored; one that passes and is malformed, or names a pid that is gone or not the user's, removes that pid's records. `clear=1` removes the pid's record. RIS, DECSTR, the alternate screen and `OSC 133` never clear records.
   - `#{pane_resume_command}` (POSIX-quoted `argv`), `#{pane_resume_cwd}` and `#{pane_resume_pid}` show the record of the live owner, an ancestor before a descendant. `vtmux-pane-program-resume` runs when they change.
 - **Live upgrade:** the token, records and last times are carried (ignorable `Pane.program_resume`); a build without D35 drops them.

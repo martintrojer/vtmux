@@ -10157,13 +10157,30 @@ fn osc_loop(prelude: &str) -> String {
     format!("{prelude}while read -r f; do cat \"$f\"; done")
 }
 
+/// `p` as one single-quoted shell word (a `TMPDIR` may hold spaces).
+fn sh_quote(p: &std::path::Path) -> String {
+    format!("'{}'", p.display().to_string().replace('\'', "'\\''"))
+}
+
+/// A shell prelude that publishes `$OSC7577_TOKEN` to `file` atomically
+/// (a temp file, then `mv`), so a reader never sees a half-written one.
+fn token_prelude(file: &std::path::Path) -> String {
+    let tmp = file.with_extension("part");
+    format!(
+        "printf %s \"$OSC7577_TOKEN\" > {t} && mv {t} {f}; ",
+        t = sh_quote(&tmp),
+        f = sh_quote(file)
+    )
+}
+
 /// A world for the D34 and D35 tests: session `a` whose window 0 (`w`,
 /// pane `%0`) runs [`osc_loop`] and is not current (window 1 is), the
-/// status line pinned. `extra` is the environment of the client that
+/// status line pinned; it writes its `OSC7577_TOKEN` to `tok-initial` in
+/// the home dir. `extra` is the environment of the client that
 /// starts the server.
 fn osc_world(extra: &[(&str, &str)]) -> (World, Attached) {
     let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
-    let program = osc_loop("");
+    let program = osc_loop(&token_prelude(&w.home.path().join("tok-initial")));
     let a = w.attach_env(
         &["new", "-s", "a", "-n", "w", "sh", "-c", &program],
         40,
@@ -10395,10 +10412,7 @@ fn resume_prefix(pid: &str, time: u64, argv: &[&str]) -> String {
 /// and pid.
 fn resume_pane(w: &World, name: &str) -> (String, String, String) {
     let file = w.home.path().join(format!("tok-{name}"));
-    let program = osc_loop(&format!(
-        "printf %s \"$OSC7577_TOKEN\" > {}; ",
-        file.display()
-    ));
+    let program = osc_loop(&token_prelude(&file));
     let id = out(
         w,
         &[
@@ -10415,11 +10429,7 @@ fn resume_pane(w: &World, name: &str) -> (String, String, String) {
         ],
     );
     common::wait("the token file", || file.exists());
-    let token = common::wait_for(
-        "the token",
-        || std::fs::read_to_string(&file).unwrap_or_default(),
-        |_| true,
-    );
+    let token = std::fs::read_to_string(&file).unwrap();
     let pid = fmt(w, &id, "#{pane_pid}");
     (id, token, pid)
 }
@@ -10435,7 +10445,7 @@ fn osc_7501_query_is_answered_when_on() {
     let file = w.home.path().join("reply");
     let program = format!(
         "stty raw -echo; printf '\\033]7501;?\\007'; exec cat > {}",
-        file.display()
+        sh_quote(&file)
     );
     out(&w, &["neww", "-d", "-n", "q", "sh", "-c", &program]);
     let got = common::wait_for(
@@ -10444,6 +10454,30 @@ fn osc_7501_query_is_answered_when_on() {
         |s| s.ends_with(b"\x07"),
     );
     assert!(got.starts_with(b"\x1b]7501;?:"), "{got:?}");
+}
+
+/// D34 rule 5: a query alone grants; the option off right after it
+/// (before any report) leaves the pane's first report accepted.
+#[test]
+fn osc_7501_query_alone_grants_past_the_option_off() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-status", "on"]);
+    let go = w.home.path().join("go");
+    let program = format!(
+        "stty raw -echo; printf '\\033]7501;?\\007\\033]2;queried\\007'; \
+         while [ ! -e {} ]; do sleep 0.1; done; \
+         printf '\\033]7501;id=a:state=working\\007'; exec sleep 600",
+        sh_quote(&go)
+    );
+    let id = out(
+        &w,
+        &["neww", "-d", "-P", "-F", "#{pane_id}", "sh", "-c", &program],
+    );
+    wait_fmt(&w, &id, "#{pane_title}", "queried");
+    assert_eq!(fmt(&w, &id, "#{pane_program_state}"), "");
+    w.cli(&["set", "-s", "vtmux-program-status", "off"]);
+    std::fs::write(&go, "").unwrap();
+    wait_fmt(&w, &id, "#{pane_program_state}", "working");
 }
 
 /// D34: reports fill the six formats, a child record inherits its
@@ -10559,14 +10593,15 @@ fn osc_7501_records_and_grant_survive_an_upgrade() {
 #[test]
 fn osc_7577_strips_the_outer_token_with_the_option_off() {
     let (w, _a) = osc_world(&[("OSC7577_TOKEN", "outer-client")]);
+    // The initial pane, before the global environment changes.
+    let initial = w.home.path().join("tok-initial");
+    common::wait("the initial token file", || initial.exists());
+    assert_eq!(std::fs::read_to_string(&initial).unwrap(), "");
     w.cli(&["set-environment", "-g", "OSC7577_TOKEN", "outer-global"]);
     let (_, token, _) = resume_pane(&w, "t1");
     assert_eq!(token, "");
     let file = w.home.path().join("tok-e");
-    let program = format!(
-        "printf %s \"$OSC7577_TOKEN\" > {}; exec cat -",
-        file.display()
-    );
+    let program = format!("{}exec cat -", token_prelude(&file));
     out(
         &w,
         &[
@@ -10613,11 +10648,7 @@ fn osc_7577_mints_unique_tokens_on_spawn_and_respawn() {
     std::fs::remove_file(&file).unwrap();
     out(&w, &["respawn-pane", "-k", "-t", &p1]);
     common::wait("the new token", || file.exists());
-    let t3 = common::wait_for(
-        "the token",
-        || std::fs::read_to_string(&file).unwrap_or_default(),
-        |s| !s.is_empty(),
-    );
+    let t3 = std::fs::read_to_string(&file).unwrap();
     assert_eq!(t3.len(), 32);
     assert_ne!(t3, t1);
     // Option off: no token for a new pane.
@@ -10724,15 +10755,69 @@ fn osc_7577_grant_outlives_the_option() {
         &signed(&resume_prefix(&pid, unix_now(), &["nvim"]), &token),
     );
     assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
-    // A respawn with the option off: no token, so nothing is accepted.
+    // A respawn with the option off: no token, so nothing is accepted,
+    // not even the old token signed with the new pane's own pid.
     out(&w, &["respawn-pane", "-k", "-t", &p]);
     wait_fmt(&w, &p, "#{pane_resume_command}", "");
+    let new_pid = common::wait_for("the new pid", || fmt(&w, &p, "#{pane_pid}"), |n| *n != pid);
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&new_pid, unix_now(), &["nvim"]), &token),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "");
+}
+
+/// D35: a respawn with the option on mints a new token; the old one,
+/// signed with the new pane's pid, is ignored and the new one accepted.
+#[test]
+fn osc_7577_old_token_is_dead_after_a_respawn() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    let (p, old, pid) = resume_pane(&w, "o");
+    let file = w.home.path().join("tok-o");
+    std::fs::remove_file(&file).unwrap();
+    out(&w, &["respawn-pane", "-k", "-t", &p]);
+    common::wait("the new token", || file.exists());
+    let new = std::fs::read_to_string(&file).unwrap();
+    assert_ne!(new, old);
+    let new_pid = common::wait_for("the new pid", || fmt(&w, &p, "#{pane_pid}"), |n| *n != pid);
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&new_pid, unix_now(), &["nvim"]), &old),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "");
+    osc_emit(
+        &w,
+        &p,
+        &signed(&resume_prefix(&new_pid, unix_now(), &["nvim"]), &new),
+    );
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
+}
+
+/// D35: the 60 s window holds on its own, whatever the pid's last time:
+/// a first report an hour ahead or an hour behind is ignored.
+#[test]
+fn osc_7577_time_window_is_enforced_independently() {
+    let (w, _a) = osc_world(&[]);
+    w.cli(&["set", "-s", "vtmux-program-resume", "on"]);
+    let (p, token, pid) = resume_pane(&w, "tw");
+    let now = unix_now();
+    for time in [now + 3600, now - 3600] {
+        osc_emit(
+            &w,
+            &p,
+            &signed(&resume_prefix(&pid, time, &["nvim"]), &token),
+        );
+        assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "", "time {time}");
+    }
     osc_emit(
         &w,
         &p,
         &signed(&resume_prefix(&pid, unix_now(), &["nvim"]), &token),
     );
-    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "");
+    assert_eq!(fmt(&w, &p, "#{pane_resume_command}"), "nvim");
 }
 
 /// D35 across a live upgrade: the token and the records come over, and a

@@ -28,11 +28,8 @@
           "5",
           "sh",
           "-c",
-          "stty raw -echo opost onlcr; printf 'a\\033]7501;?\\033\\\\b\\033]7501;id=x:state=working:kind=build:progress=50:app=app:title=T:message=M\\007c\\033]7501;id=x:state=clear\\033\\\\d\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; exec cat"
+          "stty raw -echo opost onlcr; tmux wait-for go; printf 'a\\033]7501;?\\033\\\\b\\033]7501;id=x:state=working:kind=build:progress=50:app=app:title=T:message=M\\007c\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S rdy; tmux wait-for clr; printf 'd\\033]7501;id=x:state=clear\\033\\\\e\\033[5n'; dd bs=1 count=4 2>/dev/null | LC_ALL=C cat -v; printf '|'; tmux wait-for -S done; exec cat"
         ]
-      },
-      {
-        "wait_for": "rdy"
       },
       {
         "run": [
@@ -42,6 +39,35 @@
           "-T",
           "t"
         ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "[#{pane_program_state}][#{pane_program_kind}][#{pane_program_progress}][#{pane_program_app}][#{pane_program_title}][#{pane_program_message}][#{pane_title}]"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "clr"
+        ]
+      },
+      {
+        "wait_for": "done"
       },
       {
         "run": [
@@ -111,13 +137,22 @@
       "step": 3,
       "observation": {
         "kind": "cli",
-        "stdout": "[][][][][][][t]\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
     },
     {
       "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[][][][][][][t]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -128,9 +163,36 @@
     {
       "step": 6,
       "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[][][][][][][t]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
         "kind": "screen",
         "rows": [
-          "abcd^[[0n|",
+          "abc^[[0n|de^[[0n|",
           "",
           "",
           "",
@@ -138,16 +200,16 @@
           "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
         ],
         "cursor": [
-          10,
+          17,
           0
         ]
       }
     },
     {
-      "step": 7,
+      "step": 11,
       "observation": {
         "kind": "cli",
-        "stdout": "abcd^[[0n|\n\n\n\n\n",
+        "stdout": "abc^[[0n|de^[[0n|\n\n\n\n\n",
         "stderr": "",
         "exit": 0
       }
