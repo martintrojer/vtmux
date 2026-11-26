@@ -1035,7 +1035,7 @@ fn global_environ(config: &ServerConfig) -> Environ {
         config
             .environ
             .iter()
-            .filter(|(k, _)| !k.starts_with("VTMUX_TEST_"))
+            .filter(|(k, _)| !k.starts_with("VTMUX_TEST_") && k != crate::environ::TOKEN_VAR)
             .cloned(),
     );
     if let Some(cwd) = &config.cwd {
@@ -2333,6 +2333,9 @@ impl Server {
     }
 
     fn on_hello(&mut self, id: ClientId, mut hello: Hello) {
+        // D35: an outer pane's token is never retained, nor readable by
+        // formats (`#{I/e:...}`).
+        hello.env.retain(|(k, _)| k != crate::environ::TOKEN_VAR);
         if let Some(tty) = hello.tty.as_mut() {
             (tty.cols, tty.rows) = tty_size(tty.cols, tty.rows);
         }
@@ -6146,6 +6149,10 @@ impl Server {
         pane.term.set_program_status_granted(false);
         // D35: and its resume token and records; the bodies still queued
         // went with the scanner switched off.
+        // Records of exited or pid-reused owners no longer count.
+        if let Some(r) = pane.program_resume.as_mut() {
+            r.prune(&sys::pty::process_info);
+        }
         let resume_had = pane
             .program_resume
             .as_ref()

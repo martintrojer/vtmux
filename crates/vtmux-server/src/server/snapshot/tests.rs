@@ -3753,3 +3753,101 @@ fn resume_records_and_a_split_report_survive_a_rebuild() {
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// D35: an outer terminal's token in the starting environment never shows
+/// in the global environment.
+#[test]
+fn the_global_environment_drops_an_inherited_resume_token() {
+    let dir = temp_dir("rglobal");
+    let (l, socket) = listener(&dir, "a");
+    let config = ServerConfig {
+        environ: vec![
+            ("OSC7577_TOKEN".into(), "outer".into()),
+            ("KEEP".into(), "k".into()),
+        ],
+        ..ServerConfig::default()
+    };
+    let a = Server::new(l, socket, config).unwrap();
+    assert_eq!(a.global_env.get("OSC7577_TOKEN"), None);
+    assert_eq!(a.global_env.get("KEEP"), Some("k"));
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a client's `OSC7577_TOKEN` is not retained on it, so no format
+/// reads it.
+#[test]
+fn a_client_does_not_retain_a_resume_token() {
+    let dir = temp_dir("rclient");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let mut h = hello(
+        &["attach-session", "-t", "s"],
+        &dir,
+        None,
+        ControlMode::None,
+    );
+    h.env.push(("OSC7577_TOKEN".into(), "secret".into()));
+    h.env.push(("KEEP".into(), "k".into()));
+    let (id, _peer) = connect(&mut a, h);
+    let env = &a.clients[&id].environ;
+    assert!(env.iter().all(|(k, _)| k != "OSC7577_TOKEN"));
+    assert!(env.iter().any(|(k, v)| k == "KEEP" && v == "k"));
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a respawn after the reporting process exited (or its pid was
+/// reused) fires no resume hook: nothing visible changes.
+#[test]
+fn respawn_after_the_reporter_exited_fires_no_resume_hook() {
+    let dir = temp_dir("rdead");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "set-hook",
+            "-g",
+            "vtmux-pane-program-resume",
+            "set -g @fired yes",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    let token = resume_token(&a, p).unwrap();
+    // Accept a report for a pid the real lookup sees with another start
+    // time: a reused pid.
+    let body = resume_report(&token, &["nvim"]);
+    let body = &body[b"\x1b]7577;".len()..body.len() - 1];
+    let me = std::process::id();
+    let fake = |pid: u32| {
+        (pid == me).then(|| crate::sys::pty::ProcessInfo {
+            uid: crate::sys::pty::euid(),
+            ppid: 1,
+            start_time: 1,
+            cwd: None,
+        })
+    };
+    let now = u64::try_from(crate::model::now_epoch()).unwrap();
+    a.model
+        .panes
+        .get_mut(&p)
+        .unwrap()
+        .program_resume
+        .as_mut()
+        .unwrap()
+        .report(body, now, crate::sys::pty::euid(), &fake);
+    assert_eq!(resume_records(&a, p), 1);
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let out = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(!out.contains("yes"), "{out}");
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
