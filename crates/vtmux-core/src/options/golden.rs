@@ -523,6 +523,63 @@ fn vtmux_inband_resize_is_a_hidden_server_flag() {
     assert!(!sim.take().contains(NAME));
 }
 
+/// D34/D35 options: hidden from every unnamed listing until set (D28
+/// rule 4), `off` flags and empty hook arrays.
+#[test]
+fn program_protocol_options_are_hidden_until_set() {
+    const FLAGS: [&str; 2] = ["vtmux-program-status", "vtmux-program-resume"];
+    const HOOKS: [&str; 2] = ["vtmux-pane-program-status", "vtmux-pane-program-resume"];
+    let mut sim = Sim::new();
+    for args in [
+        &["show", "-s"][..],
+        &["show", "-g"],
+        &["show", "-gw"],
+        &["show", "-wA"],
+        &["show", "-gH"],
+        &["show-hooks", "-g"],
+        &["show-hooks", "-gp"],
+    ] {
+        sim.argv(args);
+        let listing = sim.take();
+        assert!(!listing.contains("program"), "{args:?}: {listing}");
+    }
+    for name in FLAGS {
+        for c in [
+            &["show", "-sv", name][..],
+            &["set", "-s", name, "on"],
+            &["show", "-s", name],
+            &["set", "-s", name, "maybe"],
+            &["set", "-su", name],
+            &["show", "-s", name],
+        ] {
+            sim.argv(c);
+        }
+        assert_eq!(
+            sim.take(),
+            format!("off\n{name} on\nbad value: maybe\n{name} off\n")
+        );
+    }
+    for name in HOOKS {
+        sim.argv(&["set-hook", "-gp", name, "display-message x"]);
+        sim.argv(&["show-hooks", "-gp"]);
+        assert!(sim.take().contains(name), "{name}");
+        sim.argv(&["set-hook", "-gpu", name]);
+        sim.argv(&["show-hooks", "-gp"]);
+        assert!(!sim.take().contains(name), "{name}");
+    }
+    for args in [&["show", "-s"][..], &["show", "-g"], &["show-hooks", "-gp"]] {
+        sim.argv(args);
+        assert!(!sim.take().contains("program"), "{args:?}");
+    }
+    for bad in ["vtmux-program", "vtmux-pane-program", "vtmux-program-statu"] {
+        sim.argv(&["set", "-s", bad, "on"]);
+    }
+    assert_eq!(
+        sim.take(),
+        "invalid option: vtmux-program\ninvalid option: vtmux-pane-program\ninvalid option: vtmux-program-statu\n"
+    );
+}
+
 /// `vtmux-graphics` (D33): a server flag, `off` until set, hidden from
 /// listings until set like every vtmux option (D28 rule 4).
 #[test]

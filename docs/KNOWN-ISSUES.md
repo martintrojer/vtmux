@@ -21,6 +21,5 @@ What is known to differ, be rough, or be worth doing next. Until 3.8 final only 
 
 ## Ideas
 
-- **`#{pane_program_state}`:** a format from OSC 7501 (a pane program's own status: running, waiting, done) so any status line can show it. Opt-in, like the other `vtmux-*` extensions.
 - **OSC 7501 to the outer terminal:** waits until a terminal vtmux runs inside supports it.
 - **First redraw with the restart frame:** after a live upgrade, send the client's first redraw in the same write as the restart, as tmux's `MSG_WAKEUP` does (`tty_start_tty` and `server_redraw_client` in one buffer).

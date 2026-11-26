@@ -8,11 +8,11 @@ For contributors: [AGENTS.md](../AGENTS.md) (gates and rules), [ARCHITECTURE.md]
 
 | Spec | What it decides |
 |---|---|
-| [2026-10-29-vtmux.md](specs/2026-10-29-vtmux.md) | The project: pitch, scope, decisions D1-D31 and D33, compliance triangulation, milestones |
+| [2026-10-29-vtmux.md](specs/2026-10-29-vtmux.md) | The project: pitch, scope, decisions D1-D31 and D33-D35, compliance triangulation, milestones |
 | [2026-10-31-history-memory.md](specs/2026-10-31-history-memory.md) | Scrollback memory: retain close to `history-limit`, compress quiet history, keep compressing a pane that never stops |
 | [2026-11-04-pane-blend.md](specs/2026-11-04-pane-blend.md) | Pane blend (D26): blend every cell of active or inactive panes toward a colour |
 | [2026-11-06-live-upgrade.md](specs/2026-11-06-live-upgrade.md) | Live upgrade (D27), with its own numbered decisions 1-32 (cited as "decision 13"); its persistence phase was removed 2026-11-12 (M5) |
-| [2026-11-09-osc-survey.md](specs/2026-11-09-osc-survey.md) | Survey of terminal protocols tmux 3.8 drops; led to D28-D31 |
+| [2026-11-09-osc-survey.md](specs/2026-11-09-osc-survey.md) | Survey of terminal protocols tmux 3.8 drops; led to D28-D31, D34 and D35 |
 
 ## Decisions
 
@@ -52,5 +52,7 @@ From the main spec's *Key decisions*. The spec has the reasons; a change that co
 | D30 | Desktop notifications, OSC 9 and 777, to Ghostty clients: `vtmux-notifications` |
 | D31 | In-band resize, mode 2048: `vtmux-inband-resize` |
 | D33 | Kitty graphics: `vtmux-graphics` and `vtmux-graphics-limit`, drawn as unicode placeholders, dropped on live upgrade |
+| D34 | Program status, OSC 7501: `vtmux-program-status`, pane side, `#{pane_program_*}` |
+| D35 | Program resume, OSC 7577: `vtmux-program-resume`, per-pane token, `#{pane_resume_*}` |
 
 Divergence entries are numbered D-NNN (`D-001`, ...) in `compat/DIVERGENCES.md`: a different series from the decisions.

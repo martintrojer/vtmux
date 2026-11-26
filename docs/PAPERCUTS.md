@@ -30,8 +30,12 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'
 | `vtmux-inband-resize` | server | `off`, `on` | A program that sets mode 2048 gets each new size of its pane in-band, at once and after every resize, with no `SIGWINCH` race. |
 | `vtmux-graphics` | server | `off`, `on` | Kitty graphics without `allow-passthrough`: a program's images drawn by vtmux for Ghostty clients, clipped at pane edges, under popups, zoomed, in copy mode and across window switches. Apps that wrap for tmux (yazi) keep using passthrough. A live upgrade drops the images. |
 | `vtmux-graphics-limit` | server | MB, default 256 | Image memory of every pane together, half-sent images included; over it, half-sent images of other panes go first, then the images loaded least recently. |
+| `vtmux-pane-program-resume` | window pane | hook | Runs when a pane program's resume state changes. |
+| `vtmux-pane-program-status` | window pane | hook | Runs when a pane program's status changes. |
+| `vtmux-program-resume` | server | `off`, `on` | Panes started while on get an `OSC7577_TOKEN`; a program that reports through OSC 7577 with it is recorded: `#{pane_resume_command}`, `#{pane_resume_cwd}`, `#{pane_resume_pid}`. vtmux never relaunches anything. An inherited `OSC7577_TOKEN` is always removed from panes and popups. |
+| `vtmux-program-status` | server | `off`, `on` | Answers a program's OSC 7501 query and records its reports: `#{pane_program_state}`, `#{pane_program_kind}`, `#{pane_program_progress}`, `#{pane_program_app}`, `#{pane_program_title}`, `#{pane_program_message}`. Not sent to the outer terminal. |
 
-A grant (kitty keys, in-band resize, graphics) outlives the option being turned off, and a live upgrade keeps it. Kitty keys and graphics end with the program that asked; in-band resize at `?2048l`, a reset or a respawn.
+A grant (kitty keys, in-band resize, graphics, program status, program resume) outlives the option being turned off, and a live upgrade keeps it. Kitty keys and graphics end with the program that asked; in-band resize at `?2048l`, a reset or a respawn; program status and resume at a respawn or the pane's close.
 
 `vtmux-upgrade [-b binary]` is a command, not an option: bind it like any other. Without `-b` it takes the path the server started from, or, when the client's protocol differs from the server's, the client's own binary.
 

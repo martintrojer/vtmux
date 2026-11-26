@@ -49,7 +49,7 @@ Legend. **Ghostty**: inner = libghostty-vt in each pane; outer = Ghostty.app. **
 | 23 | DECSCA / DECSED / DECSEL | almost nothing (some vt220-era apps) | inner: yes | Ignored | **Can't**: vtmux stores tmux's charset flag in Ghostty's DECSCA bit (term.rs:2668-2669, 1228-1231) | Skip | Low / M (needs a patch) / – |
 | 24 | XTWINOPS | vim title save/restore, yazi `CSI 14 t` | yes | 14/15/16/18/19 reports, 22/23 title stack; rest ignored (input.c:2124+) | **Done** at parity (term.rs WinOp, size_report) | Nothing: window manipulation must never reach the outer terminal | – |
 | 25 | Unicode width negotiation | wide-glyph users, emoji | Ghostty width table + vtmux overrides (patch 0007) | `codepoint-widths`, `variation-selector-always-wide` | tmux model in width.rs; divergences D-031, D-044, D-045 | Row 5 is the useful part; OSC 66 `w=` waits on Ghostty | – |
-| 26 | OSC 7501 program status (Rex), OSC 3008 context, OSC 72 DnD | Claude Code probes 7501 at start-up; systemd 3008 | inner: 7501 effect (osc/parsers/program_status.zig:1-23; stream_terminal.zig:240), 3008 unimplemented. outer app: 7501, DnD and title push/pop ignored (stream_handler.zig:387-393) | Ignored | Ignored | 7501 would be agent status: a stated **non-goal** (spec :93). Skip | – |
+| 26 | OSC 7501 program status (Rex), OSC 3008 context, OSC 72 DnD | Claude Code probes 7501 at start-up; systemd 3008 | inner: 7501 effect (osc/parsers/program_status.zig:1-23; stream_terminal.zig:240), 3008 unimplemented. outer app: 7501, DnD and title push/pop ignored (stream_handler.zig:387-393) | Ignored | Ignored | Not agent status: the program declares it. Decided 2026-11-26 as **D34** (pane side, `vtmux-program-status`); 7577 is **D35** | – |
 
 ## 2. Detail on the items that matter
 
@@ -91,7 +91,7 @@ Legend. **Ghostty**: inner = libghostty-vt in each pane; outer = Ghostty.app. **
 8. Kitty keyboard phase 2, outer input (L).
 9. Native kitty graphics via unicode placeholders (L-XL; reverses a non-goal; not in the snapshot).
 10. OSC 21, OSC 5522, 1337 CurrentDir/Copy (S-M each, low value).
-Skip: sixel, OSC 66, DECSCA, OSC 7501/3008, XTWINOPS extensions.
+Skip: sixel, OSC 66, DECSCA, OSC 3008, XTWINOPS extensions.
 
 **Recommended first batch (4 items + 1 policy decision):** D28 policy, then OSC 8 emission (no decision needed, closes D-007's hyperlink clause), notifications (D30), kitty keyboard phase 1 (D29), in-band resize (D31). All four are small to medium, reuse state Ghostty already keeps and the snapshot already carries, and change nothing for a program that doesn't ask.
 
@@ -108,12 +108,12 @@ Skip: sixel, OSC 66, DECSCA, OSC 7501/3008, XTWINOPS extensions.
 - App behaviour (nvim 2048/2027/kitty detection, Claude Code channels) comes from web sources: code.claude.com/docs/en/terminal-config, github.com/tmux/tmux/issues/3335, yazi docs image-preview.md (github.com/yazi-rs/yazi-rs.github.io), deepwiki neovim TUI, github.com/noah-qin/Corta/issues/409. Check against current releases before writing tests.
 - No repo files were edited, and no servers were started.
 
-## Deferred: OSC 7501 (program status), 2026-11-09
+## OSC 7501 (program status): D34, 2026-11-26
 
-Owner: park it until an outer client we run inside supports it.
+Superseded the 2026-11-09 deferral. D28 rule 1 was amended: a pane-side protocol needs only libghostty-vt, not the outer app (D34); a server-level protocol needs neither (D35, OSC 7577 program resume). Forwarding 7501 to an outer terminal stays parked until one supports it.
 
 - **What it is.** Rex's Program Status Protocol: a program reports `state=idle|working|done|blocked|error`, optionally `app=` and `progress=` (`ESC ] 7501 ; state=working:app=cargo:progress=40 ESC \`), and may probe with `7501;?`. Claude Code probes at start-up.
 - **libghostty-vt implements it**, not just parses it: `osc/parsers/program_status.zig`, the `program_status` effect and the `?` query reply (`stream_terminal.zig:225-240`). So it passes D28 rule 1's "implemented by the pinned libghostty-vt" half.
 - **The outer Ghostty app ignores it** (`stream_handler.zig:387-393`); Rex consumes it. tmux 3.8 and vtmux drop it today.
 - **The non-goal is not the blocker.** "No agent integration (status detection)" forbids vtmux guessing agent state; 7501 is the program declaring its own state, which vtmux would only carry.
-- **When an outer client supports it,** the likely shape is a D32 behind `vtmux-program-status` (default off): answer `7501;?`, keep each pane's latest report, expose `#{pane_program_state}`, `#{pane_program_app}`, `#{pane_program_progress}` (plus a hook), and forward reports to clients whose terminal supports 7501, as D30 does for notifications.
+- **Original shape (2026-11-09),** now D34 without forwarding, behind `vtmux-program-status` (default off): answer `7501;?`, keep each pane's latest report, expose `#{pane_program_state}`, `#{pane_program_app}`, `#{pane_program_progress}` (plus a hook), and forward reports to clients whose terminal supports 7501, as D30 does for notifications.

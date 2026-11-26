@@ -16,7 +16,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 7] = [
+pub(super) static EXTENSIONS: [OptionDef; 11] = [
     // D33: kitty graphics, drawn as unicode placeholders (a D28 protocol
     // extension).
     OptionDef {
@@ -103,6 +103,54 @@ pub(super) static EXTENSIONS: [OptionDef; 7] = [
         separator: None,
         default: DefaultValue::Str(""),
         text: Some("Colours every cell of the other panes is blended toward."),
+        unit: None,
+    },
+    // D35: runs when a pane's resume state changes.
+    OptionDef {
+        name: "vtmux-pane-program-resume",
+        scope: Scope::WindowPane,
+        kind: Kind::Command,
+        array: true,
+        hook: true,
+        separator: Some(""),
+        default: DefaultValue::Str(""),
+        text: Some("Run when a pane program's resume state changes."),
+        unit: None,
+    },
+    // D34: runs when a pane's program status changes.
+    OptionDef {
+        name: "vtmux-pane-program-status",
+        scope: Scope::WindowPane,
+        kind: Kind::Command,
+        array: true,
+        hook: true,
+        separator: Some(""),
+        default: DefaultValue::Str(""),
+        text: Some("Run when a pane program's status changes."),
+        unit: None,
+    },
+    // D35: the Program Resume Protocol, OSC 7577 (a D28 protocol extension).
+    OptionDef {
+        name: "vtmux-program-resume",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Grant resume tokens to new panes and record OSC 7577 reports."),
+        unit: None,
+    },
+    // D34: the Program Status Protocol, OSC 7501 (a D28 protocol extension).
+    OptionDef {
+        name: "vtmux-program-status",
+        scope: Scope::Server,
+        kind: Kind::Flag,
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Flag(false),
+        text: Some("Answer and record OSC 7501 program status of panes."),
         unit: None,
     },
 ];
