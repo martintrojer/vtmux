@@ -6103,6 +6103,15 @@ impl Server {
             io.deregister(self.poll.registry());
             Some((io, pane.pid))
         });
+        // D35: records of exited or pid-reused owners no longer count, and
+        // whether one is left is read while the old process is still up:
+        // hanging it up first would drop its own report.
+        let resume_had = self.model.panes.get_mut(&p).is_some_and(|pane| {
+            pane.program_resume.as_mut().is_some_and(|r| {
+                r.prune(&sys::pty::process_info);
+                r.best(&sys::pty::process_info).is_some()
+            })
+        });
         // spawn.c:343-346: output the control clients still had queued
         // from the old process goes.
         self.control_reset_pane(p);
@@ -6149,14 +6158,6 @@ impl Server {
         pane.term.set_program_status_granted(false);
         // D35: and its resume token and records; the bodies still queued
         // went with the scanner switched off.
-        // Records of exited or pid-reused owners no longer count.
-        if let Some(r) = pane.program_resume.as_mut() {
-            r.prune(&sys::pty::process_info);
-        }
-        let resume_had = pane
-            .program_resume
-            .as_ref()
-            .is_some_and(|r| r.best(&sys::pty::process_info).is_some());
         pane.program_resume = None;
         pane.term.set_program_resume_enabled(false);
         // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM

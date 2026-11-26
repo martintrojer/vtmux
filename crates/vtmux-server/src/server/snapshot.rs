@@ -1619,6 +1619,8 @@ impl Server {
         server.causes.clone_from(&s.config_causes);
         server.info = info;
         server.global_env = env_in(&s.environment);
+        // D35: an image from an older server may still hold the token.
+        server.global_env.unset(crate::environ::TOKEN_VAR);
         server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
         server.link_numbers.reach(s.link_number);
 
@@ -2140,7 +2142,13 @@ impl Server {
         if level != 0 && x.version != vtmux_core::protocol::PROTOCOL_VERSION {
             c.speaks = vtmux_core::protocol::Speaks::Frozen;
         }
-        c.environ = hello.env.clone().into();
+        // D35: and a client's, from an older image.
+        c.environ = hello
+            .env
+            .iter()
+            .filter(|(k, _)| k != crate::environ::TOKEN_VAR)
+            .cloned()
+            .collect();
         c.attached = x.session.map(SessionId);
         c.activity_secs = x.activity_secs;
         c.cell_pixels = x.pixel_size;

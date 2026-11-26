@@ -3471,6 +3471,11 @@ fn a_view_mode_resize_libghostty_fails_keeps_copy_and_backing_together() {
 /// An OSC 7577 report for this very process (alive, ours), signed with
 /// `token` and ended with BEL, unpadded base64 as rev 0.5 allows.
 fn resume_report(token: &str, argv: &[&str]) -> Vec<u8> {
+    resume_report_from(std::process::id(), token, argv)
+}
+
+/// [`resume_report`] as process `pid` signs it.
+fn resume_report_from(pid: u32, token: &str, argv: &[&str]) -> Vec<u8> {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let b64 = |s: &str| {
         let mut out = String::new();
@@ -3489,7 +3494,7 @@ fn resume_report(token: &str, argv: &[&str]) -> Vec<u8> {
     let argv: Vec<String> = argv.iter().map(|a| b64(a)).collect();
     let prefix = format!(
         "pid={}:time={}:argv={}",
-        std::process::id(),
+        pid,
         crate::model::now_epoch(),
         argv.join(",")
     );
@@ -3848,6 +3853,77 @@ fn respawn_after_the_reporter_exited_fires_no_resume_hook() {
     run(&mut a, &dir, &["show", "-gv", "@fired"]);
     let out = run(&mut a, &dir, &["show", "-gv", "@fired"]);
     assert!(!out.contains("yes"), "{out}");
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: an image from an older server that kept `OSC7577_TOKEN` in the
+/// global environment or on a client loses it on import.
+#[test]
+fn an_imported_image_drops_a_retained_resume_token() {
+    let dir = temp_dir("rimport");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let h = hello(
+        &["attach-session", "-t", "s"],
+        &dir,
+        None,
+        ControlMode::None,
+    );
+    let (id, _peer) = connect(&mut a, h);
+    let var = |n: &str, v: &str| snap::EnvVar {
+        name: n.into(),
+        value: Some(v.into()),
+        hidden: false,
+    };
+    let b = rebuild_with(&a, &dir, |s| {
+        s.server.environment.push(var("OSC7577_TOKEN", "old"));
+        s.server.environment.push(var("KEEP", "k"));
+        for c in &mut s.clients {
+            c.environment.push(("OSC7577_TOKEN".into(), "old".into()));
+            c.environment.push(("KEEP".into(), "k".into()));
+        }
+    });
+    assert_eq!(b.global_env.get("OSC7577_TOKEN"), None);
+    assert_eq!(b.global_env.get("KEEP"), Some("k"));
+    let env = &b.clients[&id].environ;
+    assert!(env.iter().all(|(k, _)| k != "OSC7577_TOKEN"));
+    assert!(env.iter().any(|(k, v)| k == "KEEP" && v == "k"));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D35: a respawn whose reporter is the pane's own process still fires the
+/// resume hook: the records are read before the old process is hung up.
+#[test]
+fn respawn_of_a_pane_whose_own_process_reported_fires_the_resume_hook() {
+    let dir = temp_dir("rown");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-resume", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "set-hook",
+            "-g",
+            "vtmux-pane-program-resume",
+            "set -g @fired yes",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    let token = resume_token(&a, p).unwrap();
+    let pid = u32::try_from(a.model.panes[&p].pid).unwrap();
+    a.pane_input(p, &resume_report_from(pid, &token, &["nvim"]), false);
+    assert_eq!(resume_records(&a, p), 1);
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let out = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(out.contains("\nyes\n"), "{out}");
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
 }
