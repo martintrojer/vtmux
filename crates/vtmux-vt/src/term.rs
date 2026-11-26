@@ -5691,6 +5691,41 @@ mod tests {
     }
 
     #[test]
+    fn program_resume_interrupted_esc_not_resurrected_by_import() {
+        let mut t = resume_term();
+        t.feed(b"\x1b]7577;ab\x1b\x01");
+        let st = t.export_state().unwrap();
+        let mut u = PaneTerm::import_state_resuming(&st, true).unwrap();
+        u.feed(b"\\");
+        assert_eq!(u.drain_program_resume().len(), 0);
+        t.feed(b"\\");
+        assert_eq!(t.drain_program_resume().len(), 0);
+    }
+
+    #[test]
+    fn program_resume_import_does_not_double_pending() {
+        let mut t = resume_term();
+        t.feed(b"\x1b]7577;ab");
+        let before = t.pending_input().to_vec();
+        let st = t.export_state().unwrap();
+        let u = PaneTerm::import_state_resuming(&st, true).unwrap();
+        assert_eq!(u.pending_input(), &before[..]);
+        t.feed(b"\x1b");
+        let before = t.pending_input().to_vec();
+        let st = t.export_state().unwrap();
+        let u = PaneTerm::import_state_resuming(&st, true).unwrap();
+        assert_eq!(u.pending_input(), &before[..]);
+    }
+
+    #[test]
+    fn program_resume_done_survives_reset_hyperlinks() {
+        let mut t = resume_term();
+        t.feed(b"\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\\x1b]7577;done\x07");
+        assert!(t.reset_hyperlinks());
+        assert_eq!(t.drain_program_resume(), vec![b"done".to_vec()]);
+    }
+
+    #[test]
     fn program_status_off_drops_reports_and_gives_no_reply() {
         let mut t = PaneTerm::new(20, 5, 100);
         t.feed(b"\x1b]7501;state=working\x07\x1b]7501;?\x07\x1b]7501;?\x1b\\");

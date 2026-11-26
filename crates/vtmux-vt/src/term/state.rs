@@ -1090,6 +1090,7 @@ impl PaneTerm {
         }
         match Self::import_state_resuming(&state, self.program_resume_enabled()) {
             Ok(mut term) => {
+                term.scan.resume_done = self.drain_program_resume();
                 term.number_links_from(&self.link_numbers());
                 // The option and the grant live outside the exported
                 // state; the callback is registered again with them.
@@ -1346,6 +1347,12 @@ impl PaneTerm {
             let end = if ran {
                 let c0 = |b: &u8| *b < 0x20 && *b != 0x1b;
                 if c0(&bytes[i]) {
+                    // The scanner saw this control when it arrived: it
+                    // cancels a 7577 report waiting for its `\`.
+                    if self.scan.resume_esc {
+                        self.scan.resume_esc = false;
+                        self.scan.resume = None;
+                    }
                     self.pending.push(bytes[i]);
                     i += 1;
                     continue;
@@ -1367,20 +1374,9 @@ impl PaneTerm {
 
     /// The bytes that put a fresh parser where this one is.
     fn continuation(&self) -> Vec<u8> {
+        // The pending input holds a 7577 report in progress whole.
         let mut out = self.pending.clone();
-        if let Some(body) = self
-            .scan
-            .resume
-            .as_ref()
-            .filter(|_| self.scan.state == ScanState::Str)
-        {
-            out.extend_from_slice(b"\x1b]7577;");
-            out.extend_from_slice(body);
-        } else if self.scan.resume_esc && self.scan.state == ScanState::Esc {
-            out.extend_from_slice(b"\x1b]7577;");
-            out.extend_from_slice(self.scan.resume.as_deref().unwrap_or_default());
-            out.push(0x1b);
-        } else if self.scan.state == ScanState::Rename {
+        if self.scan.state == ScanState::Rename {
             out.extend_from_slice(&self.rename.buf);
         } else if self.scan.state == ScanState::Ground && self.scan.utf8.started() {
             out.extend_from_slice(&self.scan.utf8.buf[..self.scan.utf8.have]);
