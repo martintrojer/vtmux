@@ -47,42 +47,40 @@ vtmux display-message -p -t "$1" -F '#{pane_id}|#{pane_resume_cwd}|#{pane_resume
 
 ### Shell script
 
-Print what to run again in every pane. `|` separates the fields (unlike a tab, it keeps an empty `cwd` empty); `cmd` comes last, so it may contain `|` and spaces. The script quotes `cwd` and skips `cd` when it is empty:
+Print what to run again in every pane. Each field is a separate query per pane, so `cwd` and `cmd` round-trip verbatim (spaces, quotes, `|`, tabs) and an empty `cwd` stays empty. The script quotes `cwd` and skips `cd` when it is empty:
 
 ```sh
-vtmux list-panes -a -F '#{pane_id}|#{pane_resume_cwd}|#{pane_resume_command}' |
-while IFS='|' read -r id cwd cmd; do
+vtmux list-panes -a -F '#{pane_id}' |
+while IFS= read -r pane; do
+  cmd=$(vtmux display-message -p -t "$pane" '#{pane_resume_command}')
   [ -n "$cmd" ] || continue
+  cwd=$(vtmux display-message -p -t "$pane" '#{pane_resume_cwd}')
   if [ -n "$cwd" ]; then
     q=$(printf %s "$cwd" | sed "s/'/'\\\\''/g")
-    echo "cd '$q' && $cmd"
+    printf '%s\n' "cd '$q' && $cmd"
   else
-    echo "$cmd"
+    printf '%s\n' "$cmd"
   fi
 done
 ```
 
-`cmd` is already shell-quoted, so the output is safe to run with `sh`. A `cwd` containing a newline is not supported.
+`cmd` is already shell-quoted, so the output is safe to run with `sh`. A `cwd` or `cmd` containing a newline is not supported.
 
 ### tmux-resurrect
 
-tmux-resurrect saves `#{pane_current_command}`. To save the reported command instead, a post-save hook can read the formats (session names must not contain `|`):
-
-```sh
-set -g @resurrect-hook-post-save-all \
-  'vtmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index}|#{pane_resume_cwd}|#{pane_resume_command}" > ~/.tmux/resurrect/resume.txt'
-```
-
-and a restore step feeds each line back with `send-keys -l`, which sends the text literally:
+tmux-resurrect saves `#{pane_current_command}`. To restore the reported command instead, a restore step can query each live pane and feed the line back with `send-keys -l`, which sends the text literally:
 
 ```sh
 quote() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
-while IFS='|' read -r target cwd cmd; do
+vtmux list-panes -a -F '#{pane_id}' |
+while IFS= read -r pane; do
+  cmd=$(vtmux display-message -p -t "$pane" '#{pane_resume_command}')
   [ -n "$cmd" ] || continue
+  cwd=$(vtmux display-message -p -t "$pane" '#{pane_resume_cwd}')
   line=$cmd
   [ -n "$cwd" ] && line="cd $(quote "$cwd") && $cmd"
-  vtmux send-keys -t "$target" -l "$line" && vtmux send-keys -t "$target" Enter
-done < ~/.tmux/resurrect/resume.txt
+  vtmux send-keys -t "$pane" -l "$line" && vtmux send-keys -t "$pane" Enter
+done
 ```
 
 ## Security and lifetime
