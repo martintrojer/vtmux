@@ -74,7 +74,7 @@ tmux-resurrect saves `#{pane_current_command}`. To restore the reported command 
 # save
 f=${XDG_STATE_HOME:-$HOME/.local/state}/vtmux-resume.jsonl
 mkdir -p "$(dirname "$f")"
-( umask 077; : > "$f" )
+( umask 077; rm -f "$f"; : > "$f" )
 vtmux list-panes -a -F '#{pane_id}' |
 while IFS= read -r pane; do
   cmd=$(vtmux display-message -p -t "$pane" '#{pane_resume_command}')
