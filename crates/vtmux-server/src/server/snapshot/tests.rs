@@ -1225,6 +1225,87 @@ fn program_status_records_and_grant_survive_a_rebuild() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// D34: the pane the server selects when the active one exits is focused
+/// at once, so its `error` is seen without another command.
+#[test]
+fn an_automatically_selected_pane_acknowledges_error() {
+    let dir = temp_dir("pstatus-auto");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    ok(
+        &mut a,
+        &dir,
+        &["split-window", "-d", "-t", "s:0", "cat", "-"],
+    );
+    let (_client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let (p0, p1) = (vtmux_core::ids::PaneId(0), vtmux_core::ids::PaneId(1));
+    a.pane_input(p1, b"\x1b]7501;state=error:id=a\x07", false);
+    assert!(!a.model.panes[&p1].program_status.is_empty());
+    a.destroy_pane(p0);
+    a.drain_events();
+    assert!(a.model.panes[&p1].program_status.is_empty());
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D34: a pane focused before an upgrade is not focused afresh by it: its
+/// `error` stays until a real focus gain.
+#[test]
+fn a_rebuild_invents_no_focus_gain() {
+    let dir = temp_dir("pstatus-focus");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    let (_client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let p = vtmux_core::ids::PaneId(0);
+    a.pane_input(p, b"\x1b]7501;state=error:id=a\x07", false);
+    assert!(a.model.panes[&p].program_status.focused);
+    let mut b = rebuild(&a, &dir, "b");
+    assert!(b.model.panes[&p].program_status.focused);
+    b.update_focus_all();
+    assert_eq!(b.model.panes[&p].program_status.records().count(), 1);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// D34: a respawn fires the status hook for the change to empty.
+#[test]
+fn respawn_fires_the_program_status_hook() {
+    let dir = temp_dir("pstatus-respawn");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-s", "vtmux-program-status", "on"]);
+    let p = vtmux_core::ids::PaneId(0);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "set-hook",
+            "-g",
+            "vtmux-pane-program-status",
+            "set -g @fired yes",
+        ],
+    );
+    a.pane_input(p, b"\x1b]7501;state=done:id=a\x07", false);
+    // The queued hook runs after the next command or two.
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    ok(&mut a, &dir, &["set", "-g", "@fired", "no"]);
+    run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    let pre = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(pre.contains("\nno\n"), "{pre}");
+    ok(
+        &mut a,
+        &dir,
+        &["respawn-pane", "-k", "-t", "s:0.0", "cat", "-"],
+    );
+    let fired = run(&mut a, &dir, &["show", "-gv", "@fired"]);
+    assert!(fired.contains("\nyes\n"), "{fired}");
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The kernel sends SIGWINCH for a size that differs in pixels alone
 /// (`tty_do_resize` compares the whole `winsize`), so a program granted
 /// mode 2048 is reported such a size too (a client terminal whose cells

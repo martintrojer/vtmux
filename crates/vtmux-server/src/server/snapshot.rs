@@ -1929,6 +1929,7 @@ impl Server {
                 server.update_view(ClientId(x.id as usize));
             }
         }
+        server.program_status_focus_baseline();
         server.status_timer_start_all();
         // D33: a granted pane came over (its images did not).
         server.model.graphics_used = server.model.panes.values().any(|p| p.graphics.held);

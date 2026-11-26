@@ -38,11 +38,8 @@ pub mod pane_kitty;
 pub mod paste;
 pub mod pipe;
 pub mod popup;
-<<<<<<< HEAD
 pub mod program_resume;
-=======
 pub mod program_status;
->>>>>>> 14e43aa6 (vtmux-server: OSC 7501 program status store, formats, hook, focus/prompt/exit/respawn lifecycle, snapshot)
 pub mod prompt;
 pub mod prompt_history;
 pub mod remain;

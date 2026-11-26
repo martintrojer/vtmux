@@ -3346,6 +3346,7 @@ impl Server {
     /// the window. A change is reported to a pane that asked for it
     /// (`?1004h`) and is the pane-focus-in/out event returned.
     pub(crate) fn pane_focus(&mut self, p: PaneId) -> Option<crate::events::Event> {
+        self.program_status_focus_scan();
         let pane = self.model.panes.get(&p)?;
         if pane.exited {
             return None;
@@ -6088,6 +6089,8 @@ impl Server {
         let Some(fresh) = fresh else {
             return Ok(());
         };
+        // D34: the records go with a hook for the change to empty.
+        self.program_status_change(p, crate::program_status::ProgramStatus::reset);
         let extended_keys = self.model.extended_keys();
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return fresh.map(|_| ());
@@ -6113,7 +6116,6 @@ impl Server {
         pane.requests.clear();
         pane.term.end_inband_resize();
         // D34: and its program status, grant and records.
-        pane.program_status.reset();
         pane.term.set_program_status_granted(false);
         // The cursor goes home first (screen.c:111-117; DECSTBM and DECOM
         // home it too, so they come before), then screen_alternate_off(s,
@@ -6478,8 +6480,23 @@ impl Server {
     /// whatever `focus-events` says, and a pane whose program is gone
     /// included. Acts on the gain only.
     pub(crate) fn program_status_focus_scan(&mut self) {
-        let focused: Vec<(PaneId, bool)> = self
-            .model
+        for (p, on) in self.program_status_focus_now() {
+            let Some(pane) = self.model.panes.get_mut(&p) else {
+                continue;
+            };
+            if pane.program_status.focused == on {
+                continue;
+            }
+            pane.program_status.focused = on;
+            if on {
+                self.program_status_change(p, crate::program_status::ProgramStatus::on_focus);
+            }
+        }
+    }
+
+    /// Each pane and whether it is focused now (see the scan).
+    fn program_status_focus_now(&self) -> Vec<(PaneId, bool)> {
+        self.model
             .panes
             .values()
             .map(|pane| {
@@ -6496,17 +6513,15 @@ impl Server {
                     });
                 (pane.id, on)
             })
-            .collect();
-        for (p, on) in focused {
-            let Some(pane) = self.model.panes.get_mut(&p) else {
-                continue;
-            };
-            if pane.program_status.focused == on {
-                continue;
-            }
-            pane.program_status.focused = on;
-            if on {
-                self.program_status_change(p, crate::program_status::ProgramStatus::on_focus);
+            .collect()
+    }
+
+    /// After a snapshot import: what is focused already stays so, with no
+    /// gain to act on.
+    pub(crate) fn program_status_focus_baseline(&mut self) {
+        for (p, on) in self.program_status_focus_now() {
+            if let Some(pane) = self.model.panes.get_mut(&p) {
+                pane.program_status.focused = on;
             }
         }
     }

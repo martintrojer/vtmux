@@ -290,8 +290,11 @@ impl ProgramStatus {
     }
 
     /// A respawn: nothing of the old program stays.
-    pub fn reset(&mut self) {
-        *self = Self::default();
+    pub fn reset(&mut self) -> Changed {
+        let focused = self.focused;
+        let c = self.change(|s| *s = Self::default());
+        self.focused = focused;
+        c
     }
 }
 
