@@ -68,10 +68,19 @@ done
 
 ### tmux-resurrect
 
-tmux-resurrect saves `#{pane_current_command}`. To restore the reported command instead, save one JSON record per pane to a private file, then start each command in a new window. `cmd` is shell-quoted, so `sh -c` runs it as reported; nothing is typed into a shell prompt:
+tmux-resurrect saves `#{pane_current_command}`. To save and restore the OSC 7577 commands alongside it, point tmux-resurrect's own hooks at two scripts:
+
+```tmux
+%if "#{vtmux_version}"
+set -g @resurrect-hook-post-save-all '~/bin/vtmux-resume-save.sh'
+set -g @resurrect-hook-post-restore-all '~/bin/vtmux-resume-restore.sh'
+%endif
+```
+
+`vtmux-resume-save.sh` writes one JSON record per pane to a mode-0600 file, and `vtmux-resume-restore.sh` opens each saved command in a new window. `cmd` is shell-quoted, so `sh -c` runs it as reported; nothing is typed into a shell prompt:
 
 ```sh
-# save
+# ~/bin/vtmux-resume-save.sh
 f=${XDG_STATE_HOME:-$HOME/.local/state}/vtmux-resume.jsonl
 mkdir -p "$(dirname "$f")"
 ( set -e; umask 077; rm -f "$f"; : > "$f" ) || exit 1
@@ -84,7 +93,9 @@ while IFS= read -r pane; do
     "$cwd" "$cmd" >> "$f"
 done
 
-# restore
+# ~/bin/vtmux-resume-restore.sh
+f=${XDG_STATE_HOME:-$HOME/.local/state}/vtmux-resume.jsonl
+[ -r "$f" ] || exit 0
 python3 - "$f" <<'PY'
 import json, subprocess, sys
 for line in open(sys.argv[1]):
