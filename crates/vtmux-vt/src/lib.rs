@@ -12,6 +12,7 @@ pub mod kitty_keys;
 pub mod link;
 pub mod notify;
 pub mod palette;
+pub mod program_status;
 pub mod progress;
 pub mod snapshot;
 pub mod term;
@@ -51,6 +52,7 @@ pub fn set_tmux_clusters(vs16_wide: bool) {
 }
 pub use notify::Notification;
 pub use palette::PaletteState;
+pub use program_status::{ProgramKind, ProgramState, ProgramStatusEvent};
 pub use progress::{ProgressBar, ProgressState};
 pub use term::{
     AltSaved, CellState, CompressedPages, Compression, CompressionActivity, CursorShape,

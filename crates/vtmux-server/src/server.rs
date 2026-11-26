@@ -6430,6 +6430,9 @@ impl Server {
                     .redraw(crate::model::Redraw::WindowStatus(window));
             }
             TermEvent::Notification(n) => self.pane_notification(window, &n),
+            // D34: the server's records come with srv_7501; the option is
+            // never turned on until then, so none arrive.
+            TermEvent::ProgramStatus(_) => {}
         }
     }
 

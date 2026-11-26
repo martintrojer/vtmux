@@ -1576,6 +1576,15 @@ over 2.5 min, so it is not kept). vtmux's own
   already in the bindings): the title and body of an OSC 9 (not ConEmu)
   or OSC 777 notification, as bytes. vtmux sends them on to Ghostty
   clients (spec D30).
+- `libghostty-vt/src/terminal.rs`: `Terminal::on_program_status` and
+  `clear_program_status` (`GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`,
+  `GhosttyTerminalProgramStatus`, already in the bindings since 1.0.1),
+  with `ProgramStatusState`, `ProgramStatusKind` and `ProgramStatusReport`
+  (borrowed strings, progress as `Option<u8>`). While a handler is set
+  libghostty answers `OSC 7501 ; ?` through `on_pty_write`; with none
+  (`clear_program_status` sets the option to NULL) reports are dropped and
+  the query gets no reply. vtmux's OSC 7501 (spec D34) sets it only while
+  the option is on or the pane is granted.
 - `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
   (name order, `git apply`) to the fetched ghostty; the source stamp
   records the commit and the patch contents. Not applied to a

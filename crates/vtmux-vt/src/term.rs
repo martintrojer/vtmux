@@ -21,6 +21,7 @@ use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
 use crate::notify::Notification;
+use crate::program_status::ProgramStatusEvent;
 use crate::progress::ProgressBar;
 
 mod state;
@@ -471,6 +472,13 @@ pub struct PaneTerm {
     scroll_on_clear: bool,
     /// tmux's `MODE_SYNC` ([`SyncHold`]).
     sync: SyncHold,
+    /// `vtmux-program-status` (D34), shared with the reply hook.
+    status_enabled: Rc<StdCell<bool>>,
+    /// The pane's program sent an OSC 7501 query or report while the
+    /// option was on (D28 rule 5): shared with the reply hook and callback.
+    status_granted: Rc<StdCell<bool>>,
+    /// Whether libghostty's OSC 7501 callback is set.
+    status_registered: bool,
     /// The server's `vtmux-kitty-keys` (D29) the next input is read under.
     kitty_option: bool,
     /// The kitty keyboard stack of the screen not in use was emptied
@@ -589,6 +597,9 @@ impl PaneTerm {
         let graphics_seen = Rc::clone(&graphics_reply);
         let events = Rc::new(RefCell::new(Events::default()));
         let belled = Rc::clone(&events);
+        let status_enabled = Rc::new(StdCell::new(false));
+        let status_granted = Rc::new(StdCell::new(false));
+        let status_seen = (Rc::clone(&status_enabled), Rc::clone(&status_granted));
         let notified = Rc::clone(&events);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
@@ -598,8 +609,13 @@ impl PaneTerm {
                     mouse: mouse_seen.get(),
                     inband: inband_seen.get(),
                     graphics: graphics_seen.get(),
+                    status: status_seen.0.get() || status_seen.1.get(),
                 };
                 if let Some(reply) = tmux_reply(term, modes, data) {
+                    // D34 rule 5: the query was answered, so it was asked.
+                    if data.starts_with(PROGRAM_STATUS_REPLY) {
+                        status_seen.1.set(true);
+                    }
                     push_bytes(&mut sink.borrow_mut(), &reply);
                 }
             })
@@ -708,6 +724,9 @@ impl PaneTerm {
             view: RefCell::default(),
             scroll_on_clear: true,
             sync: SyncHold::default(),
+            status_enabled,
+            status_granted,
+            status_registered: false,
             kitty_option: false,
             kitty_stale: false,
             kitty_new: [false; 2],
@@ -943,6 +962,13 @@ impl PaneTerm {
                         self.reset_kitty_keys();
                         // D33: the grants end and the images go.
                         self.reset_graphics();
+                        // D34: Ghostty never sees the `c`, so it never
+                        // clears the records; the server does, in order.
+                        if self.status_registered {
+                            self.events
+                                .borrow_mut()
+                                .push(TermEvent::ProgramStatus(ProgramStatusEvent::clear_all()));
+                        }
                     }
                     // D29: a kitty keyboard push, pop, set or query reaches
                     // Ghostty while `vtmux-kitty-keys` is on or the screen
@@ -2555,6 +2581,54 @@ impl PaneTerm {
         self.cell_px
     }
 
+    /// `vtmux-program-status` (D34): with it on, or the pane granted, OSC
+    /// 7501 reports become [`TermEvent::ProgramStatus`] and `OSC 7501 ; ?`
+    /// is answered; with neither, libghostty's callback is unset, so
+    /// reports are dropped and the query gets no reply.
+    pub fn set_program_status_enabled(&mut self, enabled: bool) {
+        self.status_enabled.set(enabled);
+        self.apply_program_status();
+    }
+
+    /// The pane's program has used OSC 7501 while the option was on
+    /// (D28 rule 5): it stays served when the option goes off.
+    #[must_use]
+    pub fn program_status_granted(&self) -> bool {
+        self.status_granted.get()
+    }
+
+    /// Restore (a snapshot import) or end (a respawn) the grant.
+    pub fn set_program_status_granted(&mut self, granted: bool) {
+        self.status_granted.set(granted);
+        self.apply_program_status();
+    }
+
+    /// Set or unset libghostty's OSC 7501 callback to match the option and
+    /// the grant.
+    fn apply_program_status(&mut self) {
+        let want = self.status_enabled.get() || self.status_granted.get();
+        if want == self.status_registered {
+            return;
+        }
+        if want {
+            let events = Rc::clone(&self.events);
+            let granted = Rc::clone(&self.status_granted);
+            let ok = self
+                .term
+                .on_program_status(move |_, report| {
+                    granted.set(true);
+                    events.borrow_mut().push(TermEvent::ProgramStatus(
+                        ProgramStatusEvent::from_report(&report),
+                    ));
+                })
+                .is_ok();
+            self.status_registered = ok;
+        } else {
+            let _ = self.term.clear_program_status();
+            self.status_registered = false;
+        }
+    }
+
     /// `vtmux-inband-resize` (D31): whether a `?2048h` from now on grants
     /// mode 2048, and what DECRQM says of it. A grant already held stays
     /// either way (D28 rule 5).
@@ -3979,6 +4053,10 @@ pub enum TermEvent {
     /// A desktop notification libghostty found (OSC 9 not `ConEmu`, OSC
     /// 777;notify), which tmux drops (spec D30).
     Notification(Notification),
+    /// An OSC 7501 program status report, or the clear a reset (RIS) makes
+    /// (spec D34), in byte order with [`TermEvent::Prompt`]. Only while the
+    /// option is on or the pane granted.
+    ProgramStatus(ProgramStatusEvent),
 }
 
 /// The events not yet taken, BELs in a row counted in one. Unbounded:
@@ -5252,11 +5330,16 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// reports (a granted pane's 2048 reports are vtmux's own, D31: `?2048`
 /// never reaches Ghostty), kitty keyboard `CSI ? u`, XTWINOPS
 /// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
-/// 7501: the colour and clipboard queries are [`Reply`]s from tmux's own
+/// 7501 except D34's own answer: the colour and clipboard queries are [`Reply`]s from tmux's own
 /// palette model, `palette.rs`), XTGETTCAP, Kitty graphics and Glyph
 /// Protocol APC. DSR ?996 is [`Reply::Theme`], from the colour-scheme
 /// effect.
 fn tmux_reply(term: &Terminal<'_, '_>, modes: SeenModes, data: &[u8]) -> Option<Vec<u8>> {
+    // D34: libghostty answers `OSC 7501 ; ?` only with its callback set,
+    // which is the case while this is true; the answer is its own.
+    if modes.status && data.starts_with(PROGRAM_STATUS_REPLY) {
+        return Some(data.to_vec());
+    }
     // D33: Ghostty's answer to a granted screen's graphics command.
     if modes.graphics && data.starts_with(b"\x1b_G") {
         return Some(data.to_vec());
@@ -5292,6 +5375,10 @@ fn tmux_reply(term: &Terminal<'_, '_>, modes: SeenModes, data: &[u8]) -> Option<
     data.starts_with(b"\x1bP>|").then(|| data.to_vec())
 }
 
+/// The start of libghostty's answer to `OSC 7501 ; ?` (the terminator
+/// follows the query's).
+const PROGRAM_STATUS_REPLY: &[u8] = b"\x1b]7501;?:";
+
 /// The mode state tmux keeps beside Ghostty, as the reply hook reads it.
 #[derive(Clone, Copy)]
 struct SeenModes {
@@ -5300,6 +5387,8 @@ struct SeenModes {
     inband: InbandResize,
     /// D33: a granted screen's graphics command is ending.
     graphics: bool,
+    /// D34: `vtmux-program-status` is on or the pane is granted.
+    status: bool,
 }
 
 /// DECRQM reply from tmux's table. `params` is the Ghostty reply between
@@ -5403,6 +5492,107 @@ fn clean_name(raw: &str, untrusted: bool) -> String {
 mod tests {
     use super::*;
     use crate::snapshot::snapshot;
+
+    fn statuses(t: &mut PaneTerm) -> Vec<TermEvent> {
+        t.take_events()
+            .into_iter()
+            .filter(|e| matches!(e, TermEvent::ProgramStatus(_) | TermEvent::Prompt))
+            .collect()
+    }
+
+    #[test]
+    fn program_status_off_drops_reports_and_gives_no_reply() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"\x1b]7501;state=working\x07\x1b]7501;?\x07\x1b]7501;?\x1b\\");
+        assert_eq!(statuses(&mut t).len(), 0);
+        assert_eq!(t.take_replies().len(), 0);
+        assert!(!t.program_status_granted());
+    }
+
+    #[test]
+    fn program_status_on_reports_in_order_with_prompts() {
+        use crate::program_status::{ProgramKind, ProgramState};
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_status_enabled(true);
+        t.feed(
+            b"\x1b]7501;state=blocked:kind=auth:progress=7:id=a:app=x:title=VGl0bGU:msg=TXNn\x07\
+              \x1b]133;A\x07\x1b]7501;state=done\x1b\\",
+        );
+        let got = statuses(&mut t);
+        assert_eq!(got.len(), 3);
+        assert_eq!(
+            got[0],
+            TermEvent::ProgramStatus(ProgramStatusEvent {
+                state: ProgramState::Blocked,
+                kind: ProgramKind::Auth,
+                progress: Some(7),
+                id: "a".into(),
+                app: "x".into(),
+                title: "Title".into(),
+                message: "Msg".into(),
+            })
+        );
+        assert_eq!(got[1], TermEvent::Prompt);
+        assert!(matches!(
+            &got[2],
+            TermEvent::ProgramStatus(e) if e.state == ProgramState::Done && e.progress.is_none()
+        ));
+        assert!(t.program_status_granted());
+    }
+
+    #[test]
+    fn program_status_query_is_answered_with_its_terminator_and_grants() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_status_enabled(true);
+        assert!(!t.program_status_granted());
+        t.feed(b"\x1b]7501;?\x07");
+        let bel = t.take_replies();
+        assert!(
+            bel.starts_with(b"\x1b]7501;?:") && bel.ends_with(b"\x07"),
+            "{bel:?}"
+        );
+        assert!(t.program_status_granted());
+        t.feed(b"\x1b]7501;?\x1b\\");
+        assert!(t.take_replies().ends_with(b"\x1b\\"));
+    }
+
+    #[test]
+    fn program_status_ris_clears_all_in_order() {
+        use crate::program_status::ProgramState;
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_status_enabled(true);
+        t.feed(b"\x1b]7501;state=working:id=a\x07\x1bc\x1b]133;A\x07");
+        let got = statuses(&mut t);
+        assert_eq!(got.len(), 3);
+        assert!(matches!(&got[0], TermEvent::ProgramStatus(e) if e.state == ProgramState::Working));
+        assert_eq!(
+            got[1],
+            TermEvent::ProgramStatus(ProgramStatusEvent::clear_all())
+        );
+        assert_eq!(got[2], TermEvent::Prompt);
+    }
+
+    #[test]
+    fn program_status_grant_outlives_the_option() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_program_status_enabled(true);
+        t.feed(b"\x1b]7501;state=idle\x07");
+        assert_eq!(statuses(&mut t).len(), 1);
+        t.set_program_status_enabled(false);
+        t.feed(b"\x1b]7501;state=working\x07\x1b]7501;?\x07");
+        assert_eq!(statuses(&mut t).len(), 1);
+        assert!(t.take_replies().starts_with(b"\x1b]7501;?:"));
+        // A respawn ends the grant: dropped and silent again.
+        t.set_program_status_granted(false);
+        t.feed(b"\x1b]7501;state=working\x07\x1b]7501;?\x07\x1bc");
+        assert_eq!(statuses(&mut t).len(), 0);
+        assert_eq!(t.take_replies().len(), 0);
+        // An import restores it.
+        let mut u = PaneTerm::new(20, 5, 100);
+        u.set_program_status_granted(true);
+        u.feed(b"\x1b]7501;state=done\x07");
+        assert_eq!(statuses(&mut u).len(), 1);
+    }
 
     fn replies_to(cols: u16, rows: u16, bytes: &[u8]) -> Vec<u8> {
         let mut t = PaneTerm::new(cols, rows, 100);

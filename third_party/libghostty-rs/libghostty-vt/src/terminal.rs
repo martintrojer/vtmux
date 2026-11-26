@@ -1851,6 +1851,29 @@ handlers! {
         }
     }
 
+    /// Call the given function when the running program sends a valid
+    /// program status report (OSC 7501). While a handler is set,
+    /// libghostty also answers `OSC 7501 ; ?` through the `on_pty_write`
+    /// handler; with none (see [`Terminal::clear_program_status`]) reports
+    /// are dropped and the query gets no reply. A full reset (RIS) calls it
+    /// with a [`ProgramStatusState::Clear`] report and an empty id. The
+    /// strings are borrowed for the call only. (vtmux addition: the
+    /// bindings were there, the wrapper was not.)
+    pub fn on_program_status(
+        &mut self,
+        tag = PROGRAM_STATUS,
+        from = GhosttyTerminalProgramStatusFn(
+            report: *const ffi::TerminalProgramStatus
+        ),
+        to = <'t>ProgramStatusFn(ProgramStatusReport<'t>),
+    ) |term, func| {
+        // SAFETY: libghostty passes a valid sized struct whose strings
+        // live for the callback; every field below has been present since
+        // the struct was introduced.
+        let report = unsafe { ProgramStatusReport::from_raw(&*report) };
+        func(&term, report);
+    }
+
     /// Call the given function when the running program performs a clipboard write.
     ///
     ///
@@ -1889,6 +1912,106 @@ handlers! {
                 answer(write, &raw const reply);
             }
         }
+    }
+}
+
+/// What a program says it is doing in a program status report (OSC 7501).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProgramStatusState {
+    /// Nothing running.
+    Idle,
+    /// Working.
+    Working,
+    /// Finished.
+    Done,
+    /// Waiting on the user.
+    Blocked,
+    /// Failed.
+    Error,
+    /// Remove the record with this id and every record beneath it; an
+    /// empty id removes all.
+    Clear,
+}
+
+/// What a blocked program needs from the user.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProgramStatusKind {
+    /// Not said.
+    None,
+    /// Permission.
+    Permission,
+    /// Question.
+    Question,
+    /// Authentication.
+    Auth,
+}
+
+/// A program status report (OSC 7501), borrowed for the callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProgramStatusReport<'t> {
+    /// The state, or [`ProgramStatusState::Clear`].
+    pub state: ProgramStatusState,
+    /// Only set for a blocked program.
+    pub kind: ProgramStatusKind,
+    /// 0 through 100, or `None` when the program sent none.
+    pub progress: Option<u8>,
+    /// The record's id; empty for the root record.
+    pub id: &'t str,
+    /// The program's stable name, empty when not sent.
+    pub app: &'t str,
+    /// Decoded label, empty when not sent.
+    pub title: &'t str,
+    /// Decoded message, empty when not sent.
+    pub message: &'t str,
+}
+
+impl<'t> ProgramStatusReport<'t> {
+    /// # Safety
+    /// `raw`'s strings must be valid for `'t`.
+    unsafe fn from_raw(raw: &'t ffi::TerminalProgramStatus) -> Self {
+        // SAFETY: upheld by the caller. libghostty sends UTF-8 (title and
+        // message are decoded, id and app checked); a violation reads as
+        // empty rather than undefined.
+        let text = |s: ffi::String| std::str::from_utf8(unsafe { s.to_bytes() }).unwrap_or("");
+        Self {
+            state: match raw.state {
+                ffi::ProgramStatusState::WORKING => ProgramStatusState::Working,
+                ffi::ProgramStatusState::DONE => ProgramStatusState::Done,
+                ffi::ProgramStatusState::BLOCKED => ProgramStatusState::Blocked,
+                ffi::ProgramStatusState::ERROR => ProgramStatusState::Error,
+                ffi::ProgramStatusState::CLEAR => ProgramStatusState::Clear,
+                _ => ProgramStatusState::Idle,
+            },
+            kind: match raw.kind {
+                ffi::ProgramStatusKind::PERMISSION => ProgramStatusKind::Permission,
+                ffi::ProgramStatusKind::QUESTION => ProgramStatusKind::Question,
+                ffi::ProgramStatusKind::AUTH => ProgramStatusKind::Auth,
+                _ => ProgramStatusKind::None,
+            },
+            progress: u8::try_from(raw.progress).ok().filter(|n| *n <= 100),
+            id: text(raw.id),
+            app: text(raw.app),
+            title: text(raw.title),
+            message: text(raw.message),
+        }
+    }
+}
+
+impl Terminal<'_, '_> {
+    /// Stop receiving program status reports (set the callback to NULL):
+    /// libghostty then drops them and does not answer `OSC 7501 ; ?`.
+    pub fn clear_program_status(&mut self) -> Result<&mut Self> {
+        self.vtable.on_program_status = None;
+        // SAFETY: a null pointer is how an option is unset.
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                ffi::TerminalOption::PROGRAM_STATUS,
+                std::ptr::null(),
+            )
+        };
+        from_result(result)?;
+        Ok(self)
     }
 }
 
@@ -2284,6 +2407,76 @@ mod tests {
                 .expect("grid ref should be representable in active space"),
             original
         );
+    }
+
+    fn status_terminal<'a>(
+        reports: &'a RefCell<Vec<(ProgramStatusState, ProgramStatusKind, Option<u8>, String)>>,
+        written: &'a RefCell<Vec<u8>>,
+    ) -> Terminal<'static, 'a> {
+        let mut t = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .unwrap();
+        t.on_pty_write(|_, d| written.borrow_mut().extend_from_slice(d))
+            .unwrap();
+        t.on_program_status(|_, r| {
+            reports.borrow_mut().push((
+                r.state,
+                r.kind,
+                r.progress,
+                format!("{}|{}|{}|{}", r.id, r.app, r.title, r.message),
+            ));
+        })
+        .unwrap();
+        t
+    }
+
+    #[test]
+    fn program_status_reports_and_query() {
+        let reports = RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
+        let mut t = status_terminal(&reports, &written);
+        t.vt_write(b"\x1b]7501;state=blocked:kind=permission:app=terraform:msg=QXBwbHk/\x07");
+        t.vt_write(b"\x1b]7501;state=working:id=b:progress=42:title=QnVpbGQ\x1b\\");
+        t.vt_write(b"\x1b]7501;state=clear\x07");
+        t.vt_write(b"\x1bc");
+        let got = reports.borrow();
+        assert_eq!(
+            got[0],
+            (
+                ProgramStatusState::Blocked,
+                ProgramStatusKind::Permission,
+                None,
+                "|terraform||Apply?".into()
+            )
+        );
+        assert_eq!(got[1].0, ProgramStatusState::Working);
+        assert_eq!(got[1].2, Some(42));
+        assert_eq!(got[1].3, "b||Build|");
+        assert_eq!(got[2].0, ProgramStatusState::Clear);
+        assert_eq!(got.last().unwrap().0, ProgramStatusState::Clear);
+        assert!(got.last().unwrap().3.starts_with('|'));
+        drop(got);
+
+        t.vt_write(b"\x1b]7501;?\x07");
+        assert!(written.borrow().starts_with(b"\x1b]7501;?:states="));
+        assert!(written.borrow().ends_with(b"\x07"));
+        written.borrow_mut().clear();
+        t.vt_write(b"\x1b]7501;?\x1b\\");
+        assert!(written.borrow().ends_with(b"\x1b\\"));
+    }
+
+    #[test]
+    fn program_status_cleared_drops_reports_and_gives_no_reply() {
+        let reports = RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
+        let mut t = status_terminal(&reports, &written);
+        t.clear_program_status().unwrap();
+        t.vt_write(b"\x1b]7501;state=working\x07\x1b]7501;?\x07");
+        assert!(reports.borrow().is_empty());
+        assert!(written.borrow().is_empty());
     }
 }
 
